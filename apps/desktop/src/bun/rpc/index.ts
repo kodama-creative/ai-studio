@@ -1,5 +1,5 @@
 import { mkdirSync } from "node:fs";
-import { stat } from "node:fs/promises";
+import { readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { ModelProviderGroup } from "@llm-space/core";
@@ -8,6 +8,7 @@ import { BrowserView, Utils, type BrowserWindow } from "electrobun/bun";
 
 import type { Command } from "../../shared/commands";
 import type { DesktopRPCType } from "../../shared/rpc";
+import type { AgentProjectManager } from "../agents";
 import type { Analytics } from "../analytics";
 import { moveToTrash, revealInFileManager } from "../fs";
 import type { McpManager } from "../mcp";
@@ -50,6 +51,7 @@ export type MainWindowRPC = ReturnType<
 
 export interface MainWindowRPCDependencies {
   analytics: Analytics;
+  agentProjects: AgentProjectManager;
   executeCommand: (command: Command) => void;
   getMainWindow: () => BrowserWindow;
   homePath: string;
@@ -68,6 +70,7 @@ const MAX_REQUEST_TIME_MS = 5 * 60_000 + 10_000;
 
 export function createMainWindowRPC({
   analytics,
+  agentProjects,
   executeCommand,
   getMainWindow,
   homePath,
@@ -199,6 +202,13 @@ export function createMainWindowRPC({
           await localFs.write(path, thread);
           return null;
         },
+        fsReadText: async ({ path }) => ({
+          text: await readFile(localFs.realpath(path), "utf8"),
+        }),
+        fsWriteText: async ({ path, text }) => {
+          await writeFile(localFs.realpath(path), text, "utf8");
+          return null;
+        },
         fsReveal: async ({ path }) => {
           await revealInFileManager(localFs.realpath(path));
           return null;
@@ -228,6 +238,14 @@ export function createMainWindowRPC({
         },
         fsRealpath: ({ path }) =>
           Promise.resolve({ path: localFs.realpath(path) }),
+        agentProjectInspect: ({ projectPath }) =>
+          agentProjects.inspect(projectPath),
+        agentProjectSetModel: ({ projectPath, model }) =>
+          agentProjects.setModel(projectPath, model),
+        agentProjectNewSession: ({ projectPath, kind }) =>
+          agentProjects.newSession(projectPath, kind),
+        agentProjectSelectSession: ({ projectPath, kind, sessionId }) =>
+          agentProjects.selectSession(projectPath, kind, sessionId),
         mcpListServers: () => mcpManager.listServers(),
         mcpAddServer: ({ server }) => {
           const servers = mcpManager.addServer(server);
@@ -313,6 +331,13 @@ export function createMainWindowRPC({
           );
         },
         abortStreamThread: (payload) => streaming.abort(payload),
+        sendAgentProjectPrompt: (payload) => {
+          void agentProjects.run(payload, (message) =>
+            rpc.send.receiveAgentProjectResponse(message)
+          );
+        },
+        abortAgentProjectPrompt: ({ streamId }) =>
+          agentProjects.abort(streamId),
         captureAnalyticsEvent: ({ event, properties }) =>
           analytics.capture(event, properties),
         executeCommand: (command) => executeCommand(command),

@@ -40,7 +40,12 @@ export function ThreadTabPane({
   onClose,
 }: ThreadTabPaneProps) {
   const qc = useQueryClient();
-  const { data: thread, isLoading, isError, error } = useQuery({
+  const {
+    data: thread,
+    isLoading,
+    isError,
+    error,
+  } = useQuery({
     queryKey: ["thread", path],
     queryFn: () => localFs.read(path),
     // A workspace file can change on disk outside the app, so never serve a

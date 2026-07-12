@@ -43,9 +43,9 @@ export class LocalFileSystem implements FileSystem, ThreadStorage {
           type: isDir ? "directory" : "file",
         };
         if (isDir) {
-          node.hasChildren = await this._hasChildren(
-            path.join(real, entry.name)
-          );
+          const directory = path.join(real, entry.name);
+          node.hasChildren = await this._hasChildren(directory);
+          node.agentProject = await this._isAgentProject(directory);
         }
         return node;
       })
@@ -130,6 +130,14 @@ export class LocalFileSystem implements FileSystem, ThreadStorage {
   /** Whether a real directory contains any entries. */
   private async _hasChildren(realDir: string): Promise<boolean> {
     const entries = await fs.readdir(realDir);
-    return entries.length > 0;
+    return entries.some((entry) => entry !== ".llm-space");
+  }
+
+  private async _isAgentProject(realDir: string): Promise<boolean> {
+    try {
+      return (await fs.lstat(path.join(realDir, "agent"))).isDirectory();
+    } catch {
+      return false;
+    }
   }
 }

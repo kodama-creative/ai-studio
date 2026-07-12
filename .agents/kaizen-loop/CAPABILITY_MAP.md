@@ -1,7 +1,7 @@
 # LLM Space Capability Map
 
-- Last updated: 2026-07-12
-- Map status: refreshed after Headless Thread Semantics V1. A dedicated browser-safe `@llm-space/core/thread` entrypoint now owns prompt materialization, usage arithmetic, and persisted run/evaluation lifecycle rules; desktop retains UI/session and host-specific adapters. Public or dynamically loaded plugins remain absent.
+- Last updated: 2026-07-13
+- Map status: refreshed after Agent Runtime And Builder V1. Desktop now recognizes portable Agent Projects and runs separate real Builder/Target Pi agents through the shared `@llm-space/runtime`; Thread workflows remain available. Public or dynamically loaded plugins remain absent.
 - Evidence rule: entries marked `confirmed` cite current rendered-product or current-code evidence. Entries marked `stale` rely on previous logs or code paths not fully re-inspected in this loop. Entries marked `unknown` need a future product-surface check before they can drive a recommendation.
 
 ## First-Run Model Setup
@@ -132,7 +132,7 @@
 
 - Status: shipped V1
 - Freshness: confirmed
-- Last checked: 2026-07-12
+- Last checked: 2026-07-13
 - Evidence:
   - `packages/core/src/types/threads/thread.ts` owns the durable schemas for prompt variables, variable snapshots, run snapshots, evaluation rubrics, scores, and evaluations.
   - `packages/core/src/client/` owns transport-independent streaming, event reduction, conversion, and run eligibility; `packages/core/src/parsers/` owns native/foreign thread parsing and normalization.
@@ -145,6 +145,21 @@
 - Boundary: a core-only consumer can materialize a variableized Thread with injected skills/time, apply canonical usage semantics, record and normalize bounded runs, and create/update valid rubrics and evaluations. Desktop supplies local skill discovery and owns UI/session behavior.
 - Explicit non-goals: React/Zustand state, CodeMirror completion UI, Electrobun RPC and commands, native menus/windows/updates, desktop analytics, and dynamic third-party plugins do not belong to this capability.
 - Visible gaps: core still contains desktop-specific window-state persistence; the new public entrypoint has no real second product consumer beyond desktop and its headless integration test; a successful live-provider run/reload smoke remains pending because the configured provider was unreachable in this loop.
+
+## Agent Definition And Runtime
+
+- Status: shipped V1
+- Freshness: confirmed
+- Last checked: 2026-07-13
+- Evidence:
+  - `packages/runtime` exposes a host-agnostic `AgentRuntime`/`AgentRuntimeSession` over Pi `AgentHarness`, plus a Node/Bun `LocalAgentRuntime` over Pi `JsonlSessionRepo` and `NodeExecutionEnv`.
+  - Runtime discovery loads `instructions.md`, executable `tools/*.{ts,js}`, and Pi `skills/**/SKILL.md`, blocks invalid snapshots with structured diagnostics, rejects source-slot symlinks, and reloads a frozen snapshot before every new turn.
+  - Deterministic fake-provider tests execute project tools, compose host-injected Builder tools with Target tools, reopen persisted sessions, and reload changed tool modules in the same process.
+  - Desktop CEF audit `audits/2026-07-13-002622-agent-builder-v1/` shows the seeded Agent Project opening in Build, switching to Test, retaining a resizable Builder, browsing source, handling errors, and opening internal source files in ordinary tabs without document overflow at 1280px or 900px.
+  - Desktop `AgentProjectManager` injects host model auth, keeps Builder and Target JSONL sessions separate under project `.llm-space/`, gives Builder the complete Target tool set plus confined authoring/validation/Target-run tools, and multiplexes Pi events through typed RPC.
+- Boundary: a user can open a filesystem-authored Agent Project, edit its instructions/tools/skills, run a real Target Pi agent, ask a separate real Builder Pi agent to execute Target tools and modify/validate the project, switch/reopen local sessions, and retry against freshly loaded source. The same runtime package is available to future non-desktop hosts.
+- Explicit non-goals: no `agent/agent.ts`, database/cloud persistence, crash-safe step replay, distributed workflow durability, channels, schedules, sandbox provisioning, subagents, public plugin SDK, permission approval UI, or dynamic third-party loading in V1.
+- Visible gaps: the existing detailed Thread trace inspector has no Agent-session handoff yet; remote live-provider completion was blocked by the audit environment's outbound connection timeout; Builder authoring has no delete/move tool by design; persistence remains local JSONL pending a later database adapter.
 
 ## Token Usage Visibility
 

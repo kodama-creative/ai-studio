@@ -395,6 +395,7 @@ function PageInner() {
                 effectiveSidebarMode === "files" ? "min-h-0 flex-1" : "hidden"
               }
               onSelectFile={tabs.open}
+              onSelectAgentProject={tabs.openAgentProject}
               onRemove={tabs.handleRemove}
               onMove={tabs.handleMove}
             />

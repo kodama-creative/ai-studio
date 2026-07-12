@@ -23,6 +23,9 @@ export interface FileNode {
    * files.
    */
   hasChildren?: boolean;
+
+  /** Directory contains an `agent/` source root and opens as an Agent Project. */
+  agentProject?: boolean;
 }
 
 /**

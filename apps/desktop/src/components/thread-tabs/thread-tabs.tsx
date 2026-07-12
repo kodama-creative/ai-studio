@@ -5,6 +5,8 @@ import "@sinm/react-chrome-tabs/css/chrome-tabs-dark-theme.css";
 import "@sinm/react-chrome-tabs/css/chrome-tabs.css";
 import { PlusIcon, SidebarCloseIcon, SidebarOpenIcon } from "lucide-react";
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -30,6 +32,7 @@ import {
 } from "../ui/context-menu";
 import { Kbd, KbdGroup } from "../ui/kbd";
 
+import { SourceTabPane } from "./source-tab-pane";
 import { ThreadTabPane } from "./thread-tab-pane";
 import { TraceTabPane } from "./trace-tab-pane";
 import { tabLabel, type AppTab } from "./use-thread-tabs";
@@ -41,6 +44,12 @@ const REVEAL_LABEL = _isWindows ? "Reveal in Explorer" : "Reveal in Finder";
 const MOVE_TO_TRASH_LABEL = _isWindows
   ? "Move to Recycle Bin"
   : "Move to Trash";
+
+const AgentProjectTabPane = lazy(() =>
+  import("./agent-project-tab-pane").then((module) => ({
+    default: module.AgentProjectTabPane,
+  }))
+);
 
 // Suppress focus on mouse-down so a click doesn't leave these toolbar icons
 // with the focus-visible ring stuck; keyboard focus (Tab) still rings them.
@@ -325,7 +334,7 @@ export function ThreadTabs({
               </ContextMenuItem>
               <ContextMenuItem onSelect={closeAll}>Close All</ContextMenuItem>
             </ContextMenuGroup>
-            {contextMenuTab?.type === "thread" && (
+            {contextMenuTab && contextMenuTab.type !== "trace" && (
               <>
                 <ContextMenuSeparator />
                 <ContextMenuGroup>
@@ -345,28 +354,52 @@ export function ThreadTabs({
         ) : null}
       </ContextMenu>
       <div className="relative min-h-0 flex-1">
-        {tabs.map((tab) =>
-          tab.type === "thread" ? (
-            <ThreadTabPane
-              key={tab.id}
-              path={tab.path}
-              active={tab.id === activeId}
-              refreshNonce={tab.refreshNonce ?? 0}
-              onMove={onMove}
-              onClose={(path) => close(`thread:${path}`)}
-            />
-          ) : (
-            <TraceTabPane
-              key={tab.id}
-              projectId={tab.projectId}
-              traceKey={tab.traceKey}
-              active={tab.id === activeId}
-              refreshNonce={tab.refreshNonce ?? 0}
-              onClose={close}
-              onRenameTitle={onTraceTitleChange}
-            />
-          )
-        )}
+        {tabs.map((tab) => {
+          if (tab.type === "thread") {
+            return (
+              <ThreadTabPane
+                key={tab.id}
+                path={tab.path}
+                active={tab.id === activeId}
+                refreshNonce={tab.refreshNonce ?? 0}
+                onMove={onMove}
+                onClose={(path) => close(`thread:${path}`)}
+              />
+            );
+          }
+          if (tab.type === "trace") {
+            return (
+              <TraceTabPane
+                key={tab.id}
+                projectId={tab.projectId}
+                traceKey={tab.traceKey}
+                active={tab.id === activeId}
+                refreshNonce={tab.refreshNonce ?? 0}
+                onClose={close}
+                onRenameTitle={onTraceTitleChange}
+              />
+            );
+          }
+          if (tab.type === "source") {
+            return (
+              <SourceTabPane
+                key={tab.id}
+                path={tab.path}
+                active={tab.id === activeId}
+                refreshNonce={tab.refreshNonce ?? 0}
+              />
+            );
+          }
+          return (
+            <Suspense key={tab.id} fallback={null}>
+              <AgentProjectTabPane
+                path={tab.path}
+                active={tab.id === activeId}
+                refreshNonce={tab.refreshNonce ?? 0}
+              />
+            </Suspense>
+          );
+        })}
       </div>
     </div>
   );

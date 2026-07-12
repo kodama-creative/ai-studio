@@ -1,7 +1,12 @@
 "use client";
 
 import type { FileNode, Message, Tool } from "@llm-space/core";
-import { MessagesSquare } from "lucide-react";
+import {
+  BotIcon,
+  FileCodeIcon,
+  FileTextIcon,
+  MessagesSquare,
+} from "lucide-react";
 import {
   memo,
   useCallback,
@@ -52,6 +57,7 @@ function _FileSystemTreeView({
   className,
   headerStart,
   onSelectFile,
+  onSelectAgentProject,
   onRemove,
   onMove,
 }: {
@@ -59,6 +65,7 @@ function _FileSystemTreeView({
   headerStart?: ReactNode;
   /** Fired with a file's path when it is selected (folders aren't selectable). */
   onSelectFile?: (path: string) => void;
+  onSelectAgentProject?: (path: string) => void;
   /** Fired with a path after it (file or directory) is successfully deleted. */
   onRemove?: (path: string) => void;
   /** Fired after a path changes via rename or move (`from` → `to`). */
@@ -268,9 +275,13 @@ function _FileSystemTreeView({
         return {
           id: node.path,
           name: node.name,
+          icon: node.agentProject ? BotIcon : undefined,
           draggable: true,
           droppable: true,
-          onClick: () => toggle(node.path),
+          onClick: () => {
+            toggle(node.path);
+            if (node.agentProject) onSelectAgentProject?.(node.path);
+          },
           onContextMenu: (event) => openNodeActionsMenu(node.path, event),
           // While renaming, render as a leaf (a div) instead of an accordion
           // trigger (a button) so the input's keys (Space/Enter) don't toggle
@@ -284,7 +295,11 @@ function _FileSystemTreeView({
       return {
         id: node.path,
         name: node.name.replace(/\.json$/, ""),
-        icon: MessagesSquare,
+        icon: node.name.endsWith(".json")
+          ? MessagesSquare
+          : node.name.endsWith(".md")
+            ? FileTextIcon
+            : FileCodeIcon,
         draggable: true,
         droppable: false,
         onContextMenu: (event) => openNodeActionsMenu(node.path, event),
@@ -292,11 +307,20 @@ function _FileSystemTreeView({
       };
     };
 
-    // Only directories and *.json files are shown in the tree.
+    // Thread JSON remains visible everywhere. Agent Project source files are
+    // also visible beneath their `agent/` root; local `.llm-space` state stays
+    // hidden because it is runtime data rather than portable source.
     const build = (dirPath: string): TreeDataItem[] =>
       (nodesByPath.get(dirPath) ?? [])
         .filter(
-          (node) => node.type === "directory" || node.name.endsWith(".json")
+          (node) =>
+            node.name !== ".llm-space" &&
+            (node.type === "directory" ||
+              node.name.endsWith(".json") ||
+              ((dirPath === "agent" ||
+                dirPath.endsWith("/agent") ||
+                dirPath.includes("/agent/")) &&
+                /\.(?:md|ts|js)$/.test(node.name)))
         )
         .map(toItem);
 
@@ -309,7 +333,19 @@ function _FileSystemTreeView({
     renaming,
     openActionsPath,
     openNodeActionsMenu,
+    onSelectAgentProject,
   ]);
+
+  const agentProjectPaths = useMemo(
+    () =>
+      new Set(
+        [...nodesByPath.values()]
+          .flat()
+          .filter((node) => node.agentProject)
+          .map((node) => node.path)
+      ),
+    [nodesByPath]
+  );
 
   // Start an in-place rename of the node at `path`. Only directories can be
   // expanded, so collapse first (the row renders as a leaf while editing) to
@@ -429,7 +465,12 @@ function _FileSystemTreeView({
             renderItem={renderItem}
             onDocumentDrag={onDocumentDrag}
             onSelectChange={(item) => {
-              if (item) onSelectFile?.(item.id);
+              if (!item) return;
+              if (agentProjectPaths.has(item.id)) {
+                onSelectAgentProject?.(item.id);
+              } else {
+                onSelectFile?.(item.id);
+              }
             }}
           />
         )}

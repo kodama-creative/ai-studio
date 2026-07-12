@@ -8,6 +8,7 @@ import Electrobun, {
 } from "electrobun/bun";
 
 import type { Command } from "../../shared/commands";
+import { AgentProjectManager } from "../agents";
 import { Analytics } from "../analytics";
 import { executeCommandInBun } from "../commands";
 import { DesktopHost } from "../host/desktop-host";
@@ -34,8 +35,12 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
   const homePath = getLlmSpaceHomePath();
   const workspacePath = path.join(homePath, "workspace");
   const analytics = new Analytics();
-  const mcpManager = new McpManager();
   const modelManager = new ModelManager();
+  const agentProjects = new AgentProjectManager({
+    workspaceRoot: workspacePath,
+    modelManager,
+  });
+  const mcpManager = new McpManager();
   const searchSettings = new SearchSettingsManager();
   const skillsManager = new SkillsManager();
   const localFs = createLocalFileSystem(homePath);
@@ -83,6 +88,7 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
     stop() {
       stopPromise ??= _stopDesktopApp([
         ["updater", () => updater.stop()],
+        ["agent projects", () => agentProjects.shutdown()],
         ["streaming", () => streaming.shutdown()],
         ["desktop host", () => host.stop()],
         ["MCP manager", () => mcpManager.shutdown()],
@@ -95,6 +101,7 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
   try {
     rpc = createMainWindowRPC({
       analytics,
+      agentProjects,
       executeCommand: (command) => executeCommand(command, getMainWindow()),
       getMainWindow,
       homePath,

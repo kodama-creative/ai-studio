@@ -10,6 +10,13 @@ import type {
 } from "@llm-space/core";
 import type { RPCSchema } from "electrobun";
 
+import type {
+  AbortAgentProjectStreamPayload,
+  AgentProjectView,
+  AgentSessionKind,
+  StreamAgentProjectRequestPayload,
+  StreamAgentProjectResponsePayload,
+} from "./agent-project";
 import type { AnalyticsEvent, AnalyticsStatus } from "./analytics";
 import type { Command } from "./commands";
 import type {
@@ -164,6 +171,8 @@ export interface DesktopRPCType {
       fsRm: { params: { path: string }; response: null };
       fsRead: { params: { path: string }; response: Thread };
       fsWrite: { params: { path: string; thread: Thread }; response: null };
+      fsReadText: { params: { path: string }; response: { text: string } };
+      fsWriteText: { params: { path: string; text: string }; response: null };
       // Reveal a file/directory in the OS file manager (Finder/Explorer).
       fsReveal: { params: { path: string }; response: null };
       // Reveal an arbitrary absolute path (not confined to the workspace) in the
@@ -181,6 +190,26 @@ export interface DesktopRPCType {
       };
       // Resolve a workspace-relative path to its absolute on-disk path.
       fsRealpath: { params: { path: string }; response: { path: string } };
+      agentProjectInspect: {
+        params: { projectPath: string };
+        response: AgentProjectView;
+      };
+      agentProjectSetModel: {
+        params: { projectPath: string; model: ModelConfig };
+        response: AgentProjectView;
+      };
+      agentProjectNewSession: {
+        params: { projectPath: string; kind: AgentSessionKind };
+        response: AgentProjectView;
+      };
+      agentProjectSelectSession: {
+        params: {
+          projectPath: string;
+          kind: AgentSessionKind;
+          sessionId: string;
+        };
+        response: AgentProjectView;
+      };
       mcpListServers: {
         params: Record<string, never>;
         response: McpServerView[];
@@ -348,6 +377,8 @@ export interface DesktopRPCType {
     messages: {
       sendStreamThreadRequest: StreamThreadRequestPayload;
       abortStreamThread: AbortStreamThreadPayload;
+      sendAgentProjectPrompt: StreamAgentProjectRequestPayload;
+      abortAgentProjectPrompt: AbortAgentProjectStreamPayload;
       // A unified command dispatched from the webview to run in the bun process
       // (e.g. window zoom / reload). See `shared/commands.ts`.
       executeCommand: Command;
@@ -361,6 +392,7 @@ export interface DesktopRPCType {
     // Messages the bun side SENDS and the webview handles.
     messages: {
       receiveStreamThreadResponse: StreamThreadResponsePayload;
+      receiveAgentProjectResponse: StreamAgentProjectResponsePayload;
       // OS-level fullscreen state changed (entered/exited).
       fullScreenChanged: { fullScreen: boolean };
       // App-update flow progress from the bun-side updater service.

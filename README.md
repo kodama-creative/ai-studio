@@ -47,6 +47,7 @@ LLM Space is a Bun monorepo:
 ```
 packages/
   core/       # Shared logic: types, the agent loop, thread storage
+  runtime/    # Pi-native Agent Project discovery and persistent sessions
 apps/
   desktop/    # The desktop app (Electrobun shell + React UI)
 ```

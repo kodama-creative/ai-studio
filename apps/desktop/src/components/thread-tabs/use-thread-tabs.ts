@@ -24,16 +24,34 @@ export interface TraceTab {
   refreshNonce?: number;
 }
 
+export interface SourceTab {
+  id: string;
+  type: "source";
+  path: string;
+  refreshNonce?: number;
+}
+
+export interface AgentProjectTab {
+  id: string;
+  type: "agentProject";
+  path: string;
+  refreshNonce?: number;
+}
+
 /** Any tab shown in the main chrome tab bar. */
-export type AppTab = ThreadTab | TraceTab;
+export type AppTab = ThreadTab | TraceTab | SourceTab | AgentProjectTab;
 
 type PersistedTab =
   | { type: "thread"; path: string }
+  | { type: "source"; path: string }
+  | { type: "agentProject"; path: string }
   | { type: "trace"; projectId: string; traceKey: string; title?: string };
 
 /** Derive a tab label from an app tab. */
 export function tabLabel(tab: AppTab): string {
-  return tab.type === "thread" ? threadTitleFromPath(tab.path) : tab.title;
+  if (tab.type === "thread") return threadTitleFromPath(tab.path);
+  if (tab.type === "trace") return tab.title;
+  return tab.path.split("/").at(-1) ?? tab.path;
 }
 
 export interface ThreadTabs {
@@ -46,6 +64,7 @@ export interface ThreadTabs {
    * already know the file exists; a stale path reports as a pane read error.
    */
   open: (path: string) => void;
+  openAgentProject: (path: string) => void;
   /**
    * Open an imported trace workbench, adding it if absent and focusing it. The
    * trace must already be listed by the Trace Panel or restorable from storage.
@@ -100,8 +119,24 @@ function _traceTabId(projectId: string, traceKey: string): string {
   return `trace:${projectId}:${traceKey}`;
 }
 
+function _sourceTabId(path: string): string {
+  return `source:${path}`;
+}
+
+function _agentProjectTabId(path: string): string {
+  return `agent-project:${path}`;
+}
+
 function _createThreadTab(path: string): ThreadTab {
   return { id: _threadTabId(path), type: "thread", path };
+}
+
+function _createSourceTab(path: string): SourceTab {
+  return { id: _sourceTabId(path), type: "source", path };
+}
+
+function _createAgentProjectTab(path: string): AgentProjectTab {
+  return { id: _agentProjectTabId(path), type: "agentProject", path };
 }
 
 function _createTraceTab({
@@ -123,19 +158,28 @@ function _createTraceTab({
 }
 
 function _persistable(tab: AppTab): PersistedTab {
-  return tab.type === "thread"
-    ? { type: "thread", path: tab.path }
-    : {
-        type: "trace",
-        projectId: tab.projectId,
-        traceKey: tab.traceKey,
-        title: tab.title,
-      };
+  if (
+    tab.type === "thread" ||
+    tab.type === "source" ||
+    tab.type === "agentProject"
+  ) {
+    return { type: tab.type, path: tab.path };
+  }
+  return {
+    type: "trace",
+    projectId: tab.projectId,
+    traceKey: tab.traceKey,
+    title: tab.title,
+  };
 }
 
 function _fromPersisted(tab: PersistedTab): AppTab | null {
   if (tab.type === "thread" && tab.path) {
     return _createThreadTab(tab.path);
+  }
+  if (tab.type === "source" && tab.path) return _createSourceTab(tab.path);
+  if (tab.type === "agentProject" && tab.path) {
+    return _createAgentProjectTab(tab.path);
   }
   if (tab.type === "trace" && tab.projectId && tab.traceKey) {
     return _createTraceTab({
@@ -158,7 +202,12 @@ function _loadPersistedTabs(): AppTab[] {
         .map((item): PersistedTab | null => {
           if (!item || typeof item !== "object") return null;
           const t = item as PersistedTab;
-          return t.type === "thread" || t.type === "trace" ? t : null;
+          return t.type === "thread" ||
+            t.type === "trace" ||
+            t.type === "source" ||
+            t.type === "agentProject"
+            ? t
+            : null;
         })
         .map((item) => (item ? _fromPersisted(item) : null))
         .filter((tab): tab is AppTab => tab !== null);
@@ -239,9 +288,20 @@ async function _traceExists(tab: TraceTab): Promise<boolean> {
 }
 
 async function _tabExists(tab: AppTab): Promise<boolean> {
-  return tab.type === "thread"
-    ? _threadFileExists(tab.path)
-    : _traceExists(tab);
+  if (tab.type === "trace") return _traceExists(tab);
+  if (tab.type === "agentProject") {
+    try {
+      const parent = tab.path.includes("/")
+        ? tab.path.slice(0, tab.path.lastIndexOf("/"))
+        : "";
+      return (await localFs.ls(parent)).some(
+        (node) => node.path === tab.path && node.agentProject
+      );
+    } catch {
+      return false;
+    }
+  }
+  return _threadFileExists(tab.path);
 }
 
 export function useThreadTabs(): ThreadTabs {
@@ -295,7 +355,8 @@ export function useThreadTabs(): ThreadTabs {
   }, []);
 
   const open = useCallback((path: string) => {
-    const id = _threadTabId(path);
+    const thread = path.endsWith(".json");
+    const id = thread ? _threadTabId(path) : _sourceTabId(path);
     if (tabsRef.current.some((tab) => tab.id === id)) {
       setActiveId(id);
       return;
@@ -303,7 +364,21 @@ export function useThreadTabs(): ThreadTabs {
     setTabs((prev) =>
       prev.some((tab) => tab.id === id)
         ? prev
-        : [...prev, _createThreadTab(path)]
+        : [...prev, thread ? _createThreadTab(path) : _createSourceTab(path)]
+    );
+    setActiveId(id);
+  }, []);
+
+  const openAgentProject = useCallback((path: string) => {
+    const id = _agentProjectTabId(path);
+    if (tabsRef.current.some((tab) => tab.id === id)) {
+      setActiveId(id);
+      return;
+    }
+    setTabs((prev) =>
+      prev.some((tab) => tab.id === id)
+        ? prev
+        : [...prev, _createAgentProjectTab(path)]
     );
     setActiveId(id);
   }, []);
@@ -429,7 +504,7 @@ export function useThreadTabs(): ThreadTabs {
   const handleRemove = useCallback((removed: string) => {
     setTabs((prev) => {
       const next = prev.filter(
-        (tab) => tab.type !== "thread" || !_isUnder(tab.path, removed)
+        (tab) => tab.type === "trace" || !_isUnder(tab.path, removed)
       );
       if (next.length === prev.length) return prev;
       setActiveId((current) =>
@@ -437,7 +512,7 @@ export function useThreadTabs(): ThreadTabs {
         prev.some(
           (tab) =>
             tab.id === current &&
-            tab.type === "thread" &&
+            tab.type !== "trace" &&
             _isUnder(tab.path, removed)
         )
           ? (next[next.length - 1]?.id ?? null)
@@ -453,23 +528,39 @@ export function useThreadTabs(): ThreadTabs {
 
     setTabs((prev) => {
       if (
-        !prev.some((tab) => tab.type === "thread" && _isUnder(tab.path, from))
+        !prev.some((tab) => tab.type !== "trace" && _isUnder(tab.path, from))
       ) {
         return prev;
       }
       return prev.map((tab) => {
-        if (tab.type !== "thread" || !_isUnder(tab.path, from)) {
+        if (tab.type === "trace" || !_isUnder(tab.path, from)) {
           return tab;
         }
         const path = rewrite(tab.path);
-        return { ...tab, id: _threadTabId(path), path };
+        const id =
+          tab.type === "thread"
+            ? _threadTabId(path)
+            : tab.type === "source"
+              ? _sourceTabId(path)
+              : _agentProjectTabId(path);
+        return { ...tab, id, path };
       });
     });
     setActiveId((current) => {
       const activeTab = tabsRef.current.find((tab) => tab.id === current);
-      return activeTab?.type === "thread" && _isUnder(activeTab.path, from)
-        ? _threadTabId(rewrite(activeTab.path))
-        : current;
+      if (
+        !activeTab ||
+        activeTab.type === "trace" ||
+        !_isUnder(activeTab.path, from)
+      ) {
+        return current;
+      }
+      const rewritten = rewrite(activeTab.path);
+      return activeTab.type === "thread"
+        ? _threadTabId(rewritten)
+        : activeTab.type === "source"
+          ? _sourceTabId(rewritten)
+          : _agentProjectTabId(rewritten);
     });
   }, []);
 
@@ -499,6 +590,7 @@ export function useThreadTabs(): ThreadTabs {
     tabs,
     activeId,
     open,
+    openAgentProject,
     openTrace,
     close,
     closeOthers,
