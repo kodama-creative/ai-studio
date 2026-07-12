@@ -8,11 +8,8 @@ import {
 } from "@earendil-works/pi-agent-core/node";
 import type { Models } from "@earendil-works/pi-ai";
 
-import {
-  AgentRuntime,
-  type AgentModelSelector,
-  type AgentRuntimeSession,
-} from "../agent-runtime";
+import { AgentRuntime, type AgentModelSelector } from "../agent-runtime";
+import type { AgentRuntimeSession } from "../agent-runtime-session";
 
 import { loadAgentProject } from "./project-loader";
 
@@ -53,6 +50,7 @@ export class LocalAgentRuntime {
     id?: string;
     extraTools?: AgentTool[];
     instructionsPrefix?: string;
+    allowInvalidProject?: boolean;
   }): Promise<AgentRuntimeSession> {
     const session = await this._repo.create({
       id: options.id,
@@ -64,6 +62,7 @@ export class LocalAgentRuntime {
       loadProject: () => loadAgentProject(this.agentRoot),
       extraTools: options.extraTools,
       instructionsPrefix: options.instructionsPrefix,
+      allowInvalidProject: options.allowInvalidProject,
     });
   }
 
@@ -72,6 +71,7 @@ export class LocalAgentRuntime {
     model: AgentModelSelector;
     extraTools?: AgentTool[];
     instructionsPrefix?: string;
+    allowInvalidProject?: boolean;
   }): Promise<AgentRuntimeSession> {
     const session = await this._repo.open(options.metadata);
     return this._runtime.createSession({
@@ -80,6 +80,7 @@ export class LocalAgentRuntime {
       loadProject: () => loadAgentProject(this.agentRoot),
       extraTools: options.extraTools,
       instructionsPrefix: options.instructionsPrefix,
+      allowInvalidProject: options.allowInvalidProject,
     });
   }
 
@@ -95,6 +96,7 @@ export class LocalAgentRuntime {
     position?: "before" | "at";
     extraTools?: AgentTool[];
     instructionsPrefix?: string;
+    allowInvalidProject?: boolean;
   }): Promise<AgentRuntimeSession> {
     const session = await this._repo.fork(options.metadata, {
       id: options.id,
@@ -108,6 +110,7 @@ export class LocalAgentRuntime {
       loadProject: () => loadAgentProject(this.agentRoot),
       extraTools: options.extraTools,
       instructionsPrefix: options.instructionsPrefix,
+      allowInvalidProject: options.allowInvalidProject,
     });
   }
 

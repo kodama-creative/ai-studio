@@ -1,8 +1,4 @@
 import {
-  AgentHarness,
-  type AgentHarnessEvent,
-  type AgentHarnessEventResultMap,
-  type AgentHarnessOwnEvent,
   type AgentTool,
   type ExecutionEnv,
   type Session,
@@ -10,6 +6,7 @@ import {
 } from "@earendil-works/pi-agent-core";
 import type { Api, Model, Models } from "@earendil-works/pi-ai";
 
+import { AgentRuntimeSession } from "./agent-runtime-session";
 import { assertValidAgentProject, type AgentProjectSnapshot } from "./project";
 
 export interface AgentModelSelector {
@@ -29,6 +26,7 @@ export interface CreateAgentRuntimeSessionOptions {
   extraTools?: AgentTool[];
   instructionsPrefix?: string;
   thinkingLevel?: ThinkingLevel;
+  allowInvalidProject?: boolean;
 }
 
 export class AgentRuntime {
@@ -44,7 +42,10 @@ export class AgentRuntime {
     options: CreateAgentRuntimeSessionOptions
   ): Promise<AgentRuntimeSession> {
     const model = this._resolveModel(options.model);
-    const snapshot = assertValidAgentProject(await options.loadProject());
+    const loaded = await options.loadProject();
+    const snapshot = options.allowInvalidProject
+      ? loaded
+      : assertValidAgentProject(loaded);
     return new AgentRuntimeSession({
       env: this._env,
       models: this._models,
@@ -55,6 +56,7 @@ export class AgentRuntime {
       extraTools: options.extraTools ?? [],
       instructionsPrefix: options.instructionsPrefix ?? "",
       thinkingLevel: options.thinkingLevel,
+      allowInvalidProject: options.allowInvalidProject ?? false,
     });
   }
 
@@ -66,146 +68,5 @@ export class AgentRuntime {
       );
     }
     return model;
-  }
-}
-
-interface AgentRuntimeSessionOptions {
-  env: ExecutionEnv;
-  models: Models;
-  session: Session;
-  model: Model<Api>;
-  loadProject: () => Promise<AgentProjectSnapshot>;
-  snapshot: AgentProjectSnapshot;
-  extraTools: AgentTool[];
-  instructionsPrefix: string;
-  thinkingLevel?: ThinkingLevel;
-}
-
-export class AgentRuntimeSession {
-  private readonly _harness: AgentHarness;
-  private readonly _session: Session;
-  private readonly _loadProject: () => Promise<AgentProjectSnapshot>;
-  private readonly _extraTools: AgentTool[];
-  private readonly _instructionsPrefix: string;
-  private _snapshot: AgentProjectSnapshot;
-
-  constructor(options: AgentRuntimeSessionOptions) {
-    this._session = options.session;
-    this._snapshot = options.snapshot;
-    this._loadProject = options.loadProject;
-    this._extraTools = options.extraTools;
-    this._instructionsPrefix = options.instructionsPrefix;
-    this._harness = new AgentHarness({
-      env: options.env,
-      session: options.session,
-      models: options.models,
-      model: options.model,
-      thinkingLevel: options.thinkingLevel,
-      tools: this._allTools(options.snapshot),
-      resources: options.snapshot.resources,
-      systemPrompt: () => this._systemPrompt(),
-    });
-  }
-
-  get project(): AgentProjectSnapshot {
-    return this._snapshot;
-  }
-
-  getContext() {
-    return this._session.buildContext();
-  }
-
-  getMetadata() {
-    return this._session.getMetadata();
-  }
-
-  async prompt(text: string): Promise<void> {
-    await this.refreshProject();
-    await this._harness.prompt(text);
-  }
-
-  async skill(name: string, additionalInstructions?: string): Promise<void> {
-    await this.refreshProject();
-    await this._harness.skill(name, additionalInstructions);
-  }
-
-  steer(text: string): Promise<void> {
-    return this._harness.steer(text);
-  }
-
-  followUp(text: string): Promise<void> {
-    return this._harness.followUp(text);
-  }
-
-  nextTurn(text: string): Promise<void> {
-    return this._harness.nextTurn(text);
-  }
-
-  compact(customInstructions?: string) {
-    return this._harness.compact(customInstructions);
-  }
-
-  navigateTree(
-    targetId: string,
-    options?: Parameters<AgentHarness["navigateTree"]>[1]
-  ) {
-    return this._harness.navigateTree(targetId, options);
-  }
-
-  abort() {
-    return this._harness.abort();
-  }
-
-  waitForIdle(): Promise<void> {
-    return this._harness.waitForIdle();
-  }
-
-  subscribe(
-    listener: (
-      event: AgentHarnessEvent,
-      signal?: AbortSignal
-    ) => Promise<void> | void
-  ): () => void {
-    return this._harness.subscribe(listener);
-  }
-
-  on<TType extends keyof AgentHarnessEventResultMap>(
-    type: TType,
-    handler: (
-      event: Extract<AgentHarnessOwnEvent, { type: TType }>
-    ) =>
-      | Promise<AgentHarnessEventResultMap[TType]>
-      | AgentHarnessEventResultMap[TType]
-  ): () => void {
-    return this._harness.on(type, handler);
-  }
-
-  async refreshProject(): Promise<AgentProjectSnapshot> {
-    const snapshot = assertValidAgentProject(await this._loadProject());
-    if (snapshot.fingerprint === this._snapshot.fingerprint) {
-      return this._snapshot;
-    }
-    await this._harness.setTools(this._allTools(snapshot));
-    await this._harness.setResources(snapshot.resources);
-    this._snapshot = snapshot;
-    return snapshot;
-  }
-
-  private _allTools(snapshot: AgentProjectSnapshot): AgentTool[] {
-    const tools = [...snapshot.tools, ...this._extraTools];
-    const names = new Set<string>();
-    for (const tool of tools) {
-      if (names.has(tool.name)) {
-        throw new Error(`Duplicate runtime tool name: ${tool.name}`);
-      }
-      names.add(tool.name);
-    }
-    return tools;
-  }
-
-  private _systemPrompt(): string {
-    return [this._instructionsPrefix.trim(), this._snapshot.instructions.trim()]
-      .filter(Boolean)
-      .join("\n\n");
   }
 }

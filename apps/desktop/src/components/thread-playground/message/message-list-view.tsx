@@ -143,6 +143,24 @@ function StaticMessageList({
   );
 }
 
+export const SnapshotMessageListView = memo(function SnapshotMessageListView({
+  className,
+  context,
+  messages,
+}: {
+  className?: string;
+  context?: ThreadContext;
+  messages: Message[];
+}) {
+  return (
+    <ScrollArea type="auto" className={cn("size-full", className)}>
+      <div className="flex flex-col p-3 pt-0.5">
+        <StaticMessageList context={context} messages={messages} readonly />
+      </div>
+    </ScrollArea>
+  );
+});
+
 function DroppableMessageList({
   droppableProvided,
   messages,

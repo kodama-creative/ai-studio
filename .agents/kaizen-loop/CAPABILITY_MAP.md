@@ -159,7 +159,7 @@
   - Desktop `AgentProjectManager` injects host model auth, keeps Builder and Target JSONL sessions separate under project `.llm-space/`, gives Builder the complete Target tool set plus confined authoring/validation/Target-run tools, and multiplexes Pi events through typed RPC.
 - Boundary: a user can open a filesystem-authored Agent Project, edit its instructions/tools/skills, run a real Target Pi agent, ask a separate real Builder Pi agent to execute Target tools and modify/validate the project, switch/reopen local sessions, and retry against freshly loaded source. The same runtime package is available to future non-desktop hosts.
 - Explicit non-goals: no `agent/agent.ts`, database/cloud persistence, crash-safe step replay, distributed workflow durability, channels, schedules, sandbox provisioning, subagents, public plugin SDK, permission approval UI, or dynamic third-party loading in V1.
-- Visible gaps: the existing detailed Thread trace inspector has no Agent-session handoff yet; remote live-provider completion was blocked by the audit environment's outbound connection timeout; Builder authoring has no delete/move tool by design; persistence remains local JSONL pending a later database adapter.
+- Visible gaps: remote live-provider completion was blocked by the audit environment's outbound connection timeout; Builder authoring has no delete/move tool by design; persistence remains local JSONL pending a later database adapter; Agent session traces adapt persisted messages and tool results into the existing inspector but do not yet preserve raw Pi event timing or every provider/model detail.
 
 ## Token Usage Visibility
 

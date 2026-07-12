@@ -73,6 +73,10 @@ export class AgentProjectManager {
   private readonly _sessions = new Map<string, OpenSession>();
   private readonly _activeStreams = new Map<string, AgentRuntimeSession>();
   private readonly _runningSessions = new Set<string>();
+  private readonly _nestedTargets = new Map<
+    AgentRuntimeSession,
+    AgentRuntimeSession
+  >();
 
   constructor(options: { workspaceRoot: string; modelManager: ModelManager }) {
     this._workspaceRoot = path.resolve(options.workspaceRoot);
@@ -137,6 +141,7 @@ export class AgentProjectManager {
           ? {
               extraTools: await this._builderTools(projectPath, projectRoot),
               instructionsPrefix: _builderInstructions(projectRoot),
+              allowInvalidProject: true,
             }
           : {}),
       });
@@ -209,7 +214,10 @@ export class AgentProjectManager {
   }
 
   abort(streamId: string): void {
-    void this._activeStreams.get(streamId)?.abort();
+    const session = this._activeStreams.get(streamId);
+    if (!session) return;
+    void session.abort();
+    void this._nestedTargets.get(session)?.abort();
   }
 
   async shutdown(): Promise<void> {
@@ -221,6 +229,7 @@ export class AgentProjectManager {
       }
     }
     this._activeStreams.clear();
+    this._nestedTargets.clear();
     const runtimes = [...this._sessions.values()].map((entry) => entry.runtime);
     this._sessions.clear();
     await Promise.allSettled(runtimes.map((runtime) => runtime.cleanup()));
@@ -250,6 +259,7 @@ export class AgentProjectManager {
         ? {
             extraTools: await this._builderTools(projectPath, projectRoot),
             instructionsPrefix: _builderInstructions(projectRoot),
+            allowInvalidProject: true,
           }
         : {}),
     };
@@ -291,6 +301,7 @@ export class AgentProjectManager {
             ? {
                 extraTools: await this._builderTools(projectPath, projectRoot),
                 instructionsPrefix: _builderInstructions(projectRoot),
+                allowInvalidProject: true,
               }
             : {}),
         });
@@ -540,8 +551,13 @@ export class AgentProjectManager {
       throw new Error("Target is already running.");
     }
     this._runningSessions.add(sessionKey);
+    let builderSession: AgentRuntimeSession | undefined;
     try {
       const open = await this._getOrCreateSession(projectPath, "target");
+      builderSession = this._sessions.get(`${projectPath}:builder`)?.session;
+      if (builderSession) {
+        this._nestedTargets.set(builderSession, open.session);
+      }
       const events: string[] = [];
       const unsubscribe = open.session.subscribe((event) => {
         const summary = _eventSummary(event);
@@ -560,6 +576,7 @@ export class AgentProjectManager {
         cause: error,
       });
     } finally {
+      if (builderSession) this._nestedTargets.delete(builderSession);
       this._runningSessions.delete(sessionKey);
     }
   }
@@ -638,6 +655,17 @@ function _isAgentEvent(event: AgentHarnessEvent): event is AgentEvent {
 }
 
 function _messageViews(messages: AgentMessage[]): AgentProjectMessageView[] {
+  const toolResults = new Map<string, { text: string; isError: boolean }>();
+  for (const message of messages) {
+    if (message.role !== "toolResult") continue;
+    toolResults.set(message.toolCallId, {
+      text: message.content
+        .filter((item) => item.type === "text")
+        .map((item) => item.text)
+        .join("\n"),
+      isError: message.isError,
+    });
+  }
   return messages
     .filter(
       (message) =>
@@ -680,11 +708,17 @@ function _messageViews(messages: AgentMessage[]): AgentProjectMessageView[] {
             : ""),
         toolCalls: message.content
           .filter((item) => item.type === "toolCall")
-          .map((item) => ({
-            id: item.id,
-            name: item.name,
-            arguments: item.arguments,
-          })),
+          .map((item) => {
+            const result = toolResults.get(item.id);
+            return {
+              id: item.id,
+              name: item.name,
+              arguments: item.arguments,
+              ...(result
+                ? { result: result.text, isError: result.isError }
+                : {}),
+            };
+          }),
       };
     });
 }

@@ -141,6 +141,44 @@ describe("LocalAgentRuntime", () => {
     expect(executed).toEqual(["builder_probe", "echo"]);
     await runtime.cleanup();
   });
+
+  test("allows a host Builder session to repair an invalid project", async () => {
+    const root = await _fixture();
+    const agentRoot = join(root, "agent");
+    await mkdir(agentRoot);
+    const parameters = Type.Object({});
+    const repairTool: AgentTool<typeof parameters> = {
+      name: "builder_probe",
+      label: "Repair",
+      description: "Repair invalid source.",
+      parameters,
+      execute: () =>
+        Promise.resolve({
+          content: [{ type: "text", text: "repaired" }],
+          details: undefined,
+        }),
+    };
+    const runtime = new LocalAgentRuntime({
+      agentRoot,
+      sessionsRoot: join(root, ".llm-space", "sessions"),
+      models: _fakeModels(["builder_probe"]),
+    });
+    const builder = await runtime.createSession({
+      model: { provider: "fake", id: "fake-model" },
+      extraTools: [repairTool],
+      allowInvalidProject: true,
+    });
+    const executed: string[] = [];
+    builder.subscribe((event) => {
+      if (event.type === "tool_execution_end") executed.push(event.toolName);
+    });
+
+    await builder.prompt("repair it");
+
+    expect(executed).toEqual(["builder_probe"]);
+    expect(builder.project.diagnostics[0]?.code).toBe("instructions_missing");
+    await runtime.cleanup();
+  });
 });
 
 async function _fixture(): Promise<string> {

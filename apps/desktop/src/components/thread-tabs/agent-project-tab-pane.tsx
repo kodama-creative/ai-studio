@@ -1,6 +1,7 @@
 import type { AgentEvent } from "@earendil-works/pi-agent-core";
-import type { ModelConfig } from "@llm-space/core";
+import type { Message, ModelConfig } from "@llm-space/core";
 import { uuid } from "@llm-space/core";
+import type { RunSnapshot } from "@llm-space/core/thread";
 import {
   BotIcon,
   BracesIcon,
@@ -10,6 +11,7 @@ import {
   PlayIcon,
   PlusIcon,
   RefreshCwIcon,
+  ScanSearchIcon,
   SendIcon,
   SparklesIcon,
   WrenchIcon,
@@ -32,6 +34,12 @@ import { CodeEditor } from "@/components/code-editor";
 import { useModels } from "@/components/model-provider";
 import { Button } from "@/components/ui/button";
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
@@ -46,6 +54,12 @@ import type {
   AgentSessionKind,
   StreamAgentProjectResponsePayload,
 } from "@/shared/agent-project";
+
+import { RunTraceView } from "../thread-playground/run-trace-view";
+import {
+  createThreadStore,
+  ThreadStoreContext,
+} from "../thread-playground/stores";
 
 function _AgentProjectTabPane({
   path,
@@ -201,6 +215,10 @@ function _AgentProjectTabPane({
                 project={project}
                 kind="builder"
                 onProjectChange={setProject}
+                onSelectChangedFile={(file) => {
+                  setSelectedFile(file);
+                  setMode("build");
+                }}
               />
             </aside>
           </ResizablePanel>
@@ -417,20 +435,24 @@ const _Conversation = memo(function _Conversation({
   project,
   kind,
   onProjectChange,
+  onSelectChangedFile,
 }: {
   project: AgentProjectView;
   kind: AgentSessionKind;
   onProjectChange: (project: AgentProjectView) => void;
+  onSelectChangedFile?: (path: string) => void;
 }) {
   const [draft, setDraft] = useState("");
   const [running, setRunning] = useState(false);
   const [liveText, setLiveText] = useState("");
   const [activity, setActivity] = useState<string | null>(null);
+  const [traceOpen, setTraceOpen] = useState(false);
   const streamIdRef = useRef<string | null>(null);
   const listenerRef = useRef<
     ((message: StreamAgentProjectResponsePayload) => void) | null
   >(null);
   const session = project[kind];
+  const traceRun = useMemo(() => _traceRun(project, kind), [kind, project]);
 
   useEffect(
     () => () => {
@@ -558,12 +580,36 @@ const _Conversation = memo(function _Conversation({
           className="ml-auto h-6 px-2 text-[10px]"
           size="sm"
           variant="ghost"
+          onClick={() => setTraceOpen(true)}
+          disabled={!traceRun}
+        >
+          <ScanSearchIcon className="size-3" /> Inspect trace
+        </Button>
+        <Button
+          className="h-6 px-2 text-[10px]"
+          size="sm"
+          variant="ghost"
           onClick={() => void newSession()}
           disabled={running}
         >
-          <PlusIcon className="size-3" /> New Session
+          <PlusIcon className="size-3" /> New session
         </Button>
       </header>
+
+      {kind === "builder" && session.changedFiles.length > 0 ? (
+        <div className="flex shrink-0 flex-wrap gap-1 border-b px-3 py-1.5">
+          {session.changedFiles.map((file) => (
+            <button
+              key={file}
+              type="button"
+              className="bg-primary/10 text-primary focus-visible:ring-ring max-w-full truncate rounded px-2 py-1 font-mono text-[10px] outline-none focus-visible:ring-1"
+              onClick={() => onSelectChangedFile?.(file)}
+            >
+              {file}
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       <ScrollArea className="min-h-0 flex-1">
         <div className="space-y-3 p-3">
@@ -620,11 +666,21 @@ const _Conversation = memo(function _Conversation({
           )}
         </div>
       </div>
+      <Dialog open={traceOpen} onOpenChange={setTraceOpen}>
+        <DialogContent className="flex h-[min(720px,calc(100vh-2rem))] max-w-4xl flex-col gap-0 overflow-hidden p-0">
+          <DialogHeader className="shrink-0 border-b px-4 py-3">
+            <DialogTitle>
+              {kind === "builder" ? "Builder" : "Target"} session trace
+            </DialogTitle>
+          </DialogHeader>
+          <_AgentRunTrace run={traceRun} />
+        </DialogContent>
+      </Dialog>
     </div>
   );
 });
 
-function _Message({ message }: { message: AgentProjectMessageView }) {
+function _MessageImpl({ message }: { message: AgentProjectMessageView }) {
   const isUser = message.role === "user";
   return (
     <div
@@ -644,6 +700,90 @@ function _Message({ message }: { message: AgentProjectMessageView }) {
       ))}
     </div>
   );
+}
+
+const _Message = memo(_MessageImpl);
+
+const _AgentRunTrace = memo(function _AgentRunTrace({
+  run,
+}: {
+  run: RunSnapshot | null;
+}) {
+  const store = useMemo(
+    () => createThreadStore(run?.thread ?? {}, {}),
+    [run]
+  );
+  return (
+    <ThreadStoreContext.Provider value={store}>
+      <RunTraceView className="min-h-0 flex-1" run={run} />
+    </ThreadStoreContext.Provider>
+  );
+});
+
+function _traceRun(
+  project: AgentProjectView,
+  kind: AgentSessionKind
+): RunSnapshot | null {
+  const session = project[kind];
+  if (!session.activeSessionId || session.messages.length === 0) return null;
+  const messages = session.messages.flatMap((message): Message[] => {
+    if (message.role === "user") {
+      return [
+        {
+          id: uuid(),
+          role: "user",
+          content: [{ type: "text", text: message.text }],
+        },
+      ];
+    }
+    if (message.role !== "assistant") return [];
+    return [
+      {
+        id: uuid(),
+        role: "assistant",
+        content: message.text ? [{ type: "text", text: message.text }] : [],
+        ...(message.toolCalls?.length
+          ? {
+              toolCalls: message.toolCalls.map((toolCall) => ({
+                id: toolCall.id,
+                input: {
+                  name: toolCall.name,
+                  arguments: _record(toolCall.arguments),
+                },
+                ...(toolCall.result !== undefined
+                  ? {
+                      output: {
+                        content: [
+                          { type: "text" as const, text: toolCall.result },
+                        ],
+                        ...(toolCall.isError ? { isError: true } : {}),
+                      },
+                    }
+                  : {}),
+              })),
+            }
+          : {}),
+      },
+    ];
+  });
+  const active = session.sessions.find(
+    (candidate) => candidate.id === session.activeSessionId
+  );
+  return {
+    id: session.activeSessionId,
+    timestamp: active ? Date.parse(active.createdAt) : Date.now(),
+    thread: {
+      title: `${project.name} ${kind} session`,
+      ...(project.model ? { model: project.model } : {}),
+      context: { systemPrompt: project.instructions, messages },
+    },
+  };
+}
+
+function _record(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
 }
 
 function _applyLiveEvent(

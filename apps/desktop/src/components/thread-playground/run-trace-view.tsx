@@ -4,7 +4,7 @@ import { format } from "timeago.js";
 
 import { cn } from "@/lib/utils";
 
-import { MessageListView } from "./message/message-list-view";
+import { SnapshotMessageListView } from "./message/message-list-view";
 import { TokenUsageSummary } from "./message/token-usage-summary";
 import {
   runMessageCountLabel,
@@ -63,11 +63,10 @@ function _RunTraceView({
           {systemPrompt}
         </pre>
       </details>
-      <MessageListView
+      <SnapshotMessageListView
         className="min-h-0 flex-1"
         context={run.thread.context}
         messages={messages}
-        readonly
       />
     </div>
   );
