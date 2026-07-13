@@ -1,5 +1,12 @@
 import { createHash } from "node:crypto";
-import { lstat, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import {
+  lstat,
+  mkdir,
+  readdir,
+  readFile,
+  realpath,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -265,7 +272,10 @@ async function _importToolModule(
     );
   }
   const source = await result.outputs[0].text();
-  const cacheRoot = join(tmpdir(), "llm-space-runtime-tools");
+  // macOS exposes the temporary directory through both `/var` and
+  // `/private/var`. Canonicalize before dynamic import so Bun's module cache
+  // and the path we wrote always name the same file.
+  const cacheRoot = join(await realpath(tmpdir()), "llm-space-runtime-tools");
   const cachePath = join(cacheRoot, `${version}.mjs`);
   await mkdir(cacheRoot, { recursive: true });
   try {

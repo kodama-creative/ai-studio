@@ -11,6 +11,7 @@ import type { Command } from "../../shared/commands";
 import { AgentProjectManager } from "../agents";
 import { Analytics } from "../analytics";
 import { executeCommandInBun } from "../commands";
+import { ExternalAgentProjectManager } from "../external-projects";
 import { DesktopHost } from "../host/desktop-host";
 import { McpManager } from "../mcp";
 import { ModelManager } from "../models";
@@ -40,6 +41,7 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
     workspaceRoot: workspacePath,
     modelManager,
   });
+  const externalAgentProjects = new ExternalAgentProjectManager(homePath);
   const mcpManager = new McpManager();
   const searchSettings = new SearchSettingsManager();
   const skillsManager = new SkillsManager();
@@ -89,6 +91,7 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
       stopPromise ??= _stopDesktopApp([
         ["updater", () => updater.stop()],
         ["agent projects", () => agentProjects.shutdown()],
+        ["external agent projects", () => externalAgentProjects.shutdown()],
         ["streaming", () => streaming.shutdown()],
         ["desktop host", () => host.stop()],
         ["MCP manager", () => mcpManager.shutdown()],
@@ -102,6 +105,7 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
     rpc = createMainWindowRPC({
       analytics,
       agentProjects,
+      externalAgentProjects,
       executeCommand: (command) => executeCommand(command, getMainWindow()),
       getMainWindow,
       homePath,

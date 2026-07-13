@@ -76,6 +76,9 @@ export function ToolListView({
       setBuiltInOpen(true);
       return;
     }
+    if (tool.type === "project") {
+      return;
+    }
     setEditingTool(tool);
     setDialogOpen(true);
   }, []);

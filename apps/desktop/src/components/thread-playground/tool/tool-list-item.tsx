@@ -1,7 +1,12 @@
 "use client";
 
 import { type Tool } from "@llm-space/core";
-import { CableIcon, FunctionSquareIcon, XIcon } from "lucide-react";
+import {
+  CableIcon,
+  FunctionSquareIcon,
+  PackageIcon,
+  XIcon,
+} from "lucide-react";
 import React, { memo, useCallback, useMemo } from "react";
 
 import { cn } from "@/lib/utils";
@@ -46,8 +51,10 @@ function _ToolListItem({
       ? CableIcon
       : tool.type === "builtin"
         ? getBuiltInToolIcon(tool)
-        : FunctionSquareIcon;
-  const editDisabled = readonly;
+        : tool.type === "project"
+          ? PackageIcon
+          : FunctionSquareIcon;
+  const editDisabled = readonly || tool.type === "project";
 
   return (
     <div className="group/tool bg-secondary hover:text-accent-foreground inline-flex h-6 shrink-0 items-center rounded-md text-xs/relaxed transition-colors">
@@ -83,9 +90,11 @@ function _ToolListItem({
             type="button"
             className="focus-visible:ring-ring/30 text-muted-foreground group-hover/tool:text-foreground inline-flex h-full items-center gap-1 rounded-l-md pl-2 outline-none focus-visible:ring-2 disabled:pointer-events-none disabled:opacity-50"
             aria-label={
-              tool.type === "function"
-                ? `Edit ${tool.name} tool`
-                : `Manage ${tool.name} ${tool.type === "mcp" ? "MCP" : "built-in"} tool`
+              tool.type === "project"
+                ? `${tool.name} project tool`
+                : tool.type === "function"
+                  ? `Edit ${tool.name} tool`
+                  : `Manage ${tool.name} ${tool.type === "mcp" ? "MCP" : "built-in"} tool`
             }
             disabled={editDisabled}
             onClick={() => onEdit(tool)}

@@ -1,5 +1,6 @@
 export * from "./agent-runtime";
 export * from "./agent-runtime-session";
+export * from "./manifest";
 export * from "./project";
 
 export type {

@@ -20,6 +20,13 @@ import type {
 import type { AnalyticsEvent, AnalyticsStatus } from "./analytics";
 import type { Command } from "./commands";
 import type {
+  ExternalAgentProjectChangedPayload,
+  ExternalAgentProjectPreview,
+  ExternalAgentProjectSummary,
+  ExternalAgentProjectThreadRecord,
+  ExternalAgentProjectView,
+} from "./external-agent-project";
+import type {
   McpCallToolResponse,
   McpServerDraft,
   McpServerToolsResponse,
@@ -210,6 +217,75 @@ export interface DesktopRPCType {
         };
         response: AgentProjectView;
       };
+      externalAgentProjectBrowse: {
+        params: Record<string, never>;
+        response: ExternalAgentProjectPreview | null;
+      };
+      externalAgentProjectTrustAndOpen: {
+        params: { path: string };
+        response: ExternalAgentProjectView;
+      };
+      externalAgentProjectList: {
+        params: Record<string, never>;
+        response: ExternalAgentProjectSummary[];
+      };
+      externalAgentProjectInspect: {
+        params: { projectId: string };
+        response: ExternalAgentProjectView;
+      };
+      externalAgentProjectRemove: {
+        params: { projectId: string };
+        response: null;
+      };
+      externalAgentProjectRefresh: {
+        params: { projectId: string };
+        response: ExternalAgentProjectView;
+      };
+      externalAgentProjectCreateThread: {
+        params: { projectId: string; title?: string };
+        response: { id: string; record: ExternalAgentProjectThreadRecord };
+      };
+      externalAgentProjectReadThread: {
+        params: { projectId: string; threadId: string };
+        response: ExternalAgentProjectThreadRecord;
+      };
+      externalAgentProjectWriteThread: {
+        params: {
+          projectId: string;
+          threadId: string;
+          record: ExternalAgentProjectThreadRecord;
+        };
+        response: null;
+      };
+      externalAgentProjectDuplicateThread: {
+        params: { projectId: string; threadId: string };
+        response: { id: string; record: ExternalAgentProjectThreadRecord };
+      };
+      externalAgentProjectDeleteThread: {
+        params: { projectId: string; threadId: string };
+        response: null;
+      };
+      externalAgentProjectSyncThreadPrompt: {
+        params: { projectId: string; threadId: string };
+        response: ExternalAgentProjectThreadRecord;
+      };
+      externalAgentProjectReadSource: {
+        params: { projectId: string; path: string };
+        response: { text: string };
+      };
+      externalAgentProjectWriteSource: {
+        params: { projectId: string; path: string; text: string };
+        response: null;
+      };
+      externalAgentProjectCallTool: {
+        params: {
+          projectId: string;
+          snapshot: string;
+          name: string;
+          arguments: Record<string, unknown>;
+        };
+        response: { contentText: string; isError: boolean };
+      };
       mcpListServers: {
         params: Record<string, never>;
         response: McpServerView[];
@@ -393,6 +469,7 @@ export interface DesktopRPCType {
     messages: {
       receiveStreamThreadResponse: StreamThreadResponsePayload;
       receiveAgentProjectResponse: StreamAgentProjectResponsePayload;
+      externalAgentProjectChanged: ExternalAgentProjectChangedPayload;
       // OS-level fullscreen state changed (entered/exited).
       fullScreenChanged: { fullScreen: boolean };
       // App-update flow progress from the bun-side updater service.

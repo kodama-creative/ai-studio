@@ -51,6 +51,12 @@ const AgentProjectTabPane = lazy(() =>
   }))
 );
 
+const ExternalProjectTabPane = lazy(() =>
+  import("./external-project-tab-pane").then((module) => ({
+    default: module.ExternalProjectTabPane,
+  }))
+);
+
 // Suppress focus on mouse-down so a click doesn't leave these toolbar icons
 // with the focus-visible ring stuck; keyboard focus (Tab) still rings them.
 const _preventFocusSteal = (e: MouseEvent) => e.preventDefault();
@@ -334,22 +340,26 @@ export function ThreadTabs({
               </ContextMenuItem>
               <ContextMenuItem onSelect={closeAll}>Close All</ContextMenuItem>
             </ContextMenuGroup>
-            {contextMenuTab && contextMenuTab.type !== "trace" && (
-              <>
-                <ContextMenuSeparator />
-                <ContextMenuGroup>
-                  <ContextMenuItem onSelect={() => reveal(contextMenuTab.path)}>
-                    {REVEAL_LABEL}
-                  </ContextMenuItem>
-                  <ContextMenuItem
-                    variant="destructive"
-                    onSelect={() => moveToTrash(contextMenuTab.path)}
-                  >
-                    {MOVE_TO_TRASH_LABEL}
-                  </ContextMenuItem>
-                </ContextMenuGroup>
-              </>
-            )}
+            {contextMenuTab &&
+              contextMenuTab.type !== "trace" &&
+              contextMenuTab.type !== "externalProject" && (
+                <>
+                  <ContextMenuSeparator />
+                  <ContextMenuGroup>
+                    <ContextMenuItem
+                      onSelect={() => reveal(contextMenuTab.path)}
+                    >
+                      {REVEAL_LABEL}
+                    </ContextMenuItem>
+                    <ContextMenuItem
+                      variant="destructive"
+                      onSelect={() => moveToTrash(contextMenuTab.path)}
+                    >
+                      {MOVE_TO_TRASH_LABEL}
+                    </ContextMenuItem>
+                  </ContextMenuGroup>
+                </>
+              )}
           </ContextMenuContent>
         ) : null}
       </ContextMenu>
@@ -388,6 +398,18 @@ export function ThreadTabs({
                 active={tab.id === activeId}
                 refreshNonce={tab.refreshNonce ?? 0}
               />
+            );
+          }
+          if (tab.type === "externalProject") {
+            return (
+              <Suspense key={tab.id} fallback={null}>
+                <ExternalProjectTabPane
+                  projectId={tab.projectId}
+                  threadId={tab.threadId}
+                  active={tab.id === activeId}
+                  refreshNonce={tab.refreshNonce ?? 0}
+                />
+              </Suspense>
             );
           }
           return (

@@ -1,3 +1,10 @@
+import {
+  createContext,
+  createElement,
+  useContext,
+  type ReactNode,
+} from "react";
+
 import { getSkillsSettings, listSkills } from "@/client/skills";
 import type { SkillInfo } from "@/shared/skills";
 
@@ -16,4 +23,28 @@ export async function listEnabledPromptVariableSkills(): Promise<SkillInfo[]> {
     }
   }
   return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export type PromptSkillsLoader = () => Promise<SkillInfo[]>;
+
+const PromptSkillsContext = createContext<PromptSkillsLoader>(
+  listEnabledPromptVariableSkills
+);
+
+export function PromptSkillsProvider({
+  loader,
+  children,
+}: {
+  loader?: PromptSkillsLoader;
+  children: ReactNode;
+}) {
+  return createElement(
+    PromptSkillsContext.Provider,
+    { value: loader ?? listEnabledPromptVariableSkills },
+    children
+  );
+}
+
+export function usePromptSkillsLoader(): PromptSkillsLoader {
+  return useContext(PromptSkillsContext);
 }

@@ -10,6 +10,7 @@ import type { Command } from "../../shared/commands";
 import type { DesktopRPCType } from "../../shared/rpc";
 import type { AgentProjectManager } from "../agents";
 import type { Analytics } from "../analytics";
+import type { ExternalAgentProjectManager } from "../external-projects";
 import { moveToTrash, revealInFileManager } from "../fs";
 import type { McpManager } from "../mcp";
 import type { ModelManager } from "../models";
@@ -52,6 +53,7 @@ export type MainWindowRPC = ReturnType<
 export interface MainWindowRPCDependencies {
   analytics: Analytics;
   agentProjects: AgentProjectManager;
+  externalAgentProjects: ExternalAgentProjectManager;
   executeCommand: (command: Command) => void;
   getMainWindow: () => BrowserWindow;
   homePath: string;
@@ -71,6 +73,7 @@ const MAX_REQUEST_TIME_MS = 5 * 60_000 + 10_000;
 export function createMainWindowRPC({
   analytics,
   agentProjects,
+  externalAgentProjects,
   executeCommand,
   getMainWindow,
   homePath,
@@ -246,6 +249,58 @@ export function createMainWindowRPC({
           agentProjects.newSession(projectPath, kind),
         agentProjectSelectSession: ({ projectPath, kind, sessionId }) =>
           agentProjects.selectSession(projectPath, kind, sessionId),
+        externalAgentProjectBrowse: async () => {
+          const selected = await Utils.openFileDialog({
+            startingFolder: "~/",
+            canChooseFiles: false,
+            canChooseDirectory: true,
+            allowsMultipleSelection: false,
+          });
+          const directory = selected.map((item) => item.trim()).find(Boolean);
+          return directory
+            ? externalAgentProjects.preview(directory)
+            : Promise.resolve(null);
+        },
+        externalAgentProjectTrustAndOpen: ({ path }) =>
+          externalAgentProjects.trustAndOpen(path),
+        externalAgentProjectList: () => externalAgentProjects.list(),
+        externalAgentProjectInspect: ({ projectId }) =>
+          externalAgentProjects.inspect(projectId),
+        externalAgentProjectRemove: async ({ projectId }) => {
+          await externalAgentProjects.remove(projectId);
+          return null;
+        },
+        externalAgentProjectRefresh: ({ projectId }) =>
+          externalAgentProjects.refresh(projectId),
+        externalAgentProjectCreateThread: ({ projectId, title }) =>
+          externalAgentProjects.createThread(projectId, title),
+        externalAgentProjectReadThread: ({ projectId, threadId }) =>
+          externalAgentProjects.readThread(projectId, threadId),
+        externalAgentProjectWriteThread: async ({
+          projectId,
+          threadId,
+          record,
+        }) => {
+          await externalAgentProjects.writeThread(projectId, threadId, record);
+          return null;
+        },
+        externalAgentProjectDuplicateThread: ({ projectId, threadId }) =>
+          externalAgentProjects.duplicateThread(projectId, threadId),
+        externalAgentProjectDeleteThread: async ({ projectId, threadId }) => {
+          await externalAgentProjects.deleteThread(projectId, threadId);
+          return null;
+        },
+        externalAgentProjectSyncThreadPrompt: ({ projectId, threadId }) =>
+          externalAgentProjects.syncThreadPrompt(projectId, threadId),
+        externalAgentProjectReadSource: async ({ projectId, path }) => ({
+          text: await externalAgentProjects.readSource(projectId, path),
+        }),
+        externalAgentProjectWriteSource: async ({ projectId, path, text }) => {
+          await externalAgentProjects.writeSource(projectId, path, text);
+          return null;
+        },
+        externalAgentProjectCallTool: (input) =>
+          externalAgentProjects.callTool(input),
         mcpListServers: () => mcpManager.listServers(),
         mcpAddServer: ({ server }) => {
           const servers = mcpManager.addServer(server);
@@ -344,5 +399,8 @@ export function createMainWindowRPC({
       },
     },
   });
+  externalAgentProjects.setOnChange((projectId) =>
+    rpc.send.externalAgentProjectChanged({ projectId })
+  );
   return rpc;
 }

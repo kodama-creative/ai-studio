@@ -26,12 +26,14 @@ function _MessageListItemHeader({
   className,
   message,
   readonly = false,
+  runDisabled = false,
   collapsed,
   dragHandleProps,
 }: {
   className?: string;
   message: Message;
   readonly?: boolean;
+  runDisabled?: boolean;
   collapsed?: boolean;
   dragHandleProps?: DraggableProvidedDragHandleProps | null;
 }) {
@@ -56,7 +58,8 @@ function _MessageListItemHeader({
   // still shows (disabled) for an assistant message whose tool results aren't
   // ready yet, since that can become runnable.
   const showRun =
-    message.role === "user" || (message.role === "assistant" && !!message.toolCalls?.length);
+    message.role === "user" ||
+    (message.role === "assistant" && !!message.toolCalls?.length);
   const runTooltip = runnable ? "Run from this message" : "No runnable content";
   const runAriaLabel = runnable
     ? "Run from this message"
@@ -78,8 +81,9 @@ function _MessageListItemHeader({
     return "";
   }, [collapsed, message, textContent]);
   const handleRun = useCallback(async () => {
+    if (runDisabled) return;
     await run(message.id);
-  }, [run, message.id]);
+  }, [run, message.id, runDisabled]);
   const handleRemove = useCallback(() => {
     removeMessage(message.id);
   }, [removeMessage, message.id]);
@@ -194,7 +198,7 @@ function _MessageListItemHeader({
               variant="ghost"
               size="icon-sm"
               aria-label={runAriaLabel}
-              disabled={readonly || !runnable}
+              disabled={readonly || runDisabled || !runnable}
               onClick={handleRun}
             >
               <PlayCircleIcon className="size-4" />

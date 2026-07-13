@@ -11,8 +11,11 @@ import {
 import { usePanelRef } from "react-resizable-panels";
 import { toast } from "sonner";
 
+import { externalAgentProjects } from "@/client";
 import { CommandProvider, useCommands, useRegisterCommands } from "@/commands";
 import { useExperimental } from "@/components/experimental-provider";
+import { ExternalAgentProjectTrustDialog } from "@/components/external-agent-project-trust-dialog";
+import { ExternalAgentProjectsPanel } from "@/components/external-agent-projects-panel";
 import { FileSystemTreeView } from "@/components/file-system-tree-view";
 import { FirecrawlLimitDialog } from "@/components/firecrawl-limit-dialog";
 import { useModels } from "@/components/model-provider";
@@ -36,6 +39,10 @@ import {
 } from "@/lib/import-threads";
 import { useFullScreen } from "@/lib/use-full-screen";
 import type { SettingsTab } from "@/shared/commands";
+import type {
+  ExternalAgentProjectPreview,
+  ExternalAgentProjectSummary,
+} from "@/shared/external-agent-project";
 import type { TraceRecord } from "@/shared/traces";
 
 // Overlay surfaces that aren't part of the first paint — settings, the command
@@ -148,6 +155,17 @@ const COMMAND_PALETTE_BLACKLIST = [
   "createConnectedTraceProject",
   "importLangfuseTraceFiles",
   "syncLangfuseTraceIds",
+  "trustExternalAgentProject",
+  "createExternalAgentProjectThread",
+  "refreshExternalAgentProject",
+  "revealExternalAgentProject",
+  "removeExternalAgentProject",
+  "renameExternalAgentProjectThread",
+  "duplicateExternalAgentProjectThread",
+  "deleteExternalAgentProjectThread",
+  "syncExternalAgentProjectPrompt",
+  "enableExternalAgentProjectTools",
+  "saveExternalAgentProjectSource",
   // Only meaningful from the "ready to install" toast; a bare palette
   // invocation would silently no-op (or restart mid-work).
   "applyUpdateAndRestart",
@@ -196,9 +214,64 @@ function PageInner() {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [onboardOpen, setOnboardOpen] = useState(false);
   const [examplesOpen, setExamplesOpen] = useState(false);
+  const [externalProjectsRefresh, setExternalProjectsRefresh] = useState(0);
+  const [pendingTrust, setPendingTrust] =
+    useState<ExternalAgentProjectPreview | null>(null);
   const [sidebarMode, setSidebarMode] = useState<"files" | "traces">("files");
   // Which folder a chosen example's thread is created into (default: root).
   const examplesParentRef = useRef("");
+
+  const openExternalProjectView = useCallback(
+    (project: ExternalAgentProjectSummary) => {
+      tabs.openExternalProject({
+        projectId: project.id,
+        path: project.path,
+        projectName: project.name,
+      });
+    },
+    [tabs]
+  );
+  const openExternalProjectThread = useCallback(
+    (
+      project: ExternalAgentProjectSummary,
+      thread: { id: string; title: string }
+    ) => {
+      tabs.openExternalProject({
+        projectId: project.id,
+        path: project.path,
+        projectName: project.name,
+        threadId: thread.id,
+        threadTitle: thread.title,
+      });
+    },
+    [tabs]
+  );
+  const finishOpenExternalProject = useCallback(
+    async (path: string) => {
+      const project = await externalAgentProjects.trustAndOpen(path);
+      setExternalProjectsRefresh((value) => value + 1);
+      const first = project.threads[0];
+      if (first) openExternalProjectThread(project, first);
+      else openExternalProjectView(project);
+    },
+    [openExternalProjectThread, openExternalProjectView]
+  );
+  const browseExternalProject = useCallback(async () => {
+    try {
+      const preview = await externalAgentProjects.browse();
+      if (!preview) return;
+      if (preview.trusted) {
+        executeCommand({
+          type: "trustExternalAgentProject",
+          args: { path: preview.path },
+        });
+      } else setPendingTrust(preview);
+    } catch (error) {
+      toast.error("Unable to open Agent Project", {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }, [executeCommand]);
 
   // File import: a hidden picker (opened by the `importFiles` command), the
   // parent directory it should import into, and page-wide drag-and-drop state.
@@ -265,6 +338,13 @@ function PageInner() {
       examplesParentRef.current = parent;
       setExamplesOpen(true);
     },
+    openExternalAgentProject: () => void browseExternalProject(),
+    trustExternalAgentProject: ({ path }) =>
+      void finishOpenExternalProject(path).catch((error) =>
+        toast.error("Unable to open Agent Project", {
+          description: error instanceof Error ? error.message : String(error),
+        })
+      ),
     importFiles: ({ parent = "", files }) => {
       if (files) {
         void handleImportFiles(files, parent);
@@ -399,6 +479,13 @@ function PageInner() {
               onRemove={tabs.handleRemove}
               onMove={tabs.handleMove}
             />
+            {effectiveSidebarMode === "files" ? (
+              <ExternalAgentProjectsPanel
+                refreshNonce={externalProjectsRefresh}
+                onOpenProject={openExternalProjectView}
+                onOpenThread={openExternalProjectThread}
+              />
+            ) : null}
             {tracingEnabled && (
               <TracePanel
                 className={
@@ -494,6 +581,22 @@ function PageInner() {
           }
         />
       </LazyOverlay>
+      <ExternalAgentProjectTrustDialog
+        project={pendingTrust}
+        onOpenChange={(open) => {
+          if (!open) setPendingTrust(null);
+        }}
+        onConfirm={() => {
+          const project = pendingTrust;
+          setPendingTrust(null);
+          if (project) {
+            executeCommand({
+              type: "trustExternalAgentProject",
+              args: { path: project.path },
+            });
+          }
+        }}
+      />
       {isDraggingFiles && (
         <div className="border-primary bg-primary/10 text-primary pointer-events-none absolute inset-3 z-50 flex items-center justify-center rounded-lg border-2 border-dashed text-sm font-medium backdrop-blur-sm">
           Drop files to import as threads

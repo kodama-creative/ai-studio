@@ -15,6 +15,7 @@ import {
   type AgentTransport,
   type BuiltinTool,
   type McpTool,
+  type ProjectTool,
   type MessageContent,
   type ModelConfig,
   type ModelConfigParams,
@@ -193,9 +194,11 @@ export function createThreadStore(
      * runner. Injected so the store stays decoupled from the RPC layer.
      */
     executeTool?: (
-      tool: McpTool | BuiltinTool,
+      tool: McpTool | BuiltinTool | ProjectTool,
       args: Record<string, unknown>
     ) => Promise<{ contentText: string; isError: boolean }>;
+    /** Skills available to prompt-variable rendering for this Thread. */
+    loadPromptSkills?: typeof listEnabledPromptVariableSkills;
   } = {}
 ): ThreadStore {
   const normalizedInputThread = ensureThreadVariableState(
@@ -394,7 +397,7 @@ export function createThreadStore(
         // we bail and let the user fill it in.
         const executable: {
           toolCall: ToolCall;
-          tool: McpTool | BuiltinTool;
+          tool: McpTool | BuiltinTool | ProjectTool;
         }[] = [];
         for (const toolCall of toolCalls) {
           const tool = toolsByName.get(toolCall.input.name);
@@ -938,14 +941,12 @@ export function createThreadStore(
           // PREVIEW_THROTTLE_MS) — see createFrameThrottle for why per-event
           // set() calls are unsafe and re-rendering the growing document per
           // frame is too expensive.
-          const {
-            schedule: schedulePreview,
-            cancel: cancelPreview,
-          } = createFrameThrottle(() => {
-            if (isActiveRun()) {
-              set({ streamingMessage });
-            }
-          }, PREVIEW_THROTTLE_MS);
+          const { schedule: schedulePreview, cancel: cancelPreview } =
+            createFrameThrottle(() => {
+              if (isActiveRun()) {
+                set({ streamingMessage });
+              }
+            }, PREVIEW_THROTTLE_MS);
 
           const finalizeActiveRun = () => {
             if (!isActiveRun()) {
@@ -1038,7 +1039,9 @@ export function createThreadStore(
                         messages,
                         snapshot: promptSnapshot,
                       },
-                      loadSkills: listEnabledPromptVariableSkills,
+                      loadSkills:
+                        options.loadPromptSkills ??
+                        listEnabledPromptVariableSkills,
                     })
                   ).context;
               preparedContext = null;

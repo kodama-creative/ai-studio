@@ -3,6 +3,7 @@ export { useThreadTabs, tabLabel } from "./use-thread-tabs";
 export type {
   AppTab,
   AgentProjectTab,
+  ExternalProjectTab,
   SourceTab,
   TraceTab,
   ThreadTab,

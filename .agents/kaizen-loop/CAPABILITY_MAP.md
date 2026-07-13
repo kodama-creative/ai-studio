@@ -1,7 +1,7 @@
 # LLM Space Capability Map
 
 - Last updated: 2026-07-13
-- Map status: refreshed after Agent Runtime And Builder V1. Desktop now recognizes portable Agent Projects and runs separate real Builder/Target Pi agents through the shared `@llm-space/runtime`; Thread workflows remain available. Public or dynamically loaded plugins remain absent.
+- Map status: refreshed after External Agent Project And Project Threads V1. Users can initialize a manifest-defined project in any directory, trust/open it in desktop, and test watched project prompt/tools/skills through desktop-owned Thread Playgrounds. Managed-workspace Builder/Target sessions remain available as a separate workflow. Public or dynamically loaded plugins remain absent.
 - Evidence rule: entries marked `confirmed` cite current rendered-product or current-code evidence. Entries marked `stale` rely on previous logs or code paths not fully re-inspected in this loop. Entries marked `unknown` need a future product-surface check before they can drive a recommendation.
 
 ## First-Run Model Setup
@@ -159,7 +159,27 @@
   - Desktop `AgentProjectManager` injects host model auth, keeps Builder and Target JSONL sessions separate under project `.llm-space/`, gives Builder the complete Target tool set plus confined authoring/validation/Target-run tools, and multiplexes Pi events through typed RPC.
 - Boundary: a user can open a filesystem-authored Agent Project, edit its instructions/tools/skills, run a real Target Pi agent, ask a separate real Builder Pi agent to execute Target tools and modify/validate the project, switch/reopen local sessions, and retry against freshly loaded source. The same runtime package is available to future non-desktop hosts.
 - Explicit non-goals: no `agent/agent.ts`, database/cloud persistence, crash-safe step replay, distributed workflow durability, channels, schedules, sandbox provisioning, subagents, public plugin SDK, permission approval UI, or dynamic third-party loading in V1.
-- Visible gaps: remote live-provider completion was blocked by the audit environment's outbound connection timeout; Builder authoring has no delete/move tool by design; persistence remains local JSONL pending a later database adapter; Agent session traces adapt persisted messages and tool results into the existing inspector but do not yet preserve raw Pi event timing or every provider/model detail.
+- Visible gaps: external projects intentionally do not use this persistent Builder/Target session model; remote live-provider completion was blocked by the audit environment's outbound connection timeout; Builder authoring has no delete/move tool by design; persistence remains local JSONL pending a later database adapter; Agent session traces adapt persisted messages and tool results into the existing inspector but do not yet preserve raw Pi event timing or every provider/model detail.
+
+## Agent Project Activation
+
+- Status: shipped External Agent Project And Project Threads V1
+- Freshness: confirmed
+- Last checked: 2026-07-13
+- Evidence:
+  - `packages/cli` exposes `bunx @llm-space/cli init [directory]` / `llm-space init [directory]`, with Starter and `--blank` templates, full collision preflight, staging rollback, and no overwrite or merge.
+  - `packages/runtime/src/manifest.ts` and `src/node/project-manifest.ts` define and safely resolve the V1 `llm-space.json` contract while rejecting traversal, absolute Agent paths, and source-root symlinks.
+  - Desktop `ExternalAgentProjectManager` keeps registry/trust and project Threads under `LLM_SPACE_HOME`, validates before trust without importing tools, recursively watches trusted source, retains frozen snapshots, and executes project tools in Bun through typed RPC.
+  - Current CEF screenshots `audits/2026-07-13-182809-external-agent-project-v1/02-project-restored.png`, `03-project-build.png`, and `04-project-thread.png` show the separate Agent Projects sidebar, external Build/source surface, project tool, project skill variable, and reused Thread Playground.
+  - Current CEF screenshots `05-prompt-out-of-sync.png`, `07-sync-confirm-local-edit.png`, and `08-sync-undone.png` show watch-driven prompt drift, confirmation only when a local Thread prompt would be lost, and Sync from Project participating in normal undo history.
+  - Current CEF screenshots `09-invalid-source.png` and `10-source-recovered.png` show an imported tool syntax error blocking the project and automatic recovery after the source is repaired.
+  - Current CEF screenshot `11-project-tool-result.png` shows the existing Playground `Call tools` flow executing the trusted project `get_weather` implementation and persisting `Shanghai: Sunny, 22°C` in desktop-owned Thread data.
+  - Current CEF screenshots `12-narrow-build.png` and `14-narrow-thread-final.png` plus DOM checks confirm 900×700 Build/Thread layouts without document overflow or a visible editor horizontal scrollbar; the final console contained no application errors.
+  - Isolated filesystem verification found only `llm-space.json`, instructions, tool, and skill source inside the external project; registry, trust, Thread, messages, tool results, and run state remained under the temporary `LLM_SPACE_HOME`.
+  - Focused and full validation passed 76 Bun tests, runtime/CLI/core TypeScript, lint (one pre-existing warning), and Vite production build; desktop TypeScript reports only the same pre-existing unused example constant.
+- Boundary: users can initialize one portable Agent per directory, open and explicitly trust multiple external projects in place, inspect/edit watched Agent source, keep multiple desktop-owned Threads per project, rename/duplicate/delete those Threads, edit their prompts, explicitly sync project prompt changes with undo, select project tools/skills, execute project tools through the existing manual/auto/ReAct-capable Playground seams, and retain projects/Threads across restart without creating persistent Agent Runtime sessions or project-local Playground data. Existing managed-workspace Agent Builder behavior remains separate and unchanged.
+- Explicit non-goals: no desktop project-creation wizard, external source copy, Git/cloud/deployment workflow, Builder Agent or AI source mutation for external projects, sandbox or per-call approval system, public plugin SDK, multiple Agents per manifest, graphs/subagents/schedules, breakpoint debugger, directory-move migration, or destructive deletion of desktop-owned project data.
+- Visible gaps: a live configured-provider message run was not exercised in this isolated audit, so remote provider connectivity remains supplementary rather than proven; trusted project tools are not sandboxed; moving a project creates a new path identity; project removal keeps its desktop-owned data intentionally; richer missing-skill diagnostics and automated CEF regression coverage remain future work.
 
 ## Token Usage Visibility
 

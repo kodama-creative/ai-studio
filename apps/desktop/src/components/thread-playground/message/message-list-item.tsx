@@ -39,6 +39,7 @@ function _MessageListItem({
   message,
   placeholder,
   readonly = false,
+  runDisabled = false,
   streaming,
   collapsed,
   autoFocus = false,
@@ -49,6 +50,7 @@ function _MessageListItem({
   message: Message;
   placeholder?: string;
   readonly?: boolean;
+  runDisabled?: boolean;
   streaming?: boolean;
   collapsed?: boolean;
   /** Focus this message's editor on mount. Set only for a freshly-added message. */
@@ -92,11 +94,11 @@ function _MessageListItem({
     updateMessageTextContent,
   } = useThreadStoreActions();
   const handleRun = useCallback(async () => {
-    if (readonly) {
+    if (readonly || runDisabled) {
       return;
     }
     await run(message.id);
-  }, [message.id, readonly, run]);
+  }, [message.id, readonly, run, runDisabled]);
   const handleContinue = useCallback(() => {
     void handleRun();
   }, [handleRun]);
@@ -188,6 +190,7 @@ function _MessageListItem({
         className={toolCallsOnlyBody ? "pb-2" : undefined}
         message={message}
         readonly={readonly}
+        runDisabled={runDisabled}
         collapsed={collapsed}
         dragHandleProps={dragHandleProps}
       />
@@ -238,7 +241,9 @@ function _MessageListItem({
                     key={toolCall.id}
                     context={context}
                     messageId={message.id}
-                    canContinue={toolCallSummary?.canContinue ?? false}
+                    canContinue={
+                      !runDisabled && (toolCallSummary?.canContinue ?? false)
+                    }
                     onContinue={handleContinue}
                     readonly={readonly}
                     toolCall={toolCall}
@@ -247,6 +252,7 @@ function _MessageListItem({
                 <ToolStepContinuation
                   messageId={message.id}
                   readonly={readonly}
+                  runDisabled={runDisabled}
                   toolCalls={message.toolCalls}
                 />
               </div>
@@ -261,10 +267,12 @@ function _ToolStepContinuation({
   messageId,
   toolCalls,
   readonly,
+  runDisabled,
 }: {
   messageId: string;
   toolCalls: ToolCall[];
   readonly?: boolean;
+  runDisabled?: boolean;
 }) {
   const status = useThreadStore((state) => state.status);
   const { run } = useThreadStoreActions();
@@ -288,6 +296,7 @@ function _ToolStepContinuation({
   // call has a response.
   const canContinue =
     !readonly &&
+    !runDisabled &&
     status !== "running" &&
     !callingTools &&
     summarizeToolCalls(toolCalls).canContinue;

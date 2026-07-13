@@ -69,6 +69,11 @@ import {
 import { ToolListView } from "./tool/tool-list-view";
 import { useShortcuts } from "./use-shortcuts";
 import { useThreadPlaygroundEvents } from "./use-thread-playground-events";
+import {
+  listEnabledPromptVariableSkills,
+  PromptSkillsProvider,
+  type PromptSkillsLoader,
+} from "./variable/prompt-variable-skills";
 import { PromptVariablesListView } from "./variable/prompt-variables-list-view";
 
 export interface ThreadPlaygroundProps {
@@ -78,6 +83,8 @@ export interface ThreadPlaygroundProps {
   headerDetails?: ReactNode;
   initialValue: Thread;
   readonly?: boolean;
+  /** Block new model runs while leaving manual tool-result editing available. */
+  runDisabled?: boolean;
   /**
    * Whether this playground belongs to the active tab. Only the active one
    * registers the `runThread` command handler (the command registry keeps a
@@ -86,6 +93,13 @@ export interface ThreadPlaygroundProps {
   active?: boolean;
   /** The streaming transport used by runs (e.g. HTTP or Electrobun RPC). */
   transport?: AgentTransport;
+  /** Override local skill discovery for project-backed Threads. */
+  loadPromptSkills?: PromptSkillsLoader;
+  /** Apply an owning-surface edit through the normal undo history. */
+  externalUpdate?: {
+    revision: number;
+    update: (thread: Thread) => Thread;
+  };
 
   onChange?: (thread: Thread) => void;
   onRenameTitle?: (title: string) => Promise<boolean>;
@@ -121,6 +135,8 @@ export function ThreadPlayground({
 function _ThreadPlayground({
   initialValue,
   transport,
+  loadPromptSkills,
+  externalUpdate,
   onChange,
   onStreamingStart,
   onStreamingEnd,
@@ -135,6 +151,8 @@ function _ThreadPlayground({
   const defaultModel = useDefaultModel();
   const defaultModelRef = useRef(defaultModel);
   defaultModelRef.current = defaultModel;
+  const loadPromptSkillsRef = useRef(loadPromptSkills);
+  loadPromptSkillsRef.current = loadPromptSkills;
   const [store] = useState(() =>
     createThreadStore(initialValue, {
       transport,
@@ -147,17 +165,46 @@ function _ThreadPlayground({
       getAutoRunTools,
       getReactLoop,
       executeTool,
+      loadPromptSkills: loadPromptSkills
+        ? () =>
+            (loadPromptSkillsRef.current ?? listEnabledPromptVariableSkills)()
+        : undefined,
     })
   );
+  const appliedExternalRevision = useRef(0);
+  useEffect(() => {
+    if (
+      !externalUpdate ||
+      externalUpdate.revision === appliedExternalRevision.current
+    ) {
+      return;
+    }
+    const apply = () => {
+      if (store.getState().status === "running") return false;
+      store
+        .getState()
+        .restoreThread(externalUpdate.update(store.getState().thread));
+      appliedExternalRevision.current = externalUpdate.revision;
+      return true;
+    };
+    if (apply()) return;
+    const unsubscribe = store.subscribe((state) => {
+      if (state.status !== "idle" || !apply()) return;
+      unsubscribe();
+    });
+    return unsubscribe;
+  }, [externalUpdate, store]);
   useThreadPlaygroundEvents(store, {
     onChange,
     onStreamingStart,
     onStreamingEnd,
   });
   return (
-    <ThreadStoreContext.Provider value={store}>
-      <ThreadPlaygroundContent {...props} />
-    </ThreadStoreContext.Provider>
+    <PromptSkillsProvider loader={loadPromptSkills}>
+      <ThreadStoreContext.Provider value={store}>
+        <ThreadPlaygroundContent {...props} />
+      </ThreadStoreContext.Provider>
+    </PromptSkillsProvider>
   );
 }
 
@@ -172,6 +219,7 @@ function ThreadPlaygroundContent({
   onRenameTitle,
   validateTitle,
   readonly: readonlyFromProps = false,
+  runDisabled = false,
   active = false,
 }: Omit<
   ThreadPlaygroundProps,
@@ -200,15 +248,16 @@ function ThreadPlaygroundContent({
     return readonlyFromProps || status === "running";
   }, [readonlyFromProps, status]);
   const handleRun = useCallback(async () => {
+    if (runDisabled) return;
     await run();
-  }, []);
+  }, [run, runDisabled]);
   // Expose run as a command, but only from the active tab so a global
   // `runThread` targets it (and no-ops when no tab is active). Skip while
   // already running to avoid run()'s "already running" throw.
   useRegisterCommands(
     {
       runThread: () => {
-        if (status !== "running") void run();
+        if (status !== "running" && !runDisabled) void run();
       },
     },
     active
@@ -236,7 +285,9 @@ function ThreadPlaygroundContent({
   const closeHistory = useCallback(() => {
     runHistoryPanelRef.current?.collapse();
   }, []);
-  const handleShortcuts = useShortcuts({ readonly: readonlyFromProps });
+  const handleShortcuts = useShortcuts({
+    readonly: readonlyFromProps || (runDisabled && status !== "running"),
+  });
   return (
     <div
       ref={containerRef}
@@ -335,7 +386,8 @@ function ThreadPlaygroundContent({
                         : "Run thread"
                     }
                     disabled={
-                      readonlyFromProps || (status !== "running" && !hasModel)
+                      readonlyFromProps ||
+                      (status !== "running" && (!hasModel || runDisabled))
                     }
                     onClick={status === "running" ? handleStop : handleRun}
                   >
@@ -353,7 +405,8 @@ function ThreadPlaygroundContent({
                       className="border-none pr-1.5 pl-0.5 active:translate-y-0!"
                       aria-label="Run settings"
                       disabled={
-                        readonlyFromProps || (status !== "running" && !hasModel)
+                        readonlyFromProps ||
+                        (status !== "running" && (!hasModel || runDisabled))
                       }
                     >
                       <ChevronDownIcon className="size-3" />
@@ -404,7 +457,12 @@ function ThreadPlaygroundContent({
             className="flex min-h-0 grow"
             orientation="horizontal"
           >
-            <ResizablePanel className="pb-3" defaultSize="50%" minSize="300px">
+            <ResizablePanel
+              className="overflow-x-hidden pb-3"
+              defaultSize="50%"
+              minSize="300px"
+              style={{ overflowX: "hidden" }}
+            >
               <div className="flex size-full flex-col">
                 <div className="px-3">
                   <div className={"flex w-full border-b py-2"}>
@@ -446,7 +504,7 @@ function ThreadPlaygroundContent({
             </ResizablePanel>
             <ResizableHandle className="opacity-50 hover:opacity-100" />
             <ResizablePanel minSize="300px">
-              <MessageListView readonly={readonly} />
+              <MessageListView readonly={readonly} runDisabled={runDisabled} />
             </ResizablePanel>
           </ResizablePanelGroup>
         </ResizablePanel>
