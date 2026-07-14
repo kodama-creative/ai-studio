@@ -23,7 +23,7 @@ description = "Run the desktop app with CEF/CDP debugging on :9333"
 run = "bun run dev:cef"
 
 [tasks.lint]
-description = "Check lint (read-only; `bun run lint` is the --fix variant)"
+description = "Check lint"
 run = "bun run lint:check"
 
 # --- Local packaging -------------------------------------------------------

@@ -8,7 +8,7 @@ Use **bun** for everything (fuzzy-pinned in `mise.toml`, exact version + checksu
 
 | Task                                   | Command                                                                     | Notes                                                                                                                  |
 | -------------------------------------- | --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Set up a fresh clone                   | `mise setup`                                                                | installs the locked toolchain (`mise install`) + JS deps (`bun install`)                                               |
+| Set up a fresh clone                   | `mise setup`                                                                | installs the locked toolchain, JS dependencies, and Git hooks                                                          |
 | Install deps                           | `bun install`                                                               | from repo root                                                                                                         |
 | Run desktop app                        | `bun dev`                                                                   | root script → `cd apps/desktop && bun run dev:hmr` (Vite HMR on :5173 + `electrobun dev --watch`)                      |
 | Run desktop app with CEF/CDP debugging | `bun run dev:cef`                                                           | root script → `cd apps/desktop && bun run dev:cef`; exposes CDP on `127.0.0.1:9333` by default                         |
@@ -16,7 +16,7 @@ Use **bun** for everything (fuzzy-pinned in `mise.toml`, exact version + checksu
 | Build (stable)                         | `bun run build:stable`                                                      | in `apps/desktop` → `vite build && electrobun build --env=stable`                                                      |
 | Local packaging / update test          | `mise run pack` · `pack:adhoc` · `pack:signed` · `pack:feed` + `feed:serve` | env combinations over `build:canary` (skip signing / ad-hoc sign / local update feed on :8321); defined in `mise.toml` |
 | Cut a release                          | `bun run release` / `bun run release:canary`                                | root script → `bun scripts/release.ts`; see "Releases & auto-update"                                                   |
-| Lint                                   | `bun lint` / `bun run lint:check`                                           | `lint` = `eslint --fix`, `lint:check` / `check` = `eslint .`; flat config at repo root                                 |
+| Lint                                   | `bun run lint:check` / `bun run lint:fix`                                   | read-only and fix variants; flat config at repo root                                                                   |
 | Add a dependency                       | `bun add <pkg>`                                                             | run inside the target package (`apps/desktop` or `packages/core`)                                                      |
 | Add a shadcn/ui component              | `bunx --bun shadcn@latest add <component>`                                  | run inside `apps/desktop`                                                                                              |
 | Run a script from root                 | `bun --filter <pkg> <script>`                                               | e.g. `bun --filter @llm-space/desktop start`                                                                           |
@@ -175,7 +175,3 @@ Prefer dropping new images into the existing `src/mainview/public/images/` folde
 - Wrap components that re-render often or sit in a list in `memo()`. The house pattern is `export const Foo = memo(_Foo)` — the underscore-prefixed inner holds the implementation (see `MessageListItem`, `ThinkingView`, `CodeEditor`).
 - Keep memo effective: stabilize props with `useMemo`/`useCallback` and read the store through narrow `useThreadStore(selector)` slices so a component only re-renders on the state it uses.
 - Don't reach for `memo()` reflexively on cheap, rarely-rendered components — add it where a profile or the render path shows it pays off.
-
-### Formatting
-
-- **Prettier**: 2-space indent, double quotes, semicolons, es5 trailing commas, tailwind class sorting (`prettier-plugin-tailwindcss`). Import ordering is enforced by `eslint-plugin-import-x`.
