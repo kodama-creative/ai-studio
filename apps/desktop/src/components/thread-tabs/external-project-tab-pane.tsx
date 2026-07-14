@@ -398,8 +398,10 @@ function _ProjectThreadPane({
   }, [project, projectId]);
   const handleStreamingEnd = useCallback(() => {
     setRunning(false);
-    activeRunProvenance.current = null;
-    queueMicrotask(() => void refreshProject(true));
+    queueMicrotask(() => {
+      activeRunProvenance.current = null;
+      void refreshProject(true);
+    });
   }, [refreshProject]);
 
   const awaitingToolResult = record

@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
 import type { BuiltinTool, CustomModel, McpTool, Tool } from "@llm-space/core";
 import { streamAgent } from "@llm-space/core/server";
@@ -12,6 +10,7 @@ import type {
 } from "../../shared/rpc";
 import type { Analytics } from "../analytics";
 import type { ExternalAgentProjectManager } from "../external-projects";
+import { agentDefinitionFingerprint } from "../external-projects/agent-definition-fingerprint";
 import type { McpManager } from "../mcp";
 import type { ModelManager } from "../models";
 import type { ToolRegistry } from "../tools/tool-registry";
@@ -142,9 +141,7 @@ export class StreamThreadController {
       runtime: {
         projectId: payload.runtime.projectId,
         snapshot: session.project.fingerprint,
-        definitionFingerprint: createHash("sha256")
-          .update(JSON.stringify(definition))
-          .digest("hex"),
+        definitionFingerprint: agentDefinitionFingerprint(definition),
         modelSource:
           payload.runtime.modelSource === "threadOverride" || !matchesDefinition
             ? "threadOverride"

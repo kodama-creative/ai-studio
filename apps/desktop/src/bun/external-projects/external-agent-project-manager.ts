@@ -44,6 +44,8 @@ import type {
   ExternalAgentProjectView,
 } from "../../shared/external-agent-project";
 
+import { agentDefinitionFingerprint } from "./agent-definition-fingerprint";
+
 interface RegistryEntry {
   path: string;
   trusted: boolean;
@@ -174,7 +176,7 @@ export class ExternalAgentProjectManager {
       instructions: snapshot?.instructions ?? "",
       definition: snapshot?.definition ?? null,
       definitionFingerprint: snapshot?.definition
-        ? _definitionFingerprint(snapshot.definition)
+        ? agentDefinitionFingerprint(snapshot.definition)
         : "",
       promptFingerprint: snapshot
         ? _textFingerprint(snapshot.instructions)
@@ -658,8 +660,8 @@ export class ExternalAgentProjectManager {
       typeof parsed.definitionFingerprint === "string"
         ? parsed.definitionFingerprint
         : current?.definition
-          ? _definitionFingerprint(current.definition)
-          : _definitionFingerprint(syncedDefinition);
+          ? agentDefinitionFingerprint(current.definition)
+          : agentDefinitionFingerprint(syncedDefinition);
     const legacyDefinitionState =
       typeof parsed.definitionFingerprint !== "string" ||
       !parsed.syncedDefinition;
@@ -897,10 +899,6 @@ function _within(root: string, candidate: string): boolean {
 
 function _textFingerprint(text: string): string {
   return createHash("sha256").update(text).digest("hex");
-}
-
-function _definitionFingerprint(definition: ResolvedAgentDefinition): string {
-  return _textFingerprint(JSON.stringify(definition));
 }
 
 function _modelFromDefinition(
