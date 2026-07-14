@@ -4,17 +4,15 @@ A workbench for prompt and agent development — build, trace, debug, evaluate, 
 
 ## Tooling
 
-Use **bun** for everything (fuzzy-pinned in `mise.toml`, exact version + checksums locked in `mise.lock` — regenerate with `mise lock` when bumping). Do not use npm/pnpm/yarn.
+Use **bun** for everything (minimum version pinned in `package.json` `engines`). Do not use npm/pnpm/yarn.
 
 | Task                                   | Command                                                                     | Notes                                                                                                                  |
 | -------------------------------------- | --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Set up a fresh clone                   | `mise setup`                                                                | installs the locked toolchain, JS dependencies, and Git hooks                                                          |
-| Install deps                           | `bun install`                                                               | from repo root                                                                                                         |
+| Set up a fresh clone                   | `bun install`                                                               | from repo root; also installs Git hooks via `postinstall`                                                              |
 | Run desktop app                        | `bun dev`                                                                   | root script → `cd apps/desktop && bun run dev:hmr` (Vite HMR on :5173 + `electrobun dev --watch`)                      |
 | Run desktop app with CEF/CDP debugging | `bun run dev:cef`                                                           | root script → `cd apps/desktop && bun run dev:cef`; exposes CDP on `127.0.0.1:9333` by default                         |
 | Build (canary)                         | `bun run build:canary`                                                      | in `apps/desktop` → `vite build && electrobun build --env=canary`                                                      |
 | Build (stable)                         | `bun run build:stable`                                                      | in `apps/desktop` → `vite build && electrobun build --env=stable`                                                      |
-| Local packaging / update test          | `mise run pack` · `pack:adhoc` · `pack:signed` · `pack:feed` + `feed:serve` | env combinations over `build:canary` (skip signing / ad-hoc sign / local update feed on :8321); defined in `mise.toml` |
 | Cut a release                          | `bun run release` / `bun run release:canary`                                | root script → `bun scripts/release.ts`; see "Releases & auto-update"                                                   |
 | Lint                                   | `bun run lint:check` / `bun run lint:fix`                                   | read-only and fix variants; flat config at repo root                                                                   |
 | Add a dependency                       | `bun add <pkg>`                                                             | run inside the target package (`apps/desktop` or `packages/core`)                                                      |
