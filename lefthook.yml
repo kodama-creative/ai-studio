@@ -1,0 +1,6 @@
+pre-commit:
+  commands:
+    lint:
+      glob: "**/*.{js,mjs,cjs,ts,mts,cts,jsx,tsx}"
+      run: bunx --bun eslint --fix {staged_files}
+      stage_fixed: true
