@@ -4,7 +4,7 @@ import { format } from "timeago.js";
 
 import { cn } from "@/lib/utils";
 
-import { MessageListView } from "./message/message-list-view";
+import { SnapshotMessageListView } from "./message/message-list-view";
 import { TokenUsageSummary } from "./message/token-usage-summary";
 import {
   runMessageCountLabel,
@@ -45,6 +45,13 @@ function _RunTraceView({
         </div>
         <div className="text-muted-foreground mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[0.625rem]">
           <span>{runModelLabel(run.thread)}</span>
+          {run.thread.agentRuntime ? (
+            <span>
+              {run.thread.agentRuntime.modelSource === "agent"
+                ? "From Agent"
+                : "Thread override"}
+            </span>
+          ) : null}
           <span>{runMessageCountLabel(run.thread)}</span>
           <span>{new Date(run.timestamp).toLocaleString()}</span>
         </div>
@@ -63,11 +70,10 @@ function _RunTraceView({
           {systemPrompt}
         </pre>
       </details>
-      <MessageListView
+      <SnapshotMessageListView
         className="min-h-0 flex-1"
         context={run.thread.context}
         messages={messages}
-        readonly
       />
     </div>
   );

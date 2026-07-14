@@ -1,7 +1,7 @@
 # LLM Space Capability Map
 
-- Last updated: 2026-07-12
-- Map status: refreshed after Headless Thread Semantics V1. A dedicated browser-safe `@llm-space/core/thread` entrypoint now owns prompt materialization, usage arithmetic, and persisted run/evaluation lifecycle rules; desktop retains UI/session and host-specific adapters. Public or dynamically loaded plugins remain absent.
+- Last updated: 2026-07-14
+- Map status: refreshed after Agent Definition And Runtime V1. Workspace and explicitly opened Agents share one Build + Project Threads product, required `agent.ts` model/reasoning defaults, and the same Pi Agent-backed runtime execution path. Public or dynamically loaded plugins remain absent.
 - Evidence rule: entries marked `confirmed` cite current rendered-product or current-code evidence. Entries marked `stale` rely on previous logs or code paths not fully re-inspected in this loop. Entries marked `unknown` need a future product-surface check before they can drive a recommendation.
 
 ## First-Run Model Setup
@@ -21,15 +21,17 @@
 
 - Status: operational
 - Freshness: confirmed
-- Last checked: 2026-07-03
+- Last checked: 2026-07-14
 - Evidence:
   - Current discovery screenshot `01-current-fresh-first-run.png` shows an empty workspace state with `Start from Example`, `Blank thread`, and `Configure models`.
   - Current CEF fixture check showed both `general-agent` and `trace-fixture` files in the sidebar after reload.
   - `apps/desktop/src/components/file-system-tree-view/use-file-system-tree.ts` creates quick files as local JSON threads.
   - `apps/desktop/src/components/thread-tabs/use-thread-tabs.ts` restores/open tabs and defaults first-run tabs through persisted tab state.
-- Boundary: local workspace tree, tabs, rename/move/delete/duplicate/reveal, prompt-example/blank thread creation, and local JSON persistence.
+  - Current CEF screenshot `audits/2026-07-13-232652-agent-navigation-editor/01-stacked-sidebar-watching.png` shows the managed workspace tree and imported Agent Projects stacked in the same sidebar, with no direct Threads/Agents view switch and a default `Watching` label consuming row space.
+  - Current CEF screenshots `audits/2026-07-14-005810-agent-navigation-editor/01-agents-sidebar.png` and `07-agent-thread-nested.png` show persisted Threads/Agents switching, the workspace Agent removed from the standalone Thread tree, and its project Thread nested under the Agent.
+- Boundary: local workspace Thread tree, tabs, rename/move/delete/duplicate/reveal, prompt-example/blank thread creation, local JSON persistence, and a persisted sidebar inventory switch that keeps Agent Project roots out of the standalone Thread tree.
 - Explicit non-goals: cloud sync, cross-workspace projects, external file watching beyond current tree refresh behavior.
-- Visible gaps: richer workspace project organization remains out of scope; external file writes require reload/refresh to appear.
+- Visible gaps: richer standalone Thread organization remains out of scope; external writes to ordinary workspace Thread files still require reload/refresh to appear.
 
 ## Prompt And Thread Building
 
@@ -132,7 +134,7 @@
 
 - Status: shipped V1
 - Freshness: confirmed
-- Last checked: 2026-07-12
+- Last checked: 2026-07-13
 - Evidence:
   - `packages/core/src/types/threads/thread.ts` owns the durable schemas for prompt variables, variable snapshots, run snapshots, evaluation rubrics, scores, and evaluations.
   - `packages/core/src/client/` owns transport-independent streaming, event reduction, conversion, and run eligibility; `packages/core/src/parsers/` owns native/foreign thread parsing and normalization.
@@ -145,6 +147,66 @@
 - Boundary: a core-only consumer can materialize a variableized Thread with injected skills/time, apply canonical usage semantics, record and normalize bounded runs, and create/update valid rubrics and evaluations. Desktop supplies local skill discovery and owns UI/session behavior.
 - Explicit non-goals: React/Zustand state, CodeMirror completion UI, Electrobun RPC and commands, native menus/windows/updates, desktop analytics, and dynamic third-party plugins do not belong to this capability.
 - Visible gaps: core still contains desktop-specific window-state persistence; the new public entrypoint has no real second product consumer beyond desktop and its headless integration test; a successful live-provider run/reload smoke remains pending because the configured provider was unreachable in this loop.
+
+## Agent Definition And Runtime
+
+- Status: shipped Agent Definition And Runtime V1
+- Freshness: confirmed
+- Last checked: 2026-07-14
+- Evidence:
+  - `packages/runtime` exposes exact `defineAgent({ model, reasoning? })` authored types, required trusted `agent.ts` loading, normalized definition snapshots, immutable runtime construction, and a Pi `Agent`-backed `RuntimeSession` with no public Pi `Session` argument.
+  - Runtime tests cover definition loading/hot reload/symlink rejection, default and override model resolution, unavailable defaults, manual deferred continuation, auto-once termination, and a complete Pi ReAct project-tool run.
+  - Desktop Agent Project Threads route through the Bun-owned runtime session over typed RPC. Thread remains the single durable transcript while runtime owns model/tool/continue/ReAct execution; each run records effective model/reasoning and Agent-vs-override provenance.
+  - Current CEF audit `audits/2026-07-14-155043-agent-definition-runtime/` shows required `agent.ts` in Build, raw authored unavailable-model display without fallback, `From Agent`/`Thread override`, watched drift, field-specific sync confirmation, one-step undo, and no document overflow or relevant console errors at 1280×800 and 900×700.
+  - The prior Desktop Builder/Target experiment is preserved as historical evidence in `audits/2026-07-13-002622-agent-builder-v1/`, but the current Desktop intentionally no longer exposes that second Agent product model.
+  - Current CEF audit `audits/2026-07-14-005810-agent-navigation-editor/` shows one Agent Build surface for both default-directory and explicitly opened projects, with source editing and desktop-owned nested Threads behind the same typed runtime/RPC boundary.
+- Boundary: a filesystem-authored Agent must define static model/reasoning defaults in `agent.ts`, plus instructions, TypeScript/JavaScript tools, and skills. Runtime snapshots are immutable; sessions may persistently override model/reasoning, and Desktop Project Threads execute/debug that same runtime while retaining editable messages and run history.
+- Explicit non-goals: dynamic model resolvers, automatic compaction/session budgets, database/cloud persistence, crash-safe tool replay, distributed workflow durability, channels, schedules, sandbox provisioning, subagents, public plugin SDK, dynamic third-party loading, or separate Desktop Builder/Target Agent model.
+- Visible gaps: isolated CEF could not prove a live external provider completion; deterministic Bun integration covers the runtime branch instead. Trusted project tools remain unsandboxed. Pi has no native durable pause-before-tool state, so manual mode uses runtime-internal deferred results. Full Pi Harness compaction/tree navigation and automatic session budgets remain future capabilities.
+
+## Agent Project Activation
+
+- Status: shipped One Agent Project Model V1
+- Freshness: confirmed
+- Last checked: 2026-07-14
+- Evidence:
+  - `packages/cli` exposes `bunx @llm-space/cli init [directory]` / `llm-space init [directory]`, with Starter and `--blank` templates, full collision preflight, staging rollback, and no overwrite or merge.
+  - `packages/runtime/src/manifest.ts` and `src/node/project-manifest.ts` define and safely resolve the V1 `llm-space.json` contract while rejecting traversal, absolute Agent paths, and source-root symlinks.
+  - Desktop `ExternalAgentProjectManager` keeps registry/trust and project Threads under `LLM_SPACE_HOME`, validates before trust without importing tools, recursively watches trusted source, retains frozen snapshots, and executes project tools in Bun through typed RPC.
+  - Current CEF screenshots `audits/2026-07-13-182809-external-agent-project-v1/02-project-restored.png`, `03-project-build.png`, and `04-project-thread.png` show the separate Agent Projects sidebar, external Build/source surface, project tool, project skill variable, and reused Thread Playground.
+  - Current CEF screenshots `05-prompt-out-of-sync.png`, `07-sync-confirm-local-edit.png`, and `08-sync-undone.png` show watch-driven prompt drift, confirmation only when a local Thread prompt would be lost, and Sync from Project participating in normal undo history.
+  - Current CEF screenshots `09-invalid-source.png` and `10-source-recovered.png` show an imported tool syntax error blocking the project and automatic recovery after the source is repaired.
+  - Current CEF screenshot `11-project-tool-result.png` shows the existing Playground `Call tools` flow executing the trusted project `get_weather` implementation and persisting `Shanghai: Sunny, 22°C` in desktop-owned Thread data.
+  - Current CEF screenshots `12-narrow-build.png` and `14-narrow-thread-final.png` plus DOM checks confirm 900×700 Build/Thread layouts without document overflow or a visible editor horizontal scrollbar; the final console contained no application errors.
+  - Isolated filesystem verification found only `llm-space.json`, instructions, tool, and skill source inside the external project; registry, trust, Thread, messages, tool results, and run state remained under the temporary `LLM_SPACE_HOME`.
+  - Focused and full validation passed 76 Bun tests, runtime/CLI/core TypeScript, lint (one pre-existing warning), and Vite production build; desktop TypeScript reports only the same pre-existing unused example constant.
+  - `apps/example-agent` is now a private Bun workspace and canonical manifest-defined reference project with dependency-free portable Agent source, app-local instructions, deterministic `get_weather`, `weather-brief`, README trust/data-boundary guidance, and a contract test against the public runtime loader.
+  - Current CEF screenshots `audits/2026-07-13-220758-example-agent-app/03-example-project-build.png`, `05-example-project-tool-result.png`, `06-example-project-narrow.png`, and `08-example-tool-result-restored.png` show the checked-in app restored as a watched external project, all three source slots, project tool/skill state, `Shanghai: Sunny, 22°C` from real Bun RPC execution, a 900×700 overflow-free layout, and full app-restart persistence.
+  - Full validation now passes 77 Bun tests, example/runtime/CLI/core TypeScript, lint with the same pre-existing warning, and Vite production build. Desktop TypeScript retains only the same pre-existing unused example constant diagnostic.
+  - Current CEF screenshots `audits/2026-07-13-232652-agent-navigation-editor/02-single-source-editor-watching.png` and `03-typescript-as-markdown-single-file.png` confirm the Build surface uses one replace-in-place source selection, exposes `Watching` in three Agent contexts, and mounts one CodeMirror whose `.ts` content is parsed through the default Markdown path rather than TypeScript language support.
+  - Current CEF audit `audits/2026-07-14-005810-agent-navigation-editor/` shows a manifestless workspace Agent auto-discovered into the same inventory and Build/Threads flow as explicitly opened projects, with no provenance badge or separate Builder/Target path.
+  - `packages/runtime/src/node/project-manifest.ts` defaults a missing manifest to schema version 1 and `agent: "agent"`; focused tests preserve explicit-manifest confinement and symlink rejection.
+  - Desktop now has one Agent Project manager/typed path. It recursively discovers canonical workspace paths, merges and deduplicates registered paths, auto-trusts only the canonical workspace boundary, and keeps every project Thread under desktop-owned `LLM_SPACE_HOME/projects` data.
+- Boundary: users can use one portable Agent Project contract in the default workspace or any explicitly opened directory; a manifest is optional when the Agent lives under `agent/`. Every Agent uses one Build + nested project Threads workflow, while source, trust, Thread, tool execution, and persistence boundaries remain path-safe and desktop-owned where appropriate.
+- Explicit non-goals: no desktop project-creation wizard, external source copy, Git/cloud/deployment workflow, Builder Agent or AI source mutation for external projects, sandbox or per-call approval system, public plugin SDK, multiple Agents per manifest, graphs/subagents/schedules, breakpoint debugger, directory-move migration, or destructive deletion of desktop-owned project data.
+- Visible gaps: native-picker import coverage is still manual/pre-seeded in CEF because the execution environment lacks macOS Accessibility/Screen Recording control. A live configured-provider message run was not exercised in the isolated audit, so remote provider connectivity remains supplementary rather than proven; trusted project tools are not sandboxed; moving a project creates a new path identity; project removal keeps its desktop-owned data intentionally; richer missing-skill diagnostics and automated CEF regression coverage remain future work.
+
+## Agent And Thread Workbench Navigation
+
+- Status: shipped One Agent Model And Source Workspace V1
+- Freshness: confirmed
+- Last checked: 2026-07-14
+- Evidence:
+  - Current CEF baseline `audits/2026-07-13-232652-agent-navigation-editor/01-stacked-sidebar-watching.png` shows Threads/files and imported Agents stacked rather than switchable.
+  - Current Build baseline `02-single-source-editor-watching.png` shows a source explorer feeding one replace-in-place editor with no open-file tabs.
+  - Current TypeScript baseline `03-typescript-as-markdown-single-file.png` and DOM inspection show one `.cm-editor`; TypeScript keywords and identifiers do not receive the dedicated CodeMirror TypeScript parse/highlight classes.
+  - The pre-implementation `apps/desktop/src/app/page.tsx` owned only a conditional `files | traces` mode, leaving `FileSystemTreeView` and `ExternalAgentProjectsPanel` stacked; the current implementation persists `threads | agents | traces` and falls back safely when Traces is disabled.
+  - The pre-implementation `_ProjectBuildPane` owned one replace-in-place source buffer and the editor supported only Markdown/JSON. The current pane owns independent per-path buffers and selects explicit Markdown/TypeScript/JavaScript CodeMirror modes.
+  - Current CEF screenshots `audits/2026-07-14-005810-agent-navigation-editor/02-build-instructions-tab.png`, `03-three-source-tabs-dirty.png`, `04-dirty-source-close-confirm.png`, `05-source-conflict.png`, `06-narrow-three-tabs.png`, and `08-reload-dirty-confirm.png` prove initial instructions opening, independent three-file buffers, TypeScript parsing, dirty state, safe close, disk-conflict resolution, 900×700 reflow, and typed reload protection.
+  - Current DOM/console inspection found one active CodeMirror, dedicated TypeScript token spans, zero `Watching` labels, zero document overflow at 1280×800 and 900×700, and no relevant application console errors.
+- Boundary: users can persistently switch the sidebar among Threads, Agents, and optional Traces; discover default-directory and explicitly opened Agents through one inventory; expand Agent Threads; and safely open, edit, switch, save, conflict-resolve, and close multiple Markdown/TypeScript/JavaScript source buffers inside one Agent Build surface.
+- Explicit non-goals: no project-wide search, split editors, drag-reorder, LSP, IntelliSense, diagnostics/lint service, Git status, source creation/deletion/rename, or broad app-tab redesign in V1.
+- Visible gaps: source tabs and drafts intentionally do not persist across restart; project-wide search, LSP, split editing, source CRUD, tab reordering, and automated end-to-end CEF coverage remain future work.
 
 ## Token Usage Visibility
 

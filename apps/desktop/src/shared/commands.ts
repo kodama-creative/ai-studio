@@ -48,6 +48,75 @@ export interface OpenStartFromExampleCommand extends GenericCommand<
   { parent?: string }
 > {}
 
+/** Choose, validate, trust, and open an external Agent Project directory. */
+export interface OpenExternalAgentProjectCommand extends GenericCommand<"openExternalAgentProject"> {}
+
+/** Trust a previously previewed Agent Project path and open it in Desktop. */
+export interface TrustExternalAgentProjectCommand extends GenericCommand<
+  "trustExternalAgentProject",
+  { path: string }
+> {}
+
+/** Create a desktop-owned Thread for an imported Agent Project. */
+export interface CreateExternalAgentProjectThreadCommand extends GenericCommand<
+  "createExternalAgentProjectThread",
+  { projectId: string }
+> {}
+
+/** Reload one imported Agent Project from its watched source directory. */
+export interface RefreshExternalAgentProjectCommand extends GenericCommand<
+  "refreshExternalAgentProject",
+  { projectId: string }
+> {}
+
+/** Reveal an imported Agent Project directory in the OS file manager. */
+export interface RevealExternalAgentProjectCommand extends GenericCommand<
+  "revealExternalAgentProject",
+  { path: string }
+> {}
+
+/** Remove an imported Agent Project from Desktop without changing its source. */
+export interface RemoveExternalAgentProjectCommand extends GenericCommand<
+  "removeExternalAgentProject",
+  { projectId: string }
+> {}
+
+/** Rename a desktop-owned Agent Project Thread. */
+export interface RenameExternalAgentProjectThreadCommand extends GenericCommand<
+  "renameExternalAgentProjectThread",
+  { projectId: string; threadId: string; title: string }
+> {}
+
+/** Duplicate a desktop-owned Agent Project Thread. */
+export interface DuplicateExternalAgentProjectThreadCommand extends GenericCommand<
+  "duplicateExternalAgentProjectThread",
+  { projectId: string; threadId: string }
+> {}
+
+/** Delete a desktop-owned Agent Project Thread after confirmation. */
+export interface DeleteExternalAgentProjectThreadCommand extends GenericCommand<
+  "deleteExternalAgentProjectThread",
+  { projectId: string; threadId: string }
+> {}
+
+/** Replace one Thread's local definition fields with the latest Agent values. */
+export interface SyncExternalAgentProjectThreadFromAgentCommand extends GenericCommand<
+  "syncExternalAgentProjectThreadFromAgent",
+  { projectId: string; threadId: string }
+> {}
+
+/** Enable every currently available project tool on one project Thread. */
+export interface EnableExternalAgentProjectToolsCommand extends GenericCommand<
+  "enableExternalAgentProjectTools",
+  { projectId: string; threadId: string }
+> {}
+
+/** Save an Agent Project source file through the trusted Bun-side boundary. */
+export interface SaveExternalAgentProjectSourceCommand extends GenericCommand<
+  "saveExternalAgentProjectSource",
+  { projectId: string; path: string; text: string; overwrite?: boolean }
+> {}
+
 /** Create a new folder (with in-place rename). `parent` defaults to the root. */
 export interface NewFolderCommand extends GenericCommand<
   "newFolder",
@@ -271,6 +340,18 @@ export type Command =
   | NewFileCommand
   | NewFileFromPromptExampleCommand
   | OpenStartFromExampleCommand
+  | OpenExternalAgentProjectCommand
+  | TrustExternalAgentProjectCommand
+  | CreateExternalAgentProjectThreadCommand
+  | RefreshExternalAgentProjectCommand
+  | RevealExternalAgentProjectCommand
+  | RemoveExternalAgentProjectCommand
+  | RenameExternalAgentProjectThreadCommand
+  | DuplicateExternalAgentProjectThreadCommand
+  | DeleteExternalAgentProjectThreadCommand
+  | SyncExternalAgentProjectThreadFromAgentCommand
+  | EnableExternalAgentProjectToolsCommand
+  | SaveExternalAgentProjectSourceCommand
   | NewFolderCommand
   | RenameFileCommand
   | DuplicateFileCommand
@@ -334,6 +415,54 @@ export const COMMAND_META: Record<
   },
   openStartFromExample: {
     label: "New from Examples...",
+    target: "webview",
+  },
+  openExternalAgentProject: {
+    label: "Open Agent Project...",
+    target: "webview",
+  },
+  trustExternalAgentProject: {
+    label: "Trust and Open Agent Project",
+    target: "webview",
+  },
+  createExternalAgentProjectThread: {
+    label: "New Agent Project Thread",
+    target: "webview",
+  },
+  refreshExternalAgentProject: {
+    label: "Refresh Agent Project",
+    target: "webview",
+  },
+  revealExternalAgentProject: {
+    label: "Reveal Agent Project in Finder",
+    target: "webview",
+  },
+  removeExternalAgentProject: {
+    label: "Remove Agent Project from Desktop",
+    target: "webview",
+  },
+  renameExternalAgentProjectThread: {
+    label: "Rename Agent Project Thread",
+    target: "webview",
+  },
+  duplicateExternalAgentProjectThread: {
+    label: "Duplicate Agent Project Thread",
+    target: "webview",
+  },
+  deleteExternalAgentProjectThread: {
+    label: "Delete Agent Project Thread",
+    target: "webview",
+  },
+  syncExternalAgentProjectThreadFromAgent: {
+    label: "Sync from Agent",
+    target: "webview",
+  },
+  enableExternalAgentProjectTools: {
+    label: "Enable All Agent Project Tools",
+    target: "webview",
+  },
+  saveExternalAgentProjectSource: {
+    label: "Save Agent Project Source",
     target: "webview",
   },
   newFolder: { label: "New Folder", target: "webview" },

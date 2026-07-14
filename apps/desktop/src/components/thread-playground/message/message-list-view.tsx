@@ -22,11 +22,13 @@ export function MessageListView({
   context: contextFromProps,
   messages: messagesFromProps,
   readonly: readonlyFromProps = false,
+  runDisabled = false,
 }: {
   className?: string;
   context?: ThreadContext;
   messages?: Message[];
   readonly?: boolean;
+  runDisabled?: boolean;
 }) {
   const isSnapshotView = messagesFromProps !== undefined;
   const status = useThreadStore((s) => s.status);
@@ -88,6 +90,7 @@ export function MessageListView({
                   droppableProvided={droppableProvided}
                   messages={messages}
                   readonly={readonly}
+                  runDisabled={runDisabled}
                   autoFocusMessageId={autoFocusMessageId}
                   collapsedMessageIds={collapsedMessageIds}
                 />
@@ -143,16 +146,36 @@ function StaticMessageList({
   );
 }
 
+export const SnapshotMessageListView = memo(function SnapshotMessageListView({
+  className,
+  context,
+  messages,
+}: {
+  className?: string;
+  context?: ThreadContext;
+  messages: Message[];
+}) {
+  return (
+    <ScrollArea type="auto" className={cn("size-full", className)}>
+      <div className="flex flex-col p-3 pt-0.5">
+        <StaticMessageList context={context} messages={messages} readonly />
+      </div>
+    </ScrollArea>
+  );
+});
+
 function DroppableMessageList({
   droppableProvided,
   messages,
   readonly,
+  runDisabled,
   autoFocusMessageId,
   collapsedMessageIds,
 }: {
   droppableProvided: DroppableProvided;
   messages: Message[];
   readonly: boolean;
+  runDisabled: boolean;
   autoFocusMessageId: string | null;
   collapsedMessageIds: string[];
 }) {
@@ -168,6 +191,7 @@ function DroppableMessageList({
           message={message}
           index={index}
           readonly={readonly}
+          runDisabled={runDisabled}
           autoFocus={message.id === autoFocusMessageId}
           collapsed={collapsedMessageIds.includes(message.id)}
         />
@@ -189,12 +213,14 @@ const _DraggableMessageRow = function DraggableMessageRow({
   message,
   index,
   readonly,
+  runDisabled,
   autoFocus,
   collapsed,
 }: {
   message: Message;
   index: number;
   readonly: boolean;
+  runDisabled: boolean;
   autoFocus: boolean;
   collapsed: boolean;
 }) {
@@ -216,6 +242,7 @@ const _DraggableMessageRow = function DraggableMessageRow({
             <MessageListItem
               message={message}
               readonly={readonly}
+              runDisabled={runDisabled}
               autoFocus={autoFocus}
               collapsed={collapsed}
               dragHandleProps={draggableProvided.dragHandleProps}

@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { localFs, traceClient } from "@/client";
+import { externalAgentProjects, localFs, traceClient } from "@/client";
+import { electrobun } from "@/lib/electrobun";
 import { threadTitleFromPath } from "@/lib/thread-file";
 
 /** An open workspace thread tab. `id` is stable as `thread:{path}`. */
@@ -24,16 +25,44 @@ export interface TraceTab {
   refreshNonce?: number;
 }
 
+export interface SourceTab {
+  id: string;
+  type: "source";
+  path: string;
+  refreshNonce?: number;
+}
+
+export interface ExternalProjectTab {
+  id: string;
+  type: "externalProject";
+  projectId: string;
+  path: string;
+  title: string;
+  threadId?: string;
+  refreshNonce?: number;
+}
+
 /** Any tab shown in the main chrome tab bar. */
-export type AppTab = ThreadTab | TraceTab;
+export type AppTab = ThreadTab | TraceTab | SourceTab | ExternalProjectTab;
 
 type PersistedTab =
   | { type: "thread"; path: string }
+  | { type: "source"; path: string }
+  | {
+      type: "externalProject";
+      projectId: string;
+      path: string;
+      title: string;
+      threadId?: string;
+    }
   | { type: "trace"; projectId: string; traceKey: string; title?: string };
 
 /** Derive a tab label from an app tab. */
 export function tabLabel(tab: AppTab): string {
-  return tab.type === "thread" ? threadTitleFromPath(tab.path) : tab.title;
+  if (tab.type === "thread") return threadTitleFromPath(tab.path);
+  if (tab.type === "trace") return tab.title;
+  if (tab.type === "externalProject") return tab.title;
+  return tab.path.split("/").at(-1) ?? tab.path;
 }
 
 export interface ThreadTabs {
@@ -46,6 +75,13 @@ export interface ThreadTabs {
    * already know the file exists; a stale path reports as a pane read error.
    */
   open: (path: string) => void;
+  openExternalProject: (input: {
+    projectId: string;
+    path: string;
+    projectName: string;
+    threadId?: string;
+    threadTitle?: string;
+  }) => void;
   /**
    * Open an imported trace workbench, adding it if absent and focusing it. The
    * trace must already be listed by the Trace Panel or restorable from storage.
@@ -100,8 +136,33 @@ function _traceTabId(projectId: string, traceKey: string): string {
   return `trace:${projectId}:${traceKey}`;
 }
 
+function _sourceTabId(path: string): string {
+  return `source:${path}`;
+}
+
+function _externalProjectTabId(projectId: string, threadId?: string): string {
+  return `external-project:${projectId}:${threadId ?? "build"}`;
+}
+
 function _createThreadTab(path: string): ThreadTab {
   return { id: _threadTabId(path), type: "thread", path };
+}
+
+function _createSourceTab(path: string): SourceTab {
+  return { id: _sourceTabId(path), type: "source", path };
+}
+
+function _createExternalProjectTab(input: {
+  projectId: string;
+  path: string;
+  title: string;
+  threadId?: string;
+}): ExternalProjectTab {
+  return {
+    id: _externalProjectTabId(input.projectId, input.threadId),
+    type: "externalProject",
+    ...input,
+  };
 }
 
 function _createTraceTab({
@@ -123,19 +184,43 @@ function _createTraceTab({
 }
 
 function _persistable(tab: AppTab): PersistedTab {
-  return tab.type === "thread"
-    ? { type: "thread", path: tab.path }
-    : {
-        type: "trace",
-        projectId: tab.projectId,
-        traceKey: tab.traceKey,
-        title: tab.title,
-      };
+  if (tab.type === "externalProject") {
+    return {
+      type: tab.type,
+      projectId: tab.projectId,
+      path: tab.path,
+      title: tab.title,
+      ...(tab.threadId ? { threadId: tab.threadId } : {}),
+    };
+  }
+  if (tab.type === "thread" || tab.type === "source") {
+    return { type: tab.type, path: tab.path };
+  }
+  return {
+    type: "trace",
+    projectId: tab.projectId,
+    traceKey: tab.traceKey,
+    title: tab.title,
+  };
 }
 
 function _fromPersisted(tab: PersistedTab): AppTab | null {
   if (tab.type === "thread" && tab.path) {
     return _createThreadTab(tab.path);
+  }
+  if (tab.type === "source" && tab.path) return _createSourceTab(tab.path);
+  if (
+    tab.type === "externalProject" &&
+    tab.projectId &&
+    tab.path &&
+    tab.title
+  ) {
+    return _createExternalProjectTab({
+      projectId: tab.projectId,
+      path: tab.path,
+      title: tab.title,
+      ...(tab.threadId ? { threadId: tab.threadId } : {}),
+    });
   }
   if (tab.type === "trace" && tab.projectId && tab.traceKey) {
     return _createTraceTab({
@@ -158,7 +243,12 @@ function _loadPersistedTabs(): AppTab[] {
         .map((item): PersistedTab | null => {
           if (!item || typeof item !== "object") return null;
           const t = item as PersistedTab;
-          return t.type === "thread" || t.type === "trace" ? t : null;
+          return t.type === "thread" ||
+            t.type === "trace" ||
+            t.type === "source" ||
+            t.type === "externalProject"
+            ? t
+            : null;
         })
         .map((item) => (item ? _fromPersisted(item) : null))
         .filter((tab): tab is AppTab => tab !== null);
@@ -239,9 +329,18 @@ async function _traceExists(tab: TraceTab): Promise<boolean> {
 }
 
 async function _tabExists(tab: AppTab): Promise<boolean> {
-  return tab.type === "thread"
-    ? _threadFileExists(tab.path)
-    : _traceExists(tab);
+  if (tab.type === "trace") return _traceExists(tab);
+  if (tab.type === "externalProject") {
+    try {
+      const project = await externalAgentProjects.inspect(tab.projectId);
+      return tab.threadId
+        ? project.threads.some((thread) => thread.id === tab.threadId)
+        : true;
+    } catch {
+      return false;
+    }
+  }
+  return _threadFileExists(tab.path);
 }
 
 export function useThreadTabs(): ThreadTabs {
@@ -272,6 +371,82 @@ export function useThreadTabs(): ThreadTabs {
   }, [activeId]);
 
   useEffect(() => {
+    const rpc = electrobun.rpc;
+    if (!rpc) return;
+    let mounted = true;
+    const listener = ({ projectId }: { projectId: string }) => {
+      void externalAgentProjects
+        .inspect(projectId)
+        .then((project) => {
+          if (!mounted) return;
+          const threadTitles = new Map(
+            project.threads.map((thread) => [thread.id, thread.title])
+          );
+          setTabs((current) => {
+            const next = current
+              .filter(
+                (tab) =>
+                  tab.type !== "externalProject" ||
+                  tab.projectId !== projectId ||
+                  !tab.threadId ||
+                  threadTitles.has(tab.threadId)
+              )
+              .map((tab) => {
+                if (
+                  tab.type !== "externalProject" ||
+                  tab.projectId !== projectId
+                ) {
+                  return tab;
+                }
+                const title = tab.threadId
+                  ? `${project.name}: ${threadTitles.get(tab.threadId) ?? "untitled"}`
+                  : project.name;
+                return tab.title === title ? tab : { ...tab, title };
+              });
+            if (
+              next.length === current.length &&
+              next.every((tab, index) => tab === current[index])
+            ) {
+              return current;
+            }
+            setActiveId((focused) =>
+              focused && next.some((tab) => tab.id === focused)
+                ? focused
+                : (next.at(-1)?.id ?? null)
+            );
+            return next;
+          });
+        })
+        .catch(() => {
+          if (!mounted) return;
+          setTabs((current) => {
+            const next = current.filter(
+              (tab) =>
+                tab.type !== "externalProject" || tab.projectId !== projectId
+            );
+            if (next.length === current.length) return current;
+            setActiveId((focused) =>
+              focused && next.some((tab) => tab.id === focused)
+                ? focused
+                : (next.at(-1)?.id ?? null)
+            );
+            return next;
+          });
+        });
+    };
+    rpc.addMessageListener("externalAgentProjectChanged", listener);
+    new Set(
+      tabsRef.current
+        .filter((tab) => tab.type === "externalProject")
+        .map((tab) => tab.projectId)
+    ).forEach((projectId) => listener({ projectId }));
+    return () => {
+      mounted = false;
+      rpc.removeMessageListener("externalAgentProjectChanged", listener);
+    };
+  }, []);
+
+  useEffect(() => {
     const restored = tabsRef.current;
     const restoredActive = activeId;
     if (restored.length === 0) return;
@@ -295,7 +470,8 @@ export function useThreadTabs(): ThreadTabs {
   }, []);
 
   const open = useCallback((path: string) => {
-    const id = _threadTabId(path);
+    const thread = path.endsWith(".json");
+    const id = thread ? _threadTabId(path) : _sourceTabId(path);
     if (tabsRef.current.some((tab) => tab.id === id)) {
       setActiveId(id);
       return;
@@ -303,10 +479,50 @@ export function useThreadTabs(): ThreadTabs {
     setTabs((prev) =>
       prev.some((tab) => tab.id === id)
         ? prev
-        : [...prev, _createThreadTab(path)]
+        : [...prev, thread ? _createThreadTab(path) : _createSourceTab(path)]
     );
     setActiveId(id);
   }, []);
+
+  const openExternalProject = useCallback(
+    ({
+      projectId,
+      path,
+      projectName,
+      threadId,
+      threadTitle,
+    }: {
+      projectId: string;
+      path: string;
+      projectName: string;
+      threadId?: string;
+      threadTitle?: string;
+    }) => {
+      const id = _externalProjectTabId(projectId, threadId);
+      const title = threadId
+        ? `${projectName}: ${threadTitle ?? "untitled"}`
+        : projectName;
+      if (tabsRef.current.some((tab) => tab.id === id)) {
+        setActiveId(id);
+        return;
+      }
+      setTabs((prev) =>
+        prev.some((tab) => tab.id === id)
+          ? prev
+          : [
+              ...prev,
+              _createExternalProjectTab({
+                projectId,
+                path,
+                title,
+                ...(threadId ? { threadId } : {}),
+              }),
+            ]
+      );
+      setActiveId(id);
+    },
+    []
+  );
 
   const openTrace = useCallback(
     ({
@@ -429,7 +645,9 @@ export function useThreadTabs(): ThreadTabs {
   const handleRemove = useCallback((removed: string) => {
     setTabs((prev) => {
       const next = prev.filter(
-        (tab) => tab.type !== "thread" || !_isUnder(tab.path, removed)
+        (tab) =>
+          (tab.type !== "thread" && tab.type !== "source") ||
+          !_isUnder(tab.path, removed)
       );
       if (next.length === prev.length) return prev;
       setActiveId((current) =>
@@ -437,7 +655,7 @@ export function useThreadTabs(): ThreadTabs {
         prev.some(
           (tab) =>
             tab.id === current &&
-            tab.type === "thread" &&
+            (tab.type === "thread" || tab.type === "source") &&
             _isUnder(tab.path, removed)
         )
           ? (next[next.length - 1]?.id ?? null)
@@ -453,23 +671,40 @@ export function useThreadTabs(): ThreadTabs {
 
     setTabs((prev) => {
       if (
-        !prev.some((tab) => tab.type === "thread" && _isUnder(tab.path, from))
+        !prev.some(
+          (tab) =>
+            (tab.type === "thread" || tab.type === "source") &&
+            _isUnder(tab.path, from)
+        )
       ) {
         return prev;
       }
       return prev.map((tab) => {
-        if (tab.type !== "thread" || !_isUnder(tab.path, from)) {
+        if (
+          (tab.type !== "thread" && tab.type !== "source") ||
+          !_isUnder(tab.path, from)
+        ) {
           return tab;
         }
         const path = rewrite(tab.path);
-        return { ...tab, id: _threadTabId(path), path };
+        const id =
+          tab.type === "thread" ? _threadTabId(path) : _sourceTabId(path);
+        return { ...tab, id, path };
       });
     });
     setActiveId((current) => {
       const activeTab = tabsRef.current.find((tab) => tab.id === current);
-      return activeTab?.type === "thread" && _isUnder(activeTab.path, from)
-        ? _threadTabId(rewrite(activeTab.path))
-        : current;
+      if (
+        !activeTab ||
+        (activeTab.type !== "thread" && activeTab.type !== "source") ||
+        !_isUnder(activeTab.path, from)
+      ) {
+        return current;
+      }
+      const rewritten = rewrite(activeTab.path);
+      return activeTab.type === "thread"
+        ? _threadTabId(rewritten)
+        : _sourceTabId(rewritten);
     });
   }, []);
 
@@ -499,6 +734,7 @@ export function useThreadTabs(): ThreadTabs {
     tabs,
     activeId,
     open,
+    openExternalProject,
     openTrace,
     close,
     closeOthers,

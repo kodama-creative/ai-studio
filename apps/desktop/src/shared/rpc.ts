@@ -7,11 +7,20 @@ import type {
   ModelConfig,
   ModelProviderGroup,
   Thread,
+  ThreadAgentRuntimeProvenance,
 } from "@llm-space/core";
+import type { RuntimeExecutionMode } from "@llm-space/runtime";
 import type { RPCSchema } from "electrobun";
 
 import type { AnalyticsEvent, AnalyticsStatus } from "./analytics";
 import type { Command } from "./commands";
+import type {
+  ExternalAgentProjectChangedPayload,
+  ExternalAgentProjectPreview,
+  ExternalAgentProjectSummary,
+  ExternalAgentProjectThreadRecord,
+  ExternalAgentProjectView,
+} from "./external-agent-project";
 import type {
   McpCallToolResponse,
   McpServerDraft,
@@ -37,11 +46,23 @@ import type { UpdateMode, UpdateStatusChangedPayload } from "./updates";
 export interface StreamThreadRequestPayload {
   streamId: string;
   request: AgentStreamRequest;
+  runtime?: {
+    type: "agentProject";
+    projectId: string;
+    threadId: string;
+    executionMode: RuntimeExecutionMode;
+    modelSource: ThreadAgentRuntimeProvenance["modelSource"];
+  };
 }
 
 /** A bun→webview chunk of a streaming agent run, keyed by `streamId`. */
 export type StreamThreadResponsePayload =
   | { streamId: string; type: "event"; event: AgentEvent }
+  | {
+      streamId: string;
+      type: "runtime";
+      runtime: ThreadAgentRuntimeProvenance;
+    }
   | { streamId: string; type: "done" }
   | { streamId: string; type: "error"; message: string };
 
@@ -164,6 +185,8 @@ export interface DesktopRPCType {
       fsRm: { params: { path: string }; response: null };
       fsRead: { params: { path: string }; response: Thread };
       fsWrite: { params: { path: string; thread: Thread }; response: null };
+      fsReadText: { params: { path: string }; response: { text: string } };
+      fsWriteText: { params: { path: string; text: string }; response: null };
       // Reveal a file/directory in the OS file manager (Finder/Explorer).
       fsReveal: { params: { path: string }; response: null };
       // Reveal an arbitrary absolute path (not confined to the workspace) in the
@@ -181,6 +204,75 @@ export interface DesktopRPCType {
       };
       // Resolve a workspace-relative path to its absolute on-disk path.
       fsRealpath: { params: { path: string }; response: { path: string } };
+      externalAgentProjectBrowse: {
+        params: Record<string, never>;
+        response: ExternalAgentProjectPreview | null;
+      };
+      externalAgentProjectTrustAndOpen: {
+        params: { path: string };
+        response: ExternalAgentProjectView;
+      };
+      externalAgentProjectList: {
+        params: Record<string, never>;
+        response: ExternalAgentProjectSummary[];
+      };
+      externalAgentProjectInspect: {
+        params: { projectId: string };
+        response: ExternalAgentProjectView;
+      };
+      externalAgentProjectRemove: {
+        params: { projectId: string };
+        response: null;
+      };
+      externalAgentProjectRefresh: {
+        params: { projectId: string };
+        response: ExternalAgentProjectView;
+      };
+      externalAgentProjectCreateThread: {
+        params: { projectId: string; title?: string };
+        response: { id: string; record: ExternalAgentProjectThreadRecord };
+      };
+      externalAgentProjectReadThread: {
+        params: { projectId: string; threadId: string };
+        response: ExternalAgentProjectThreadRecord;
+      };
+      externalAgentProjectWriteThread: {
+        params: {
+          projectId: string;
+          threadId: string;
+          record: ExternalAgentProjectThreadRecord;
+        };
+        response: null;
+      };
+      externalAgentProjectDuplicateThread: {
+        params: { projectId: string; threadId: string };
+        response: { id: string; record: ExternalAgentProjectThreadRecord };
+      };
+      externalAgentProjectDeleteThread: {
+        params: { projectId: string; threadId: string };
+        response: null;
+      };
+      externalAgentProjectSyncThreadFromAgent: {
+        params: { projectId: string; threadId: string };
+        response: ExternalAgentProjectThreadRecord;
+      };
+      externalAgentProjectReadSource: {
+        params: { projectId: string; path: string };
+        response: { text: string };
+      };
+      externalAgentProjectWriteSource: {
+        params: { projectId: string; path: string; text: string };
+        response: null;
+      };
+      externalAgentProjectCallTool: {
+        params: {
+          projectId: string;
+          snapshot: string;
+          name: string;
+          arguments: Record<string, unknown>;
+        };
+        response: { contentText: string; isError: boolean };
+      };
       mcpListServers: {
         params: Record<string, never>;
         response: McpServerView[];
@@ -348,6 +440,11 @@ export interface DesktopRPCType {
     messages: {
       sendStreamThreadRequest: StreamThreadRequestPayload;
       abortStreamThread: AbortStreamThreadPayload;
+      agentSourceDirtyStateChanged: { dirty: boolean };
+      resolveDiscardDirtyAgentSources: {
+        requestId: string;
+        discard: boolean;
+      };
       // A unified command dispatched from the webview to run in the bun process
       // (e.g. window zoom / reload). See `shared/commands.ts`.
       executeCommand: Command;
@@ -361,6 +458,11 @@ export interface DesktopRPCType {
     // Messages the bun side SENDS and the webview handles.
     messages: {
       receiveStreamThreadResponse: StreamThreadResponsePayload;
+      externalAgentProjectChanged: ExternalAgentProjectChangedPayload;
+      requestDiscardDirtyAgentSources: {
+        requestId: string;
+        reason: "quit" | "reload";
+      };
       // OS-level fullscreen state changed (entered/exited).
       fullScreenChanged: { fullScreen: boolean };
       // App-update flow progress from the bun-side updater service.

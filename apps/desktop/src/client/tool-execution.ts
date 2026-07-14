@@ -1,7 +1,8 @@
-import type { BuiltinTool, McpTool } from "@llm-space/core";
+import type { BuiltinTool, McpTool, ProjectTool } from "@llm-space/core";
 
 import { callBuiltInTool } from "@/client/built-in-tools";
 import { callMcpTool } from "@/client/mcp";
+import { electrobun } from "@/lib/electrobun";
 
 /**
  * A tool call's result, normalized across the two backends. MCP surfaces
@@ -18,7 +19,7 @@ export interface ToolCallResult {
  * {@link isExecutableTool} so `function` tools never reach here.
  */
 export async function executeTool(
-  tool: McpTool | BuiltinTool,
+  tool: McpTool | BuiltinTool | ProjectTool,
   args: Record<string, unknown>
 ): Promise<ToolCallResult> {
   if (tool.type === "mcp") {
@@ -27,7 +28,19 @@ export async function executeTool(
       toolName: tool.toolName,
       arguments: args,
     });
-    return { contentText: result.contentText, isError: result.isError ?? false };
+    return {
+      contentText: result.contentText,
+      isError: result.isError ?? false,
+    };
+  }
+  if (tool.type === "project") {
+    if (!electrobun.rpc) throw new Error("Desktop RPC is not available.");
+    return electrobun.rpc.request.externalAgentProjectCallTool({
+      projectId: tool.projectId,
+      snapshot: tool.snapshot,
+      name: tool.name,
+      arguments: args,
+    });
   }
   const result = await callBuiltInTool({ name: tool.name, arguments: args });
   return { contentText: result.contentText, isError: false };

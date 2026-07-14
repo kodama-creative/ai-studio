@@ -1,5 +1,17 @@
-import type { CustomModel } from "@llm-space/core";
+import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
+import {
+  isDangerousBashCommand,
+  type BuiltinTool,
+  type CustomModel,
+  type McpTool,
+  type Tool,
+} from "@llm-space/core";
 import { streamAgent } from "@llm-space/core/server";
+import {
+  agentModelMatchesDefinition,
+  createDeferredAgentTool,
+  DEFERRED_TOOL_RESULT_MARKER,
+} from "@llm-space/runtime";
 
 import type {
   AbortStreamThreadPayload,
@@ -7,15 +19,22 @@ import type {
   StreamThreadResponsePayload,
 } from "../../shared/rpc";
 import type { Analytics } from "../analytics";
+import type { ExternalAgentProjectManager } from "../external-projects";
+import { agentDefinitionFingerprint } from "../external-projects/agent-definition-fingerprint";
+import type { McpManager } from "../mcp";
 import type { ModelManager } from "../models";
+import type { ToolRegistry } from "../tools/tool-registry";
 
 /** Process-scoped agent streaming and model-connection controller. */
 export class StreamThreadController {
-  private readonly _activeStreams = new Map<string, AbortController>();
+  private readonly _activeStreams = new Map<string, { abort(): void }>();
 
   constructor(
     private readonly _modelManager: ModelManager,
-    private readonly _analytics: Analytics
+    private readonly _analytics: Analytics,
+    private readonly _externalAgentProjects?: ExternalAgentProjectManager,
+    private readonly _mcpManager?: McpManager,
+    private readonly _tools?: ToolRegistry
   ) {}
 
   /** Run an agent stream and push each event back through the caller's sender. */
@@ -25,23 +44,39 @@ export class StreamThreadController {
   ): Promise<void> {
     const { streamId, request } = payload;
     const abortController = new AbortController();
-    this._activeStreams.set(streamId, abortController);
+    let aborted = false;
+    this._activeStreams.set(streamId, {
+      abort() {
+        aborted = true;
+        abortController.abort();
+      },
+    });
     const startedAt = Date.now();
     let outcome: "completed" | "error" | "aborted" = "error";
     try {
-      for await (const event of streamAgent(request, {
-        models: await this._modelManager.getAvailableModels(),
-        getApiKey: this._modelManager.getApiKey.bind(this._modelManager),
-        getBaseUrl: this._modelManager.getBaseUrl.bind(this._modelManager),
-        getHeaders: this._modelManager.getHeaders.bind(this._modelManager),
-        signal: abortController.signal,
-      })) {
-        send({ streamId, type: "event", event });
+      if (payload.runtime?.type === "agentProject") {
+        await this._runAgentProject(payload, send, () => {
+          aborted = true;
+        });
+      } else {
+        for await (const event of streamAgent(request, {
+          models: await this._modelManager.getAvailableModels(),
+          getApiKey: this._modelManager.getApiKey.bind(this._modelManager),
+          getBaseUrl: this._modelManager.getBaseUrl.bind(this._modelManager),
+          getHeaders: this._modelManager.getHeaders.bind(this._modelManager),
+          signal: abortController.signal,
+        })) {
+          send({ streamId, type: "event", event });
+        }
+      }
+      if (aborted) {
+        outcome = "aborted";
+        return;
       }
       outcome = "completed";
       send({ streamId, type: "done" });
     } catch (error) {
-      if (abortController.signal.aborted) {
+      if (aborted || abortController.signal.aborted) {
         outcome = "aborted";
         return;
       }
@@ -61,6 +96,155 @@ export class StreamThreadController {
         hasSystemPrompt: Boolean(request.context.systemPrompt),
       });
     }
+  }
+
+  private async _runAgentProject(
+    payload: StreamThreadRequestPayload,
+    send: (message: StreamThreadResponsePayload) => void,
+    onAbort: () => void
+  ): Promise<void> {
+    if (!payload.runtime || !this._externalAgentProjects) {
+      throw new Error("Agent Project runtime is unavailable.");
+    }
+    const sourceTools = payload.request.context.sourceTools ?? [];
+    const extraTools = sourceTools
+      .filter((tool) => tool.type !== "project")
+      .map((tool) => this._runtimeTool(tool));
+    const session = await this._externalAgentProjects.createRuntimeSession(
+      payload.runtime.projectId,
+      {
+        id: payload.runtime.threadId,
+        model: payload.request.model,
+        reasoning: payload.request.config?.model?.reasoning,
+        initialMessages: payload.request.context.messages as AgentMessage[],
+        extraTools,
+        activeToolNames: sourceTools.map((tool) => tool.name),
+        systemPrompt: payload.request.context.systemPrompt,
+        executionMode: payload.runtime.executionMode,
+        streamFn: async (model, context, options) => {
+          const models = await this._modelManager.getAvailableModels();
+          const baseUrl = this._modelManager.getBaseUrl(model.provider);
+          const headers = this._modelManager.getHeaders(model.provider);
+          return models.streamSimple(
+            baseUrl ? { ...model, baseUrl } : model,
+            context,
+            headers
+              ? {
+                  ...options,
+                  headers: { ...headers, ...options?.headers },
+                }
+              : options
+          );
+        },
+      }
+    );
+    const definition = session.project.definition;
+    if (!definition)
+      throw new Error("Agent runtime definition is unavailable.");
+    const matchesDefinition = agentModelMatchesDefinition({
+      model: session.model,
+      reasoning: session.reasoning,
+      definition,
+    });
+    send({
+      streamId: payload.streamId,
+      type: "runtime",
+      runtime: {
+        projectId: payload.runtime.projectId,
+        snapshot: session.project.fingerprint,
+        definitionFingerprint: agentDefinitionFingerprint(definition),
+        modelSource:
+          payload.runtime.modelSource === "threadOverride" || !matchesDefinition
+            ? "threadOverride"
+            : "agent",
+      },
+    });
+    this._activeStreams.set(payload.streamId, {
+      abort() {
+        onAbort();
+        session.abort();
+      },
+    });
+    const unsubscribe = session.subscribe((event) => {
+      if (event.type !== "tool_calls_deferred") {
+        send({
+          streamId: payload.streamId,
+          type: "event",
+          event,
+        });
+      }
+    });
+    try {
+      await session.continue();
+    } finally {
+      unsubscribe();
+    }
+  }
+
+  private _runtimeTool(tool: Exclude<Tool, { type: "project" }>): AgentTool {
+    const definition = {
+      name: tool.name,
+      label: tool.name,
+      description: tool.description,
+      parameters: tool.parameters,
+    } as Omit<AgentTool, "execute">;
+    if (tool.type === "function" || _requiresHumanResult(tool)) {
+      return createDeferredAgentTool(definition);
+    }
+    if (tool.type === "mcp") {
+      if (!this._mcpManager) {
+        throw new Error("MCP runtime is unavailable.");
+      }
+      return {
+        ...definition,
+        execute: async (_toolCallId, args) => {
+          const result = await this._mcpManager!.callTool({
+            serverId: tool.serverId,
+            toolName: tool.toolName,
+            arguments: args as Record<string, unknown>,
+          });
+          if (result.isError) {
+            throw new Error(
+              result.contentText || `MCP tool ${tool.toolName} failed`
+            );
+          }
+          return {
+            content: [{ type: "text", text: result.contentText }],
+            details: undefined,
+          };
+        },
+      } as AgentTool;
+    }
+    if (!this._tools) {
+      throw new Error("Built-in tool runtime is unavailable.");
+    }
+    return {
+      ...definition,
+      execute: async (_toolCallId, args) => {
+        const command =
+          tool.name === "bash" &&
+          args &&
+          typeof args === "object" &&
+          "command" in args
+            ? args.command
+            : undefined;
+        if (typeof command === "string" && isDangerousBashCommand(command)) {
+          return {
+            content: [{ type: "text", text: "" }],
+            details: { marker: DEFERRED_TOOL_RESULT_MARKER },
+            terminate: true,
+          };
+        }
+        const result = await this._tools!.call({
+          name: tool.name,
+          arguments: args as Record<string, unknown>,
+        });
+        return {
+          content: [{ type: "text", text: result.contentText }],
+          details: undefined,
+        };
+      },
+    } as AgentTool;
   }
 
   /** Abort one in-flight stream. */
@@ -146,4 +330,8 @@ export class StreamThreadController {
         : "custom",
     };
   }
+}
+
+function _requiresHumanResult(tool: BuiltinTool | McpTool): boolean {
+  return tool.type === "builtin" && tool.terminate === true;
 }

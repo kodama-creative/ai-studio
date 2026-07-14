@@ -1,0 +1,14 @@
+{
+  "name": "@llm-space/cli",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "llm-space": "./src/index.ts"
+  },
+  "files": [
+    "src"
+  ],
+  "dependencies": {
+    "@llm-space/runtime": "workspace:*"
+  }
+}

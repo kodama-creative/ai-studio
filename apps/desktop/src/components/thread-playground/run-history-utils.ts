@@ -29,9 +29,9 @@ export function summarizeRun(thread: ThreadSnapshot): string {
 
 /** The model label for a run snapshot, separated so it can truncate safely. */
 export function runModelLabel(thread: ThreadSnapshot): string {
-  return thread.model
-    ? `${thread.model.provider}/${thread.model.id}`
-    : "No model";
+  if (!thread.model) return "No model";
+  const reasoning = thread.model.params?.reasoning;
+  return `${thread.model.provider}/${thread.model.id}${reasoning ? ` · reasoning: ${reasoning}` : ""}`;
 }
 
 /** The message count label for a run snapshot, kept visible in narrow panels. */
@@ -62,8 +62,9 @@ export function runLastUserText(thread: ThreadSnapshot): string {
     return "No user message";
   }
   const text = getMessageText(message).trim();
-  const imageCount = message.content.filter((c) => c.type === "image_data")
-    .length;
+  const imageCount = message.content.filter(
+    (c) => c.type === "image_data"
+  ).length;
   if (text && imageCount > 0) {
     return `${text}\n[${imageCount} image${imageCount > 1 ? "s" : ""}]`;
   }
@@ -83,7 +84,9 @@ export function runResultText(thread: ThreadSnapshot): string {
   }
   const toolText = _toolResultText(message);
   const assistantText = getMessageText(message).trim();
-  return [assistantText, toolText].filter(Boolean).join("\n\n") || "Empty result";
+  return (
+    [assistantText, toolText].filter(Boolean).join("\n\n") || "Empty result"
+  );
 }
 
 /** Compactly format tool calls and outputs inside an assistant result. */

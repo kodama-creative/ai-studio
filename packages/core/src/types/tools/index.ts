@@ -79,6 +79,21 @@ const BuiltinTool = Type.Intersect([
 ]);
 export type BuiltinTool = Static<typeof BuiltinTool>;
 
+/**
+ * A tool implemented by a trusted external Agent Project. The renderer only
+ * persists opaque project/snapshot identities; authored code stays in Bun and
+ * is resolved by the desktop project manager at execution time.
+ */
+const ProjectTool = Type.Intersect([
+  ToolBase,
+  Type.Object({
+    type: Type.Literal("project"),
+    projectId: Type.String(),
+    snapshot: Type.String(),
+  }),
+]);
+export type ProjectTool = Static<typeof ProjectTool>;
+
 export interface LegacyMcpToolSource {
   /**
    * The configured MCP server id that owns the raw MCP tool.
@@ -98,8 +113,13 @@ export interface LegacyMcpToolSource {
 /**
  * The union type of the tools.
  */
-export const Tool = Type.Union([FunctionTool, McpTool, BuiltinTool]);
-export type Tool = FunctionTool | McpTool | BuiltinTool;
+export const Tool = Type.Union([
+  FunctionTool,
+  McpTool,
+  BuiltinTool,
+  ProjectTool,
+]);
+export type Tool = FunctionTool | McpTool | BuiltinTool | ProjectTool;
 
 export type LegacyTool = Omit<FunctionTool, "type"> & {
   type?: "function";
@@ -107,7 +127,11 @@ export type LegacyTool = Omit<FunctionTool, "type"> & {
 };
 
 export function normalizeTool(tool: Tool | LegacyTool): Tool {
-  if (tool.type === "mcp" || tool.type === "builtin") {
+  if (
+    tool.type === "mcp" ||
+    tool.type === "builtin" ||
+    tool.type === "project"
+  ) {
     return tool;
   }
   const legacySource = _getLegacyMcpSource(tool);
@@ -147,8 +171,10 @@ export function normalizeTools(tools: readonly (Tool | LegacyTool)[]): Tool[] {
  * require human input, so they are treated as non-executable too. The single
  * source of truth for "can be auto-executed".
  */
-export function isExecutableTool(tool: Tool): tool is McpTool | BuiltinTool {
-  if (tool.type === "mcp") {
+export function isExecutableTool(
+  tool: Tool
+): tool is McpTool | BuiltinTool | ProjectTool {
+  if (tool.type === "mcp" || tool.type === "project") {
     return true;
   }
   return tool.type === "builtin" && tool.terminate !== true;

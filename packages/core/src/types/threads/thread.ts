@@ -107,6 +107,19 @@ export const ThreadContext = Type.Object({
 });
 export type ThreadContext = Static<typeof ThreadContext>;
 
+export const ThreadAgentRuntimeProvenance = Type.Object({
+  projectId: Type.String(),
+  snapshot: Type.String(),
+  definitionFingerprint: Type.String(),
+  modelSource: Type.Union([
+    Type.Literal("agent"),
+    Type.Literal("threadOverride"),
+  ]),
+});
+export type ThreadAgentRuntimeProvenance = Static<
+  typeof ThreadAgentRuntimeProvenance
+>;
+
 const THREAD_FIELDS = {
   /**
    * The title of the thread.
@@ -119,6 +132,9 @@ const THREAD_FIELDS = {
    * display/running and only persists a model once the user picks one.
    */
   model: Type.Optional(ModelConfig),
+
+  /** Effective Agent runtime identity and model provenance for saved runs. */
+  agentRuntime: Type.Optional(ThreadAgentRuntimeProvenance),
 
   /**
    * The context of the thread, including the system prompt, messages, and tools.

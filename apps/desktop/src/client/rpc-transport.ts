@@ -1,7 +1,15 @@
-import { uuid, type AgentEvent, type AgentTransport } from "@llm-space/core";
+import {
+  uuid,
+  type AgentEvent,
+  type AgentTransport,
+  type ThreadAgentRuntimeProvenance,
+} from "@llm-space/core";
 
 import { electrobun } from "@/lib/electrobun";
-import type { StreamThreadResponsePayload } from "@/shared/rpc";
+import type {
+  StreamThreadRequestPayload,
+  StreamThreadResponsePayload,
+} from "@/shared/rpc";
 
 const ABORT_ERROR = () =>
   new DOMException("The operation was aborted.", "AbortError");
@@ -11,7 +19,10 @@ const ABORT_ERROR = () =>
  * request as a `sendStreamThreadRequest` message and bridges the incoming
  * `receiveStreamThreadResponse` messages into an async iterator of events.
  */
-export function createRpcTransport(): AgentTransport {
+export function createRpcTransport(options?: {
+  runtime?: () => StreamThreadRequestPayload["runtime"];
+  onRuntimeResolved?: (runtime: ThreadAgentRuntimeProvenance) => void;
+}): AgentTransport {
   return async function* rpcTransport(request, { signal }) {
     const rpc = electrobun.rpc;
     if (!rpc) {
@@ -35,6 +46,8 @@ export function createRpcTransport(): AgentTransport {
       }
       if (message.type === "event") {
         events.push(message.event);
+      } else if (message.type === "runtime") {
+        options?.onRuntimeResolved?.(message.runtime);
       } else if (message.type === "done") {
         finished = true;
       } else {
@@ -59,7 +72,11 @@ export function createRpcTransport(): AgentTransport {
     signal?.addEventListener("abort", onAbort, { once: true });
 
     try {
-      rpc.send.sendStreamThreadRequest({ streamId, request });
+      rpc.send.sendStreamThreadRequest({
+        streamId,
+        request,
+        ...(options?.runtime ? { runtime: options.runtime() } : {}),
+      });
       while (true) {
         while (events.length > 0) {
           yield events.shift()!;

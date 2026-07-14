@@ -1,0 +1,13 @@
+{
+  "name": "@llm-space/example-agent",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@llm-space/runtime": "workspace:*"
+  }
+}

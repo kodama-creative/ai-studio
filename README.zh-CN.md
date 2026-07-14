@@ -47,8 +47,18 @@ LLM Space 是一个 Bun monorepo：
 ```text
 packages/
   core/       # 共享逻辑：类型、agent loop、thread storage
+  runtime/    # Pi 原生 Agent Project 发现和持久会话
 apps/
+  example-agent/ # 可由桌面端直接导入的便携 Agent Project 示例
   desktop/    # 桌面应用：Electrobun shell + React UI
+```
+
+如需验证 Agent Project 导入流程，请启动桌面应用，选择 **Open Agent Project**，
+然后选择 `apps/example-agent`。该示例包含确定性的工具和 skill；
+即使没有配置模型，也可以检查它的源码契约：
+
+```bash
+bun test apps/example-agent
 ```
 
 ## 安装

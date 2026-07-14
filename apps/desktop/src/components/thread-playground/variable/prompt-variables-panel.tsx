@@ -53,7 +53,7 @@ import {
   PROMPT_SKILLS_FORMATS,
   PROMPT_SKILLS_INDENTS,
 } from "./prompt-variable-options";
-import { listEnabledPromptVariableSkills } from "./prompt-variable-skills";
+import { usePromptSkillsLoader } from "./prompt-variable-skills";
 import { SkillSelectionDialog } from "./skill-selection-dialog";
 
 interface PromptVariablesPanelProps {
@@ -135,6 +135,7 @@ function _PromptVariablesPanel({
   const [pendingRemoveCustom, setPendingRemoveCustom] = useState<string | null>(
     null
   );
+  const loadSkills = usePromptSkillsLoader();
   const initialSelectionKey = initialSelection
     ? `${initialSelection.kind}:${initialSelection.name}`
     : null;
@@ -219,7 +220,7 @@ function _PromptVariablesPanel({
     let cancelled = false;
     setSkillsLoading(true);
     setSkillsError(null);
-    void listEnabledPromptVariableSkills()
+    void loadSkills()
       .then((loaded) => {
         if (!cancelled) {
           setSkills(loaded);
@@ -241,7 +242,7 @@ function _PromptVariablesPanel({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [loadSkills]);
 
   const addCustom = useCallback(() => {
     const used = new Set([...Object.keys(variables), ...customNames]);

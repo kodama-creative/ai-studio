@@ -15,6 +15,7 @@ import {
   type AgentTransport,
   type BuiltinTool,
   type McpTool,
+  type ProjectTool,
   type MessageContent,
   type ModelConfig,
   type ModelConfigParams,
@@ -163,7 +164,7 @@ export type ThreadStore = StoreApi<ThreadState>;
 export function createThreadStore(
   initialThread: Thread,
   options: {
-    transport?: AgentTransport;
+    transport: AgentTransport;
     /**
      * Resolve the model a run/edit should use given the thread's saved model:
      * the saved model when still available, else the user's default, else the
@@ -193,10 +194,16 @@ export function createThreadStore(
      * runner. Injected so the store stays decoupled from the RPC layer.
      */
     executeTool?: (
-      tool: McpTool | BuiltinTool,
+      tool: McpTool | BuiltinTool | ProjectTool,
       args: Record<string, unknown>
     ) => Promise<{ contentText: string; isError: boolean }>;
-  } = {}
+    /** Skills available to prompt-variable rendering for this Thread. */
+    loadPromptSkills?: typeof listEnabledPromptVariableSkills;
+    /** Runtime transport owns tool execution and continuation for this Thread. */
+    runtimeOwnsToolLoop?: boolean;
+    /** Add host-owned runtime provenance before recording a run snapshot. */
+    prepareRunSnapshot?: (thread: Thread) => Thread;
+  }
 ): ThreadStore {
   const normalizedInputThread = ensureThreadVariableState(
     normalizeThread(initialThread)
@@ -394,7 +401,7 @@ export function createThreadStore(
         // we bail and let the user fill it in.
         const executable: {
           toolCall: ToolCall;
-          tool: McpTool | BuiltinTool;
+          tool: McpTool | BuiltinTool | ProjectTool;
         }[] = [];
         for (const toolCall of toolCalls) {
           const tool = toolsByName.get(toolCall.input.name);
@@ -938,14 +945,12 @@ export function createThreadStore(
           // PREVIEW_THROTTLE_MS) — see createFrameThrottle for why per-event
           // set() calls are unsafe and re-rendering the growing document per
           // frame is too expensive.
-          const {
-            schedule: schedulePreview,
-            cancel: cancelPreview,
-          } = createFrameThrottle(() => {
-            if (isActiveRun()) {
-              set({ streamingMessage });
-            }
-          }, PREVIEW_THROTTLE_MS);
+          const { schedule: schedulePreview, cancel: cancelPreview } =
+            createFrameThrottle(() => {
+              if (isActiveRun()) {
+                set({ streamingMessage });
+              }
+            }, PREVIEW_THROTTLE_MS);
 
           const finalizeActiveRun = () => {
             if (!isActiveRun()) {
@@ -967,10 +972,10 @@ export function createThreadStore(
             // thread is unchanged.
             const finalThread = get().thread;
             if (sawEvent && !failed) {
-              const threadWithSnapshot = withPromptVariableSnapshot(
-                finalThread,
-                promptSnapshot
-              );
+              const threadWithSnapshot =
+                options.prepareRunSnapshot?.(
+                  withPromptVariableSnapshot(finalThread, promptSnapshot)
+                ) ?? withPromptVariableSnapshot(finalThread, promptSnapshot);
               const runUsage = aggregateMessageUsage(
                 (threadWithSnapshot.context?.messages ?? []).slice(
                   runStartMessageCount
@@ -1038,7 +1043,9 @@ export function createThreadStore(
                         messages,
                         snapshot: promptSnapshot,
                       },
-                      loadSkills: listEnabledPromptVariableSkills,
+                      loadSkills:
+                        options.loadPromptSkills ??
+                        listEnabledPromptVariableSkills,
                     })
                   ).context;
               preparedContext = null;
@@ -1130,6 +1137,9 @@ export function createThreadStore(
             for (let turn = 0; turn < MAX_AUTO_TOOL_TURNS; turn++) {
               const outcome = await streamTurn();
               if (outcome !== "completed") {
+                break;
+              }
+              if (options.runtimeOwnsToolLoop) {
                 break;
               }
               const reactLoop = options.getReactLoop?.() ?? false;

@@ -1,5 +1,5 @@
 import { mkdirSync } from "node:fs";
-import { stat } from "node:fs/promises";
+import { readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { ModelProviderGroup } from "@llm-space/core";
@@ -9,6 +9,7 @@ import { BrowserView, Utils, type BrowserWindow } from "electrobun/bun";
 import type { Command } from "../../shared/commands";
 import type { DesktopRPCType } from "../../shared/rpc";
 import type { Analytics } from "../analytics";
+import type { ExternalAgentProjectManager } from "../external-projects";
 import { moveToTrash, revealInFileManager } from "../fs";
 import type { McpManager } from "../mcp";
 import type { ModelManager } from "../models";
@@ -50,6 +51,12 @@ export type MainWindowRPC = ReturnType<
 
 export interface MainWindowRPCDependencies {
   analytics: Analytics;
+  externalAgentProjects: ExternalAgentProjectManager;
+  onAgentSourceDirtyStateChanged: (dirty: boolean) => void;
+  onDiscardDirtyAgentSourcesResolved: (
+    requestId: string,
+    discard: boolean
+  ) => void;
   executeCommand: (command: Command) => void;
   getMainWindow: () => BrowserWindow;
   homePath: string;
@@ -68,6 +75,9 @@ const MAX_REQUEST_TIME_MS = 5 * 60_000 + 10_000;
 
 export function createMainWindowRPC({
   analytics,
+  externalAgentProjects,
+  onAgentSourceDirtyStateChanged,
+  onDiscardDirtyAgentSourcesResolved,
   executeCommand,
   getMainWindow,
   homePath,
@@ -199,6 +209,13 @@ export function createMainWindowRPC({
           await localFs.write(path, thread);
           return null;
         },
+        fsReadText: async ({ path }) => ({
+          text: await readFile(localFs.realpath(path), "utf8"),
+        }),
+        fsWriteText: async ({ path, text }) => {
+          await writeFile(localFs.realpath(path), text, "utf8");
+          return null;
+        },
         fsReveal: async ({ path }) => {
           await revealInFileManager(localFs.realpath(path));
           return null;
@@ -228,6 +245,58 @@ export function createMainWindowRPC({
         },
         fsRealpath: ({ path }) =>
           Promise.resolve({ path: localFs.realpath(path) }),
+        externalAgentProjectBrowse: async () => {
+          const selected = await Utils.openFileDialog({
+            startingFolder: "~/",
+            canChooseFiles: false,
+            canChooseDirectory: true,
+            allowsMultipleSelection: false,
+          });
+          const directory = selected.map((item) => item.trim()).find(Boolean);
+          return directory
+            ? externalAgentProjects.preview(directory)
+            : Promise.resolve(null);
+        },
+        externalAgentProjectTrustAndOpen: ({ path }) =>
+          externalAgentProjects.trustAndOpen(path),
+        externalAgentProjectList: () => externalAgentProjects.list(),
+        externalAgentProjectInspect: ({ projectId }) =>
+          externalAgentProjects.inspect(projectId),
+        externalAgentProjectRemove: async ({ projectId }) => {
+          await externalAgentProjects.remove(projectId);
+          return null;
+        },
+        externalAgentProjectRefresh: ({ projectId }) =>
+          externalAgentProjects.refresh(projectId),
+        externalAgentProjectCreateThread: ({ projectId, title }) =>
+          externalAgentProjects.createThread(projectId, title),
+        externalAgentProjectReadThread: ({ projectId, threadId }) =>
+          externalAgentProjects.readThread(projectId, threadId),
+        externalAgentProjectWriteThread: async ({
+          projectId,
+          threadId,
+          record,
+        }) => {
+          await externalAgentProjects.writeThread(projectId, threadId, record);
+          return null;
+        },
+        externalAgentProjectDuplicateThread: ({ projectId, threadId }) =>
+          externalAgentProjects.duplicateThread(projectId, threadId),
+        externalAgentProjectDeleteThread: async ({ projectId, threadId }) => {
+          await externalAgentProjects.deleteThread(projectId, threadId);
+          return null;
+        },
+        externalAgentProjectSyncThreadFromAgent: ({ projectId, threadId }) =>
+          externalAgentProjects.syncThreadFromAgent(projectId, threadId),
+        externalAgentProjectReadSource: async ({ projectId, path }) => ({
+          text: await externalAgentProjects.readSource(projectId, path),
+        }),
+        externalAgentProjectWriteSource: async ({ projectId, path, text }) => {
+          await externalAgentProjects.writeSource(projectId, path, text);
+          return null;
+        },
+        externalAgentProjectCallTool: (input) =>
+          externalAgentProjects.callTool(input),
         mcpListServers: () => mcpManager.listServers(),
         mcpAddServer: ({ server }) => {
           const servers = mcpManager.addServer(server);
@@ -313,11 +382,18 @@ export function createMainWindowRPC({
           );
         },
         abortStreamThread: (payload) => streaming.abort(payload),
+        agentSourceDirtyStateChanged: ({ dirty }) =>
+          onAgentSourceDirtyStateChanged(dirty),
+        resolveDiscardDirtyAgentSources: ({ requestId, discard }) =>
+          onDiscardDirtyAgentSourcesResolved(requestId, discard),
         captureAnalyticsEvent: ({ event, properties }) =>
           analytics.capture(event, properties),
         executeCommand: (command) => executeCommand(command),
       },
     },
   });
+  externalAgentProjects.setOnChange((projectId) =>
+    rpc.send.externalAgentProjectChanged({ projectId })
+  );
   return rpc;
 }

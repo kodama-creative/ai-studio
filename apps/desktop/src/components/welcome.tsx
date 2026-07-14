@@ -2,6 +2,7 @@
 
 import {
   ArrowUpRightIcon,
+  FolderOpenIcon,
   PlusIcon,
   SettingsIcon,
   SparklesIcon,
@@ -83,6 +84,15 @@ export function Welcome({
           <Button variant="outline" onClick={onModels}>
             <SettingsIcon />
             Configure models
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() =>
+              executeCommand({ type: "openExternalAgentProject", args: {} })
+            }
+          >
+            <FolderOpenIcon />
+            Open Agent Project
           </Button>
         </EmptyContent>
         <Button
