@@ -164,7 +164,7 @@ export type ThreadStore = StoreApi<ThreadState>;
 export function createThreadStore(
   initialThread: Thread,
   options: {
-    transport?: AgentTransport;
+    transport: AgentTransport;
     /**
      * Resolve the model a run/edit should use given the thread's saved model:
      * the saved model when still available, else the user's default, else the
@@ -199,7 +199,7 @@ export function createThreadStore(
     ) => Promise<{ contentText: string; isError: boolean }>;
     /** Skills available to prompt-variable rendering for this Thread. */
     loadPromptSkills?: typeof listEnabledPromptVariableSkills;
-  } = {}
+  }
 ): ThreadStore {
   const normalizedInputThread = ensureThreadVariableState(
     normalizeThread(initialThread)

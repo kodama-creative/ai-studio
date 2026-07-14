@@ -9,7 +9,7 @@ import {
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
-import { externalAgentProjects } from "@/client";
+import { createRpcTransport, externalAgentProjects } from "@/client";
 import { useCommands, useRegisterCommands } from "@/commands";
 import {
   CodeEditor,
@@ -30,6 +30,8 @@ import {
 } from "@/shared/external-agent-project";
 
 import { registerTabCloseGuard, setTabDirty } from "./tab-close-guards";
+
+const RPC_TRANSPORT = createRpcTransport();
 
 function _ExternalProjectTabPane({
   tabId,
@@ -371,6 +373,7 @@ function _ProjectThreadPane({
         externalUpdate={externalUpdate}
         runDisabled={runBlockReason !== null}
         active={active}
+        transport={RPC_TRANSPORT}
         onStreamingStart={handleStreamingStart}
         onStreamingEnd={handleStreamingEnd}
         onChange={handleChange}

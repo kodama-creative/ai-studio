@@ -92,7 +92,7 @@ export interface ThreadPlaygroundProps {
    */
   active?: boolean;
   /** The streaming transport used by runs (e.g. HTTP or Electrobun RPC). */
-  transport?: AgentTransport;
+  transport: AgentTransport;
   /** Override local skill discovery for project-backed Threads. */
   loadPromptSkills?: PromptSkillsLoader;
   /** Apply an owning-surface edit through the normal undo history. */
@@ -223,7 +223,13 @@ function ThreadPlaygroundContent({
   active = false,
 }: Omit<
   ThreadPlaygroundProps,
-  "initialValue" | "onChange" | "onStreamingStart" | "onStreamingEnd"
+  | "initialValue"
+  | "transport"
+  | "loadPromptSkills"
+  | "externalUpdate"
+  | "onChange"
+  | "onStreamingStart"
+  | "onStreamingEnd"
 >) {
   const containerRef = useRef<HTMLDivElement>(null);
   const status = useThreadStore((s) => s.status);
