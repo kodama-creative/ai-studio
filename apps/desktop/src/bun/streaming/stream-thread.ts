@@ -8,10 +8,7 @@ import {
 } from "@llm-space/core";
 import { streamAgent } from "@llm-space/core/server";
 import { agentModelMatchesDefinition } from "@llm-space/runtime";
-import type {
-  PreparedAgentTool,
-  PreparedAgentToolDefinition,
-} from "@llm-space/runtime/node";
+import type { PreparedAgentTool } from "@llm-space/runtime/node";
 
 import type {
   AbortStreamThreadPayload,
@@ -189,7 +186,7 @@ export class StreamThreadController {
       label: tool.name,
       description: tool.description,
       parameters: tool.parameters,
-    } as PreparedAgentToolDefinition;
+    } satisfies PreparedAgentTool["definition"];
     if (tool.type === "function" || _requiresHumanResult(tool)) {
       return { kind: "deferred", definition };
     }

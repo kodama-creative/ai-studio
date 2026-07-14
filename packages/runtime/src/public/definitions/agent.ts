@@ -4,7 +4,7 @@ import type {
   AgentReasoningDefinition,
 } from "../../shared/agent-definition";
 
-import type { ExactDefinition } from "./exact";
+import type { ExactDefinition } from "./exact-definition";
 
 export type { AgentDefinition, AgentModelDefinition, AgentReasoningDefinition };
 

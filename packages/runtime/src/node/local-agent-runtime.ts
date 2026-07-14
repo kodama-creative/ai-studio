@@ -8,7 +8,7 @@ import {
 } from "../runtime/agent/agent-runtime";
 import type { AgentSession } from "../runtime/sessions/agent-session";
 
-import { loadAgentProject } from "./compiler/project";
+import { loadAgentProject } from "./compiler/load-agent-project";
 
 export interface LocalAgentRuntimeOptions {
   agentRoot: string;

@@ -1,8 +1,8 @@
 import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
 import type { ToolResultMessage } from "@earendil-works/pi-ai";
 
-import type { PreparedAgentTool } from "../runtime/agent/prepared-tool";
-import type { RuntimeExecutionMode } from "../shared/runtime-execution";
+import type { PreparedAgentTool } from "../runtime/agent/prepared-agent-tool";
+import type { RuntimeExecutionMode } from "../shared/runtime-execution-mode";
 
 const DEFERRED_TOOL_RESULT_MARKER = "llm-space-runtime-deferred";
 

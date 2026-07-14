@@ -1,6 +1,6 @@
 import type { AgentProjectDiagnostic } from "../../shared/agent-project";
 
-import type { AgentProjectSnapshot } from "./agent-project";
+import type { AgentProjectSnapshot } from "./agent-project-snapshot";
 
 class AgentProjectValidationError extends Error {
   readonly diagnostics: readonly AgentProjectDiagnostic[];

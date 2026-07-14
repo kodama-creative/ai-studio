@@ -18,9 +18,9 @@ import {
 } from "../../execution/agent-event-projector";
 import { ToolExecutionPolicy } from "../../execution/tool-execution-policy";
 import type { AgentModelSelector } from "../../shared/agent-definition";
-import type { RuntimeExecutionMode } from "../../shared/runtime-execution";
-import type { AgentProjectSnapshot } from "../agent/agent-project";
-import type { PreparedAgentTool } from "../agent/prepared-tool";
+import type { RuntimeExecutionMode } from "../../shared/runtime-execution-mode";
+import type { AgentProjectSnapshot } from "../agent/agent-project-snapshot";
+import type { PreparedAgentTool } from "../agent/prepared-agent-tool";
 
 export type { AgentSessionEvent, AgentSessionPersistence };
 
@@ -48,7 +48,6 @@ export class AgentSession {
   private readonly _reasoning?: ThinkingLevel;
   private readonly _toolPolicy: ToolExecutionPolicy;
   private readonly _eventProjector: AgentEventProjector;
-  private readonly _persistence?: AgentSessionPersistence;
   private _executionMode: RuntimeExecutionMode;
 
   constructor(options: AgentSessionOptions) {
@@ -56,7 +55,6 @@ export class AgentSession {
     this._modelSelector = options.modelSelector;
     this._reasoning = options.reasoning;
     this._executionMode = options.executionMode;
-    this._persistence = options.persistence;
     this._toolPolicy = new ToolExecutionPolicy({
       tools: options.tools,
       activeToolNames: options.activeToolNames,
@@ -133,7 +131,7 @@ export class AgentSession {
       this._agent.state.messages,
       results
     );
-    await this._persistence?.replaceMessages(this.messages);
+    await this._eventProjector.handleToolResultsResolved();
   }
 
   continue(): Promise<void> {

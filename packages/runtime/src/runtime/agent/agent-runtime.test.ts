@@ -11,7 +11,7 @@ import {
 } from "@earendil-works/pi-ai";
 import { describe, expect, test } from "bun:test";
 
-import type { AgentProjectSnapshot } from "./agent-project";
+import type { AgentProjectSnapshot } from "./agent-project-snapshot";
 import { AgentRuntime } from "./agent-runtime";
 
 describe("AgentRuntime", () => {
@@ -115,7 +115,15 @@ describe("AgentRuntime", () => {
       models: _reactModels(),
       project: { ..._project(), tools: [tool] },
     });
-    const session = await runtime.createSession({ executionMode: "manual" });
+    const persisted: AgentMessage[][] = [];
+    const session = await runtime.createSession({
+      executionMode: "manual",
+      persistence: {
+        replaceMessages(messages) {
+          persisted.push(messages);
+        },
+      },
+    });
     const deferred: string[] = [];
     session.subscribe((event) => {
       if (event.type === "tool_calls_deferred") {
@@ -141,6 +149,11 @@ describe("AgentRuntime", () => {
         isError: false,
         timestamp: Date.now(),
       },
+    ]);
+    expect(persisted.at(-1)?.map((message) => message.role)).toEqual([
+      "user",
+      "assistant",
+      "toolResult",
     ]);
     await session.continue();
 

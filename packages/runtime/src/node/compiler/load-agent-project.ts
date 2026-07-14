@@ -8,8 +8,8 @@ import {
   type AgentTool,
 } from "@earendil-works/pi-agent-core/node";
 
-import { normalizeAgentDefinition } from "../../internal/authored-definition/agent";
-import type { AgentProjectSnapshot } from "../../runtime/agent/agent-project";
+import { normalizeAgentDefinition } from "../../internal/authored-definition/normalize-agent-definition";
+import type { AgentProjectSnapshot } from "../../runtime/agent/agent-project-snapshot";
 import { createImmutableAgentProjectSnapshot } from "../../runtime/agent/create-immutable-agent-project-snapshot";
 import type { CompiledAgentDefinition } from "../../shared/agent-definition";
 import type { AgentProjectDiagnostic } from "../../shared/agent-project";
@@ -17,10 +17,10 @@ import {
   discoverAgentProject,
   type AgentProjectSourceRef,
   type DiscoveredAgentProject,
-} from "../discover/project";
+} from "../discover/discover-agent-project";
 
-import { compileAgentDefinition } from "./normalize-agent-config";
-import { loadAuthoredModule } from "./source-module";
+import { compileAgentDefinition } from "./compile-agent-definition";
+import { loadAuthoredModule } from "./load-authored-module";
 
 export async function loadAgentProject(
   agentRoot: string
@@ -182,17 +182,7 @@ async function _compileSkills(
   diagnostics: AgentProjectDiagnostic[],
   hash: ReturnType<typeof createHash>
 ) {
-  if (
-    diagnostics.some(
-      (diagnostic) =>
-        diagnostic.code === "skill_invalid" &&
-        diagnostic.path === discovered.skillsRoot &&
-        diagnostic.message ===
-          "The skills source directory cannot be a symbolic link"
-    )
-  ) {
-    return [];
-  }
+  if (!discovered.skillsRoot) return [];
   const env = new NodeExecutionEnv({ cwd: discovered.root });
   try {
     const loaded = await loadSkills(env, discovered.skillsRoot);

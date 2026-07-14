@@ -15,8 +15,9 @@ The runtime owns three boundaries:
   diagnostics and manifest types, execution-mode types, and pure comparison
   helpers.
 - `@llm-space/runtime/node` is the Bun/Node host contract. It exports local
-  project discovery/compilation, `AgentRuntime`, `AgentSession`, prepared tool
-  types, and `LocalAgentRuntime`. It does not re-export the root entrypoint.
+  project discovery/compilation, `AgentRuntime`, `AgentSession`, the
+  `PreparedAgentTool` host contract, and `LocalAgentRuntime`. It does not
+  re-export the root entrypoint.
 
 ## Architecture
 

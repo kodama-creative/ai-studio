@@ -16,7 +16,7 @@ export interface DiscoveredAgentProject {
   readonly definition?: AgentProjectSourceRef;
   readonly instructions?: AgentProjectSourceRef;
   readonly tools: readonly AgentProjectSourceRef[];
-  readonly skillsRoot: string;
+  readonly skillsRoot?: string;
   readonly diagnostics: readonly AgentProjectDiagnostic[];
 }
 
@@ -40,17 +40,19 @@ export async function discoverAgentProject(
     diagnostics,
   });
   const tools = await _discoverTools(root, diagnostics);
-  const skillsRoot = path.join(root, "skills");
+  const skillsRootCandidate = path.join(root, "skills");
+  let skillsRoot: string | undefined = skillsRootCandidate;
   try {
-    if (await _isSymlink(skillsRoot)) {
+    if (await _isSymlink(skillsRootCandidate)) {
       diagnostics.push({
         severity: "error",
         code: "skill_invalid",
         message: "The skills source directory cannot be a symbolic link",
-        path: skillsRoot,
+        path: skillsRootCandidate,
       });
+      skillsRoot = undefined;
     } else {
-      for (const symlink of await _findSymlinks(skillsRoot)) {
+      for (const symlink of await _findSymlinks(skillsRootCandidate)) {
         diagnostics.push({
           severity: "error",
           code: "skill_invalid",
@@ -64,8 +66,9 @@ export async function discoverAgentProject(
       severity: "error",
       code: "skill_invalid",
       message: `Unable to load skills: ${_errorMessage(error)}`,
-      path: skillsRoot,
+      path: skillsRootCandidate,
     });
+    skillsRoot = undefined;
   }
 
   return {
@@ -162,7 +165,7 @@ async function _discoverTools(
   }
   const tools: AgentProjectSourceRef[] = [];
   for (const entry of entries.sort((left, right) =>
-    left.name.localeCompare(right.name)
+    left.name < right.name ? -1 : left.name > right.name ? 1 : 0
   )) {
     if (!entry.name.endsWith(".ts") && !entry.name.endsWith(".js")) {
       continue;

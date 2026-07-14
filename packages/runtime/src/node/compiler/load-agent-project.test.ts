@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, test } from "bun:test";
 
-import { loadAgentProject } from "./project";
+import { loadAgentProject } from "./load-agent-project";
 
 const ROOTS: string[] = [];
 
@@ -66,6 +66,25 @@ describe("loadAgentProject", () => {
     ]);
     expect(snapshot.diagnostics).toEqual([]);
     expect(snapshot.fingerprint).toHaveLength(64);
+  });
+
+  test("preserves code-point tool ordering for runtime and fingerprint input", async () => {
+    const root = await _fixture();
+    await writeFile(join(root, "instructions.md"), "You are helpful.\n");
+    await mkdir(join(root, "tools"));
+    const tool = (name: string) => `export default {
+      name: "${name}",
+      label: "${name}",
+      description: "Ordered tool.",
+      parameters: { type: "object", properties: {} },
+      async execute() { return { content: [{ type: "text", text: "${name}" }], details: undefined }; }
+    };`;
+    await writeFile(join(root, "tools", "Z.ts"), tool("upper"));
+    await writeFile(join(root, "tools", "a.ts"), tool("lower"));
+
+    const snapshot = await loadAgentProject(root);
+
+    expect(snapshot.tools.map((item) => item.name)).toEqual(["upper", "lower"]);
   });
 
   test("returns blocking diagnostics for missing instructions and duplicate tools", async () => {

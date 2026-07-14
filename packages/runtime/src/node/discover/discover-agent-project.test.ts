@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, test } from "bun:test";
 
-import { discoverAgentProject } from "./project";
+import { discoverAgentProject } from "./discover-agent-project";
 
 const ROOTS: string[] = [];
 
@@ -38,6 +38,7 @@ describe("discoverAgentProject", () => {
     expect(discovered.root).toBe(root);
     expect(discovered.definition?.logicalPath).toBe("agent.ts");
     expect(discovered.instructions?.logicalPath).toBe("instructions.md");
+    expect(discovered.skillsRoot).toBe(path.join(root, "skills"));
     expect(discovered.tools.map((tool) => tool.logicalPath)).toEqual([
       "tools/danger.ts",
     ]);
@@ -56,6 +57,7 @@ describe("discoverAgentProject", () => {
       ["definition_missing", "instructions_missing", "tool_import_failed"]
     );
     expect(discovered.tools).toEqual([]);
+    expect(discovered.skillsRoot).toBe(path.join(root, "skills"));
   });
 
   test("keeps symlinked source slots outside the discovered project", async () => {
@@ -72,6 +74,7 @@ describe("discoverAgentProject", () => {
     const discovered = await discoverAgentProject(root);
 
     expect(discovered.tools).toEqual([]);
+    expect(discovered.skillsRoot).toBeUndefined();
     expect(discovered.diagnostics).toEqual([
       {
         severity: "error",

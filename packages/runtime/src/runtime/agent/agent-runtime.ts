@@ -7,16 +7,16 @@ import type {
 import type { Models } from "@earendil-works/pi-ai";
 
 import type { AgentModelSelector } from "../../shared/agent-definition";
-import type { RuntimeExecutionMode } from "../../shared/runtime-execution";
+import type { RuntimeExecutionMode } from "../../shared/runtime-execution-mode";
 import {
   AgentSession,
   type AgentSessionPersistence,
 } from "../sessions/agent-session";
 
-import { type AgentProjectSnapshot } from "./agent-project";
+import { type AgentProjectSnapshot } from "./agent-project-snapshot";
 import { assertValidAgentProject } from "./assert-valid-agent-project";
 import { createImmutableAgentProjectSnapshot } from "./create-immutable-agent-project-snapshot";
-import type { PreparedAgentTool } from "./prepared-tool";
+import type { PreparedAgentTool } from "./prepared-agent-tool";
 import { resolveAgentRuntimeModel } from "./resolve-model";
 
 export interface AgentRuntimeOptions {

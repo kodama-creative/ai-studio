@@ -1,8 +1,8 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 
-export type PreparedAgentToolDefinition = Omit<AgentTool, "execute">;
+type PreparedAgentToolDefinition = Omit<AgentTool, "execute">;
 
-export type PreparedAgentToolOutcome =
+type PreparedAgentToolOutcome =
   | {
       readonly type: "completed";
       readonly result: Awaited<ReturnType<AgentTool["execute"]>>;

@@ -1,4 +1,4 @@
-import type { AgentProjectSnapshot } from "./agent-project";
+import type { AgentProjectSnapshot } from "./agent-project-snapshot";
 
 export function createImmutableAgentProjectSnapshot(
   snapshot: AgentProjectSnapshot

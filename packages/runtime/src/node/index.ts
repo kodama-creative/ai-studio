@@ -1,4 +1,4 @@
-export { loadAgentProject } from "./compiler/project";
+export { loadAgentProject } from "./compiler/load-agent-project";
 export {
   loadAgentProjectManifest,
   type ResolvedAgentProjectManifest,
@@ -7,22 +7,18 @@ export {
   discoverAgentProject,
   type AgentProjectSourceRef,
   type DiscoveredAgentProject,
-} from "./discover/project";
+} from "./discover/discover-agent-project";
 export {
   LocalAgentRuntime,
   type LocalAgentRuntimeOptions,
 } from "./local-agent-runtime";
-export { type AgentProjectSnapshot } from "../runtime/agent/agent-project";
+export { type AgentProjectSnapshot } from "../runtime/agent/agent-project-snapshot";
 export {
   AgentRuntime,
   type AgentRuntimeOptions,
   type CreateAgentSessionOptions,
 } from "../runtime/agent/agent-runtime";
-export type {
-  PreparedAgentTool,
-  PreparedAgentToolDefinition,
-  PreparedAgentToolOutcome,
-} from "../runtime/agent/prepared-tool";
+export type { PreparedAgentTool } from "../runtime/agent/prepared-agent-tool";
 export { AgentRuntimeModelUnavailableError } from "../runtime/agent/agent-runtime-model-unavailable-error";
 export {
   AgentSession,

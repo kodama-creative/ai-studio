@@ -1,6 +1,6 @@
 import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
 
-import type { RuntimeExecutionMode } from "../shared/runtime-execution";
+import type { RuntimeExecutionMode } from "../shared/runtime-execution-mode";
 
 import type {
   DeferredToolCall,
@@ -31,6 +31,10 @@ export class AgentEventProjector {
   ): () => void {
     this._listeners.add(listener);
     return () => this._listeners.delete(listener);
+  }
+
+  async handleToolResultsResolved(): Promise<void> {
+    await this._persist();
   }
 
   async handle(event: AgentEvent): Promise<void> {
@@ -86,7 +90,7 @@ export class AgentEventProjector {
     }
     if (event.type === "agent_end") {
       const messages = this._messages();
-      await this._persistence?.replaceMessages(messages);
+      await this._persist();
       if (this._toolPolicy.pendingCalls.length > 0) {
         await this._emit({
           type: "tool_calls_deferred",
@@ -101,5 +105,9 @@ export class AgentEventProjector {
 
   private async _emit(event: AgentSessionEvent): Promise<void> {
     for (const listener of this._listeners) await listener(event);
+  }
+
+  private async _persist(): Promise<void> {
+    await this._persistence?.replaceMessages(this._messages());
   }
 }
