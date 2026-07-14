@@ -12,8 +12,10 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 
+import type { Models } from "@earendil-works/pi-ai";
 import {
   normalizeThread,
+  type ModelConfig,
   type ProjectTool,
   type Thread,
 } from "@llm-space/core";
@@ -22,9 +24,13 @@ import {
   ensureThreadVariableState,
 } from "@llm-space/core/thread";
 import {
+  AgentRuntime,
   loadAgentProject,
   loadAgentProjectManifest,
+  type AgentRuntimeSession,
+  type CreateAgentRuntimeSessionOptions,
   type AgentProjectSnapshot,
+  type ResolvedAgentDefinition,
   type ResolvedAgentProjectManifest,
 } from "@llm-space/runtime/node";
 
@@ -54,25 +60,38 @@ interface LoadedProject {
   watcher: FSWatcher | null;
   reloadTimer: ReturnType<typeof setTimeout> | null;
   snapshots: Map<string, AgentProjectSnapshot>;
+  runtime: AgentRuntime | null;
+  models: Models | null;
 }
 
 interface ThreadFile {
   thread: Thread;
   promptFingerprint: string;
   syncedPrompt: string;
+  definitionFingerprint: string;
+  syncedDefinition: ResolvedAgentDefinition;
 }
 
 export class ExternalAgentProjectManager {
   private readonly _settingsFile: string;
   private readonly _dataRoot: string;
   private readonly _workspaceRoot: string;
+  private readonly _getModels: () => Promise<Models>;
   private readonly _registry = new Map<string, RegistryEntry>();
   private readonly _loaded = new Map<string, LoadedProject>();
   private _loadedRegistry = false;
   private _onChange: ((projectId: string) => void) | null = null;
 
-  constructor(options: { homePath: string; workspaceRoot: string }) {
+  constructor(options: {
+    homePath: string;
+    workspaceRoot: string;
+    getModels?: () => Promise<Models>;
+  }) {
     const { homePath, workspaceRoot } = options;
+    this._getModels =
+      options.getModels ??
+      (() =>
+        Promise.resolve({ getModel: () => undefined } as unknown as Models));
     this._settingsFile = path.join(
       homePath,
       "settings",
@@ -151,6 +170,10 @@ export class ExternalAgentProjectManager {
       threads,
       agentPath: loaded.resolved?.agentRoot ?? null,
       instructions: snapshot?.instructions ?? "",
+      definition: snapshot?.definition ?? null,
+      definitionFingerprint: snapshot?.definition
+        ? _definitionFingerprint(snapshot.definition)
+        : "",
       promptFingerprint: snapshot
         ? _textFingerprint(snapshot.instructions)
         : "",
@@ -190,6 +213,9 @@ export class ExternalAgentProjectManager {
     if (view.status !== "ready") {
       throw new Error(view.error ?? "Agent Project is invalid.");
     }
+    if (!view.definition) {
+      throw new Error("Agent Project has no valid definition.");
+    }
     const id = randomUUID();
     const variables = createDefaultThreadVariables();
     const skillVariable = variables.available_skills;
@@ -201,6 +227,13 @@ export class ExternalAgentProjectManager {
     }
     const thread: Thread = ensureThreadVariableState({
       title,
+      model: _modelFromDefinition(view.definition),
+      agentRuntime: {
+        projectId,
+        snapshot: view.snapshot,
+        definitionFingerprint: view.definitionFingerprint,
+        modelSource: "agent",
+      },
       context: {
         systemPrompt: view.instructions,
         messages: [],
@@ -212,6 +245,8 @@ export class ExternalAgentProjectManager {
       thread,
       promptFingerprint: view.promptFingerprint,
       syncedPrompt: view.instructions,
+      definitionFingerprint: view.definitionFingerprint,
+      syncedDefinition: view.definition,
     };
     await this._writeThreadFile(projectId, id, record);
     this._notify(projectId);
@@ -227,6 +262,8 @@ export class ExternalAgentProjectManager {
     return {
       promptFingerprint: stored.promptFingerprint,
       syncedPrompt: stored.syncedPrompt,
+      definitionFingerprint: stored.definitionFingerprint,
+      syncedDefinition: stored.syncedDefinition,
       thread: _reconcileThread(stored.thread, loaded),
     };
   }
@@ -241,6 +278,8 @@ export class ExternalAgentProjectManager {
       thread: normalizeThread(record.thread),
       promptFingerprint: record.promptFingerprint,
       syncedPrompt: record.syncedPrompt,
+      definitionFingerprint: record.definitionFingerprint,
+      syncedDefinition: record.syncedDefinition,
     });
     this._notify(projectId);
   }
@@ -268,17 +307,29 @@ export class ExternalAgentProjectManager {
     this._notify(projectId);
   }
 
-  async syncThreadPrompt(
+  async syncThreadFromAgent(
     projectId: string,
     threadId: string
   ): Promise<ExternalAgentProjectThreadRecord> {
     const project = await this.inspect(projectId);
     const record = await this.readThread(projectId, threadId);
+    if (!project.definition) {
+      throw new Error("Agent Project has no valid definition.");
+    }
     const next = {
       promptFingerprint: project.promptFingerprint,
       syncedPrompt: project.instructions,
+      definitionFingerprint: project.definitionFingerprint,
+      syncedDefinition: project.definition,
       thread: {
         ...record.thread,
+        model: _modelFromDefinition(project.definition, record.thread.model),
+        agentRuntime: {
+          projectId,
+          snapshot: project.snapshot,
+          definitionFingerprint: project.definitionFingerprint,
+          modelSource: "agent" as const,
+        },
         context: {
           ...record.thread.context,
           systemPrompt: project.instructions,
@@ -330,6 +381,23 @@ export class ExternalAgentProjectManager {
       .map((item) => item.text)
       .join("\n");
     return { contentText: text, isError: false };
+  }
+
+  async createRuntimeSession(
+    projectId: string,
+    options: CreateAgentRuntimeSessionOptions
+  ): Promise<AgentRuntimeSession> {
+    await this._ensureProject(projectId);
+    const loaded = this._state(projectId);
+    if (loaded.error || !loaded.runtime) {
+      throw new Error(loaded.error ?? "Agent runtime is unavailable.");
+    }
+    const models = await this._getModels();
+    if (models !== loaded.models && loaded.snapshot) {
+      loaded.runtime = new AgentRuntime({ models, project: loaded.snapshot });
+      loaded.models = models;
+    }
+    return loaded.runtime.createSession(options);
   }
 
   async refresh(projectId: string): Promise<ExternalAgentProjectView> {
@@ -424,6 +492,8 @@ export class ExternalAgentProjectManager {
         watcher: null,
         reloadTimer: null,
         snapshots: new Map(),
+        runtime: null,
+        models: null,
       };
       this._loaded.set(projectId, state);
     }
@@ -445,6 +515,14 @@ export class ExternalAgentProjectManager {
             .map((diagnostic) => diagnostic.message)
             .join("\n")
         : null;
+      if (!state.error) {
+        const models = await this._getModels();
+        state.runtime = new AgentRuntime({
+          models,
+          project: snapshot,
+        });
+        state.models = models;
+      }
       state.snapshots.delete(snapshot.fingerprint);
       state.snapshots.set(snapshot.fingerprint, snapshot);
       this._ensureWatcher(projectId, state, resolved.projectRoot);
@@ -545,7 +623,12 @@ export class ExternalAgentProjectManager {
     const parsed = JSON.parse(
       await readFile(this._threadFile(projectId, threadId), "utf8")
     ) as Partial<ThreadFile>;
-    if (!parsed.thread || typeof parsed.promptFingerprint !== "string") {
+    if (
+      !parsed.thread ||
+      typeof parsed.promptFingerprint !== "string" ||
+      typeof parsed.definitionFingerprint !== "string" ||
+      !parsed.syncedDefinition
+    ) {
       throw new Error("Invalid project Thread file.");
     }
     return {
@@ -555,6 +638,8 @@ export class ExternalAgentProjectManager {
         typeof parsed.syncedPrompt === "string"
           ? parsed.syncedPrompt
           : (parsed.thread.context?.systemPrompt ?? ""),
+      definitionFingerprint: parsed.definitionFingerprint,
+      syncedDefinition: parsed.syncedDefinition,
     };
   }
 
@@ -735,6 +820,23 @@ function _within(root: string, candidate: string): boolean {
 
 function _textFingerprint(text: string): string {
   return createHash("sha256").update(text).digest("hex");
+}
+
+function _definitionFingerprint(definition: ResolvedAgentDefinition): string {
+  return _textFingerprint(JSON.stringify(definition));
+}
+
+function _modelFromDefinition(
+  definition: ResolvedAgentDefinition,
+  current?: ModelConfig
+): ModelConfig {
+  const params = { ...current?.params };
+  if (definition.reasoning === undefined) delete params.reasoning;
+  else params.reasoning = definition.reasoning;
+  return {
+    ...definition.model,
+    ...(Object.keys(params).length > 0 ? { params } : {}),
+  };
 }
 
 function _hasCode(error: unknown, code: string): boolean {

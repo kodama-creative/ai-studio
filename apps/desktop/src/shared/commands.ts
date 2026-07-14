@@ -454,7 +454,7 @@ export const COMMAND_META: Record<
     target: "webview",
   },
   syncExternalAgentProjectPrompt: {
-    label: "Sync Prompt from Agent Project",
+    label: "Sync from Agent",
     target: "webview",
   },
   enableExternalAgentProjectTools: {

@@ -1,72 +1,118 @@
-import {
-  type AgentTool,
-  type ExecutionEnv,
-  type Session,
-  type ThinkingLevel,
+import type {
+  AgentMessage,
+  AgentTool,
+  StreamFn,
+  ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
 import type { Api, Model, Models } from "@earendil-works/pi-ai";
 
-import { AgentRuntimeSession } from "./agent-runtime-session";
+import type { AgentModelSelector } from "./agent-definition";
+import {
+  AgentRuntimeSession,
+  type AgentRuntimeSessionPersistence,
+  type RuntimeExecutionMode,
+} from "./agent-runtime-session";
 import { assertValidAgentProject, type AgentProjectSnapshot } from "./project";
 
-export interface AgentModelSelector {
-  provider: string;
-  id: string;
+export interface AgentRuntimeOptions {
+  models: Models;
+  project: AgentProjectSnapshot;
 }
 
-export interface AgentRuntimeOptions {
-  env: ExecutionEnv;
+export interface BuildAgentRuntimeOptions {
   models: Models;
+  loadProject: () => Promise<AgentProjectSnapshot>;
 }
 
 export interface CreateAgentRuntimeSessionOptions {
-  session: Session;
-  model: AgentModelSelector;
-  loadProject: () => Promise<AgentProjectSnapshot>;
+  id?: string;
+  model?: AgentModelSelector;
+  reasoning?: ThinkingLevel;
+  initialMessages?: AgentMessage[];
   extraTools?: AgentTool[];
+  activeToolNames?: string[];
   instructionsPrefix?: string;
-  thinkingLevel?: ThinkingLevel;
-  allowInvalidProject?: boolean;
+  systemPrompt?: string;
+  executionMode?: RuntimeExecutionMode;
+  persistence?: AgentRuntimeSessionPersistence;
+  streamFn?: StreamFn;
+}
+
+export class AgentRuntimeModelUnavailableError extends Error {
+  readonly selector: AgentModelSelector;
+
+  constructor(selector: AgentModelSelector) {
+    super(`Model "${selector.provider}/${selector.id}" is not available`);
+    this.name = "AgentRuntimeModelUnavailableError";
+    this.selector = selector;
+  }
 }
 
 export class AgentRuntime {
-  private readonly _env: ExecutionEnv;
   private readonly _models: Models;
+  private readonly _project: AgentProjectSnapshot;
 
-  constructor(options: AgentRuntimeOptions) {
-    this._env = options.env;
-    this._models = options.models;
+  static async create(
+    options: BuildAgentRuntimeOptions
+  ): Promise<AgentRuntime> {
+    const project = assertValidAgentProject(await options.loadProject());
+    if (!project.definition) {
+      throw new Error("Agent project has no resolved definition");
+    }
+    return new AgentRuntime({ models: options.models, project });
   }
 
-  async createSession(
-    options: CreateAgentRuntimeSessionOptions
+  constructor(options: AgentRuntimeOptions) {
+    this._models = options.models;
+    this._project = assertValidAgentProject(options.project);
+    if (!this._project.definition) {
+      throw new Error("Agent project has no resolved definition");
+    }
+  }
+
+  get project(): AgentProjectSnapshot {
+    return this._project;
+  }
+
+  get defaultModel(): {
+    selector: AgentModelSelector;
+    available: boolean;
+  } {
+    const selector = this._project.definition!.model;
+    return {
+      selector,
+      available: Boolean(this._models.getModel(selector.provider, selector.id)),
+    };
+  }
+
+  createSession(
+    options: CreateAgentRuntimeSessionOptions = {}
   ): Promise<AgentRuntimeSession> {
-    const model = this._resolveModel(options.model);
-    const loaded = await options.loadProject();
-    const snapshot = options.allowInvalidProject
-      ? loaded
-      : assertValidAgentProject(loaded);
-    return new AgentRuntimeSession({
-      env: this._env,
-      models: this._models,
-      session: options.session,
-      model,
-      loadProject: options.loadProject,
-      snapshot,
-      extraTools: options.extraTools ?? [],
-      instructionsPrefix: options.instructionsPrefix ?? "",
-      thinkingLevel: options.thinkingLevel,
-      allowInvalidProject: options.allowInvalidProject ?? false,
-    });
+    const selector = options.model ?? this._project.definition!.model;
+    const model = this._resolveModel(selector);
+    return Promise.resolve(
+      new AgentRuntimeSession({
+        id: options.id,
+        models: this._models,
+        project: this._project,
+        model,
+        modelSelector: selector,
+        reasoning: options.reasoning ?? this._project.definition!.reasoning,
+        initialMessages: options.initialMessages ?? [],
+        extraTools: options.extraTools ?? [],
+        activeToolNames: options.activeToolNames,
+        instructionsPrefix: options.instructionsPrefix ?? "",
+        systemPrompt: options.systemPrompt,
+        executionMode: options.executionMode ?? "react",
+        persistence: options.persistence,
+        streamFn: options.streamFn,
+      })
+    );
   }
 
   private _resolveModel(selector: AgentModelSelector): Model<Api> {
     const model = this._models.getModel(selector.provider, selector.id);
-    if (!model) {
-      throw new Error(
-        `Model "${selector.provider}/${selector.id}" is not available`
-      );
-    }
+    if (!model) throw new AgentRuntimeModelUnavailableError(selector);
     return model;
   }
 }

@@ -1,3 +1,4 @@
+export * from "./agent-definition";
 export * from "./agent-runtime";
 export * from "./agent-runtime-session";
 export * from "./manifest";

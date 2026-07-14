@@ -2,12 +2,10 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { AgentTool } from "@earendil-works/pi-agent-core";
 import {
   createAssistantMessageEventStream,
   createModels,
   createProvider,
-  Type,
   type Api,
   type AssistantMessage,
   type Context,
@@ -26,15 +24,9 @@ afterEach(async () => {
 });
 
 describe("LocalAgentRuntime", () => {
-  test("executes project tools and reopens the persistent Pi session", async () => {
-    const root = await _fixture();
-    const agentRoot = join(root, "agent");
-    const sessionsRoot = join(root, ".llm-space", "sessions");
-    await mkdir(join(agentRoot, "tools"), { recursive: true });
-    await writeFile(
-      join(agentRoot, "instructions.md"),
-      "Always use the echo tool before answering.\n"
-    );
+  test("builds from the required definition before creating sessions", async () => {
+    const agentRoot = await _fixture();
+    let executions = 0;
     await writeFile(
       join(agentRoot, "tools", "echo.ts"),
       `export default {
@@ -55,158 +47,64 @@ describe("LocalAgentRuntime", () => {
         }
       };`
     );
-    const models = _fakeModels();
-    const runtime = new LocalAgentRuntime({ agentRoot, sessionsRoot, models });
-    const session = await runtime.createSession({
-      id: "session-one",
-      model: { provider: "fake", id: "fake-model" },
-    });
-    const eventTypes: string[] = [];
-    session.subscribe((event) => {
-      eventTypes.push(event.type);
+    const runtime = await LocalAgentRuntime.create({
+      agentRoot,
+      models: _fakeModels(() => {
+        executions += 1;
+      }),
     });
 
+    const session = await runtime.createSession({ id: "thread-one" });
     await session.prompt("hello");
 
-    expect(eventTypes).toContain("tool_execution_end");
-    expect(eventTypes.at(-1)).toBe("settled");
-    const listed = await runtime.listSessions();
-    expect(listed).toHaveLength(1);
-    await runtime.cleanup();
-
-    const reopenedRuntime = new LocalAgentRuntime({
-      agentRoot,
-      sessionsRoot,
-      models,
-    });
-    const reopenedMetadata = (await reopenedRuntime.listSessions())[0]!;
-    const reopened = await reopenedRuntime.openSession({
-      metadata: reopenedMetadata,
+    expect(runtime.project.definition).toEqual({
       model: { provider: "fake", id: "fake-model" },
+      reasoning: "high",
     });
-    await reopened.prompt("again");
-
-    expect(reopenedMetadata.path).toContain("session-one");
-    expect(await reopenedRuntime.listSessions()).toHaveLength(1);
-    await reopenedRuntime.cleanup();
-  });
-
-  test("composes host tools with project tools for a real agent session", async () => {
-    const root = await _fixture();
-    const agentRoot = join(root, "agent");
-    await mkdir(join(agentRoot, "tools"), { recursive: true });
-    await writeFile(
-      join(agentRoot, "instructions.md"),
-      "Use available tools.\n"
-    );
-    await writeFile(
-      join(agentRoot, "tools", "echo.ts"),
-      `export default {
-        name: "echo",
-        label: "Echo",
-        description: "Echo text.",
-        parameters: { type: "object", properties: {}, additionalProperties: false },
-        async execute() { return { content: [{ type: "text", text: "project" }] }; }
-      };`
-    );
-    const parameters = Type.Object({});
-    const builderProbe: AgentTool<typeof parameters> = {
-      name: "builder_probe",
-      label: "Builder probe",
-      description: "Host-injected Builder capability.",
-      parameters,
-      execute: () =>
-        Promise.resolve({
-          content: [{ type: "text", text: "builder" }],
-          details: undefined,
-        }),
-    };
-    const runtime = new LocalAgentRuntime({
-      agentRoot,
-      sessionsRoot: join(root, ".llm-space", "sessions"),
-      models: _fakeModels(["builder_probe", "echo"]),
-    });
-    const session = await runtime.createSession({
-      model: { provider: "fake", id: "fake-model" },
-      extraTools: [builderProbe],
-    });
-    const executed: string[] = [];
-    session.subscribe((event) => {
-      if (event.type === "tool_execution_end") executed.push(event.toolName);
-    });
-
-    await session.prompt("use builder");
-    await session.prompt("use target");
-
-    expect(executed).toEqual(["builder_probe", "echo"]);
-    await runtime.cleanup();
-  });
-
-  test("allows a host Builder session to repair an invalid project", async () => {
-    const root = await _fixture();
-    const agentRoot = join(root, "agent");
-    await mkdir(agentRoot);
-    const parameters = Type.Object({});
-    const repairTool: AgentTool<typeof parameters> = {
-      name: "builder_probe",
-      label: "Repair",
-      description: "Repair invalid source.",
-      parameters,
-      execute: () =>
-        Promise.resolve({
-          content: [{ type: "text", text: "repaired" }],
-          details: undefined,
-        }),
-    };
-    const runtime = new LocalAgentRuntime({
-      agentRoot,
-      sessionsRoot: join(root, ".llm-space", "sessions"),
-      models: _fakeModels(["builder_probe"]),
-    });
-    const builder = await runtime.createSession({
-      model: { provider: "fake", id: "fake-model" },
-      extraTools: [repairTool],
-      allowInvalidProject: true,
-    });
-    const executed: string[] = [];
-    builder.subscribe((event) => {
-      if (event.type === "tool_execution_end") executed.push(event.toolName);
-    });
-
-    await builder.prompt("repair it");
-
-    expect(executed).toEqual(["builder_probe"]);
-    expect(builder.project.diagnostics[0]?.code).toBe("instructions_missing");
-    await runtime.cleanup();
+    expect(session.messages.map((message) => message.role)).toEqual([
+      "user",
+      "assistant",
+      "toolResult",
+      "assistant",
+    ]);
+    expect(executions).toBe(2);
   });
 });
 
 async function _fixture(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "llm-space-runtime-session-"));
   roots.push(root);
+  await mkdir(join(root, "tools"), { recursive: true });
+  await writeFile(
+    join(root, "agent.ts"),
+    `export default { model: "fake/fake-model", reasoning: "high" };`
+  );
+  await writeFile(join(root, "instructions.md"), "Always use echo.\n");
   return root;
 }
 
-function _fakeModels(toolNames: string[] = []) {
+function _fakeModels(onStream: () => void) {
   const model: Model<"fake"> = {
     id: "fake-model",
     name: "Fake Model",
     api: "fake",
     provider: "fake",
     baseUrl: "http://localhost.invalid",
-    reasoning: false,
+    reasoning: true,
     input: ["text"],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: 128_000,
     maxTokens: 4_096,
   };
-  let toolIndex = 0;
-  const nextTool = () => toolNames[toolIndex++] ?? "echo";
   const api = {
-    stream: (_model: Model<Api>, context: Context) =>
-      _fakeStream(context, nextTool()),
-    streamSimple: (_model: Model<Api>, context: Context) =>
-      _fakeStream(context, nextTool()),
+    stream: (_model: Model<Api>, context: Context) => {
+      onStream();
+      return _fakeStream(context);
+    },
+    streamSimple: (_model: Model<Api>, context: Context) => {
+      onStream();
+      return _fakeStream(context);
+    },
   };
   const provider = createProvider({
     id: "fake",
@@ -224,22 +122,21 @@ function _fakeModels(toolNames: string[] = []) {
   return models;
 }
 
-function _fakeStream(context: Context, toolName: string) {
+function _fakeStream(context: Context) {
   const stream = createAssistantMessageEventStream();
   const hasToolResult = context.messages.at(-1)?.role === "toolResult";
-  const content = hasToolResult
-    ? [{ type: "text" as const, text: "done" }]
-    : [
-        {
-          type: "toolCall" as const,
-          id: `call-${context.messages.length}`,
-          name: toolName,
-          arguments: { text: "hello" },
-        },
-      ];
   const message: AssistantMessage = {
     role: "assistant",
-    content,
+    content: hasToolResult
+      ? [{ type: "text", text: "done" }]
+      : [
+          {
+            type: "toolCall",
+            id: "call-one",
+            name: "echo",
+            arguments: { text: "hello" },
+          },
+        ],
     api: "fake",
     provider: "fake",
     model: "fake-model",

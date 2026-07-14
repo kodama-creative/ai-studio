@@ -40,13 +40,13 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
   const externalAgentProjects = new ExternalAgentProjectManager({
     homePath,
     workspaceRoot: workspacePath,
+    getModels: () => modelManager.getAvailableModels(),
   });
   const mcpManager = new McpManager();
   const searchSettings = new SearchSettingsManager();
   const skillsManager = new SkillsManager();
   const localFs = createLocalFileSystem(homePath);
   const traceManager = new TraceManager();
-  const streaming = new StreamThreadController(modelManager, analytics);
   const host = new DesktopHost({
     modules: [
       createBuiltInToolsModule({
@@ -58,6 +58,13 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
     ],
   });
   await host.start();
+  const streaming = new StreamThreadController(
+    modelManager,
+    analytics,
+    externalAgentProjects,
+    mcpManager,
+    host.tools
+  );
 
   let mainWindow: BrowserWindow | null = null;
   let rpc: MainWindowRPC | null = null;

@@ -45,6 +45,13 @@ function _RunTraceView({
         </div>
         <div className="text-muted-foreground mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[0.625rem]">
           <span>{runModelLabel(run.thread)}</span>
+          {run.thread.agentRuntime ? (
+            <span>
+              {run.thread.agentRuntime.modelSource === "agent"
+                ? "From Agent"
+                : "Thread override"}
+            </span>
+          ) : null}
           <span>{runMessageCountLabel(run.thread)}</span>
           <span>{new Date(run.timestamp).toLocaleString()}</span>
         </div>

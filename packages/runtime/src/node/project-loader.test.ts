@@ -15,6 +15,26 @@ afterEach(async () => {
 });
 
 describe("loadAgentProject", () => {
+  test("loads and normalizes the required Agent definition", async () => {
+    const root = await _fixture();
+    await writeFile(join(root, "instructions.md"), "You are helpful.\n");
+    await writeFile(
+      join(root, "agent.ts"),
+      `export default {
+        model: "fake/models/codex",
+        reasoning: "none"
+      };`
+    );
+
+    const snapshot = await loadAgentProject(root);
+
+    expect(snapshot.definition).toEqual({
+      model: { provider: "fake", id: "models/codex" },
+      reasoning: "off",
+    });
+    expect(snapshot.diagnostics).toEqual([]);
+  });
+
   test("discovers instructions, executable tools, and skills", async () => {
     const root = await _fixture();
     await writeFile(join(root, "instructions.md"), "You are helpful.\n");
@@ -67,6 +87,21 @@ describe("loadAgentProject", () => {
     ]);
   });
 
+  test("returns a blocking diagnostic when the required definition is missing", async () => {
+    const root = await _fixture();
+    await rm(join(root, "agent.ts"));
+    await writeFile(join(root, "instructions.md"), "Test.\n");
+
+    const snapshot = await loadAgentProject(root);
+
+    expect(snapshot.definition).toBeUndefined();
+    expect(snapshot.diagnostics).toHaveLength(1);
+    expect(snapshot.diagnostics[0]).toMatchObject({
+      severity: "error",
+      code: "definition_missing",
+    });
+  });
+
   test("treats invalid skills as blocking project diagnostics", async () => {
     const root = await _fixture();
     await writeFile(join(root, "instructions.md"), "Test.\n");
@@ -87,9 +122,15 @@ describe("loadAgentProject", () => {
 
   test("rejects symbolic links at every agent source slot", async () => {
     const root = await _fixture();
+    await rm(join(root, "agent.ts"));
+    await writeFile(
+      join(root, "real-agent.ts"),
+      `export default { model: "fake/fake-model" };`
+    );
     await writeFile(join(root, "real-instructions.md"), "Outside source.\n");
     await mkdir(join(root, "real-tools"));
     await mkdir(join(root, "real-skills"));
+    await symlink(join(root, "real-agent.ts"), join(root, "agent.ts"));
     await symlink(
       join(root, "real-instructions.md"),
       join(root, "instructions.md")
@@ -100,6 +141,7 @@ describe("loadAgentProject", () => {
     const snapshot = await loadAgentProject(root);
 
     expect(snapshot.diagnostics.map((item) => item.code)).toEqual([
+      "definition_import_failed",
       "instructions_read_failed",
       "tool_import_failed",
       "skill_invalid",
@@ -129,10 +171,39 @@ describe("loadAgentProject", () => {
       text: "two",
     });
   });
+
+  test("reloads changed Agent definitions in the same process", async () => {
+    const root = await _fixture();
+    await writeFile(join(root, "instructions.md"), "Test.\n");
+    const definitionPath = join(root, "agent.ts");
+    await writeFile(
+      definitionPath,
+      `export default { model: "fake/model-one", reasoning: "provider-default" };`
+    );
+    const first = await loadAgentProject(root);
+    await writeFile(
+      definitionPath,
+      `export default { model: "fake/model-two", reasoning: "xhigh" };`
+    );
+    const second = await loadAgentProject(root);
+
+    expect(first.definition).toEqual({
+      model: { provider: "fake", id: "model-one" },
+    });
+    expect(second.definition).toEqual({
+      model: { provider: "fake", id: "model-two" },
+      reasoning: "xhigh",
+    });
+    expect(second.fingerprint).not.toBe(first.fingerprint);
+  });
 });
 
 async function _fixture(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "llm-space-runtime-"));
   roots.push(root);
+  await writeFile(
+    join(root, "agent.ts"),
+    `export default { model: "fake/fake-model" };`
+  );
   return root;
 }

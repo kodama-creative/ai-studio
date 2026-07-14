@@ -34,6 +34,10 @@ describe("scaffoldAgentProject", () => {
     const resolved = await loadAgentProjectManifest(root);
     const snapshot = await loadAgentProject(resolved.agentRoot);
     expect(snapshot.diagnostics).toEqual([]);
+    expect(snapshot.definition).toEqual({
+      model: { provider: "openai", id: "gpt-5.3-codex" },
+      reasoning: "high",
+    });
     expect(snapshot.tools.map((tool) => tool.name)).toEqual(["get_weather"]);
     expect(snapshot.resources.skills?.map((skill) => skill.name)).toEqual([
       "weather-brief",
@@ -47,6 +51,10 @@ describe("scaffoldAgentProject", () => {
     const resolved = await loadAgentProjectManifest(root);
     const snapshot = await loadAgentProject(resolved.agentRoot);
     expect(snapshot.diagnostics).toEqual([]);
+    expect(snapshot.definition).toEqual({
+      model: { provider: "openai", id: "gpt-5.3-codex" },
+      reasoning: "high",
+    });
     expect(snapshot.tools).toEqual([]);
   });
 

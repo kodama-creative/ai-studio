@@ -8,6 +8,7 @@ import type {
   ModelProviderGroup,
   Thread,
 } from "@llm-space/core";
+import type { RuntimeExecutionMode } from "@llm-space/runtime";
 import type { RPCSchema } from "electrobun";
 
 import type { AnalyticsEvent, AnalyticsStatus } from "./analytics";
@@ -44,6 +45,12 @@ import type { UpdateMode, UpdateStatusChangedPayload } from "./updates";
 export interface StreamThreadRequestPayload {
   streamId: string;
   request: AgentStreamRequest;
+  runtime?: {
+    type: "agentProject";
+    projectId: string;
+    threadId: string;
+    executionMode: RuntimeExecutionMode;
+  };
 }
 
 /** A bun→webview chunk of a streaming agent run, keyed by `streamId`. */

@@ -10,6 +10,7 @@ export function convertToPiContext(context: ThreadContext): PiThreadContext {
     systemPrompt: context.systemPrompt,
     messages: context.messages ? _convertToPiMessages(context.messages) : [],
     tools: context.tools ? _convertToPiTools(context.tools) : [],
+    sourceTools: context.tools ? [...context.tools] : [],
   };
   return result;
 }
@@ -43,12 +44,13 @@ function _convertToPiMessages(messages: Message[]) {
     }
     if (message.role === "assistant" && message.toolCalls) {
       for (const toolCall of message.toolCalls) {
+        if (!toolCall.output) continue;
         result.push({
           role: "toolResult",
           toolCallId: toolCall.id,
           toolName: toolCall.input.name,
-          content: toolCall.output?.content ?? [{ type: "text", text: "" }],
-          isError: toolCall.output?.isError ?? false,
+          content: toolCall.output.content,
+          isError: toolCall.output.isError ?? false,
           timestamp: Date.now(),
         });
       }

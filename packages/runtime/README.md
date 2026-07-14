@@ -4,14 +4,15 @@ Pi-native runtime for LLM Space Agent Projects.
 
 The runtime owns three boundaries:
 
-- discover a portable `agent/` source tree;
-- compose that snapshot with Pi `AgentHarness` and real `AgentTool`s;
-- create or reopen persistent Pi sessions through an injected host environment.
+- load one immutable portable Agent source snapshot;
+- resolve its authored model/reasoning defaults;
+- execute stateful sessions through Pi `Agent` and its native ReAct loop.
 
-V1 discovers:
+V1 requires:
 
 ```text
 agent/
+├── agent.ts
 ├── instructions.md
 ├── tools/
 │   └── *.ts
@@ -19,32 +20,46 @@ agent/
     └── <name>/SKILL.md
 ```
 
-Tool modules default-export a Pi `AgentTool`. Instructions are required. Skills
-follow the Agent Skills `SKILL.md` format and are loaded through Pi resources.
+`agent.ts` default-exports a typed definition:
 
-The main entrypoint is host-agnostic. `@llm-space/runtime/node` adds the local
-`NodeExecutionEnv`, JSONL session repository, and Bun-powered TypeScript project
-loader used by the desktop host.
+```ts
+import { defineAgent } from "@llm-space/runtime";
+
+export default defineAgent({
+  model: "openai/gpt-5.3-codex",
+  reasoning: "high",
+});
+```
+
+The model string splits on its first `/`. Reasoning accepts
+`provider-default`, `none`, `minimal`, `low`, `medium`, `high`, and `xhigh`;
+`none` maps to Pi's internal `off` value.
+
+Build the runtime before creating a session:
 
 ```ts
 import { LocalAgentRuntime } from "@llm-space/runtime/node";
 
-const runtime = new LocalAgentRuntime({
+const runtime = await LocalAgentRuntime.create({
   agentRoot: "/absolute/project/agent",
-  sessionsRoot: "/absolute/project/.llm-space/sessions/target",
   models,
 });
 
 const session = await runtime.createSession({
-  model: { provider: "anthropic", id: "claude-sonnet-4-5" },
+  id: "thread-id",
+  initialMessages,
+  executionMode: "react",
 });
 
 session.subscribe((event) => console.log(event.type));
 await session.prompt("Hello");
-await runtime.cleanup();
 ```
 
-JSONL persistence retains conversation and Pi session-tree state across process
-restarts. It is not workflow-step durability: interrupted tools are not promised
-exactly-once effects or crash-safe replay. Hosts remain responsible for tool
-permissions, sandboxing, idempotency, credentials, and lifecycle cleanup.
+`RuntimeSession` does not expose or accept a Pi `Session`. Hosts provide the
+durable transcript through `initialMessages` and the optional persistence
+driver. Desktop Project Threads are the durable authority; runtime sessions
+own live prompt/tool/continuation execution.
+
+Execution modes are `manual`, `autoOnce`, and `react`. Manual deferred tool
+results remain internal control messages and are exposed as pending calls until
+the host supplies real results and calls `continue()`.

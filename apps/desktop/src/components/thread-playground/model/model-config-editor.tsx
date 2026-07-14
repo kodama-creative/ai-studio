@@ -11,15 +11,18 @@ import { ModelSelector } from "./model-selector";
 export function ModelConfigEditor({
   className,
   readonly,
+  preserveSavedModel = false,
 }: {
   className?: string;
   readonly?: boolean;
+  preserveSavedModel?: boolean;
 }) {
   // A thread may have no saved model, or a stale one whose provider was removed;
   // resolve it for display (own → default → first available). `null` when there
   // are no models at all.
   const savedModel = useThreadStore((s) => s.thread.model);
-  const model = useResolveModelConfig(savedModel);
+  const resolvedFallbackModel = useResolveModelConfig(savedModel);
+  const model = preserveSavedModel ? savedModel : resolvedFallbackModel;
   const resolvedModel = useModel({
     id: model?.id ?? "",
     provider: model?.provider ?? "",
@@ -35,7 +38,10 @@ export function ModelConfigEditor({
   if (model?.params?.maxTokens !== undefined) {
     paramSummary.push({ label: "max_tokens", value: model.params.maxTokens });
   }
-  if (resolvedModel?.reasoning && model?.params?.reasoning !== undefined) {
+  if (
+    (preserveSavedModel || resolvedModel?.reasoning) &&
+    model?.params?.reasoning !== undefined
+  ) {
     paramSummary.push({ label: "reasoning", value: model.params.reasoning });
   }
 

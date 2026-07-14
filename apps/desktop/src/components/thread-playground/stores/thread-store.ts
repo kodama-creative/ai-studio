@@ -199,6 +199,10 @@ export function createThreadStore(
     ) => Promise<{ contentText: string; isError: boolean }>;
     /** Skills available to prompt-variable rendering for this Thread. */
     loadPromptSkills?: typeof listEnabledPromptVariableSkills;
+    /** Runtime transport owns tool execution and continuation for this Thread. */
+    runtimeOwnsToolLoop?: boolean;
+    /** Add host-owned runtime provenance before recording a run snapshot. */
+    prepareRunSnapshot?: (thread: Thread) => Thread;
   }
 ): ThreadStore {
   const normalizedInputThread = ensureThreadVariableState(
@@ -968,10 +972,10 @@ export function createThreadStore(
             // thread is unchanged.
             const finalThread = get().thread;
             if (sawEvent && !failed) {
-              const threadWithSnapshot = withPromptVariableSnapshot(
-                finalThread,
-                promptSnapshot
-              );
+              const threadWithSnapshot =
+                options.prepareRunSnapshot?.(
+                  withPromptVariableSnapshot(finalThread, promptSnapshot)
+                ) ?? withPromptVariableSnapshot(finalThread, promptSnapshot);
               const runUsage = aggregateMessageUsage(
                 (threadWithSnapshot.context?.messages ?? []).slice(
                   runStartMessageCount
@@ -1133,6 +1137,9 @@ export function createThreadStore(
             for (let turn = 0; turn < MAX_AUTO_TOOL_TURNS; turn++) {
               const outcome = await streamTurn();
               if (outcome !== "completed") {
+                break;
+              }
+              if (options.runtimeOwnsToolLoop) {
                 break;
               }
               const reactLoop = options.getReactLoop?.() ?? false;

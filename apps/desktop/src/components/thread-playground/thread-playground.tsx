@@ -93,6 +93,12 @@ export interface ThreadPlaygroundProps {
   active?: boolean;
   /** The streaming transport used by runs (e.g. HTTP or Electrobun RPC). */
   transport: AgentTransport;
+  /** The transport executes tool batches and ReAct continuation itself. */
+  runtimeOwnsToolLoop?: boolean;
+  /** Keep an unavailable saved model visible instead of resolving a fallback. */
+  preserveSavedModel?: boolean;
+  /** Stamp runtime provenance into the durable run snapshot. */
+  prepareRunSnapshot?: (thread: Thread) => Thread;
   /** Override local skill discovery for project-backed Threads. */
   loadPromptSkills?: PromptSkillsLoader;
   /** Apply an owning-surface edit through the normal undo history. */
@@ -135,6 +141,9 @@ export function ThreadPlayground({
 function _ThreadPlayground({
   initialValue,
   transport,
+  runtimeOwnsToolLoop,
+  preserveSavedModel,
+  prepareRunSnapshot,
   loadPromptSkills,
   externalUpdate,
   onChange,
@@ -153,15 +162,19 @@ function _ThreadPlayground({
   defaultModelRef.current = defaultModel;
   const loadPromptSkillsRef = useRef(loadPromptSkills);
   loadPromptSkillsRef.current = loadPromptSkills;
+  const prepareRunSnapshotRef = useRef(prepareRunSnapshot);
+  prepareRunSnapshotRef.current = prepareRunSnapshot;
   const [store] = useState(() =>
     createThreadStore(initialValue, {
       transport,
       resolveModel: (saved) =>
-        resolveModelConfig(
-          providersRef.current,
-          saved,
-          defaultModelRef.current
-        ),
+        preserveSavedModel && saved
+          ? saved
+          : resolveModelConfig(
+              providersRef.current,
+              saved,
+              defaultModelRef.current
+            ),
       getAutoRunTools,
       getReactLoop,
       executeTool,
@@ -169,6 +182,9 @@ function _ThreadPlayground({
         ? () =>
             (loadPromptSkillsRef.current ?? listEnabledPromptVariableSkills)()
         : undefined,
+      runtimeOwnsToolLoop,
+      prepareRunSnapshot: (thread) =>
+        prepareRunSnapshotRef.current?.(thread) ?? thread,
     })
   );
   const appliedExternalRevision = useRef(0);
@@ -202,7 +218,10 @@ function _ThreadPlayground({
   return (
     <PromptSkillsProvider loader={loadPromptSkills}>
       <ThreadStoreContext.Provider value={store}>
-        <ThreadPlaygroundContent {...props} />
+        <ThreadPlaygroundContent
+          {...props}
+          preserveSavedModel={preserveSavedModel}
+        />
       </ThreadStoreContext.Provider>
     </PromptSkillsProvider>
   );
@@ -221,6 +240,7 @@ function ThreadPlaygroundContent({
   readonly: readonlyFromProps = false,
   runDisabled = false,
   active = false,
+  preserveSavedModel = false,
 }: Omit<
   ThreadPlaygroundProps,
   | "initialValue"
@@ -476,7 +496,10 @@ function ThreadPlaygroundContent({
                       Models
                     </div>
                     <div className="flex grow items-center">
-                      <ModelConfigEditor readonly={readonly} />
+                      <ModelConfigEditor
+                        readonly={readonly}
+                        preserveSavedModel={preserveSavedModel}
+                      />
                     </div>
                   </div>
                   <div className={"flex w-full border-b py-2"}>

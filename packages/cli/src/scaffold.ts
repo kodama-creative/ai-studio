@@ -64,6 +64,17 @@ async function _writeStage(
     ) + "\n",
     "utf8"
   );
+  await writeFile(
+    path.join(agent, "agent.ts"),
+    `import { defineAgent } from "@llm-space/runtime";
+
+export default defineAgent({
+  model: "openai/gpt-5.3-codex",
+  reasoning: "high",
+});
+`,
+    "utf8"
+  );
   if (template === "blank") {
     await writeFile(
       path.join(agent, "instructions.md"),

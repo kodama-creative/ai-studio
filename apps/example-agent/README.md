@@ -1,7 +1,7 @@
 # Example Agent
 
-A portable LLM Space Agent Project for validating the manifest, tool, skill,
-and desktop import workflow. Its weather data is deterministic and does not
+A portable LLM Space Agent Project for validating the definition, manifest,
+tool, skill, and desktop import workflow. Its weather data is deterministic and does not
 use the network, credentials, or a live model.
 
 ## Open In LLM Space
@@ -27,8 +27,9 @@ From the repository root:
 bun test apps/example-agent
 ```
 
-The test loads this exact project through `@llm-space/runtime`, discovers the
-`weather-brief` skill, and verifies that `get_weather({ city: "Shanghai" })`
+The test loads this exact project through `@llm-space/runtime`, resolves the
+model/reasoning defaults from `agent.ts`, discovers the `weather-brief` skill,
+and verifies that `get_weather({ city: "Shanghai" })`
 returns `Shanghai: Sunny, 22°C`.
 
 This project is example code for local development. It does not provide live

@@ -16,6 +16,11 @@ const PROJECT = {
   threads: [],
   agentPath: "/tmp/project/agent",
   instructions: "Test",
+  definition: {
+    model: { provider: "openai", id: "gpt-5.3-codex" },
+    reasoning: "high",
+  },
+  definitionFingerprint: "definition",
   promptFingerprint: "prompt",
   snapshot: "snapshot-2",
   tools: [],
@@ -25,7 +30,13 @@ const PROJECT = {
 } satisfies ExternalAgentProjectView;
 
 function _record(thread: Thread): ExternalAgentProjectThreadRecord {
-  return { thread, promptFingerprint: "prompt", syncedPrompt: "Test" };
+  return {
+    thread,
+    promptFingerprint: "prompt",
+    syncedPrompt: "Test",
+    definitionFingerprint: "definition",
+    syncedDefinition: PROJECT.definition,
+  };
 }
 
 describe("external Agent Project run gate", () => {

@@ -1,5 +1,8 @@
 import type { ProjectTool, Thread } from "@llm-space/core";
-import type { AgentProjectDiagnostic } from "@llm-space/runtime";
+import type {
+  AgentProjectDiagnostic,
+  ResolvedAgentDefinition,
+} from "@llm-space/runtime";
 
 import type { SkillInfo } from "./skills";
 
@@ -30,6 +33,8 @@ export interface ExternalAgentProjectSummary {
 export interface ExternalAgentProjectView extends ExternalAgentProjectSummary {
   agentPath: string | null;
   instructions: string;
+  definition: ResolvedAgentDefinition | null;
+  definitionFingerprint: string;
   promptFingerprint: string;
   snapshot: string;
   tools: ProjectTool[];
@@ -42,6 +47,8 @@ export interface ExternalAgentProjectThreadRecord {
   thread: Thread;
   promptFingerprint: string;
   syncedPrompt: string;
+  definitionFingerprint: string;
+  syncedDefinition: ResolvedAgentDefinition;
 }
 
 export interface ExternalAgentProjectChangedPayload {

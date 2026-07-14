@@ -14,6 +14,10 @@ describe("example Agent Project", () => {
       agent: "./agent",
     });
     expect(snapshot.diagnostics).toEqual([]);
+    expect(snapshot.definition).toEqual({
+      model: { provider: "openai", id: "gpt-5.3-codex" },
+      reasoning: "high",
+    });
     expect(snapshot.instructions).toContain("concise weather assistant");
     expect(snapshot.tools.map((tool) => tool.name)).toEqual(["get_weather"]);
     expect(snapshot.resources.skills?.map((skill) => skill.name)).toEqual([

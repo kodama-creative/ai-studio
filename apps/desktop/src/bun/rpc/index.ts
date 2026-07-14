@@ -287,7 +287,7 @@ export function createMainWindowRPC({
           return null;
         },
         externalAgentProjectSyncThreadPrompt: ({ projectId, threadId }) =>
-          externalAgentProjects.syncThreadPrompt(projectId, threadId),
+          externalAgentProjects.syncThreadFromAgent(projectId, threadId),
         externalAgentProjectReadSource: async ({ projectId, path }) => ({
           text: await externalAgentProjects.readSource(projectId, path),
         }),

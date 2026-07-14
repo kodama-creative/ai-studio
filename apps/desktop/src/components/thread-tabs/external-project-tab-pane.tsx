@@ -1,4 +1,5 @@
 import type { Thread } from "@llm-space/core";
+import type { ResolvedAgentDefinition } from "@llm-space/runtime";
 import {
   AlertTriangleIcon,
   BotIcon,
@@ -6,7 +7,7 @@ import {
   WrenchIcon,
   XIcon,
 } from "lucide-react";
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { createRpcTransport, externalAgentProjects } from "@/client";
@@ -17,7 +18,12 @@ import {
   type CodeEditorLanguage,
 } from "@/components/code-editor";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { useModels } from "@/components/model-provider";
 import { ThreadPlayground } from "@/components/thread-playground";
+import {
+  getAutoRunTools,
+  getReactLoop,
+} from "@/components/thread-playground/stores/run-mode";
 import { Button } from "@/components/ui/button";
 import { electrobun } from "@/lib/electrobun";
 import { cn } from "@/lib/utils";
@@ -30,8 +36,6 @@ import {
 } from "@/shared/external-agent-project";
 
 import { registerTabCloseGuard, setTabDirty } from "./tab-close-guards";
-
-const RPC_TRANSPORT = createRpcTransport();
 
 function _ExternalProjectTabPane({
   tabId,
@@ -88,11 +92,28 @@ function _ProjectThreadPane({
   }>();
   const [syncConfirmOpen, setSyncConfirmOpen] = useState(false);
   const [running, setRunning] = useState(false);
+  const providers = useModels();
   const { executeCommand } = useCommands();
   const writeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pending = useRef<ExternalAgentProjectThreadRecord | null>(null);
   const recordRef = useRef(record);
   recordRef.current = record;
+  const runtimeTransport = useMemo(
+    () =>
+      createRpcTransport({
+        runtime: () => ({
+          type: "agentProject",
+          projectId,
+          threadId,
+          executionMode: getReactLoop()
+            ? "react"
+            : getAutoRunTools()
+              ? "autoOnce"
+              : "manual",
+        }),
+      }),
+    [projectId, threadId]
+  );
 
   const flush = useCallback(async () => {
     if (writeTimer.current) clearTimeout(writeTimer.current);
@@ -233,9 +254,9 @@ function _ProjectThreadPane({
     [flush]
   );
 
-  const syncPrompt = useCallback(async () => {
+  const syncFromAgent = useCallback(async () => {
     await flush();
-    const next = await externalAgentProjects.syncThreadPrompt(
+    const next = await externalAgentProjects.syncThreadFromAgent(
       projectId,
       threadId
     );
@@ -244,6 +265,7 @@ function _ProjectThreadPane({
       revision: (current?.revision ?? 0) + 1,
       update: (thread) => ({
         ...thread,
+        model: next.thread.model,
         context: {
           ...thread.context,
           systemPrompt: next.thread.context?.systemPrompt,
@@ -285,7 +307,7 @@ function _ProjectThreadPane({
           commandThreadId === threadId &&
           !running
         ) {
-          return syncPrompt();
+          return syncFromAgent();
         }
       },
       enableExternalAgentProjectTools: ({
@@ -307,6 +329,20 @@ function _ProjectThreadPane({
     () => Promise.resolve(project?.skills ?? []),
     [project?.skills]
   );
+  const prepareRunSnapshot = useCallback(
+    (thread: Thread): Thread => ({
+      ...thread,
+      agentRuntime: {
+        projectId,
+        snapshot: project?.snapshot ?? "",
+        definitionFingerprint: project?.definitionFingerprint ?? "",
+        modelSource: _matchesDefinition(thread, project?.definition)
+          ? "agent"
+          : "threadOverride",
+      },
+    }),
+    [project, projectId]
+  );
   const handleStreamingStart = useCallback(() => setRunning(true), []);
   const handleStreamingEnd = useCallback(() => {
     setRunning(false);
@@ -320,6 +356,18 @@ function _ProjectThreadPane({
     project && record
       ? getExternalAgentProjectRunBlockReason(project, record)
       : "sourceUnavailable";
+  const savedModelAvailable = useMemo(() => {
+    const model = record?.thread.model;
+    if (!model) return false;
+    const provider = providers.find(
+      (candidate) => candidate.id === model.provider
+    );
+    return Boolean(
+      provider &&
+      !provider.disabledModels?.includes(model.id) &&
+      provider.models.some((candidate) => candidate.id === model.id)
+    );
+  }, [providers, record?.thread.model]);
   useEffect(() => {
     if (runBlockReason === "staleToolSnapshot") {
       void refreshProject();
@@ -357,9 +405,24 @@ function _ProjectThreadPane({
 
   const promptLocallyChanged =
     (record.thread.context?.systemPrompt ?? "") !== record.syncedPrompt;
-  const promptOutOfSync =
+  const currentReasoning = record.thread.model?.params?.reasoning;
+  const modelLocallyChanged =
+    record.thread.model?.provider !== record.syncedDefinition.model.provider ||
+    record.thread.model?.id !== record.syncedDefinition.model.id;
+  const reasoningLocallyChanged =
+    currentReasoning !== record.syncedDefinition.reasoning;
+  const definitionLocallyChanged =
+    modelLocallyChanged || reasoningLocallyChanged;
+  const locallyChanged = promptLocallyChanged || definitionLocallyChanged;
+  const agentOutOfSync =
     record.promptFingerprint !== project.promptFingerprint ||
-    promptLocallyChanged;
+    record.definitionFingerprint !== project.definitionFingerprint ||
+    locallyChanged;
+  const replacedFields = [
+    ...(promptLocallyChanged ? ["instructions"] : []),
+    ...(modelLocallyChanged ? ["model"] : []),
+    ...(reasoningLocallyChanged ? ["reasoning"] : []),
+  ];
   const enabledProjectTools = (record.thread.context?.tools ?? []).filter(
     (tool) => tool.type === "project"
   ).length;
@@ -371,9 +434,12 @@ function _ProjectThreadPane({
         title={record.thread.title ?? "untitled"}
         initialValue={record.thread}
         externalUpdate={externalUpdate}
-        runDisabled={runBlockReason !== null}
+        runDisabled={runBlockReason !== null || !savedModelAvailable}
         active={active}
-        transport={RPC_TRANSPORT}
+        transport={runtimeTransport}
+        runtimeOwnsToolLoop
+        preserveSavedModel
+        prepareRunSnapshot={prepareRunSnapshot}
         onStreamingStart={handleStreamingStart}
         onStreamingEnd={handleStreamingEnd}
         onChange={handleChange}
@@ -387,14 +453,22 @@ function _ProjectThreadPane({
                 ? null
                 : " · Source invalid; current run is frozen"}
             </span>
-            {promptOutOfSync ? (
+            <span className="text-muted-foreground shrink-0">
+              {locallyChanged ? "Thread override" : "From Agent"}
+            </span>
+            {!savedModelAvailable ? (
+              <span className="text-destructive flex shrink-0 items-center gap-1">
+                <AlertTriangleIcon className="size-3" /> Model unavailable
+              </span>
+            ) : null}
+            {agentOutOfSync ? (
               <Button
                 className="h-5 px-1.5 text-[10px]"
                 size="sm"
                 variant="outline"
                 disabled={running || project.status !== "ready"}
                 onClick={() =>
-                  promptLocallyChanged
+                  locallyChanged
                     ? setSyncConfirmOpen(true)
                     : executeCommand({
                         type: "syncExternalAgentProjectPrompt",
@@ -402,7 +476,7 @@ function _ProjectThreadPane({
                       })
                 }
               >
-                <RefreshCwIcon className="size-3" /> Sync from Project
+                <RefreshCwIcon className="size-3" /> Sync from Agent
               </Button>
             ) : null}
             {enabledProjectTools < project.tools.length ? (
@@ -427,9 +501,9 @@ function _ProjectThreadPane({
       <ConfirmDialog
         open={syncConfirmOpen}
         onOpenChange={setSyncConfirmOpen}
-        title="Sync prompt from project?"
-        description="This replaces this Thread’s system prompt with the latest project prompt. You can undo the change after syncing."
-        confirmLabel="Sync from Project"
+        title="Sync settings from Agent?"
+        description={`This replaces this Thread’s ${replacedFields.join(", ")} with the latest Agent values. You can undo the change after syncing.`}
+        confirmLabel="Sync from Agent"
         onConfirm={() => {
           setSyncConfirmOpen(false);
           executeCommand({
@@ -973,6 +1047,18 @@ function _sourceLanguage(path: string): CodeEditorLanguage {
   if (path.endsWith(".ts")) return "typescript";
   if (path.endsWith(".js")) return "javascript";
   return "markdown";
+}
+
+function _matchesDefinition(
+  thread: Thread,
+  definition: ResolvedAgentDefinition | null | undefined
+): boolean {
+  return Boolean(
+    definition &&
+    thread.model?.provider === definition.model.provider &&
+    thread.model.id === definition.model.id &&
+    thread.model.params?.reasoning === definition.reasoning
+  );
 }
 
 export const ExternalProjectTabPane = memo(_ExternalProjectTabPane);

@@ -54,25 +54,36 @@ export function ModelSelector({
   const { updateModel } = useThreadStoreActions();
   const { executeCommand } = useCommands();
   const [open, setOpen] = useState(false);
+  const selectedValue = value ? toModelKey(value) : "";
 
-  const items = useMemo(
-    () =>
-      [...providers]
-        .sort((a, b) => a.name.localeCompare(b.name))
-        .map((group) => {
-          const disabled = new Set(group.disabledModels ?? []);
-          return {
-            id: group.id,
-            name: group.name,
-            icon: group.icon,
-            items: group.models
-              .filter((model) => !disabled.has(model.id))
-              .map((model) => toModelKey(model)),
-          };
-        })
-        .filter((group) => group.items.length > 0),
-    [providers]
-  );
+  const items = useMemo(() => {
+    const groups = [...providers]
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((group) => {
+        const disabled = new Set(group.disabledModels ?? []);
+        return {
+          id: group.id,
+          name: group.name,
+          icon: group.icon,
+          items: group.models
+            .filter((model) => !disabled.has(model.id))
+            .map((model) => toModelKey(model)),
+        };
+      })
+      .filter((group) => group.items.length > 0);
+    if (
+      selectedValue &&
+      !groups.some((group) => group.items.includes(selectedValue))
+    ) {
+      groups.unshift({
+        id: "unavailable",
+        name: "Unavailable",
+        icon: undefined,
+        items: [selectedValue],
+      });
+    }
+    return groups;
+  }, [providers, selectedValue]);
 
   const modelMeta = useMemo(() => {
     const meta = new Map<string, { id: string; name: string; icon?: string }>();
@@ -85,8 +96,14 @@ export function ModelSelector({
         });
       }
     }
+    if (value && !meta.has(selectedValue)) {
+      meta.set(selectedValue, {
+        id: value.id,
+        name: `${value.provider}/${value.id}`,
+      });
+    }
     return meta;
-  }, [providers]);
+  }, [providers, selectedValue, value]);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const handleOpenChange = useCallback(
@@ -115,8 +132,6 @@ export function ModelSelector({
     },
     [modelMeta]
   );
-
-  const selectedValue = value ? toModelKey(value) : "";
 
   useEffect(() => {
     const trigger = inputRef.current

@@ -4,9 +4,14 @@ import type {
   Skill,
 } from "@earendil-works/pi-agent-core";
 
+import type { ResolvedAgentDefinition } from "./agent-definition";
+
 export type AgentProjectDiagnosticSeverity = "error" | "warning";
 
 export type AgentProjectDiagnosticCode =
+  | "definition_missing"
+  | "definition_import_failed"
+  | "definition_export_invalid"
   | "instructions_missing"
   | "instructions_read_failed"
   | "tool_import_failed"
@@ -23,6 +28,7 @@ export interface AgentProjectDiagnostic {
 
 export interface AgentProjectSnapshot {
   root: string;
+  definition?: ResolvedAgentDefinition;
   instructions: string;
   tools: AgentTool[];
   resources: AgentHarnessResources<Skill>;

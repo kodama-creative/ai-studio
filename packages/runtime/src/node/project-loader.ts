@@ -17,8 +17,14 @@ import {
   type AgentTool,
 } from "@earendil-works/pi-agent-core/node";
 
+import type {
+  AgentDefinition,
+  AgentReasoningDefinition,
+  ResolvedAgentDefinition,
+} from "../agent-definition";
 import type { AgentProjectDiagnostic, AgentProjectSnapshot } from "../project";
 
+const DEFINITION_FILE = "agent.ts";
 const INSTRUCTIONS_FILE = "instructions.md";
 
 export async function loadAgentProject(
@@ -27,6 +33,7 @@ export async function loadAgentProject(
   const root = resolve(agentRoot);
   const diagnostics: AgentProjectDiagnostic[] = [];
   const hash = createHash("sha256");
+  const definition = await _loadDefinition(root, diagnostics, hash);
   const instructions = await _loadInstructions(root, diagnostics, hash);
   const tools = await _loadTools(root, diagnostics, hash);
   const env = new NodeExecutionEnv({ cwd: root });
@@ -76,11 +83,103 @@ export async function loadAgentProject(
   }
   return {
     root,
+    definition,
     instructions,
     tools,
     resources: { skills },
     diagnostics,
     fingerprint: hash.digest("hex"),
+  };
+}
+
+async function _loadDefinition(
+  root: string,
+  diagnostics: AgentProjectDiagnostic[],
+  hash: ReturnType<typeof createHash>
+): Promise<ResolvedAgentDefinition | undefined> {
+  const path = join(root, DEFINITION_FILE);
+  try {
+    if ((await lstat(path)).isSymbolicLink()) {
+      throw new Error(`${DEFINITION_FILE} cannot be a symbolic link`);
+    }
+    const source = await readFile(path);
+    hash.update(path);
+    hash.update(source);
+    const version = createHash("sha256").update(source).digest("hex");
+    const module = await _importSourceModule(path, version, true);
+    const authored = module.default;
+    if (!_isAgentDefinition(authored)) {
+      diagnostics.push({
+        severity: "error",
+        code: "definition_export_invalid",
+        message: `${DEFINITION_FILE} must default-export defineAgent({ model, reasoning? })`,
+        path,
+      });
+      return undefined;
+    }
+    return _resolveDefinition(authored);
+  } catch (error) {
+    const missing =
+      error instanceof Error && "code" in error && error.code === "ENOENT";
+    diagnostics.push({
+      severity: "error",
+      code: missing ? "definition_missing" : "definition_import_failed",
+      message: missing
+        ? `Missing required ${DEFINITION_FILE}`
+        : `Unable to import ${DEFINITION_FILE}: ${_errorMessage(error)}`,
+      path,
+    });
+    return undefined;
+  }
+}
+
+function _isAgentDefinition(value: unknown): value is AgentDefinition {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<AgentDefinition> & Record<string, unknown>;
+  if (
+    Object.keys(candidate).some((key) => key !== "model" && key !== "reasoning")
+  ) {
+    return false;
+  }
+  if (typeof candidate.model !== "string") return false;
+  const separator = candidate.model.indexOf("/");
+  if (separator <= 0 || separator === candidate.model.length - 1) return false;
+  return (
+    candidate.reasoning === undefined ||
+    _isAgentReasoningDefinition(candidate.reasoning)
+  );
+}
+
+function _isAgentReasoningDefinition(
+  value: unknown
+): value is AgentReasoningDefinition {
+  return (
+    value === "provider-default" ||
+    value === "none" ||
+    value === "minimal" ||
+    value === "low" ||
+    value === "medium" ||
+    value === "high" ||
+    value === "xhigh"
+  );
+}
+
+function _resolveDefinition(
+  definition: AgentDefinition
+): ResolvedAgentDefinition {
+  const separator = definition.model.indexOf("/");
+  const reasoning =
+    definition.reasoning === "none"
+      ? "off"
+      : definition.reasoning === "provider-default"
+        ? undefined
+        : definition.reasoning;
+  return {
+    model: {
+      provider: definition.model.slice(0, separator),
+      id: definition.model.slice(separator + 1),
+    },
+    ...(reasoning ? { reasoning } : {}),
   };
 }
 
@@ -164,7 +263,7 @@ async function _loadTools(
       const source = await readFile(path);
       hash.update(source);
       const moduleVersion = createHash("sha256").update(source).digest("hex");
-      const module = await _importToolModule(path, moduleVersion);
+      const module = await _importSourceModule(path, moduleVersion);
       const tool =
         module && typeof module === "object" && "default" in module
           ? module.default
@@ -253,9 +352,10 @@ async function _findSymlinks(root: string): Promise<string[]> {
   return result;
 }
 
-async function _importToolModule(
+async function _importSourceModule(
   path: string,
-  version: string
+  version: string,
+  definition = false
 ): Promise<{ default?: unknown }> {
   const result = await Bun.build({
     entrypoints: [path],
@@ -264,6 +364,30 @@ async function _importToolModule(
     target: "bun",
     write: false,
     sourcemap: "inline",
+    plugins: definition
+      ? [
+          {
+            name: "llm-space-agent-definition",
+            setup(build) {
+              build.onResolve({ filter: /^@llm-space\/runtime$/ }, () => ({
+                path: "agent-definition",
+                namespace: "llm-space-runtime",
+              }));
+              build.onLoad(
+                {
+                  filter: /^agent-definition$/,
+                  namespace: "llm-space-runtime",
+                },
+                () => ({
+                  contents:
+                    "export const defineAgent = (definition) => definition;",
+                  loader: "js",
+                })
+              );
+            },
+          },
+        ]
+      : [],
   } as Parameters<typeof Bun.build>[0]);
   if (!result.success || !result.outputs[0]) {
     throw new Error(
@@ -276,7 +400,10 @@ async function _importToolModule(
   // `/private/var`. Canonicalize before dynamic import so Bun's module cache
   // and the path we wrote always name the same file.
   const cacheRoot = join(await realpath(tmpdir()), "llm-space-runtime-tools");
-  const cachePath = join(cacheRoot, `${version}.mjs`);
+  const cachePath = join(
+    cacheRoot,
+    `${definition ? "definition" : "source"}-${version}.mjs`
+  );
   await mkdir(cacheRoot, { recursive: true });
   try {
     await writeFile(cachePath, source, { encoding: "utf8", flag: "wx" });

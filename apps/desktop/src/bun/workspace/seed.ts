@@ -20,6 +20,16 @@ export function seedWorkspace(): void {
     recursive: true,
   });
   writeFileSync(
+    path.join(agentRoot, "agent.ts"),
+    `import { defineAgent } from "@llm-space/runtime";
+
+export default defineAgent({
+  model: "openai/gpt-5.3-codex",
+  reasoning: "high",
+});
+`
+  );
+  writeFileSync(
     path.join(agentRoot, "instructions.md"),
     "You are a concise weather assistant. Use get_weather before answering questions about a city. The data is intentionally mocked for this example.\n"
   );

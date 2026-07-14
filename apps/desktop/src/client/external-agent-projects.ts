@@ -68,7 +68,7 @@ export const externalAgentProjects = {
       threadId,
     });
   },
-  syncThreadPrompt(
+  syncThreadFromAgent(
     projectId: string,
     threadId: string
   ): Promise<ExternalAgentProjectThreadRecord> {

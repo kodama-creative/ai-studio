@@ -30,6 +30,11 @@ async function _fixture() {
     "utf8"
   );
   await writeFile(
+    path.join(project, "agent", "agent.ts"),
+    `export default { model: "openai/gpt-5.3-codex", reasoning: "high" };`,
+    "utf8"
+  );
+  await writeFile(
     path.join(project, "agent", "instructions.md"),
     "Use echo for every request.\n",
     "utf8"
@@ -70,6 +75,17 @@ describe("ExternalAgentProjectManager", () => {
 
     const threadId = opened.threads[0].id;
     const record = await manager.readThread(opened.id, threadId);
+    expect(record.thread.model).toEqual({
+      provider: "openai",
+      id: "gpt-5.3-codex",
+      params: { reasoning: "high" },
+    });
+    expect(record.thread.agentRuntime).toMatchObject({
+      projectId: opened.id,
+      snapshot: opened.snapshot,
+      definitionFingerprint: opened.definitionFingerprint,
+      modelSource: "agent",
+    });
     expect(record.thread.context?.systemPrompt).toContain("Use echo");
     expect(record.thread.context?.tools?.[0]?.type).toBe("project");
 
@@ -141,17 +157,28 @@ describe("ExternalAgentProjectManager", () => {
       "Updated project prompt.\n",
       "utf8"
     );
+    await writeFile(
+      path.join(project, "agent", "agent.ts"),
+      `export default { model: "openai/gpt-5.3", reasoning: "medium" };`,
+      "utf8"
+    );
     const refreshed = await manager.refresh(opened.id);
     expect(refreshed.promptFingerprint).not.toBe(before.promptFingerprint);
     const outOfSync = await manager.readThread(opened.id, threadId);
     expect(outOfSync.syncedPrompt).toBe(before.syncedPrompt);
 
-    const synced = await manager.syncThreadPrompt(opened.id, threadId);
+    const synced = await manager.syncThreadFromAgent(opened.id, threadId);
     expect(synced.promptFingerprint).toBe(refreshed.promptFingerprint);
     expect(synced.thread.context?.systemPrompt).toBe(
       "Updated project prompt.\n"
     );
     expect(synced.syncedPrompt).toBe("Updated project prompt.\n");
+    expect(synced.thread.model).toEqual({
+      provider: "openai",
+      id: "gpt-5.3",
+      params: { reasoning: "medium" },
+    });
+    expect(synced.definitionFingerprint).toBe(refreshed.definitionFingerprint);
   });
 
   test("keeps a trusted invalid project open for source diagnostics", async () => {
@@ -197,6 +224,11 @@ describe("ExternalAgentProjectManager", () => {
     const { home, manager, workspace } = await _fixture();
     const project = path.join(workspace, "nested", "weather-agent");
     await mkdir(path.join(project, "agent"), { recursive: true });
+    await writeFile(
+      path.join(project, "agent", "agent.ts"),
+      `export default { model: "openai/gpt-5.3-codex", reasoning: "high" };`,
+      "utf8"
+    );
     await writeFile(
       path.join(project, "agent", "instructions.md"),
       "Be concise.\n",

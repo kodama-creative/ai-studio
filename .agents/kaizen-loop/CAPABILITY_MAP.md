@@ -1,7 +1,7 @@
 # LLM Space Capability Map
 
 - Last updated: 2026-07-14
-- Map status: refreshed after One Agent Model And Source Workspace V1. Workspace and explicitly opened Agents now share one Build + project Threads product; workspace is only the default discovery directory, manifests are optional, and Agent source editing supports safe multi-file CodeMirror tabs. Public or dynamically loaded plugins remain absent.
+- Map status: refreshed after Agent Definition And Runtime V1. Workspace and explicitly opened Agents share one Build + Project Threads product, required `agent.ts` model/reasoning defaults, and the same Pi Agent-backed runtime execution path. Public or dynamically loaded plugins remain absent.
 - Evidence rule: entries marked `confirmed` cite current rendered-product or current-code evidence. Entries marked `stale` rely on previous logs or code paths not fully re-inspected in this loop. Entries marked `unknown` need a future product-surface check before they can drive a recommendation.
 
 ## First-Run Model Setup
@@ -150,18 +150,19 @@
 
 ## Agent Definition And Runtime
 
-- Status: shipped V1
+- Status: shipped Agent Definition And Runtime V1
 - Freshness: confirmed
 - Last checked: 2026-07-14
 - Evidence:
-  - `packages/runtime` exposes a host-agnostic `AgentRuntime`/`AgentRuntimeSession` over Pi `AgentHarness`, plus a Node/Bun `LocalAgentRuntime` over Pi `JsonlSessionRepo` and `NodeExecutionEnv`.
-  - Runtime discovery loads `instructions.md`, executable `tools/*.{ts,js}`, and Pi `skills/**/SKILL.md`, blocks invalid snapshots with structured diagnostics, rejects source-slot symlinks, and reloads a frozen snapshot before every new turn.
-  - Deterministic runtime tests execute project tools, exercise host-injected tools, reopen persisted sessions, reload changed tool modules in the same process, and preserve invalid-project repair coverage.
+  - `packages/runtime` exposes exact `defineAgent({ model, reasoning? })` authored types, required trusted `agent.ts` loading, normalized definition snapshots, immutable runtime construction, and a Pi `Agent`-backed `RuntimeSession` with no public Pi `Session` argument.
+  - Runtime tests cover definition loading/hot reload/symlink rejection, default and override model resolution, unavailable defaults, manual deferred continuation, auto-once termination, and a complete Pi ReAct project-tool run.
+  - Desktop Agent Project Threads route through the Bun-owned runtime session over typed RPC. Thread remains the single durable transcript while runtime owns model/tool/continue/ReAct execution; each run records effective model/reasoning and Agent-vs-override provenance.
+  - Current CEF audit `audits/2026-07-14-155043-agent-definition-runtime/` shows required `agent.ts` in Build, raw authored unavailable-model display without fallback, `From Agent`/`Thread override`, watched drift, field-specific sync confirmation, one-step undo, and no document overflow or relevant console errors at 1280×800 and 900×700.
   - The prior Desktop Builder/Target experiment is preserved as historical evidence in `audits/2026-07-13-002622-agent-builder-v1/`, but the current Desktop intentionally no longer exposes that second Agent product model.
   - Current CEF audit `audits/2026-07-14-005810-agent-navigation-editor/` shows one Agent Build surface for both default-directory and explicitly opened projects, with source editing and desktop-owned nested Threads behind the same typed runtime/RPC boundary.
-- Boundary: a filesystem-authored Agent can define instructions, TypeScript/JavaScript tools, and skills through the portable runtime contract. Desktop consumes the project snapshot through one Build + nested Threads workflow; the lower-level runtime session API remains available to future non-desktop hosts without requiring the retired Desktop Builder/Target UI.
-- Explicit non-goals: no `agent/agent.ts`, database/cloud persistence, crash-safe step replay, distributed workflow durability, channels, schedules, sandbox provisioning, subagents, public plugin SDK, permission approval UI, dynamic third-party loading, or separate Desktop Builder/Target Agent model in V1.
-- Visible gaps: remote live-provider completion remains supplementary rather than proven in the latest isolated audit; trusted project tools are not sandboxed; runtime persistence remains local JSONL for hosts that use `LocalAgentRuntime`; raw Pi event timing and every provider/model detail are not yet preserved as a durable debugger trace.
+- Boundary: a filesystem-authored Agent must define static model/reasoning defaults in `agent.ts`, plus instructions, TypeScript/JavaScript tools, and skills. Runtime snapshots are immutable; sessions may persistently override model/reasoning, and Desktop Project Threads execute/debug that same runtime while retaining editable messages and run history.
+- Explicit non-goals: dynamic model resolvers, automatic compaction/session budgets, database/cloud persistence, crash-safe tool replay, distributed workflow durability, channels, schedules, sandbox provisioning, subagents, public plugin SDK, dynamic third-party loading, or separate Desktop Builder/Target Agent model.
+- Visible gaps: isolated CEF could not prove a live external provider completion; deterministic Bun integration covers the runtime branch instead. Trusted project tools remain unsandboxed. Pi has no native durable pause-before-tool state, so manual mode uses runtime-internal deferred results. Full Pi Harness compaction/tree navigation and automatic session budgets remain future capabilities.
 
 ## Agent Project Activation
 

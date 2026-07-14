@@ -1,120 +1,52 @@
 import { resolve } from "node:path";
 
-import {
-  JsonlSessionRepo,
-  NodeExecutionEnv,
-  type AgentTool,
-  type JsonlSessionMetadata,
-} from "@earendil-works/pi-agent-core/node";
 import type { Models } from "@earendil-works/pi-ai";
 
-import { AgentRuntime, type AgentModelSelector } from "../agent-runtime";
+import {
+  AgentRuntime,
+  type CreateAgentRuntimeSessionOptions,
+} from "../agent-runtime";
 import type { AgentRuntimeSession } from "../agent-runtime-session";
 
 import { loadAgentProject } from "./project-loader";
 
 export interface LocalAgentRuntimeOptions {
   agentRoot: string;
-  sessionsRoot: string;
   models: Models;
 }
 
 export class LocalAgentRuntime {
   readonly agentRoot: string;
-  readonly sessionsRoot: string;
 
-  private readonly _env: NodeExecutionEnv;
-  private readonly _repo: JsonlSessionRepo;
   private readonly _runtime: AgentRuntime;
 
-  constructor(options: LocalAgentRuntimeOptions) {
-    this.agentRoot = resolve(options.agentRoot);
-    this.sessionsRoot = resolve(options.sessionsRoot);
-    this._env = new NodeExecutionEnv({ cwd: this.agentRoot });
-    this._repo = new JsonlSessionRepo({
-      fs: this._env,
-      sessionsRoot: this.sessionsRoot,
-    });
-    this._runtime = new AgentRuntime({
-      env: this._env,
+  static async create(
+    options: LocalAgentRuntimeOptions
+  ): Promise<LocalAgentRuntime> {
+    const agentRoot = resolve(options.agentRoot);
+    const runtime = await AgentRuntime.create({
       models: options.models,
+      loadProject: () => loadAgentProject(agentRoot),
     });
+    return new LocalAgentRuntime(agentRoot, runtime);
   }
 
-  listSessions(): Promise<JsonlSessionMetadata[]> {
-    return this._repo.list({ cwd: this.agentRoot });
+  private constructor(agentRoot: string, runtime: AgentRuntime) {
+    this.agentRoot = agentRoot;
+    this._runtime = runtime;
   }
 
-  async createSession(options: {
-    model: AgentModelSelector;
-    id?: string;
-    extraTools?: AgentTool[];
-    instructionsPrefix?: string;
-    allowInvalidProject?: boolean;
-  }): Promise<AgentRuntimeSession> {
-    const session = await this._repo.create({
-      id: options.id,
-      cwd: this.agentRoot,
-    });
-    return this._runtime.createSession({
-      session,
-      model: options.model,
-      loadProject: () => loadAgentProject(this.agentRoot),
-      extraTools: options.extraTools,
-      instructionsPrefix: options.instructionsPrefix,
-      allowInvalidProject: options.allowInvalidProject,
-    });
+  get project() {
+    return this._runtime.project;
   }
 
-  async openSession(options: {
-    metadata: JsonlSessionMetadata;
-    model: AgentModelSelector;
-    extraTools?: AgentTool[];
-    instructionsPrefix?: string;
-    allowInvalidProject?: boolean;
-  }): Promise<AgentRuntimeSession> {
-    const session = await this._repo.open(options.metadata);
-    return this._runtime.createSession({
-      session,
-      model: options.model,
-      loadProject: () => loadAgentProject(this.agentRoot),
-      extraTools: options.extraTools,
-      instructionsPrefix: options.instructionsPrefix,
-      allowInvalidProject: options.allowInvalidProject,
-    });
+  get defaultModel() {
+    return this._runtime.defaultModel;
   }
 
-  deleteSession(metadata: JsonlSessionMetadata): Promise<void> {
-    return this._repo.delete(metadata);
-  }
-
-  async forkSession(options: {
-    metadata: JsonlSessionMetadata;
-    model: AgentModelSelector;
-    id?: string;
-    entryId?: string;
-    position?: "before" | "at";
-    extraTools?: AgentTool[];
-    instructionsPrefix?: string;
-    allowInvalidProject?: boolean;
-  }): Promise<AgentRuntimeSession> {
-    const session = await this._repo.fork(options.metadata, {
-      id: options.id,
-      entryId: options.entryId,
-      position: options.position,
-      cwd: this.agentRoot,
-    });
-    return this._runtime.createSession({
-      session,
-      model: options.model,
-      loadProject: () => loadAgentProject(this.agentRoot),
-      extraTools: options.extraTools,
-      instructionsPrefix: options.instructionsPrefix,
-      allowInvalidProject: options.allowInvalidProject,
-    });
-  }
-
-  cleanup(): Promise<void> {
-    return this._env.cleanup();
+  createSession(
+    options: CreateAgentRuntimeSessionOptions = {}
+  ): Promise<AgentRuntimeSession> {
+    return this._runtime.createSession(options);
   }
 }
