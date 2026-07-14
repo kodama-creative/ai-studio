@@ -64,6 +64,7 @@ export default defineConfig([
       "@typescript-eslint/no-misused-promises": "off",
       "@typescript-eslint/no-unused-vars": "warn",
       "@typescript-eslint/prefer-nullish-coalescing": "off",
+      "@typescript-eslint/require-await": "off",
       "import-x/order": [
         "error",
         {
