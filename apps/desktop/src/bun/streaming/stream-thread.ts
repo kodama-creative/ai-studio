@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
 import type { BuiltinTool, CustomModel, McpTool, Tool } from "@llm-space/core";
 import { streamAgent } from "@llm-space/core/server";
@@ -127,6 +129,28 @@ export class StreamThreadController {
         },
       }
     );
+    const definition = session.project.definition;
+    if (!definition)
+      throw new Error("Agent runtime definition is unavailable.");
+    const matchesDefinition =
+      session.model.provider === definition.model.provider &&
+      session.model.id === definition.model.id &&
+      session.reasoning === definition.reasoning;
+    send({
+      streamId: payload.streamId,
+      type: "runtime",
+      runtime: {
+        projectId: payload.runtime.projectId,
+        snapshot: session.project.fingerprint,
+        definitionFingerprint: createHash("sha256")
+          .update(JSON.stringify(definition))
+          .digest("hex"),
+        modelSource:
+          payload.runtime.modelSource === "threadOverride" || !matchesDefinition
+            ? "threadOverride"
+            : "agent",
+      },
+    });
     this._activeStreams.set(payload.streamId, {
       abort() {
         onAbort();

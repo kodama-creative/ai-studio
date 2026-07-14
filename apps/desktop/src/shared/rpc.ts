@@ -7,6 +7,7 @@ import type {
   ModelConfig,
   ModelProviderGroup,
   Thread,
+  ThreadAgentRuntimeProvenance,
 } from "@llm-space/core";
 import type { RuntimeExecutionMode } from "@llm-space/runtime";
 import type { RPCSchema } from "electrobun";
@@ -50,12 +51,18 @@ export interface StreamThreadRequestPayload {
     projectId: string;
     threadId: string;
     executionMode: RuntimeExecutionMode;
+    modelSource: ThreadAgentRuntimeProvenance["modelSource"];
   };
 }
 
 /** A bun→webview chunk of a streaming agent run, keyed by `streamId`. */
 export type StreamThreadResponsePayload =
   | { streamId: string; type: "event"; event: AgentEvent }
+  | {
+      streamId: string;
+      type: "runtime";
+      runtime: ThreadAgentRuntimeProvenance;
+    }
   | { streamId: string; type: "done" }
   | { streamId: string; type: "error"; message: string };
 

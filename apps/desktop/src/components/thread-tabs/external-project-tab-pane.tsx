@@ -1,4 +1,4 @@
-import type { Thread } from "@llm-space/core";
+import type { Thread, ThreadAgentRuntimeProvenance } from "@llm-space/core";
 import type { ResolvedAgentDefinition } from "@llm-space/runtime";
 import {
   AlertTriangleIcon,
@@ -97,11 +97,7 @@ function _ProjectThreadPane({
   const writeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pending = useRef<ExternalAgentProjectThreadRecord | null>(null);
   const recordRef = useRef(record);
-  const activeRunProject = useRef<{
-    snapshot: string;
-    definitionFingerprint: string;
-    definition: ResolvedAgentDefinition | null;
-  } | null>(null);
+  const activeRunProvenance = useRef<ThreadAgentRuntimeProvenance | null>(null);
   recordRef.current = record;
   const runtimeTransport = useMemo(
     () =>
@@ -110,12 +106,18 @@ function _ProjectThreadPane({
           type: "agentProject",
           projectId,
           threadId,
+          modelSource:
+            recordRef.current?.thread.agentRuntime?.modelSource ??
+            "threadOverride",
           executionMode: getReactLoop()
             ? "react"
             : getAutoRunTools()
               ? "autoOnce"
               : "manual",
         }),
+        onRuntimeResolved: (runtime) => {
+          activeRunProvenance.current = runtime;
+        },
       }),
     [projectId, threadId]
   );
@@ -238,13 +240,32 @@ function _ProjectThreadPane({
     (thread: Thread) => {
       const current = recordRef.current;
       if (!current) return;
-      const next = { ...current, thread };
+      const modelChanged = !_sameRuntimeModel(
+        current.thread.model,
+        thread.model
+      );
+      const nextThread = modelChanged
+        ? {
+            ...thread,
+            agentRuntime: {
+              projectId,
+              snapshot:
+                thread.agentRuntime?.snapshot ?? project?.snapshot ?? "",
+              definitionFingerprint:
+                thread.agentRuntime?.definitionFingerprint ??
+                project?.definitionFingerprint ??
+                "",
+              modelSource: "threadOverride" as const,
+            },
+          }
+        : thread;
+      const next = { ...current, thread: nextThread };
       setRecord(next);
       pending.current = next;
       if (writeTimer.current) clearTimeout(writeTimer.current);
       writeTimer.current = setTimeout(() => void flush(), 500);
     },
-    [flush]
+    [flush, project, projectId]
   );
 
   const handleRename = useCallback(
@@ -337,38 +358,47 @@ function _ProjectThreadPane({
   );
   const prepareRunSnapshot = useCallback(
     (thread: Thread): Thread => {
-      const frozen = activeRunProject.current ?? {
+      const frozen = activeRunProvenance.current ?? {
+        projectId,
         snapshot: project?.snapshot ?? "",
         definitionFingerprint: project?.definitionFingerprint ?? "",
-        definition: project?.definition ?? null,
+        modelSource:
+          recordRef.current?.thread.agentRuntime?.modelSource ??
+          (_matchesDefinition(thread, project?.definition)
+            ? "agent"
+            : "threadOverride"),
       };
       return {
         ...thread,
         agentRuntime: {
-          projectId,
+          projectId: frozen.projectId,
           snapshot: frozen.snapshot,
           definitionFingerprint: frozen.definitionFingerprint,
-          modelSource: _matchesDefinition(thread, frozen.definition)
-            ? "agent"
-            : "threadOverride",
+          modelSource: frozen.modelSource,
         },
       };
     },
     [project, projectId]
   );
   const handleStreamingStart = useCallback(() => {
-    activeRunProject.current = project
+    activeRunProvenance.current = project
       ? {
+          projectId,
           snapshot: project.snapshot,
           definitionFingerprint: project.definitionFingerprint,
-          definition: project.definition,
+          modelSource:
+            recordRef.current?.thread.agentRuntime?.modelSource ??
+            (recordRef.current &&
+            _matchesDefinition(recordRef.current.thread, project.definition)
+              ? "agent"
+              : "threadOverride"),
         }
       : null;
     setRunning(true);
-  }, [project]);
+  }, [project, projectId]);
   const handleStreamingEnd = useCallback(() => {
     setRunning(false);
-    activeRunProject.current = null;
+    activeRunProvenance.current = null;
     queueMicrotask(() => void refreshProject(true));
   }, [refreshProject]);
 
@@ -429,11 +459,17 @@ function _ProjectThreadPane({
   const promptLocallyChanged =
     (record.thread.context?.systemPrompt ?? "") !== record.syncedPrompt;
   const currentReasoning = record.thread.model?.params?.reasoning;
-  const modelLocallyChanged =
+  const modelValueChanged =
     record.thread.model?.provider !== record.syncedDefinition.model.provider ||
     record.thread.model?.id !== record.syncedDefinition.model.id;
-  const reasoningLocallyChanged =
+  const reasoningValueChanged =
     currentReasoning !== record.syncedDefinition.reasoning;
+  const provenanceOnlyModelOverride =
+    record.thread.agentRuntime?.modelSource === "threadOverride" &&
+    !modelValueChanged &&
+    !reasoningValueChanged;
+  const modelLocallyChanged = modelValueChanged || provenanceOnlyModelOverride;
+  const reasoningLocallyChanged = reasoningValueChanged;
   const definitionLocallyChanged =
     modelLocallyChanged || reasoningLocallyChanged;
   const locallyChanged = promptLocallyChanged || definitionLocallyChanged;
@@ -1081,6 +1117,17 @@ function _matchesDefinition(
     thread.model?.provider === definition.model.provider &&
     thread.model.id === definition.model.id &&
     thread.model.params?.reasoning === definition.reasoning
+  );
+}
+
+function _sameRuntimeModel(
+  left: Thread["model"],
+  right: Thread["model"]
+): boolean {
+  return (
+    left?.provider === right?.provider &&
+    left?.id === right?.id &&
+    left?.params?.reasoning === right?.params?.reasoning
   );
 }
 

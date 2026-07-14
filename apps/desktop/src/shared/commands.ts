@@ -99,8 +99,8 @@ export interface DeleteExternalAgentProjectThreadCommand extends GenericCommand<
   { projectId: string; threadId: string }
 > {}
 
-/** Replace one Thread's local prompt with the latest watched project prompt. */
-export interface SyncExternalAgentProjectPromptCommand extends GenericCommand<
+/** Replace one Thread's local definition fields with the latest Agent values. */
+export interface SyncExternalAgentProjectThreadFromAgentCommand extends GenericCommand<
   "syncExternalAgentProjectThreadFromAgent",
   { projectId: string; threadId: string }
 > {}
@@ -349,7 +349,7 @@ export type Command =
   | RenameExternalAgentProjectThreadCommand
   | DuplicateExternalAgentProjectThreadCommand
   | DeleteExternalAgentProjectThreadCommand
-  | SyncExternalAgentProjectPromptCommand
+  | SyncExternalAgentProjectThreadFromAgentCommand
   | EnableExternalAgentProjectToolsCommand
   | SaveExternalAgentProjectSourceCommand
   | NewFolderCommand

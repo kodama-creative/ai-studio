@@ -220,7 +220,7 @@ describe("ExternalAgentProjectManager", () => {
     expect(missing.threads.map((thread) => thread.id)).toContain(threadId);
   });
 
-  test("migrates pre-definition Threads without replacing their model override", async () => {
+  test("migrates matching legacy model values as an explicit Thread override", async () => {
     const { home, manager, project } = await _fixture();
     const opened = await manager.trustAndOpen(project);
     if (!opened.definition) throw new Error("Missing Agent definition");
@@ -239,14 +239,19 @@ describe("ExternalAgentProjectManager", () => {
     delete legacy.definitionFingerprint;
     delete legacy.syncedDefinition;
     delete legacy.thread.agentRuntime;
-    legacy.thread.model = { provider: "openai", id: "experimental-model" };
+    legacy.thread.model = {
+      provider: "openai",
+      id: "gpt-5.3-codex",
+      params: { reasoning: "high" },
+    };
     await writeFile(threadFile, JSON.stringify(legacy), "utf8");
 
     const migrated = await manager.readThread(opened.id, threadId);
 
     expect(migrated.thread.model).toEqual({
       provider: "openai",
-      id: "experimental-model",
+      id: "gpt-5.3-codex",
+      params: { reasoning: "high" },
     });
     expect(migrated.syncedDefinition).toEqual(opened.definition);
     expect(migrated.thread.agentRuntime?.modelSource).toBe("threadOverride");

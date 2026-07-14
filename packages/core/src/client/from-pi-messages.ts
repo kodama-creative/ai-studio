@@ -44,6 +44,9 @@ export function convertFromPiMessages(
 
     if (message.role === "assistant") {
       const previous = existing[visibleIndex];
+      const textContent = message.content
+        .filter((content) => content.type === "text")
+        .map((content) => ({ type: "text" as const, text: content.text }));
       const toolCalls = message.content
         .filter((content) => content.type === "toolCall")
         .map((content): ToolCall => ({
@@ -56,9 +59,8 @@ export function convertFromPiMessages(
       const assistant: AssistantMessage = {
         id: previous?.role === "assistant" ? previous.id : uuid(),
         role: "assistant",
-        content: message.content
-          .filter((content) => content.type === "text")
-          .map((content) => ({ type: "text", text: content.text })),
+        content:
+          textContent.length > 0 ? textContent : [{ type: "text", text: "" }],
         ...(message.content.some((content) => content.type === "thinking")
           ? {
               thinking: message.content
@@ -115,13 +117,19 @@ function _arguments(value: unknown): Record<string, unknown> {
 
 function _modelUsage(usage: Usage): { usage: ModelUsage } | undefined {
   const reasoning = _optionalNumber(usage.reasoning);
+  const input = _number(usage.input);
+  const output = _number(usage.output);
+  const cacheRead = _number(usage.cacheRead);
+  const cacheWrite = _number(usage.cacheWrite);
   const normalized: ModelUsage = {
-    input: _number(usage.input),
-    output: _number(usage.output),
-    cacheRead: _number(usage.cacheRead),
-    cacheWrite: _number(usage.cacheWrite),
+    input,
+    output,
+    cacheRead,
+    cacheWrite,
     ...(reasoning === undefined ? {} : { reasoning }),
-    totalTokens: _number(usage.totalTokens),
+    totalTokens: _number(
+      usage.totalTokens || input + output + cacheRead + cacheWrite
+    ),
     cost: {
       input: _number(usage.cost.input),
       output: _number(usage.cost.output),
@@ -130,7 +138,8 @@ function _modelUsage(usage: Usage): { usage: ModelUsage } | undefined {
       total: _number(usage.cost.total),
     },
   };
-  return normalized.totalTokens > 0 || normalized.cost.total > 0
+  return normalized.totalTokens > 0 ||
+    Object.values(normalized.cost).some(Boolean)
     ? { usage: normalized }
     : undefined;
 }

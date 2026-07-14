@@ -1,4 +1,9 @@
-import { uuid, type AgentEvent, type AgentTransport } from "@llm-space/core";
+import {
+  uuid,
+  type AgentEvent,
+  type AgentTransport,
+  type ThreadAgentRuntimeProvenance,
+} from "@llm-space/core";
 
 import { electrobun } from "@/lib/electrobun";
 import type {
@@ -16,6 +21,7 @@ const ABORT_ERROR = () =>
  */
 export function createRpcTransport(options?: {
   runtime?: () => StreamThreadRequestPayload["runtime"];
+  onRuntimeResolved?: (runtime: ThreadAgentRuntimeProvenance) => void;
 }): AgentTransport {
   return async function* rpcTransport(request, { signal }) {
     const rpc = electrobun.rpc;
@@ -40,6 +46,8 @@ export function createRpcTransport(options?: {
       }
       if (message.type === "event") {
         events.push(message.event);
+      } else if (message.type === "runtime") {
+        options?.onRuntimeResolved?.(message.runtime);
       } else if (message.type === "done") {
         finished = true;
       } else {

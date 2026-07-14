@@ -660,6 +660,9 @@ export class ExternalAgentProjectManager {
         : current?.definition
           ? _definitionFingerprint(current.definition)
           : _definitionFingerprint(syncedDefinition);
+    const legacyDefinitionState =
+      typeof parsed.definitionFingerprint !== "string" ||
+      !parsed.syncedDefinition;
     const migrated = {
       thread: {
         ...thread,
@@ -670,12 +673,11 @@ export class ExternalAgentProjectManager {
                 projectId,
                 snapshot: current.fingerprint,
                 definitionFingerprint,
-                modelSource: _modelMatchesDefinition(
-                  thread.model,
-                  syncedDefinition
-                )
-                  ? ("agent" as const)
-                  : ("threadOverride" as const),
+                modelSource: legacyDefinitionState
+                  ? ("threadOverride" as const)
+                  : _modelMatchesDefinition(thread.model, syncedDefinition)
+                    ? ("agent" as const)
+                    : ("threadOverride" as const),
               }
             : undefined),
       },

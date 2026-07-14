@@ -11,6 +11,7 @@ import {
   type Context,
   type Model,
 } from "@earendil-works/pi-ai";
+import type { ThreadAgentRuntimeProvenance } from "@llm-space/core";
 import { afterEach, describe, expect, test } from "bun:test";
 
 import { ExternalAgentProjectManager } from "../external-projects";
@@ -68,6 +69,7 @@ describe("StreamThreadController Agent Project runtime", () => {
     const opened = await manager.trustAndOpen(project);
     const threadId = opened.threads[0].id;
     const events: string[] = [];
+    let runtimeProvenance: ThreadAgentRuntimeProvenance | undefined;
     const controller = new StreamThreadController(
       {
         getAvailableModels: () => Promise.resolve(models),
@@ -88,6 +90,7 @@ describe("StreamThreadController Agent Project runtime", () => {
           projectId: opened.id,
           threadId,
           executionMode: "react",
+          modelSource: "agent",
         },
         request: {
           model: { provider: "fake", id: "fake-model" },
@@ -106,12 +109,22 @@ describe("StreamThreadController Agent Project runtime", () => {
           },
         },
       },
-      (message) =>
+      (message) => {
+        if (message.type === "runtime") {
+          runtimeProvenance = message.runtime;
+        }
         events.push(
           message.type === "event" ? message.event.type : message.type
-        )
+        );
+      }
     );
 
+    expect(runtimeProvenance).toEqual({
+      projectId: opened.id,
+      snapshot: opened.snapshot,
+      definitionFingerprint: opened.definitionFingerprint,
+      modelSource: "agent",
+    });
     expect(events).toContain("tool_execution_end");
     expect(events.at(-1)).toBe("done");
     const persisted = await manager.readThread(opened.id, threadId);
