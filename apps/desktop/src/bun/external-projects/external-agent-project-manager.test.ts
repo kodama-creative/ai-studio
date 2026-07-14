@@ -1,4 +1,4 @@
-import { mkdir, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -238,6 +238,7 @@ describe("ExternalAgentProjectManager", () => {
     > & { thread: Record<string, unknown> };
     delete legacy.definitionFingerprint;
     delete legacy.syncedDefinition;
+    delete legacy.modelSource;
     delete legacy.thread.agentRuntime;
     legacy.thread.model = {
       provider: "openai",
@@ -261,6 +262,46 @@ describe("ExternalAgentProjectManager", () => {
       definitionFingerprint: opened.definitionFingerprint,
       syncedDefinition: opened.definition,
     });
+  });
+
+  test("retains a legacy override when the project recovers after migration", async () => {
+    const { home, manager, project } = await _fixture();
+    const opened = await manager.trustAndOpen(project);
+    const threadId = opened.threads[0].id;
+    const threadFile = path.join(
+      home,
+      "projects",
+      opened.id,
+      "threads",
+      `${threadId}.json`
+    );
+    const legacy = (await Bun.file(threadFile).json()) as Record<
+      string,
+      unknown
+    > & { thread: Record<string, unknown> };
+    delete legacy.definitionFingerprint;
+    delete legacy.syncedDefinition;
+    delete legacy.modelSource;
+    delete legacy.thread.agentRuntime;
+    await writeFile(threadFile, JSON.stringify(legacy), "utf8");
+    await manager.shutdown();
+    managers.splice(managers.indexOf(manager), 1);
+
+    const parked = `${project}-parked`;
+    await rename(project, parked);
+    const restarted = new ExternalAgentProjectManager({
+      homePath: home,
+      workspaceRoot: path.join(home, "workspace"),
+    });
+    managers.push(restarted);
+    const missing = await restarted.readThread(opened.id, threadId);
+    expect(missing.thread.agentRuntime).toBeUndefined();
+
+    await rename(parked, project);
+    await restarted.refresh(opened.id);
+    const recovered = await restarted.readThread(opened.id, threadId);
+
+    expect(recovered.thread.agentRuntime?.modelSource).toBe("threadOverride");
   });
 
   test("discovers manifestless workspace Agents without registering them", async () => {

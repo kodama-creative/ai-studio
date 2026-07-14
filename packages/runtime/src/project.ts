@@ -20,27 +20,27 @@ export type AgentProjectDiagnosticCode =
   | "skill_invalid";
 
 export interface AgentProjectDiagnostic {
-  severity: AgentProjectDiagnosticSeverity;
-  code: AgentProjectDiagnosticCode;
-  message: string;
-  path: string;
+  readonly severity: AgentProjectDiagnosticSeverity;
+  readonly code: AgentProjectDiagnosticCode;
+  readonly message: string;
+  readonly path: string;
 }
 
 export interface AgentProjectSnapshot {
-  root: string;
-  definition?: ResolvedAgentDefinition;
-  instructions: string;
-  tools: AgentTool[];
-  resources: AgentHarnessResources<Skill>;
-  diagnostics: AgentProjectDiagnostic[];
+  readonly root: string;
+  readonly definition?: ResolvedAgentDefinition;
+  readonly instructions: string;
+  readonly tools: readonly AgentTool[];
+  readonly resources: Readonly<AgentHarnessResources<Skill>>;
+  readonly diagnostics: readonly AgentProjectDiagnostic[];
   /** Changes whenever the discovered source bytes or tool module mtimes change. */
-  fingerprint: string;
+  readonly fingerprint: string;
 }
 
 export class AgentProjectValidationError extends Error {
-  readonly diagnostics: AgentProjectDiagnostic[];
+  readonly diagnostics: readonly AgentProjectDiagnostic[];
 
-  constructor(diagnostics: AgentProjectDiagnostic[]) {
+  constructor(diagnostics: readonly AgentProjectDiagnostic[]) {
     super(
       diagnostics
         .filter((diagnostic) => diagnostic.severity === "error")

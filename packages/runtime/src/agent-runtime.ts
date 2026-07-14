@@ -13,6 +13,7 @@ import {
   type AgentRuntimeSessionPersistence,
   type RuntimeExecutionMode,
 } from "./agent-runtime-session";
+import { createImmutableAgentProjectSnapshot } from "./immutable-agent-project-snapshot";
 import { assertValidAgentProject, type AgentProjectSnapshot } from "./project";
 
 export interface AgentRuntimeOptions {
@@ -55,7 +56,9 @@ export class AgentRuntime {
 
   constructor(options: AgentRuntimeOptions) {
     this._models = options.models;
-    this._project = assertValidAgentProject(options.project);
+    this._project = createImmutableAgentProjectSnapshot(
+      assertValidAgentProject(options.project)
+    );
     if (!this._project.definition) {
       throw new Error("Agent project has no resolved definition");
     }

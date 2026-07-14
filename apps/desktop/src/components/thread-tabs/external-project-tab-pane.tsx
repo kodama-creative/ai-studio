@@ -1,5 +1,5 @@
 import type { Thread, ThreadAgentRuntimeProvenance } from "@llm-space/core";
-import type { ResolvedAgentDefinition } from "@llm-space/runtime";
+import { agentModelMatchesDefinition } from "@llm-space/runtime";
 import {
   AlertTriangleIcon,
   BotIcon,
@@ -364,7 +364,11 @@ function _ProjectThreadPane({
         definitionFingerprint: project?.definitionFingerprint ?? "",
         modelSource:
           recordRef.current?.thread.agentRuntime?.modelSource ??
-          (_matchesDefinition(thread, project?.definition)
+          (agentModelMatchesDefinition({
+            model: thread.model,
+            reasoning: thread.model?.params?.reasoning,
+            definition: project?.definition,
+          })
             ? "agent"
             : "threadOverride"),
       };
@@ -389,7 +393,11 @@ function _ProjectThreadPane({
           modelSource:
             recordRef.current?.thread.agentRuntime?.modelSource ??
             (recordRef.current &&
-            _matchesDefinition(recordRef.current.thread, project.definition)
+            agentModelMatchesDefinition({
+              model: recordRef.current.thread.model,
+              reasoning: recordRef.current.thread.model?.params?.reasoning,
+              definition: project.definition,
+            })
               ? "agent"
               : "threadOverride"),
         }
@@ -1108,18 +1116,6 @@ function _sourceLanguage(path: string): CodeEditorLanguage {
   if (path.endsWith(".ts")) return "typescript";
   if (path.endsWith(".js")) return "javascript";
   return "markdown";
-}
-
-function _matchesDefinition(
-  thread: Thread,
-  definition: ResolvedAgentDefinition | null | undefined
-): boolean {
-  return Boolean(
-    definition &&
-    thread.model?.provider === definition.model.provider &&
-    thread.model.id === definition.model.id &&
-    thread.model.params?.reasoning === definition.reasoning
-  );
 }
 
 function _sameRuntimeModel(

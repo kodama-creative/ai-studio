@@ -1,7 +1,17 @@
 import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
-import type { BuiltinTool, CustomModel, McpTool, Tool } from "@llm-space/core";
+import {
+  isDangerousBashCommand,
+  type BuiltinTool,
+  type CustomModel,
+  type McpTool,
+  type Tool,
+} from "@llm-space/core";
 import { streamAgent } from "@llm-space/core/server";
-import { createDeferredAgentTool } from "@llm-space/runtime";
+import {
+  agentModelMatchesDefinition,
+  createDeferredAgentTool,
+  DEFERRED_TOOL_RESULT_MARKER,
+} from "@llm-space/runtime";
 
 import type {
   AbortStreamThreadPayload,
@@ -131,10 +141,11 @@ export class StreamThreadController {
     const definition = session.project.definition;
     if (!definition)
       throw new Error("Agent runtime definition is unavailable.");
-    const matchesDefinition =
-      session.model.provider === definition.model.provider &&
-      session.model.id === definition.model.id &&
-      session.reasoning === definition.reasoning;
+    const matchesDefinition = agentModelMatchesDefinition({
+      model: session.model,
+      reasoning: session.reasoning,
+      definition,
+    });
     send({
       streamId: payload.streamId,
       type: "runtime",
@@ -192,6 +203,11 @@ export class StreamThreadController {
             toolName: tool.toolName,
             arguments: args as Record<string, unknown>,
           });
+          if (result.isError) {
+            throw new Error(
+              result.contentText || `MCP tool ${tool.toolName} failed`
+            );
+          }
           return {
             content: [{ type: "text", text: result.contentText }],
             details: undefined,
@@ -205,6 +221,20 @@ export class StreamThreadController {
     return {
       ...definition,
       execute: async (_toolCallId, args) => {
+        const command =
+          tool.name === "bash" &&
+          args &&
+          typeof args === "object" &&
+          "command" in args
+            ? args.command
+            : undefined;
+        if (typeof command === "string" && isDangerousBashCommand(command)) {
+          return {
+            content: [{ type: "text", text: "" }],
+            details: { marker: DEFERRED_TOOL_RESULT_MARKER },
+            terminate: true,
+          };
+        }
         const result = await this._tools!.call({
           name: tool.name,
           arguments: args as Record<string, unknown>,

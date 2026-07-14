@@ -26,6 +26,7 @@ import {
   ensureThreadVariableState,
 } from "@llm-space/core/thread";
 import {
+  agentModelMatchesDefinition,
   AgentRuntime,
   loadAgentProject,
   loadAgentProjectManifest,
@@ -74,6 +75,7 @@ interface ThreadFile {
   syncedPrompt: string;
   definitionFingerprint: string;
   syncedDefinition: ResolvedAgentDefinition;
+  modelSource?: NonNullable<Thread["agentRuntime"]>["modelSource"];
 }
 
 export class ExternalAgentProjectManager {
@@ -191,7 +193,7 @@ export class ExternalAgentProjectManager {
             enabled: true,
           }))
         : [],
-      diagnostics: snapshot?.diagnostics ?? [],
+      diagnostics: snapshot ? [...snapshot.diagnostics] : [],
       sourceFiles: loaded.resolved
         ? await _listSourceFiles(loaded.resolved.agentRoot)
         : [],
@@ -665,6 +667,18 @@ export class ExternalAgentProjectManager {
     const legacyDefinitionState =
       typeof parsed.definitionFingerprint !== "string" ||
       !parsed.syncedDefinition;
+    const modelSource =
+      parsed.modelSource ??
+      thread.agentRuntime?.modelSource ??
+      (legacyDefinitionState
+        ? "threadOverride"
+        : agentModelMatchesDefinition({
+              model: thread.model,
+              reasoning: thread.model?.params?.reasoning,
+              definition: syncedDefinition,
+            })
+          ? "agent"
+          : "threadOverride");
     const migrated = {
       thread: {
         ...thread,
@@ -675,11 +689,7 @@ export class ExternalAgentProjectManager {
                 projectId,
                 snapshot: current.fingerprint,
                 definitionFingerprint,
-                modelSource: legacyDefinitionState
-                  ? ("threadOverride" as const)
-                  : _modelMatchesDefinition(thread.model, syncedDefinition)
-                    ? ("agent" as const)
-                    : ("threadOverride" as const),
+                modelSource,
               }
             : undefined),
       },
@@ -690,6 +700,7 @@ export class ExternalAgentProjectManager {
           : (parsed.thread.context?.systemPrompt ?? ""),
       definitionFingerprint,
       syncedDefinition,
+      modelSource,
     };
     if (
       typeof parsed.definitionFingerprint !== "string" ||
@@ -728,7 +739,11 @@ export class ExternalAgentProjectManager {
     record: ThreadFile
   ): Promise<void> {
     await mkdir(this._threadsRoot(projectId), { recursive: true });
-    await _atomicJsonWrite(this._threadFile(projectId, threadId), record);
+    await _atomicJsonWrite(this._threadFile(projectId, threadId), {
+      ...record,
+      modelSource:
+        record.thread.agentRuntime?.modelSource ?? record.modelSource,
+    });
   }
 
   private async _agentRoot(projectId: string): Promise<string> {
@@ -922,17 +937,6 @@ function _definitionFromModel(
     model: { provider: model.provider, id: model.id },
     ...(model.params?.reasoning ? { reasoning: model.params.reasoning } : {}),
   };
-}
-
-function _modelMatchesDefinition(
-  model: ModelConfig | undefined,
-  definition: ResolvedAgentDefinition
-): boolean {
-  return (
-    model?.provider === definition.model.provider &&
-    model.id === definition.model.id &&
-    model.params?.reasoning === definition.reasoning
-  );
 }
 
 function _hasCode(error: unknown, code: string): boolean {

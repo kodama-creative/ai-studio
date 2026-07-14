@@ -11,13 +11,13 @@ export interface AgentDefinition {
 }
 
 export interface AgentModelSelector {
-  provider: string;
-  id: string;
+  readonly provider: string;
+  readonly id: string;
 }
 
 export interface ResolvedAgentDefinition {
-  model: AgentModelSelector;
-  reasoning?: ThinkingLevel;
+  readonly model: AgentModelSelector;
+  readonly reasoning?: ThinkingLevel;
 }
 
 type ExactAgentDefinition<T extends AgentDefinition> = T &

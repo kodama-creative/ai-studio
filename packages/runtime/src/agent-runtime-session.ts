@@ -62,6 +62,7 @@ export class AgentRuntimeSession {
   private readonly _modelSelector: AgentModelSelector;
   private readonly _reasoning?: ThinkingLevel;
   private readonly _tools: AgentTool[];
+  private readonly _toolNames: Set<string>;
   private readonly _deferredToolNames: Set<string>;
   private readonly _persistence?: AgentRuntimeSessionPersistence;
   private readonly _deferredCalls = new Map<string, DeferredToolCall>();
@@ -83,6 +84,7 @@ export class AgentRuntimeSession {
     this._tools = activeToolNames
       ? allTools.filter((tool) => activeToolNames.has(tool.name))
       : allTools;
+    this._toolNames = new Set(this._tools.map((tool) => tool.name));
     this._deferredToolNames = new Set(
       this._tools.filter(isRuntimeDeferredTool).map((tool) => tool.name)
     );
@@ -251,7 +253,7 @@ export class AgentRuntimeSession {
     if (
       event.type === "message_update" &&
       event.assistantMessageEvent.type === "toolcall_end" &&
-      this._deferredToolNames.has(event.assistantMessageEvent.toolCall.name)
+      this._toolNames.has(event.assistantMessageEvent.toolCall.name)
     ) {
       return;
     }

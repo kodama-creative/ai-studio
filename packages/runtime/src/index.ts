@@ -1,4 +1,5 @@
 export * from "./agent-definition";
+export * from "./agent-model-matches-definition";
 export * from "./agent-runtime";
 export * from "./agent-runtime-model-unavailable-error";
 export * from "./agent-runtime-session";

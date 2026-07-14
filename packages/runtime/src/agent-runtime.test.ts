@@ -17,6 +17,7 @@ import type { AgentProjectSnapshot } from "./project";
 describe("AgentRuntime", () => {
   test("loads the immutable project and definition default while building", async () => {
     const project = _project();
+    (project.tools as AgentTool[]).push(_tool("original-tool"));
     let loads = 0;
 
     const runtime = await AgentRuntime.create({
@@ -28,7 +29,18 @@ describe("AgentRuntime", () => {
     });
 
     expect(loads).toBe(1);
-    expect(runtime.project).toBe(project);
+    expect(runtime.project).not.toBe(project);
+    (project.definition!.model as { id: string }).id = "mutated-model";
+    (project.tools[0] as { name: string }).name = "mutated-tool";
+    (project.tools as AgentTool[]).push(_tool("late-tool"));
+    expect(runtime.project.definition?.model.id).toBe("fake-model");
+    expect(runtime.project.tools.map((tool) => tool.name)).toEqual([
+      "original-tool",
+    ]);
+    expect(Object.isFrozen(runtime.project)).toBe(true);
+    expect(Object.isFrozen(runtime.project.definition?.model)).toBe(true);
+    expect(Object.isFrozen(runtime.project.tools)).toBe(true);
+    expect(Object.isFrozen(runtime.project.tools[0])).toBe(true);
     expect(runtime.defaultModel).toEqual({
       selector: { provider: "fake", id: "fake-model" },
       available: true,
@@ -244,6 +256,17 @@ function _project(): AgentProjectSnapshot {
     resources: { skills: [] },
     diagnostics: [],
     fingerprint: "snapshot-one",
+  };
+}
+
+function _tool(name: string): AgentTool {
+  return {
+    name,
+    label: name,
+    description: name,
+    parameters: { type: "object", properties: {} },
+    execute: () =>
+      Promise.resolve({ content: [{ type: "text", text: "" }], details: {} }),
   };
 }
 
