@@ -1,4 +1,4 @@
-import type { AgentProjectSnapshot } from "./project";
+import type { AgentProjectSnapshot } from "./agent-project";
 
 export function createImmutableAgentProjectSnapshot(
   snapshot: AgentProjectSnapshot
@@ -37,7 +37,7 @@ function _immutablePlainDataCopy<T>(
     const childPath = `${path}.${typeof key === "symbol" ? (key.description ?? key.toString()) : key}`;
     Object.defineProperty(copy, key, {
       value: _immutablePlainDataCopy(
-        _readProperty(value, key),
+        (value as Record<PropertyKey, unknown>)[key],
         childPath,
         ancestors
       ),
@@ -48,8 +48,4 @@ function _immutablePlainDataCopy<T>(
   }
   ancestors.delete(value);
   return Object.freeze(copy) as T;
-}
-
-function _readProperty(value: object, key: PropertyKey): unknown {
-  return (value as Record<PropertyKey, unknown>)[key];
 }

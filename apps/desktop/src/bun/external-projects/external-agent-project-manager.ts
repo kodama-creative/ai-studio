@@ -27,13 +27,15 @@ import {
 } from "@llm-space/core/thread";
 import {
   agentModelMatchesDefinition,
+  type CompiledAgentDefinition,
+} from "@llm-space/runtime";
+import {
   AgentRuntime,
   loadAgentProject,
   loadAgentProjectManifest,
-  type AgentRuntimeSession,
-  type CreateAgentRuntimeSessionOptions,
+  type AgentSession,
+  type CreateAgentSessionOptions,
   type AgentProjectSnapshot,
-  type ResolvedAgentDefinition,
   type ResolvedAgentProjectManifest,
 } from "@llm-space/runtime/node";
 
@@ -74,7 +76,7 @@ interface ThreadFile {
   promptFingerprint: string;
   syncedPrompt: string;
   definitionFingerprint: string;
-  syncedDefinition: ResolvedAgentDefinition;
+  syncedDefinition: CompiledAgentDefinition;
   modelSource?: NonNullable<Thread["agentRuntime"]>["modelSource"];
 }
 
@@ -391,8 +393,8 @@ export class ExternalAgentProjectManager {
 
   async createRuntimeSession(
     projectId: string,
-    options: CreateAgentRuntimeSessionOptions
-  ): Promise<AgentRuntimeSession> {
+    options: CreateAgentSessionOptions
+  ): Promise<AgentSession> {
     await this._ensureProject(projectId);
     const loaded = this._state(projectId);
     if (loaded.error || !loaded.runtime) {
@@ -917,7 +919,7 @@ function _textFingerprint(text: string): string {
 }
 
 function _modelFromDefinition(
-  definition: ResolvedAgentDefinition,
+  definition: CompiledAgentDefinition,
   current?: ModelConfig
 ): ModelConfig {
   const params = { ...current?.params };
@@ -931,7 +933,7 @@ function _modelFromDefinition(
 
 function _definitionFromModel(
   model: ModelConfig | undefined
-): ResolvedAgentDefinition | undefined {
+): CompiledAgentDefinition | undefined {
   if (!model) return undefined;
   return {
     model: { provider: model.provider, id: model.id },

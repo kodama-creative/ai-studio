@@ -11,24 +11,16 @@ import {
 } from "@earendil-works/pi-ai";
 import { describe, expect, test } from "bun:test";
 
+import type { AgentProjectSnapshot } from "./agent-project";
 import { AgentRuntime } from "./agent-runtime";
-import type { AgentProjectSnapshot } from "./project";
 
 describe("AgentRuntime", () => {
-  test("loads the immutable project and definition default while building", async () => {
+  test("owns an immutable project and its definition default", () => {
     const project = _project();
     (project.tools as AgentTool[]).push(_tool("original-tool"));
-    let loads = 0;
 
-    const runtime = await AgentRuntime.create({
-      models: _models(),
-      loadProject: () => {
-        loads += 1;
-        return Promise.resolve(project);
-      },
-    });
+    const runtime = new AgentRuntime({ models: _models(), project });
 
-    expect(loads).toBe(1);
     expect(runtime.project).not.toBe(project);
     (project.definition!.model as { id: string }).id = "mutated-model";
     (project.tools[0] as { name: string }).name = "mutated-tool";
@@ -73,9 +65,9 @@ describe("AgentRuntime", () => {
       },
     };
     const persisted: AgentMessage[][] = [];
-    const runtime = await AgentRuntime.create({
+    const runtime = new AgentRuntime({
       models: _reactModels(),
-      loadProject: () => Promise.resolve({ ..._project(), tools: [tool] }),
+      project: { ..._project(), tools: [tool] },
     });
 
     const session = await runtime.createSession({
@@ -119,9 +111,9 @@ describe("AgentRuntime", () => {
         });
       },
     };
-    const runtime = await AgentRuntime.create({
+    const runtime = new AgentRuntime({
       models: _reactModels(),
-      loadProject: () => Promise.resolve({ ..._project(), tools: [tool] }),
+      project: { ..._project(), tools: [tool] },
     });
     const session = await runtime.createSession({ executionMode: "manual" });
     const deferred: string[] = [];
@@ -180,9 +172,9 @@ describe("AgentRuntime", () => {
         });
       },
     };
-    const runtime = await AgentRuntime.create({
+    const runtime = new AgentRuntime({
       models: _reactModels(),
-      loadProject: () => Promise.resolve({ ..._project(), tools: [tool] }),
+      project: { ..._project(), tools: [tool] },
     });
     const session = await runtime.createSession({ executionMode: "autoOnce" });
 
@@ -196,6 +188,46 @@ describe("AgentRuntime", () => {
     ]);
   });
 
+  test("keeps a host-deferred prepared tool pending during ReAct", async () => {
+    const runtime = new AgentRuntime({
+      models: _reactModels(),
+      project: _project(),
+    });
+    const session = await runtime.createSession({
+      executionMode: "react",
+      extraTools: [
+        {
+          kind: "deferred",
+          definition: {
+            name: "echo",
+            label: "Echo",
+            description: "Echo input through the host.",
+            parameters: {
+              type: "object",
+              properties: { text: { type: "string" } },
+              required: ["text"],
+              additionalProperties: false,
+            },
+          },
+        },
+      ],
+    });
+    const deferred: string[] = [];
+    session.subscribe((event) => {
+      if (event.type === "tool_calls_deferred") {
+        deferred.push(...event.calls.map((call) => call.id));
+      }
+    });
+
+    await session.prompt("hello");
+
+    expect(deferred).toEqual(["call-one"]);
+    expect(session.messages.map((message) => message.role)).toEqual([
+      "user",
+      "assistant",
+    ]);
+  });
+
   test("blocks an unavailable definition default but accepts an explicit override", async () => {
     const project = {
       ..._project(),
@@ -204,10 +236,7 @@ describe("AgentRuntime", () => {
         reasoning: "high" as const,
       },
     };
-    const runtime = await AgentRuntime.create({
-      models: _reactModels(),
-      loadProject: () => Promise.resolve(project),
-    });
+    const runtime = new AgentRuntime({ models: _reactModels(), project });
 
     expect(runtime.defaultModel).toEqual({
       selector: { provider: "missing", id: "missing-model" },
@@ -229,9 +258,9 @@ describe("AgentRuntime", () => {
   });
 
   test("distinguishes an omitted reasoning override from provider default", async () => {
-    const runtime = await AgentRuntime.create({
+    const runtime = new AgentRuntime({
       models: _reactModels(),
-      loadProject: () => Promise.resolve(_project()),
+      project: _project(),
     });
 
     const inherited = await runtime.createSession();

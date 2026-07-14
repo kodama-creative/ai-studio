@@ -4,11 +4,11 @@ import type { Models } from "@earendil-works/pi-ai";
 
 import {
   AgentRuntime,
-  type CreateAgentRuntimeSessionOptions,
-} from "../agent-runtime";
-import type { AgentRuntimeSession } from "../agent-runtime-session";
+  type CreateAgentSessionOptions,
+} from "../runtime/agent/agent-runtime";
+import type { AgentSession } from "../runtime/sessions/agent-session";
 
-import { loadAgentProject } from "./project-loader";
+import { loadAgentProject } from "./compiler/project";
 
 export interface LocalAgentRuntimeOptions {
   agentRoot: string;
@@ -24,9 +24,9 @@ export class LocalAgentRuntime {
     options: LocalAgentRuntimeOptions
   ): Promise<LocalAgentRuntime> {
     const agentRoot = resolve(options.agentRoot);
-    const runtime = await AgentRuntime.create({
+    const runtime = new AgentRuntime({
       models: options.models,
-      loadProject: () => loadAgentProject(agentRoot),
+      project: await loadAgentProject(agentRoot),
     });
     return new LocalAgentRuntime(agentRoot, runtime);
   }
@@ -45,8 +45,8 @@ export class LocalAgentRuntime {
   }
 
   createSession(
-    options: CreateAgentRuntimeSessionOptions = {}
-  ): Promise<AgentRuntimeSession> {
+    options: CreateAgentSessionOptions = {}
+  ): Promise<AgentSession> {
     return this._runtime.createSession(options);
   }
 }

@@ -7,7 +7,7 @@ import {
   AgentProjectManifestError,
   parseAgentProjectManifest,
   type AgentProjectManifest,
-} from "../manifest";
+} from "../../shared/agent-project-manifest";
 
 export interface ResolvedAgentProjectManifest {
   projectRoot: string;

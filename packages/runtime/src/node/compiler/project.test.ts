@@ -4,13 +4,13 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, test } from "bun:test";
 
-import { loadAgentProject } from "./project-loader";
+import { loadAgentProject } from "./project";
 
-const roots: string[] = [];
+const ROOTS: string[] = [];
 
 afterEach(async () => {
   await Promise.all(
-    roots.splice(0).map((root) => rm(root, { recursive: true }))
+    ROOTS.splice(0).map((root) => rm(root, { recursive: true }))
   );
 });
 
@@ -33,6 +33,8 @@ describe("loadAgentProject", () => {
       reasoning: "off",
     });
     expect(snapshot.diagnostics).toEqual([]);
+    expect(Object.isFrozen(snapshot)).toBe(true);
+    expect(Object.isFrozen(snapshot.definition?.model)).toBe(true);
   });
 
   test("discovers instructions, executable tools, and skills", async () => {
@@ -200,7 +202,7 @@ describe("loadAgentProject", () => {
 
 async function _fixture(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "llm-space-runtime-"));
-  roots.push(root);
+  ROOTS.push(root);
   await writeFile(
     join(root, "agent.ts"),
     `export default { model: "fake/fake-model" };`

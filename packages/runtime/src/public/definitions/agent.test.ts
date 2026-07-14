@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { defineAgent } from "./agent-definition";
+import { defineAgent } from "./agent";
 
 describe("defineAgent", () => {
   test("preserves authored literal definition values", () => {

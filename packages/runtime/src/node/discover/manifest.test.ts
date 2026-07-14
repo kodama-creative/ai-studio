@@ -4,19 +4,19 @@ import path from "node:path";
 
 import { afterEach, describe, expect, test } from "bun:test";
 
-import { loadAgentProjectManifest } from "./project-manifest";
+import { loadAgentProjectManifest } from "./manifest";
 
-const roots: string[] = [];
+const ROOTS: string[] = [];
 
 afterEach(async () => {
   await Promise.all(
-    roots.splice(0).map((root) => rm(root, { recursive: true }))
+    ROOTS.splice(0).map((root) => rm(root, { recursive: true }))
   );
 });
 
 async function _fixture(agent = "./agent") {
   const root = path.join(tmpdir(), `llm-space-manifest-${crypto.randomUUID()}`);
-  roots.push(root);
+  ROOTS.push(root);
   await mkdir(path.join(root, "agent"), { recursive: true });
   await writeFile(
     path.join(root, "llm-space.json"),
@@ -32,7 +32,7 @@ describe("loadAgentProjectManifest", () => {
       tmpdir(),
       `llm-space-manifest-${crypto.randomUUID()}`
     );
-    roots.push(root);
+    ROOTS.push(root);
     await mkdir(path.join(root, "agent"), { recursive: true });
 
     const loaded = await loadAgentProjectManifest(root);

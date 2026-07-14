@@ -1,4 +1,4 @@
-import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import {
   isDangerousBashCommand,
   type BuiltinTool,
@@ -7,11 +7,11 @@ import {
   type Tool,
 } from "@llm-space/core";
 import { streamAgent } from "@llm-space/core/server";
-import {
-  agentModelMatchesDefinition,
-  createDeferredAgentTool,
-  DEFERRED_TOOL_RESULT_MARKER,
-} from "@llm-space/runtime";
+import { agentModelMatchesDefinition } from "@llm-space/runtime";
+import type {
+  PreparedAgentTool,
+  PreparedAgentToolDefinition,
+} from "@llm-space/runtime/node";
 
 import type {
   AbortStreamThreadPayload,
@@ -181,22 +181,25 @@ export class StreamThreadController {
     }
   }
 
-  private _runtimeTool(tool: Exclude<Tool, { type: "project" }>): AgentTool {
+  private _runtimeTool(
+    tool: Exclude<Tool, { type: "project" }>
+  ): PreparedAgentTool {
     const definition = {
       name: tool.name,
       label: tool.name,
       description: tool.description,
       parameters: tool.parameters,
-    } as Omit<AgentTool, "execute">;
+    } as PreparedAgentToolDefinition;
     if (tool.type === "function" || _requiresHumanResult(tool)) {
-      return createDeferredAgentTool(definition);
+      return { kind: "deferred", definition };
     }
     if (tool.type === "mcp") {
       if (!this._mcpManager) {
         throw new Error("MCP runtime is unavailable.");
       }
       return {
-        ...definition,
+        kind: "executable",
+        definition,
         execute: async (_toolCallId, args) => {
           const result = await this._mcpManager!.callTool({
             serverId: tool.serverId,
@@ -209,17 +212,21 @@ export class StreamThreadController {
             );
           }
           return {
-            content: [{ type: "text", text: result.contentText }],
-            details: undefined,
+            type: "completed",
+            result: {
+              content: [{ type: "text", text: result.contentText }],
+              details: undefined,
+            },
           };
         },
-      } as AgentTool;
+      };
     }
     if (!this._tools) {
       throw new Error("Built-in tool runtime is unavailable.");
     }
     return {
-      ...definition,
+      kind: "executable",
+      definition,
       execute: async (_toolCallId, args) => {
         const command =
           tool.name === "bash" &&
@@ -229,22 +236,21 @@ export class StreamThreadController {
             ? args.command
             : undefined;
         if (typeof command === "string" && isDangerousBashCommand(command)) {
-          return {
-            content: [{ type: "text", text: "" }],
-            details: { marker: DEFERRED_TOOL_RESULT_MARKER },
-            terminate: true,
-          };
+          return { type: "deferred" };
         }
         const result = await this._tools!.call({
           name: tool.name,
           arguments: args as Record<string, unknown>,
         });
         return {
-          content: [{ type: "text", text: result.contentText }],
-          details: undefined,
+          type: "completed",
+          result: {
+            content: [{ type: "text", text: result.contentText }],
+            details: undefined,
+          },
         };
       },
-    } as AgentTool;
+    };
   }
 
   /** Abort one in-flight stream. */

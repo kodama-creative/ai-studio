@@ -6,8 +6,8 @@ export type AgentReasoningDefinition =
   "provider-default" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
 export interface AgentDefinition {
-  model: AgentModelDefinition;
-  reasoning?: AgentReasoningDefinition;
+  readonly model: AgentModelDefinition;
+  readonly reasoning?: AgentReasoningDefinition;
 }
 
 export interface AgentModelSelector {
@@ -15,16 +15,7 @@ export interface AgentModelSelector {
   readonly id: string;
 }
 
-export interface ResolvedAgentDefinition {
+export interface CompiledAgentDefinition {
   readonly model: AgentModelSelector;
   readonly reasoning?: ThinkingLevel;
-}
-
-type ExactAgentDefinition<T extends AgentDefinition> = T &
-  Record<Exclude<keyof T, keyof AgentDefinition>, never>;
-
-export function defineAgent<const T extends AgentDefinition>(
-  definition: ExactAgentDefinition<T>
-): T {
-  return definition;
 }

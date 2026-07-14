@@ -4,7 +4,7 @@ import {
   AGENT_PROJECT_MANIFEST_VERSION,
   AgentProjectManifestError,
   parseAgentProjectManifest,
-} from "./manifest";
+} from "./agent-project-manifest";
 
 describe("Agent Project manifest", () => {
   test("parses the V1 manifest", () => {

@@ -15,11 +15,11 @@ import { afterEach, describe, expect, test } from "bun:test";
 
 import { LocalAgentRuntime } from "./local-agent-runtime";
 
-const roots: string[] = [];
+const ROOTS: string[] = [];
 
 afterEach(async () => {
   await Promise.all(
-    roots.splice(0).map((root) => rm(root, { recursive: true }))
+    ROOTS.splice(0).map((root) => rm(root, { recursive: true }))
   );
 });
 
@@ -73,7 +73,7 @@ describe("LocalAgentRuntime", () => {
 
 async function _fixture(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "llm-space-runtime-session-"));
-  roots.push(root);
+  ROOTS.push(root);
   await mkdir(join(root, "tools"), { recursive: true });
   await writeFile(
     join(root, "agent.ts"),
