@@ -1,12 +1,9 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
-
 import { getLlmSpaceHomePath } from "@llm-space/core/server";
 
 /**
- * On a fresh install `LLM_SPACE_HOME/workspace` does not exist yet. Create the
- * directory and seed one runnable Agent Project. No-op once the workspace
- * directory exists, preserving every existing user's workspace.
+ * Seed the example agent when the workspace does not exist.
  */
 export function seedWorkspace(): void {
   const workspace = path.join(getLlmSpaceHomePath(), "workspace");
@@ -17,7 +14,7 @@ export function seedWorkspace(): void {
   const agentRoot = path.join(workspace, "example-agent", "agent");
   mkdirSync(path.join(agentRoot, "tools"), { recursive: true });
   mkdirSync(path.join(agentRoot, "skills", "weather-brief"), {
-    recursive: true,
+    recursive: true
   });
   writeFileSync(
     path.join(agentRoot, "agent.ts"),
@@ -59,6 +56,3 @@ export default defineAgent({
     "---\nname: weather-brief\ndescription: Produce a short practical weather brief.\n---\n\nUse the weather tool, state that the data is mocked, and keep the answer below four sentences.\n"
   );
 }
-
-// Run on import so the workspace is seeded before storage/RPC touch it.
-seedWorkspace();
