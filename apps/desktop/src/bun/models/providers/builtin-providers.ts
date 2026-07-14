@@ -13,7 +13,6 @@ import { moonshotaiProvider } from "@earendil-works/pi-ai/providers/moonshotai";
 import { moonshotaiCnProvider } from "@earendil-works/pi-ai/providers/moonshotai-cn";
 import { nvidiaProvider } from "@earendil-works/pi-ai/providers/nvidia";
 import { openaiProvider } from "@earendil-works/pi-ai/providers/openai";
-import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
 import { openrouterProvider } from "@earendil-works/pi-ai/providers/openrouter";
 import { vercelAIGatewayProvider } from "@earendil-works/pi-ai/providers/vercel-ai-gateway";
 import { xaiProvider } from "@earendil-works/pi-ai/providers/xai";
@@ -23,10 +22,15 @@ import { zaiCodingCnProvider } from "@earendil-works/pi-ai/providers/zai-coding-
 
 import { arkProvider } from "./ark";
 import { arkCodingPlanProvider } from "./ark-coding-plan";
+import { createOpenAICodexProvider } from "./openai-codex";
 
-/** Static, non-`Provider` metadata for a builtin provider. */
+/**
+ * Static, non-`Provider` metadata for a builtin provider.
+ */
 export interface BuiltinProviderMeta {
-  /** The provider's public homepage. Optional — omitted when uncertain. */
+  /**
+   * The provider's public homepage. Optional — omitted when uncertain.
+   */
   websiteLink?: string;
 }
 
@@ -66,7 +70,9 @@ export const BUILTIN_PROVIDER_META: Record<string, BuiltinProviderMeta> = {
   "zai-coding-cn": { websiteLink: "https://z.ai/subscribe" },
 };
 
-/** Factory for each builtin provider, keyed by provider id. */
+/**
+ * Factory for each builtin provider, keyed by provider id.
+ */
 export const BUILTIN_PROVIDERS: Record<string, Provider> = {
   "amazon-bedrock": amazonBedrockProvider(),
   "ant-ling": antLingProvider(),
@@ -84,7 +90,7 @@ export const BUILTIN_PROVIDERS: Record<string, Provider> = {
   "moonshotai-cn": moonshotaiCnProvider(),
   nvidia: nvidiaProvider(),
   openai: openaiProvider(),
-  "openai-codex": openaiCodexProvider(),
+  "openai-codex": createOpenAICodexProvider(),
   openrouter: openrouterProvider(),
   "vercel-ai-gateway": vercelAIGatewayProvider(),
   xai: xaiProvider(),

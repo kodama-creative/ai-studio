@@ -1,5 +1,4 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { env } from "node:process";
 
@@ -443,37 +442,28 @@ export class ModelManager {
   }
 
   /**
-   * Resolve the configured API key for a provider. A value starting with `$` is
-   * read from the matching environment variable (`$DEEPSEEK_API_KEY` →
-   * `process.env.DEEPSEEK_API_KEY`); any other value is returned verbatim.
-   * Returns `undefined` when the provider has no key configured.
+   * The raw API key value from config, without resolving `$ENV` references.
    */
-  async getApiKey(
-    providerId: string,
-    resolved = true
-  ): Promise<string | undefined> {
-    const apiKey = this._config.providers.find(
-      (entry) => entry.id === providerId
-    )?.apiKey;
-    if (!resolved) {
-      return apiKey;
-    }
-    if (!apiKey) {
-      if (providerId === "openai-codex") {
-        const codexApiKey = this._getCodexApiKey();
-        if (codexApiKey) {
-          return codexApiKey;
-        }
-      }
-      return undefined;
-    }
-    if (apiKey.startsWith("$")) {
-      return await Promise.resolve(process.env[apiKey.slice(1)]);
+  getRawApiKey(providerId: string): string | undefined {
+    return this._config.providers.find((entry) => entry.id === providerId)?.apiKey;
+  }
+
+  /**
+   * Resolve the API key. `$VAR` is read from env; otherwise returned verbatim.
+   *
+   * Returns `undefined` to fall back to the provider's own auth resolution.
+   */
+  getApiKey(providerId: string): string | undefined {
+    const apiKey = this.getRawApiKey(providerId);
+    if (apiKey?.startsWith("$")) {
+      return process.env[apiKey.slice(1)];
     }
     return apiKey;
   }
 
-  /** The public homepage for a builtin provider, if known. */
+  /**
+   * The public homepage for a builtin provider, if known.
+   */
   getWebsiteLink(providerId: string): string | undefined {
     return BUILTIN_PROVIDER_META[providerId]?.websiteLink;
   }
@@ -490,7 +480,9 @@ export class ModelManager {
     return [...builtin, ...this.getCustomModels(providerId)];
   }
 
-  /** Assemble the configured providers into a `Models` registry. */
+  /**
+   * Assemble the configured providers into a `Models` registry.
+   */
   private _buildModels(): Models {
     const models = createModels();
     for (const provider of this._buildProviders()) {
@@ -646,39 +638,17 @@ export class ModelManager {
   private async _detectProviders() {
     const potentialProviders: string[] = [];
     for (const provider of Object.values(BUILTIN_PROVIDERS)) {
-      if (provider.id === "openai-codex") {
-        if (this._getCodexApiKey()) {
-          potentialProviders.push(provider.id);
-        }
-      } else {
-        const res = await provider.auth.apiKey?.resolve({
-          model: provider.getModels()[0],
-          ctx: {
-            env: (name) => Promise.resolve(env[name]),
-            fileExists: (path) => Promise.resolve(existsSync(path)),
-          },
-        });
-        if (res?.auth.apiKey) {
-          potentialProviders.push(provider.id);
-        }
+      const res = await provider.auth.apiKey?.resolve({
+        model: provider.getModels()[0],
+        ctx: {
+          env: async (name) => env[name],
+          fileExists: async (filePath) => existsSync(filePath),
+        },
+      });
+      if (res?.auth.apiKey) {
+        potentialProviders.push(provider.id);
       }
     }
     return potentialProviders;
-  }
-
-  private _getCodexApiKey(): string | undefined {
-    const authPath = path.join(os.homedir(), ".codex", "auth.json");
-    if (!existsSync(authPath)) {
-      return undefined;
-    }
-    try {
-      const parsed = JSON.parse(readFileSync(authPath, "utf8")) as {
-        tokens?: { access_token?: unknown };
-      };
-      const accessToken = parsed?.tokens?.access_token;
-      return typeof accessToken === "string" ? accessToken : undefined;
-    } catch {
-      return undefined;
-    }
   }
 }

@@ -28,7 +28,7 @@ async function _getModelProviderGroups(modelManager: ModelManager) {
       name: provider.name,
       builtin: modelManager.isBuiltin(provider.id),
       models: provider.getModels(),
-      apiKey: await modelManager.getApiKey(provider.id, false),
+      apiKey: modelManager.getRawApiKey(provider.id),
       baseUrl: modelManager.getBaseUrl(provider.id),
       headers: modelManager.getHeaders(provider.id),
       api: modelManager.getApi(provider.id),
