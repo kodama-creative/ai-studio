@@ -242,6 +242,30 @@ describe("AgentRuntime", () => {
     expect(inherited.reasoning).toBe("high");
     expect(providerDefault.reasoning).toBeUndefined();
   });
+
+  test("rejects non-plain project tool definitions instead of sharing them", () => {
+    class StatefulTool implements AgentTool {
+      name = "stateful";
+      label = "Stateful";
+      description = "Stateful class tool.";
+      parameters = { type: "object" as const, properties: {} };
+
+      execute() {
+        return Promise.resolve({
+          content: [{ type: "text" as const, text: "done" }],
+          details: {},
+        });
+      }
+    }
+
+    expect(
+      () =>
+        new AgentRuntime({
+          models: _models(),
+          project: { ..._project(), tools: [new StatefulTool()] },
+        })
+    ).toThrow("plain data objects");
+  });
 });
 
 function _project(): AgentProjectSnapshot {
