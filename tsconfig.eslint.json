@@ -1,0 +1,26 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "lib": [
+      "ESNext",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "paths": {
+      "@/*": [
+        "./apps/desktop/src/*"
+      ]
+    }
+  },
+  "include": [
+    "apps",
+    "eslint.config.mts",
+    "packages",
+    "scripts"
+  ],
+  "exclude": [
+    "apps/desktop/build",
+    "apps/desktop/dist"
+  ]
+}
