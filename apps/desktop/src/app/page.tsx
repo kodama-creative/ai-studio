@@ -190,7 +190,7 @@ const COMMAND_PALETTE_BLACKLIST = [
   "renameExternalAgentProjectThread",
   "duplicateExternalAgentProjectThread",
   "deleteExternalAgentProjectThread",
-  "syncExternalAgentProjectPrompt",
+  "syncExternalAgentProjectThreadFromAgent",
   "enableExternalAgentProjectTools",
   "saveExternalAgentProjectSource",
   // Only meaningful from the "ready to install" toast; a bare palette

@@ -14,6 +14,10 @@ import type {
 } from "@earendil-works/pi-ai";
 
 import type { AgentModelSelector } from "./agent-definition";
+import {
+  DEFERRED_TOOL_RESULT_MARKER,
+  isRuntimeDeferredTool,
+} from "./deferred-agent-tool";
 import type { AgentProjectSnapshot } from "./project";
 
 export type RuntimeExecutionMode = "manual" | "autoOnce" | "react";
@@ -48,29 +52,6 @@ export interface AgentRuntimeSessionOptions {
   streamFn?: StreamFn;
 }
 
-const DEFERRED_MARKER = "llm-space-runtime-deferred";
-const RUNTIME_DEFERRED_TOOL = Symbol("llm-space-runtime-deferred-tool");
-
-type RuntimeDeferredAgentTool = AgentTool & {
-  [RUNTIME_DEFERRED_TOOL]: true;
-};
-
-export function createDeferredAgentTool(
-  tool: Omit<AgentTool, "execute">
-): AgentTool {
-  return {
-    ...tool,
-    [RUNTIME_DEFERRED_TOOL]: true,
-    execute() {
-      return Promise.resolve({
-        content: [{ type: "text", text: "" }],
-        details: { marker: DEFERRED_MARKER },
-        terminate: true,
-      });
-    },
-  } as RuntimeDeferredAgentTool;
-}
-
 export class AgentRuntimeSession {
   private readonly _agent: Agent;
   private readonly _listeners = new Set<
@@ -103,7 +84,7 @@ export class AgentRuntimeSession {
       ? allTools.filter((tool) => activeToolNames.has(tool.name))
       : allTools;
     this._deferredToolNames = new Set(
-      this._tools.filter(_isRuntimeDeferredTool).map((tool) => tool.name)
+      this._tools.filter(isRuntimeDeferredTool).map((tool) => tool.name)
     );
     this._executionMode = options.executionMode;
     this._persistence = options.persistence;
@@ -114,6 +95,8 @@ export class AgentRuntimeSession {
           options.systemPrompt ??
           _systemPrompt(options.project, options.instructionsPrefix),
         model: options.model,
+        // Pi Agent represents an unspecified provider-default reasoning option
+        // as `off`, which its loop lowers back to an omitted reasoning field.
         thinkingLevel: options.reasoning ?? "off",
         messages: _restoreDeferredPlaceholders(
           options.initialMessages,
@@ -232,7 +215,7 @@ export class AgentRuntimeSession {
           });
           return Promise.resolve({
             content: [{ type: "text", text: "" }],
-            details: { marker: DEFERRED_MARKER },
+            details: { marker: DEFERRED_TOOL_RESULT_MARKER },
             terminate: true,
           });
         },
@@ -352,7 +335,7 @@ function _isDeferredResult(
   return (
     message.role === "toolResult" &&
     (message.details as { marker?: unknown } | undefined)?.marker ===
-      DEFERRED_MARKER
+      DEFERRED_TOOL_RESULT_MARKER
   );
 }
 
@@ -362,14 +345,8 @@ function _isDeferredToolResult(result: unknown): boolean {
   }
   return (
     (result as { details?: { marker?: unknown } }).details?.marker ===
-    DEFERRED_MARKER
+    DEFERRED_TOOL_RESULT_MARKER
   );
-}
-
-function _isRuntimeDeferredTool(
-  tool: AgentTool
-): tool is RuntimeDeferredAgentTool {
-  return RUNTIME_DEFERRED_TOOL in tool;
 }
 
 function _publicMessages(messages: AgentMessage[]): AgentMessage[] {
@@ -392,7 +369,7 @@ function _restoreDeferredPlaceholders(
       toolCallId: call.id,
       toolName: call.name,
       content: [{ type: "text", text: "" }],
-      details: { marker: DEFERRED_MARKER },
+      details: { marker: DEFERRED_TOOL_RESULT_MARKER },
       isError: false,
       timestamp: Date.now(),
     })),

@@ -286,7 +286,7 @@ export function createMainWindowRPC({
           await externalAgentProjects.deleteThread(projectId, threadId);
           return null;
         },
-        externalAgentProjectSyncThreadPrompt: ({ projectId, threadId }) =>
+        externalAgentProjectSyncThreadFromAgent: ({ projectId, threadId }) =>
           externalAgentProjects.syncThreadFromAgent(projectId, threadId),
         externalAgentProjectReadSource: async ({ projectId, path }) => ({
           text: await externalAgentProjects.readSource(projectId, path),

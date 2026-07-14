@@ -114,6 +114,17 @@ describe("StreamThreadController Agent Project runtime", () => {
 
     expect(events).toContain("tool_execution_end");
     expect(events.at(-1)).toBe("done");
+    const persisted = await manager.readThread(opened.id, threadId);
+    expect(
+      persisted.thread.context?.messages?.map((message) => message.role)
+    ).toEqual(["user", "assistant", "assistant"]);
+    expect(
+      persisted.thread.context?.messages?.[1]?.role === "assistant"
+        ? persisted.thread.context.messages[1].toolCalls?.[0]?.output
+        : undefined
+    ).toMatchObject({
+      content: [{ type: "text", text: "hello" }],
+    });
   });
 });
 

@@ -97,6 +97,11 @@ function _ProjectThreadPane({
   const writeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pending = useRef<ExternalAgentProjectThreadRecord | null>(null);
   const recordRef = useRef(record);
+  const activeRunProject = useRef<{
+    snapshot: string;
+    definitionFingerprint: string;
+    definition: ResolvedAgentDefinition | null;
+  } | null>(null);
   recordRef.current = record;
   const runtimeTransport = useMemo(
     () =>
@@ -167,7 +172,6 @@ function _ProjectThreadPane({
   const refreshProject = useCallback(
     async (runEnded = false) => {
       const nextProject = await externalAgentProjects.inspect(projectId);
-      setProject(nextProject);
       const current = pending.current ?? recordRef.current;
       if (!current) return;
       const enabledToolNames = new Set(
@@ -193,8 +197,10 @@ function _ProjectThreadPane({
             thread: { ...current.thread, title },
           });
         }
+        if (!running || runEnded) setProject(nextProject);
         return;
       }
+      setProject(nextProject);
       if (!toolsChanged && (!title || title === current.thread.title)) return;
       setRecord({
         ...current,
@@ -298,7 +304,7 @@ function _ProjectThreadPane({
   }, [project, projectId, threadId]);
   useRegisterCommands(
     {
-      syncExternalAgentProjectPrompt: ({
+      syncExternalAgentProjectThreadFromAgent: ({
         projectId: commandProjectId,
         threadId: commandThreadId,
       }) => {
@@ -330,22 +336,39 @@ function _ProjectThreadPane({
     [project?.skills]
   );
   const prepareRunSnapshot = useCallback(
-    (thread: Thread): Thread => ({
-      ...thread,
-      agentRuntime: {
-        projectId,
+    (thread: Thread): Thread => {
+      const frozen = activeRunProject.current ?? {
         snapshot: project?.snapshot ?? "",
         definitionFingerprint: project?.definitionFingerprint ?? "",
-        modelSource: _matchesDefinition(thread, project?.definition)
-          ? "agent"
-          : "threadOverride",
-      },
-    }),
+        definition: project?.definition ?? null,
+      };
+      return {
+        ...thread,
+        agentRuntime: {
+          projectId,
+          snapshot: frozen.snapshot,
+          definitionFingerprint: frozen.definitionFingerprint,
+          modelSource: _matchesDefinition(thread, frozen.definition)
+            ? "agent"
+            : "threadOverride",
+        },
+      };
+    },
     [project, projectId]
   );
-  const handleStreamingStart = useCallback(() => setRunning(true), []);
+  const handleStreamingStart = useCallback(() => {
+    activeRunProject.current = project
+      ? {
+          snapshot: project.snapshot,
+          definitionFingerprint: project.definitionFingerprint,
+          definition: project.definition,
+        }
+      : null;
+    setRunning(true);
+  }, [project]);
   const handleStreamingEnd = useCallback(() => {
     setRunning(false);
+    activeRunProject.current = null;
     queueMicrotask(() => void refreshProject(true));
   }, [refreshProject]);
 
@@ -471,7 +494,7 @@ function _ProjectThreadPane({
                   locallyChanged
                     ? setSyncConfirmOpen(true)
                     : executeCommand({
-                        type: "syncExternalAgentProjectPrompt",
+                        type: "syncExternalAgentProjectThreadFromAgent",
                         args: { projectId, threadId },
                       })
                 }
@@ -507,7 +530,7 @@ function _ProjectThreadPane({
         onConfirm={() => {
           setSyncConfirmOpen(false);
           executeCommand({
-            type: "syncExternalAgentProjectPrompt",
+            type: "syncExternalAgentProjectThreadFromAgent",
             args: { projectId, threadId },
           });
         }}

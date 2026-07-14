@@ -245,7 +245,7 @@ export interface DesktopRPCType {
         params: { projectId: string; threadId: string };
         response: null;
       };
-      externalAgentProjectSyncThreadPrompt: {
+      externalAgentProjectSyncThreadFromAgent: {
         params: { projectId: string; threadId: string };
         response: ExternalAgentProjectThreadRecord;
       };

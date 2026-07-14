@@ -7,6 +7,7 @@ import type {
 import type { Api, Model, Models } from "@earendil-works/pi-ai";
 
 import type { AgentModelSelector } from "./agent-definition";
+import { AgentRuntimeModelUnavailableError } from "./agent-runtime-model-unavailable-error";
 import {
   AgentRuntimeSession,
   type AgentRuntimeSessionPersistence,
@@ -36,16 +37,6 @@ export interface CreateAgentRuntimeSessionOptions {
   executionMode?: RuntimeExecutionMode;
   persistence?: AgentRuntimeSessionPersistence;
   streamFn?: StreamFn;
-}
-
-export class AgentRuntimeModelUnavailableError extends Error {
-  readonly selector: AgentModelSelector;
-
-  constructor(selector: AgentModelSelector) {
-    super(`Model "${selector.provider}/${selector.id}" is not available`);
-    this.name = "AgentRuntimeModelUnavailableError";
-    this.selector = selector;
-  }
 }
 
 export class AgentRuntime {
@@ -90,6 +81,9 @@ export class AgentRuntime {
   ): Promise<AgentRuntimeSession> {
     const selector = options.model ?? this._project.definition!.model;
     const model = this._resolveModel(selector);
+    const reasoning = Object.hasOwn(options, "reasoning")
+      ? options.reasoning
+      : this._project.definition!.reasoning;
     return Promise.resolve(
       new AgentRuntimeSession({
         id: options.id,
@@ -97,7 +91,7 @@ export class AgentRuntime {
         project: this._project,
         model,
         modelSelector: selector,
-        reasoning: options.reasoning ?? this._project.definition!.reasoning,
+        reasoning,
         initialMessages: options.initialMessages ?? [],
         extraTools: options.extraTools ?? [],
         activeToolNames: options.activeToolNames,

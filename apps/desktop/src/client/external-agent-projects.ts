@@ -72,7 +72,7 @@ export const externalAgentProjects = {
     projectId: string,
     threadId: string
   ): Promise<ExternalAgentProjectThreadRecord> {
-    return _rpc().request.externalAgentProjectSyncThreadPrompt({
+    return _rpc().request.externalAgentProjectSyncThreadFromAgent({
       projectId,
       threadId,
     });

@@ -215,6 +215,21 @@ describe("AgentRuntime", () => {
     });
     expect(session.model).toEqual({ provider: "fake", id: "fake-model" });
   });
+
+  test("distinguishes an omitted reasoning override from provider default", async () => {
+    const runtime = await AgentRuntime.create({
+      models: _reactModels(),
+      loadProject: () => Promise.resolve(_project()),
+    });
+
+    const inherited = await runtime.createSession();
+    const providerDefault = await runtime.createSession({
+      reasoning: undefined,
+    });
+
+    expect(inherited.reasoning).toBe("high");
+    expect(providerDefault.reasoning).toBeUndefined();
+  });
 });
 
 function _project(): AgentProjectSnapshot {

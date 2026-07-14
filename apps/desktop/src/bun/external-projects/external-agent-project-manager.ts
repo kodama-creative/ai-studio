@@ -12,8 +12,10 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Models } from "@earendil-works/pi-ai";
 import {
+  convertFromPiMessages,
   normalizeThread,
   type ModelConfig,
   type ProjectTool,
@@ -397,7 +399,24 @@ export class ExternalAgentProjectManager {
       loaded.runtime = new AgentRuntime({ models, project: loaded.snapshot });
       loaded.models = models;
     }
-    return loaded.runtime.createSession(options);
+    const callerPersistence = options.persistence;
+    return loaded.runtime.createSession({
+      ...options,
+      ...(options.id
+        ? {
+            persistence: {
+              replaceMessages: async (messages: AgentMessage[]) => {
+                await this._replaceRuntimeMessages(
+                  projectId,
+                  options.id!,
+                  messages
+                );
+                await callerPersistence?.replaceMessages(messages);
+              },
+            },
+          }
+        : {}),
+    });
   }
 
   async refresh(projectId: string): Promise<ExternalAgentProjectView> {
@@ -623,24 +642,80 @@ export class ExternalAgentProjectManager {
     const parsed = JSON.parse(
       await readFile(this._threadFile(projectId, threadId), "utf8")
     ) as Partial<ThreadFile>;
-    if (
-      !parsed.thread ||
-      typeof parsed.promptFingerprint !== "string" ||
-      typeof parsed.definitionFingerprint !== "string" ||
-      !parsed.syncedDefinition
-    ) {
+    if (!parsed.thread || typeof parsed.promptFingerprint !== "string") {
       throw new Error("Invalid project Thread file.");
     }
-    return {
-      thread: normalizeThread(parsed.thread),
+    const thread = normalizeThread(parsed.thread);
+    const current = this._state(projectId).snapshot;
+    const syncedDefinition =
+      parsed.syncedDefinition ??
+      current?.definition ??
+      _definitionFromModel(thread.model);
+    if (!syncedDefinition) {
+      throw new Error("Project Thread has no model definition to migrate.");
+    }
+    const definitionFingerprint =
+      typeof parsed.definitionFingerprint === "string"
+        ? parsed.definitionFingerprint
+        : current?.definition
+          ? _definitionFingerprint(current.definition)
+          : _definitionFingerprint(syncedDefinition);
+    const migrated = {
+      thread: {
+        ...thread,
+        agentRuntime:
+          thread.agentRuntime ??
+          (current
+            ? {
+                projectId,
+                snapshot: current.fingerprint,
+                definitionFingerprint,
+                modelSource: _modelMatchesDefinition(
+                  thread.model,
+                  syncedDefinition
+                )
+                  ? ("agent" as const)
+                  : ("threadOverride" as const),
+              }
+            : undefined),
+      },
       promptFingerprint: parsed.promptFingerprint,
       syncedPrompt:
         typeof parsed.syncedPrompt === "string"
           ? parsed.syncedPrompt
           : (parsed.thread.context?.systemPrompt ?? ""),
-      definitionFingerprint: parsed.definitionFingerprint,
-      syncedDefinition: parsed.syncedDefinition,
+      definitionFingerprint,
+      syncedDefinition,
     };
+    if (
+      typeof parsed.definitionFingerprint !== "string" ||
+      !parsed.syncedDefinition ||
+      !parsed.thread.agentRuntime
+    ) {
+      await _atomicJsonWrite(this._threadFile(projectId, threadId), migrated);
+    }
+    return migrated;
+  }
+
+  private async _replaceRuntimeMessages(
+    projectId: string,
+    threadId: string,
+    messages: AgentMessage[]
+  ): Promise<void> {
+    const record = await this._readThreadFile(projectId, threadId);
+    await this._writeThreadFile(projectId, threadId, {
+      ...record,
+      thread: {
+        ...record.thread,
+        context: {
+          ...record.thread.context,
+          messages: convertFromPiMessages(
+            messages,
+            record.thread.context?.messages
+          ),
+        },
+      },
+    });
   }
 
   private async _writeThreadFile(
@@ -837,6 +912,27 @@ function _modelFromDefinition(
     ...definition.model,
     ...(Object.keys(params).length > 0 ? { params } : {}),
   };
+}
+
+function _definitionFromModel(
+  model: ModelConfig | undefined
+): ResolvedAgentDefinition | undefined {
+  if (!model) return undefined;
+  return {
+    model: { provider: model.provider, id: model.id },
+    ...(model.params?.reasoning ? { reasoning: model.params.reasoning } : {}),
+  };
+}
+
+function _modelMatchesDefinition(
+  model: ModelConfig | undefined,
+  definition: ResolvedAgentDefinition
+): boolean {
+  return (
+    model?.provider === definition.model.provider &&
+    model.id === definition.model.id &&
+    model.params?.reasoning === definition.reasoning
+  );
 }
 
 function _hasCode(error: unknown, code: string): boolean {

@@ -101,7 +101,7 @@ export interface DeleteExternalAgentProjectThreadCommand extends GenericCommand<
 
 /** Replace one Thread's local prompt with the latest watched project prompt. */
 export interface SyncExternalAgentProjectPromptCommand extends GenericCommand<
-  "syncExternalAgentProjectPrompt",
+  "syncExternalAgentProjectThreadFromAgent",
   { projectId: string; threadId: string }
 > {}
 
@@ -453,7 +453,7 @@ export const COMMAND_META: Record<
     label: "Delete Agent Project Thread",
     target: "webview",
   },
-  syncExternalAgentProjectPrompt: {
+  syncExternalAgentProjectThreadFromAgent: {
     label: "Sync from Agent",
     target: "webview",
   },

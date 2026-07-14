@@ -1,7 +1,7 @@
 # Pi ReAct runtime reuse research
 
-Date: 2026-07-14  
-Scope: `@earendil-works/pi-agent-core` 0.80.3, current LLM Space runtime prototype, and Desktop Thread execution.  
+Date: 2026-07-14
+Scope: `@earendil-works/pi-agent-core` 0.80.3, current LLM Space runtime prototype, and Desktop Thread execution.
 Primary sources: the installed 0.80.3 package, the official `earendil-works/pi` `v0.80.3` tag, and this repository.
 
 ## Conclusion
