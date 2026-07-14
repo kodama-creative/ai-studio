@@ -1,4 +1,4 @@
-import { FileTextIcon, GitBranchIcon } from "lucide-react";
+import { BotIcon, GitBranchIcon, MessagesSquareIcon } from "lucide-react";
 import {
   lazy,
   Suspense,
@@ -13,6 +13,7 @@ import { toast } from "sonner";
 
 import { externalAgentProjects } from "@/client";
 import { CommandProvider, useCommands, useRegisterCommands } from "@/commands";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { useExperimental } from "@/components/experimental-provider";
 import { ExternalAgentProjectTrustDialog } from "@/components/external-agent-project-trust-dialog";
 import { ExternalAgentProjectsPanel } from "@/components/external-agent-projects-panel";
@@ -20,6 +21,7 @@ import { FileSystemTreeView } from "@/components/file-system-tree-view";
 import { FirecrawlLimitDialog } from "@/components/firecrawl-limit-dialog";
 import { useModels } from "@/components/model-provider";
 import { ThreadTabs, useThreadTabs } from "@/components/thread-tabs";
+import { canCloseTabs } from "@/components/thread-tabs/tab-close-guards";
 import { TracePanel } from "@/components/trace-panel";
 import { Button } from "@/components/ui/button";
 import {
@@ -91,38 +93,63 @@ function LazyOverlay({
   return <Suspense fallback={null}>{children}</Suspense>;
 }
 
+type SidebarMode = "threads" | "agents" | "traces";
+
+const SIDEBAR_MODE_STORAGE_KEY = "llm-space:sidebar-mode";
+
+function _loadSidebarMode(): SidebarMode {
+  const stored = window.localStorage.getItem(SIDEBAR_MODE_STORAGE_KEY);
+  return stored === "agents" || stored === "traces" ? stored : "threads";
+}
+
 function _SidebarModeSwitch({
   mode,
   onModeChange,
+  tracingEnabled,
 }: {
-  mode: "files" | "traces";
-  onModeChange: (mode: "files" | "traces") => void;
+  mode: SidebarMode;
+  onModeChange: (mode: SidebarMode) => void;
+  tracingEnabled: boolean;
 }) {
   return (
-    <div className="bg-muted/60 grid w-full grid-cols-2 rounded-md p-0.5">
+    <div
+      className={`bg-muted/60 grid w-full ${tracingEnabled ? "grid-cols-3" : "grid-cols-2"} rounded-md p-0.5`}
+    >
       <Button
         className="h-6 justify-center px-2"
-        variant={mode === "files" ? "secondary" : "ghost"}
+        variant={mode === "threads" ? "secondary" : "ghost"}
         size="sm"
-        aria-pressed={mode === "files"}
-        onClick={() => onModeChange("files")}
+        aria-pressed={mode === "threads"}
+        onClick={() => onModeChange("threads")}
       >
-        <FileTextIcon className="size-3" />
-        Files
+        <MessagesSquareIcon className="size-3" />
+        Threads
       </Button>
       <Button
-        className="relative h-6 justify-center px-2"
-        variant={mode === "traces" ? "secondary" : "ghost"}
+        className="h-6 justify-center px-2"
+        variant={mode === "agents" ? "secondary" : "ghost"}
         size="sm"
-        aria-pressed={mode === "traces"}
-        onClick={() => onModeChange("traces")}
+        aria-pressed={mode === "agents"}
+        onClick={() => onModeChange("agents")}
       >
-        <GitBranchIcon className="size-3" />
-        Traces
-        <span className="border-primary/30 bg-primary/10 text-primary absolute top-1 right-2 rounded px-1 py-px text-[0.5rem] leading-none font-semibold tracking-wide uppercase">
-          Beta
-        </span>
+        <BotIcon className="size-3" />
+        Agents
       </Button>
+      {tracingEnabled ? (
+        <Button
+          className="relative h-6 justify-center px-2"
+          variant={mode === "traces" ? "secondary" : "ghost"}
+          size="sm"
+          aria-pressed={mode === "traces"}
+          onClick={() => onModeChange("traces")}
+        >
+          <GitBranchIcon className="size-3" />
+          Traces
+          <span className="border-primary/30 bg-primary/10 text-primary absolute top-1 right-2 rounded px-1 py-px text-[0.5rem] leading-none font-semibold tracking-wide uppercase">
+            Beta
+          </span>
+        </Button>
+      ) : null}
     </div>
   );
 }
@@ -217,17 +244,35 @@ function PageInner() {
   const [externalProjectsRefresh, setExternalProjectsRefresh] = useState(0);
   const [pendingTrust, setPendingTrust] =
     useState<ExternalAgentProjectPreview | null>(null);
-  const [sidebarMode, setSidebarMode] = useState<"files" | "traces">("files");
+  const [discardAgentSourcesRequest, setDiscardAgentSourcesRequest] = useState<{
+    requestId: string;
+    reason: "quit" | "reload";
+  } | null>(null);
+  const [sidebarMode, setSidebarMode] = useState<SidebarMode>(_loadSidebarMode);
+  useEffect(() => {
+    const next =
+      !tracingEnabled && sidebarMode === "traces" ? "threads" : sidebarMode;
+    if (next !== sidebarMode) setSidebarMode(next);
+    window.localStorage.setItem(SIDEBAR_MODE_STORAGE_KEY, next);
+  }, [sidebarMode, tracingEnabled]);
   // Which folder a chosen example's thread is created into (default: root).
   const examplesParentRef = useRef("");
 
   const openExternalProjectView = useCallback(
-    (project: ExternalAgentProjectSummary) => {
-      tabs.openExternalProject({
-        projectId: project.id,
-        path: project.path,
-        projectName: project.name,
-      });
+    async (summary: ExternalAgentProjectSummary) => {
+      try {
+        const project = await externalAgentProjects.trustAndOpen(summary.path);
+        setExternalProjectsRefresh((value) => value + 1);
+        tabs.openExternalProject({
+          projectId: project.id,
+          path: project.path,
+          projectName: project.name,
+        });
+      } catch (error) {
+        toast.error("Unable to open Agent", {
+          description: error instanceof Error ? error.message : String(error),
+        });
+      }
     },
     [tabs]
   );
@@ -252,9 +297,15 @@ function PageInner() {
       setExternalProjectsRefresh((value) => value + 1);
       const first = project.threads[0];
       if (first) openExternalProjectThread(project, first);
-      else openExternalProjectView(project);
+      else {
+        tabs.openExternalProject({
+          projectId: project.id,
+          path: project.path,
+          projectName: project.name,
+        });
+      }
     },
-    [openExternalProjectThread, openExternalProjectView]
+    [openExternalProjectThread, tabs]
   );
   const browseExternalProject = useCallback(async () => {
     try {
@@ -311,15 +362,20 @@ function PageInner() {
   // settings). `newFile` / `newFolder` / the tree ops are registered by the
   // file tree, which owns that state.
   useRegisterCommands({
-    closeTab: ({ id, path }) => {
+    closeTab: async ({ id, path }) => {
       const target = id ?? (path ? `thread:${path}` : activeTabIdRef.current);
-      if (target) close(target);
+      if (target && (await canCloseTabs([target]))) close(target);
     },
-    closeOtherTabs: ({ id, path }) => {
+    closeOtherTabs: async ({ id, path }) => {
       const target = id ?? (path ? `thread:${path}` : activeTabIdRef.current);
-      if (target) closeOthers(target);
+      const closing = tabs.tabs
+        .filter((tab) => tab.id !== target)
+        .map((tab) => tab.id);
+      if (target && (await canCloseTabs(closing))) closeOthers(target);
     },
-    closeAllTabs: () => closeAll(),
+    closeAllTabs: async () => {
+      if (await canCloseTabs(tabs.tabs.map((tab) => tab.id))) closeAll();
+    },
     reopenClosedTab: () => void reopenClosed(),
     selectNextTab: () => activateNext(),
     selectPreviousTab: () => activatePrevious(),
@@ -368,7 +424,18 @@ function PageInner() {
     const rpc = electrobun.rpc;
     if (!rpc) return;
     rpc.addMessageListener("executeCommand", executeCommand);
-    return () => rpc.removeMessageListener("executeCommand", executeCommand);
+    const requestDiscard = (request: {
+      requestId: string;
+      reason: "quit" | "reload";
+    }) => setDiscardAgentSourcesRequest(request);
+    rpc.addMessageListener("requestDiscardDirtyAgentSources", requestDiscard);
+    return () => {
+      rpc.removeMessageListener("executeCommand", executeCommand);
+      rpc.removeMessageListener(
+        "requestDiscardDirtyAgentSources",
+        requestDiscard
+      );
+    };
   }, [executeCommand]);
 
   const fullScreen = useFullScreen();
@@ -385,6 +452,12 @@ function PageInner() {
   const handleCloseTab = useCallback(
     (id: string) => executeCommand({ type: "closeTab", args: { id } }),
     [executeCommand]
+  );
+  const handleRefreshTab = useCallback(
+    async (id: string) => {
+      if (await canCloseTabs([id])) tabs.refresh(id);
+    },
+    [tabs]
   );
   const handleCloseOtherTabs = useCallback(
     (id: string) => executeCommand({ type: "closeOtherTabs", args: { id } }),
@@ -410,9 +483,8 @@ function PageInner() {
     () => executeCommand({ type: "toggleSidebar", args: {} }),
     [executeCommand]
   );
-  // The Traces sidebar is gated behind the tracing (beta) experiment. With it
-  // off, hide the mode switch and pin the sidebar to files.
-  const effectiveSidebarMode = tracingEnabled ? sidebarMode : "files";
+  const effectiveSidebarMode =
+    tracingEnabled || sidebarMode !== "traces" ? sidebarMode : "threads";
 
   return (
     <div
@@ -472,15 +544,15 @@ function PageInner() {
           >
             <FileSystemTreeView
               className={
-                effectiveSidebarMode === "files" ? "min-h-0 flex-1" : "hidden"
+                effectiveSidebarMode === "threads" ? "min-h-0 flex-1" : "hidden"
               }
               onSelectFile={tabs.open}
-              onSelectAgentProject={tabs.openAgentProject}
               onRemove={tabs.handleRemove}
               onMove={tabs.handleMove}
             />
-            {effectiveSidebarMode === "files" ? (
+            {effectiveSidebarMode === "agents" ? (
               <ExternalAgentProjectsPanel
+                className="min-h-0 flex-1"
                 refreshNonce={externalProjectsRefresh}
                 onOpenProject={openExternalProjectView}
                 onOpenThread={openExternalProjectThread}
@@ -496,14 +568,13 @@ function PageInner() {
                 onOpenTrace={handleOpenTrace}
               />
             )}
-            {tracingEnabled && (
-              <div className="border-border/70 electrobun-webkit-app-region-no-drag flex shrink-0 border-t px-3 py-2">
-                <_SidebarModeSwitch
-                  mode={sidebarMode}
-                  onModeChange={setSidebarMode}
-                />
-              </div>
-            )}
+            <div className="border-border/70 electrobun-webkit-app-region-no-drag flex shrink-0 border-t px-3 py-2">
+              <_SidebarModeSwitch
+                mode={effectiveSidebarMode}
+                onModeChange={setSidebarMode}
+                tracingEnabled={tracingEnabled}
+              />
+            </div>
           </ResizablePanel>
           <ResizableHandle />
           <ResizablePanel minSize={640}>
@@ -528,7 +599,7 @@ function PageInner() {
                 tabs={tabs.tabs}
                 activeId={tabs.activeId}
                 activate={tabs.activate}
-                refresh={tabs.refresh}
+                refresh={(id) => void handleRefreshTab(id)}
                 sidebarOpen={sidebarOpen}
                 fullScreen={fullScreen}
                 close={handleCloseTab}
@@ -548,6 +619,38 @@ function PageInner() {
         </ResizablePanelGroup>
       </main>
       <FirecrawlLimitDialog />
+      <ConfirmDialog
+        open={discardAgentSourcesRequest !== null}
+        onOpenChange={(open) => {
+          if (open || !discardAgentSourcesRequest) return;
+          electrobun.rpc?.send.resolveDiscardDirtyAgentSources({
+            requestId: discardAgentSourcesRequest.requestId,
+            discard: false,
+          });
+          setDiscardAgentSourcesRequest(null);
+        }}
+        title={
+          discardAgentSourcesRequest?.reason === "quit"
+            ? "Quit and discard unsaved Agent source changes?"
+            : "Reload and discard unsaved Agent source changes?"
+        }
+        description="One or more open source files have unsaved changes."
+        confirmLabel={
+          discardAgentSourcesRequest?.reason === "quit"
+            ? "Discard and quit"
+            : "Discard and reload"
+        }
+        onConfirm={() => {
+          const request = discardAgentSourcesRequest;
+          setDiscardAgentSourcesRequest(null);
+          if (request) {
+            electrobun.rpc?.send.resolveDiscardDirtyAgentSources({
+              requestId: request.requestId,
+              discard: true,
+            });
+          }
+        }}
+      />
       <LazyOverlay open={settingsOpen}>
         <SettingsDialog
           tab={settingsTab}

@@ -49,7 +49,17 @@ packages/
   core/       # Shared logic: types, the agent loop, thread storage
   runtime/    # Pi-native Agent Project discovery and persistent sessions
 apps/
+  example-agent/ # Portable Agent Project example for desktop import
   desktop/    # The desktop app (Electrobun shell + React UI)
+```
+
+To exercise the Agent Project import workflow, start the desktop app, choose
+**Open Agent Project**, and select `apps/example-agent`. The example includes a
+deterministic tool and skill, so its source contract can also be checked without
+a configured model:
+
+```bash
+bun test apps/example-agent
 ```
 
 ## Install

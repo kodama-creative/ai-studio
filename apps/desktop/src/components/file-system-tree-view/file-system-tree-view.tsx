@@ -1,12 +1,7 @@
 "use client";
 
 import type { FileNode, Message, Tool } from "@llm-space/core";
-import {
-  BotIcon,
-  FileCodeIcon,
-  FileTextIcon,
-  MessagesSquare,
-} from "lucide-react";
+import { FileCodeIcon, FileTextIcon, MessagesSquare } from "lucide-react";
 import {
   memo,
   useCallback,
@@ -57,7 +52,6 @@ function _FileSystemTreeView({
   className,
   headerStart,
   onSelectFile,
-  onSelectAgentProject,
   onRemove,
   onMove,
 }: {
@@ -65,7 +59,6 @@ function _FileSystemTreeView({
   headerStart?: ReactNode;
   /** Fired with a file's path when it is selected (folders aren't selectable). */
   onSelectFile?: (path: string) => void;
-  onSelectAgentProject?: (path: string) => void;
   /** Fired with a path after it (file or directory) is successfully deleted. */
   onRemove?: (path: string) => void;
   /** Fired after a path changes via rename or move (`from` → `to`). */
@@ -275,12 +268,10 @@ function _FileSystemTreeView({
         return {
           id: node.path,
           name: node.name,
-          icon: node.agentProject ? BotIcon : undefined,
           draggable: true,
           droppable: true,
           onClick: () => {
             toggle(node.path);
-            if (node.agentProject) onSelectAgentProject?.(node.path);
           },
           onContextMenu: (event) => openNodeActionsMenu(node.path, event),
           // While renaming, render as a leaf (a div) instead of an accordion
@@ -314,6 +305,7 @@ function _FileSystemTreeView({
       (nodesByPath.get(dirPath) ?? [])
         .filter(
           (node) =>
+            !node.agentProject &&
             node.name !== ".llm-space" &&
             (node.type === "directory" ||
               node.name.endsWith(".json") ||
@@ -333,19 +325,7 @@ function _FileSystemTreeView({
     renaming,
     openActionsPath,
     openNodeActionsMenu,
-    onSelectAgentProject,
   ]);
-
-  const agentProjectPaths = useMemo(
-    () =>
-      new Set(
-        [...nodesByPath.values()]
-          .flat()
-          .filter((node) => node.agentProject)
-          .map((node) => node.path)
-      ),
-    [nodesByPath]
-  );
 
   // Start an in-place rename of the node at `path`. Only directories can be
   // expanded, so collapse first (the row renders as a leaf while editing) to
@@ -466,11 +446,7 @@ function _FileSystemTreeView({
             onDocumentDrag={onDocumentDrag}
             onSelectChange={(item) => {
               if (!item) return;
-              if (agentProjectPaths.has(item.id)) {
-                onSelectAgentProject?.(item.id);
-              } else {
-                onSelectFile?.(item.id);
-              }
+              onSelectFile?.(item.id);
             }}
           />
         )}

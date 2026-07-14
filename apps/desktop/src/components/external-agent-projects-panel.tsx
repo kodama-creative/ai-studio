@@ -1,5 +1,6 @@
 import {
   BotIcon,
+  ChevronRightIcon,
   CopyIcon,
   FileTextIcon,
   FolderOpenIcon,
@@ -10,7 +11,7 @@ import {
   Trash2Icon,
   UnplugIcon,
 } from "lucide-react";
-import { memo, useCallback, useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { externalAgentProjects } from "@/client";
@@ -56,10 +57,23 @@ function _ExternalAgentProjectsPanel({
     value: string;
   } | null>(null);
   const { executeCommand } = useCommands();
+  const duplicateNames = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const project of projects) {
+      counts.set(project.name, (counts.get(project.name) ?? 0) + 1);
+    }
+    return new Set(
+      [...counts].filter(([, count]) => count > 1).map(([name]) => name)
+    );
+  }, [projects]);
 
   const refresh = useCallback(async () => {
     try {
-      setProjects(await externalAgentProjects.list());
+      setProjects(
+        (await externalAgentProjects.list()).toSorted(
+          (a, b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path)
+        )
+      );
     } catch (error) {
       toast.error("Unable to load Agent Projects", {
         description: error instanceof Error ? error.message : String(error),
@@ -138,18 +152,18 @@ function _ExternalAgentProjectsPanel({
   });
 
   return (
-    <section className={cn("border-border/70 border-t", className)}>
-      <header className="flex h-9 items-center gap-2 px-3">
+    <section className={cn("flex h-full flex-col", className)}>
+      <header className="electrobun-webkit-app-region-drag flex h-11.5 shrink-0 items-center gap-2 px-3">
         <BotIcon className="text-primary size-3.5" />
         <h2 className="text-muted-foreground text-[11px] font-medium tracking-wide uppercase">
-          Agent Projects
+          Agents
         </h2>
-        <Tooltip content="Open Agent Project…">
+        <Tooltip content="Open agent folder…">
           <Button
             className="ml-auto"
             size="icon-sm"
             variant="ghost"
-            aria-label="Open Agent Project"
+            aria-label="Open agent folder"
             onClick={() =>
               executeCommand({ type: "openExternalAgentProject", args: {} })
             }
@@ -158,10 +172,10 @@ function _ExternalAgentProjectsPanel({
           </Button>
         </Tooltip>
       </header>
-      <div className="max-h-72 overflow-y-auto px-1 pb-2">
+      <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-2">
         {projects.length === 0 ? (
           <p className="text-muted-foreground px-2 py-2 text-xs">
-            Open a directory containing llm-space.json.
+            Open a folder containing an agent directory.
           </p>
         ) : (
           projects.map((project) => {
@@ -169,9 +183,12 @@ function _ExternalAgentProjectsPanel({
             return (
               <div key={project.id}>
                 <div className="group flex min-w-0 items-center rounded-md hover:bg-white/5">
-                  <button
-                    type="button"
-                    className="focus-visible:ring-ring/30 flex min-w-0 grow items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs outline-none focus-visible:ring-2"
+                  <Button
+                    className="shrink-0"
+                    size="icon-sm"
+                    variant="ghost"
+                    aria-label={`${open ? "Collapse" : "Expand"} ${project.name}`}
+                    aria-expanded={open}
                     onClick={() => {
                       setExpanded((current) => {
                         const next = new Set(current);
@@ -179,8 +196,19 @@ function _ExternalAgentProjectsPanel({
                         else next.add(project.id);
                         return next;
                       });
-                      onOpenProject(project);
                     }}
+                  >
+                    <ChevronRightIcon
+                      className={cn(
+                        "size-3.5 transition-transform",
+                        open && "rotate-90"
+                      )}
+                    />
+                  </Button>
+                  <button
+                    type="button"
+                    className="focus-visible:ring-ring/30 flex min-w-0 grow items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs outline-none focus-visible:ring-2"
+                    onClick={() => onOpenProject(project)}
                   >
                     <BotIcon
                       className={cn(
@@ -190,10 +218,19 @@ function _ExternalAgentProjectsPanel({
                           : "text-destructive"
                       )}
                     />
-                    <span className="truncate">{project.name}</span>
-                    <span className="text-muted-foreground ml-auto text-[9px]">
-                      {project.status === "ready" ? "Watching" : project.status}
+                    <span className="min-w-0 truncate">
+                      <span className="block truncate">{project.name}</span>
+                      {duplicateNames.has(project.name) ? (
+                        <span className="text-muted-foreground block truncate text-[9px]">
+                          {project.path}
+                        </span>
+                      ) : null}
                     </span>
+                    {project.status === "ready" ? null : (
+                      <span className="text-destructive ml-auto text-[9px]">
+                        {project.status}
+                      </span>
+                    )}
                   </button>
                   <Button
                     size="icon-sm"
@@ -239,17 +276,21 @@ function _ExternalAgentProjectsPanel({
                       >
                         <FolderOpenIcon /> Reveal in Finder
                       </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        onSelect={() =>
-                          executeCommand({
-                            type: "removeExternalAgentProject",
-                            args: { projectId: project.id },
-                          })
-                        }
-                      >
-                        <UnplugIcon /> Remove from Desktop
-                      </DropdownMenuItem>
+                      {project.removable ? (
+                        <>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            onSelect={() =>
+                              executeCommand({
+                                type: "removeExternalAgentProject",
+                                args: { projectId: project.id },
+                              })
+                            }
+                          >
+                            <UnplugIcon /> Remove from Agents
+                          </DropdownMenuItem>
+                        </>
+                      ) : null}
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </div>

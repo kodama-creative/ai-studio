@@ -8,7 +8,6 @@ import Electrobun, {
 } from "electrobun/bun";
 
 import type { Command } from "../../shared/commands";
-import { AgentProjectManager } from "../agents";
 import { Analytics } from "../analytics";
 import { executeCommandInBun } from "../commands";
 import { ExternalAgentProjectManager } from "../external-projects";
@@ -24,6 +23,7 @@ import { createBuiltInToolsModule } from "../tools/built-in";
 import { TraceManager } from "../traces";
 import { UpdaterService } from "../updates";
 
+import { createDirtyAgentSourceCoordinator } from "./dirty-agent-source-coordinator";
 import { createShutdownCoordinator } from "./shutdown-coordinator";
 import { createMainWindow } from "./window";
 
@@ -37,11 +37,10 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
   const workspacePath = path.join(homePath, "workspace");
   const analytics = new Analytics();
   const modelManager = new ModelManager();
-  const agentProjects = new AgentProjectManager({
+  const externalAgentProjects = new ExternalAgentProjectManager({
+    homePath,
     workspaceRoot: workspacePath,
-    modelManager,
   });
-  const externalAgentProjects = new ExternalAgentProjectManager(homePath);
   const mcpManager = new McpManager();
   const searchSettings = new SearchSettingsManager();
   const skillsManager = new SkillsManager();
@@ -74,6 +73,10 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
     }
     return mainWindow;
   };
+  const dirtyAgentSources = createDirtyAgentSourceCoordinator({
+    sendRequest: (request) =>
+      getRpc().send.requestDiscardDirtyAgentSources(request),
+  });
   const updater = new UpdaterService((message) =>
     getRpc().send.updateStatusChanged(message)
   );
@@ -82,15 +85,21 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
     updater,
     workspacePath,
   };
-  const executeCommand = (command: Command, window: BrowserWindow): void =>
+  const executeCommand = (command: Command, window: BrowserWindow): void => {
+    if (command.type === "reload" && dirtyAgentSources.dirty) {
+      dirtyAgentSources.request("reload", () =>
+        executeCommandInBun(command, window, commandDependencies)
+      );
+      return;
+    }
     executeCommandInBun(command, window, commandDependencies);
+  };
 
   let stopPromise: Promise<void> | null = null;
   const runtime: DesktopAppRuntime = {
     stop() {
       stopPromise ??= _stopDesktopApp([
         ["updater", () => updater.stop()],
-        ["agent projects", () => agentProjects.shutdown()],
         ["external agent projects", () => externalAgentProjects.shutdown()],
         ["streaming", () => streaming.shutdown()],
         ["desktop host", () => host.stop()],
@@ -104,8 +113,12 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
   try {
     rpc = createMainWindowRPC({
       analytics,
-      agentProjects,
       externalAgentProjects,
+      onAgentSourceDirtyStateChanged: (dirty) => {
+        dirtyAgentSources.setDirty(dirty);
+      },
+      onDiscardDirtyAgentSourcesResolved: (requestId, discard) =>
+        dirtyAgentSources.resolve(requestId, discard),
       executeCommand: (command) => executeCommand(command, getMainWindow()),
       getMainWindow,
       homePath,
@@ -130,8 +143,14 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
     });
     Electrobun.events.on(
       "before-quit",
-      (event: ElectrobunEvent<{}, { allow: boolean }>) =>
-        handleBeforeQuit(event)
+      (event: ElectrobunEvent<{}, { allow: boolean }>) => {
+        if (dirtyAgentSources.dirty) {
+          event.response = { allow: false };
+          dirtyAgentSources.request("quit", () => app.quit());
+          return;
+        }
+        handleBeforeQuit(event);
+      }
     );
 
     return runtime;

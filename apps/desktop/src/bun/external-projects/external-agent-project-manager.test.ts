@@ -1,4 +1,4 @@
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -19,6 +19,7 @@ afterEach(async () => {
 async function _fixture() {
   const root = path.join(tmpdir(), `llm-space-external-${crypto.randomUUID()}`);
   const home = path.join(root, "home");
+  const workspace = path.join(home, "workspace");
   const project = path.join(root, "repo");
   const marker = path.join(root, "tool-loaded.txt");
   roots.push(root);
@@ -46,9 +47,13 @@ export default {
 `,
     "utf8"
   );
-  const manager = new ExternalAgentProjectManager(home);
+  await mkdir(workspace, { recursive: true });
+  const manager = new ExternalAgentProjectManager({
+    homePath: home,
+    workspaceRoot: workspace,
+  });
   managers.push(manager);
-  return { home, manager, marker, project };
+  return { home, manager, marker, project, workspace };
 }
 
 describe("ExternalAgentProjectManager", () => {
@@ -172,7 +177,10 @@ describe("ExternalAgentProjectManager", () => {
     await manager.shutdown();
     managers.splice(managers.indexOf(manager), 1);
 
-    const restarted = new ExternalAgentProjectManager(home);
+    const restarted = new ExternalAgentProjectManager({
+      homePath: home,
+      workspaceRoot: path.join(home, "workspace"),
+    });
     managers.push(restarted);
     const [restored] = await restarted.list();
     expect(restored.status).toBe("ready");
@@ -183,5 +191,31 @@ describe("ExternalAgentProjectManager", () => {
     const [missing] = await restarted.list();
     expect(missing.status).toBe("missing");
     expect(missing.threads.map((thread) => thread.id)).toContain(threadId);
+  });
+
+  test("discovers manifestless workspace Agents without registering them", async () => {
+    const { home, manager, workspace } = await _fixture();
+    const project = path.join(workspace, "nested", "weather-agent");
+    await mkdir(path.join(project, "agent"), { recursive: true });
+    await writeFile(
+      path.join(project, "agent", "instructions.md"),
+      "Be concise.\n",
+      "utf8"
+    );
+
+    const [discovered] = await manager.list();
+    expect(discovered.path).toBe(await realpath(project));
+    expect(discovered.removable).toBe(false);
+    expect(discovered.status).toBe("ready");
+    expect(discovered.threads).toHaveLength(0);
+
+    const opened = await manager.trustAndOpen(project);
+    expect(opened.removable).toBe(false);
+    expect(opened.threads).toHaveLength(1);
+    expect(
+      await Bun.file(
+        path.join(home, "settings", "external-agent-projects.json")
+      ).exists()
+    ).toBe(false);
   });
 });

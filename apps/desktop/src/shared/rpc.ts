@@ -10,13 +10,6 @@ import type {
 } from "@llm-space/core";
 import type { RPCSchema } from "electrobun";
 
-import type {
-  AbortAgentProjectStreamPayload,
-  AgentProjectView,
-  AgentSessionKind,
-  StreamAgentProjectRequestPayload,
-  StreamAgentProjectResponsePayload,
-} from "./agent-project";
 import type { AnalyticsEvent, AnalyticsStatus } from "./analytics";
 import type { Command } from "./commands";
 import type {
@@ -197,26 +190,6 @@ export interface DesktopRPCType {
       };
       // Resolve a workspace-relative path to its absolute on-disk path.
       fsRealpath: { params: { path: string }; response: { path: string } };
-      agentProjectInspect: {
-        params: { projectPath: string };
-        response: AgentProjectView;
-      };
-      agentProjectSetModel: {
-        params: { projectPath: string; model: ModelConfig };
-        response: AgentProjectView;
-      };
-      agentProjectNewSession: {
-        params: { projectPath: string; kind: AgentSessionKind };
-        response: AgentProjectView;
-      };
-      agentProjectSelectSession: {
-        params: {
-          projectPath: string;
-          kind: AgentSessionKind;
-          sessionId: string;
-        };
-        response: AgentProjectView;
-      };
       externalAgentProjectBrowse: {
         params: Record<string, never>;
         response: ExternalAgentProjectPreview | null;
@@ -453,8 +426,11 @@ export interface DesktopRPCType {
     messages: {
       sendStreamThreadRequest: StreamThreadRequestPayload;
       abortStreamThread: AbortStreamThreadPayload;
-      sendAgentProjectPrompt: StreamAgentProjectRequestPayload;
-      abortAgentProjectPrompt: AbortAgentProjectStreamPayload;
+      agentSourceDirtyStateChanged: { dirty: boolean };
+      resolveDiscardDirtyAgentSources: {
+        requestId: string;
+        discard: boolean;
+      };
       // A unified command dispatched from the webview to run in the bun process
       // (e.g. window zoom / reload). See `shared/commands.ts`.
       executeCommand: Command;
@@ -468,8 +444,11 @@ export interface DesktopRPCType {
     // Messages the bun side SENDS and the webview handles.
     messages: {
       receiveStreamThreadResponse: StreamThreadResponsePayload;
-      receiveAgentProjectResponse: StreamAgentProjectResponsePayload;
       externalAgentProjectChanged: ExternalAgentProjectChangedPayload;
+      requestDiscardDirtyAgentSources: {
+        requestId: string;
+        reason: "quit" | "reload";
+      };
       // OS-level fullscreen state changed (entered/exited).
       fullScreenChanged: { fullScreen: boolean };
       // App-update flow progress from the bun-side updater service.

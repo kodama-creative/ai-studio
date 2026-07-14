@@ -8,7 +8,6 @@ import { BrowserView, Utils, type BrowserWindow } from "electrobun/bun";
 
 import type { Command } from "../../shared/commands";
 import type { DesktopRPCType } from "../../shared/rpc";
-import type { AgentProjectManager } from "../agents";
 import type { Analytics } from "../analytics";
 import type { ExternalAgentProjectManager } from "../external-projects";
 import { moveToTrash, revealInFileManager } from "../fs";
@@ -52,8 +51,12 @@ export type MainWindowRPC = ReturnType<
 
 export interface MainWindowRPCDependencies {
   analytics: Analytics;
-  agentProjects: AgentProjectManager;
   externalAgentProjects: ExternalAgentProjectManager;
+  onAgentSourceDirtyStateChanged: (dirty: boolean) => void;
+  onDiscardDirtyAgentSourcesResolved: (
+    requestId: string,
+    discard: boolean
+  ) => void;
   executeCommand: (command: Command) => void;
   getMainWindow: () => BrowserWindow;
   homePath: string;
@@ -72,8 +75,9 @@ const MAX_REQUEST_TIME_MS = 5 * 60_000 + 10_000;
 
 export function createMainWindowRPC({
   analytics,
-  agentProjects,
   externalAgentProjects,
+  onAgentSourceDirtyStateChanged,
+  onDiscardDirtyAgentSourcesResolved,
   executeCommand,
   getMainWindow,
   homePath,
@@ -241,14 +245,6 @@ export function createMainWindowRPC({
         },
         fsRealpath: ({ path }) =>
           Promise.resolve({ path: localFs.realpath(path) }),
-        agentProjectInspect: ({ projectPath }) =>
-          agentProjects.inspect(projectPath),
-        agentProjectSetModel: ({ projectPath, model }) =>
-          agentProjects.setModel(projectPath, model),
-        agentProjectNewSession: ({ projectPath, kind }) =>
-          agentProjects.newSession(projectPath, kind),
-        agentProjectSelectSession: ({ projectPath, kind, sessionId }) =>
-          agentProjects.selectSession(projectPath, kind, sessionId),
         externalAgentProjectBrowse: async () => {
           const selected = await Utils.openFileDialog({
             startingFolder: "~/",
@@ -386,13 +382,10 @@ export function createMainWindowRPC({
           );
         },
         abortStreamThread: (payload) => streaming.abort(payload),
-        sendAgentProjectPrompt: (payload) => {
-          void agentProjects.run(payload, (message) =>
-            rpc.send.receiveAgentProjectResponse(message)
-          );
-        },
-        abortAgentProjectPrompt: ({ streamId }) =>
-          agentProjects.abort(streamId),
+        agentSourceDirtyStateChanged: ({ dirty }) =>
+          onAgentSourceDirtyStateChanged(dirty),
+        resolveDiscardDirtyAgentSources: ({ requestId, discard }) =>
+          onDiscardDirtyAgentSourcesResolved(requestId, discard),
         captureAnalyticsEvent: ({ event, properties }) =>
           analytics.capture(event, properties),
         executeCommand: (command) => executeCommand(command),

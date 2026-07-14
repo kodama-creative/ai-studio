@@ -45,12 +45,6 @@ const MOVE_TO_TRASH_LABEL = _isWindows
   ? "Move to Recycle Bin"
   : "Move to Trash";
 
-const AgentProjectTabPane = lazy(() =>
-  import("./agent-project-tab-pane").then((module) => ({
-    default: module.AgentProjectTabPane,
-  }))
-);
-
 const ExternalProjectTabPane = lazy(() =>
   import("./external-project-tab-pane").then((module) => ({
     default: module.ExternalProjectTabPane,
@@ -400,22 +394,12 @@ export function ThreadTabs({
               />
             );
           }
-          if (tab.type === "externalProject") {
-            return (
-              <Suspense key={tab.id} fallback={null}>
-                <ExternalProjectTabPane
-                  projectId={tab.projectId}
-                  threadId={tab.threadId}
-                  active={tab.id === activeId}
-                  refreshNonce={tab.refreshNonce ?? 0}
-                />
-              </Suspense>
-            );
-          }
           return (
             <Suspense key={tab.id} fallback={null}>
-              <AgentProjectTabPane
-                path={tab.path}
+              <ExternalProjectTabPane
+                tabId={tab.id}
+                projectId={tab.projectId}
+                threadId={tab.threadId}
                 active={tab.id === activeId}
                 refreshNonce={tab.refreshNonce ?? 0}
               />

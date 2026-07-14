@@ -3,6 +3,7 @@ import path from "node:path";
 
 import {
   AGENT_PROJECT_MANIFEST_FILE,
+  AGENT_PROJECT_MANIFEST_VERSION,
   AgentProjectManifestError,
   parseAgentProjectManifest,
   type AgentProjectManifest,
@@ -24,25 +25,29 @@ export async function loadAgentProjectManifest(
 ): Promise<ResolvedAgentProjectManifest> {
   const projectRoot = await _canonicalDirectory(projectDirectory, "Project");
   const manifestPath = path.join(projectRoot, AGENT_PROJECT_MANIFEST_FILE);
-  let parsed: unknown;
+  let manifest: AgentProjectManifest;
   try {
-    parsed = JSON.parse(await readFile(manifestPath, "utf8")) as unknown;
+    manifest = parseAgentProjectManifest(
+      JSON.parse(await readFile(manifestPath, "utf8")) as unknown
+    );
   } catch (error) {
     if (_hasCode(error, "ENOENT")) {
-      throw new AgentProjectManifestError(
-        `Missing ${AGENT_PROJECT_MANIFEST_FILE} in ${projectRoot}.`
-      );
-    }
-    if (error instanceof SyntaxError) {
+      manifest = {
+        schemaVersion: AGENT_PROJECT_MANIFEST_VERSION,
+        agent: "agent",
+      };
+    } else if (error instanceof SyntaxError) {
       throw new AgentProjectManifestError(
         `${AGENT_PROJECT_MANIFEST_FILE} contains invalid JSON: ${error.message}`
       );
+    } else if (error instanceof AgentProjectManifestError) {
+      throw error;
+    } else {
+      throw new AgentProjectManifestError(
+        `Unable to read ${AGENT_PROJECT_MANIFEST_FILE}: ${_message(error)}`
+      );
     }
-    throw new AgentProjectManifestError(
-      `Unable to read ${AGENT_PROJECT_MANIFEST_FILE}: ${_message(error)}`
-    );
   }
-  const manifest = parseAgentProjectManifest(parsed);
   if (path.isAbsolute(manifest.agent)) {
     throw new AgentProjectManifestError(
       "The agent path must be relative to the project root."

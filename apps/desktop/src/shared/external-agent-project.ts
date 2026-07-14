@@ -21,6 +21,7 @@ export interface ExternalAgentProjectSummary {
   id: string;
   name: string;
   path: string;
+  removable: boolean;
   status: ExternalAgentProjectStatus;
   error?: string;
   threads: ExternalAgentProjectThreadSummary[];

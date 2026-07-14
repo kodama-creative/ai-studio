@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { watch, type FSWatcher } from "node:fs";
+import { realpathSync, watch, type FSWatcher } from "node:fs";
 import {
   lstat,
   mkdir,
@@ -39,16 +39,18 @@ import type {
 interface RegistryEntry {
   path: string;
   trusted: boolean;
+  origin: "workspace" | "registered";
 }
 
 interface RegistryFile {
-  projects: RegistryEntry[];
+  projects: Pick<RegistryEntry, "path" | "trusted">[];
 }
 
 interface LoadedProject {
   resolved: ResolvedAgentProjectManifest | null;
   snapshot: AgentProjectSnapshot | null;
   error: string | null;
+  missing: boolean;
   watcher: FSWatcher | null;
   reloadTimer: ReturnType<typeof setTimeout> | null;
   snapshots: Map<string, AgentProjectSnapshot>;
@@ -63,18 +65,25 @@ interface ThreadFile {
 export class ExternalAgentProjectManager {
   private readonly _settingsFile: string;
   private readonly _dataRoot: string;
+  private readonly _workspaceRoot: string;
   private readonly _registry = new Map<string, RegistryEntry>();
   private readonly _loaded = new Map<string, LoadedProject>();
   private _loadedRegistry = false;
   private _onChange: ((projectId: string) => void) | null = null;
 
-  constructor(homePath: string) {
+  constructor(options: { homePath: string; workspaceRoot: string }) {
+    const { homePath, workspaceRoot } = options;
     this._settingsFile = path.join(
       homePath,
       "settings",
       "external-agent-projects.json"
     );
     this._dataRoot = path.join(homePath, "projects");
+    try {
+      this._workspaceRoot = realpathSync(workspaceRoot);
+    } catch {
+      this._workspaceRoot = path.resolve(workspaceRoot);
+    }
   }
 
   setOnChange(listener: (projectId: string) => void): void {
@@ -101,8 +110,13 @@ export class ExternalAgentProjectManager {
     await this._ensureRegistry();
     const resolved = await loadAgentProjectManifest(projectDirectory);
     const id = _projectId(resolved.projectRoot);
-    this._registry.set(id, { path: resolved.projectRoot, trusted: true });
-    await this._saveRegistry();
+    const inWorkspace = _within(this._workspaceRoot, resolved.projectRoot);
+    this._registry.set(id, {
+      path: resolved.projectRoot,
+      trusted: true,
+      origin: inWorkspace ? "workspace" : "registered",
+    });
+    if (!inWorkspace) await this._saveRegistry();
     await this._reload(id, { resolved });
     const view = await this.inspect(id);
     if (view.status !== "ready") return view;
@@ -131,7 +145,8 @@ export class ExternalAgentProjectManager {
       id: projectId,
       name: path.basename(entry.path),
       path: entry.path,
-      status: loaded.error ? "invalid" : "ready",
+      removable: entry.origin === "registered",
+      status: loaded.missing ? "missing" : loaded.error ? "invalid" : "ready",
       ...(loaded.error ? { error: loaded.error } : {}),
       threads,
       agentPath: loaded.resolved?.agentRoot ?? null,
@@ -158,6 +173,9 @@ export class ExternalAgentProjectManager {
 
   async remove(projectId: string): Promise<void> {
     await this._ensureRegistry();
+    if (this._entry(projectId).origin === "workspace") {
+      throw new Error("Workspace Agents are discovered automatically.");
+    }
     this._registry.delete(projectId);
     this._closeLoaded(projectId);
     await this._saveRegistry();
@@ -325,32 +343,64 @@ export class ExternalAgentProjectManager {
   }
 
   private async _ensureRegistry(): Promise<void> {
-    if (this._loadedRegistry) return;
-    this._loadedRegistry = true;
-    try {
-      const parsed = JSON.parse(
-        await readFile(this._settingsFile, "utf8")
-      ) as Partial<RegistryFile>;
-      for (const entry of parsed.projects ?? []) {
-        if (typeof entry.path !== "string" || entry.trusted !== true) continue;
-        const canonical = await realpath(entry.path).catch(() =>
-          path.resolve(entry.path)
-        );
-        this._registry.set(_projectId(canonical), {
-          path: canonical,
-          trusted: true,
-        });
+    if (!this._loadedRegistry) {
+      this._loadedRegistry = true;
+      try {
+        const parsed = JSON.parse(
+          await readFile(this._settingsFile, "utf8")
+        ) as Partial<RegistryFile>;
+        for (const entry of parsed.projects ?? []) {
+          if (typeof entry.path !== "string" || entry.trusted !== true)
+            continue;
+          const canonical = await realpath(entry.path).catch(() =>
+            path.resolve(entry.path)
+          );
+          this._registry.set(_projectId(canonical), {
+            path: canonical,
+            trusted: true,
+            origin: "registered",
+          });
+        }
+      } catch (error) {
+        if (!_hasCode(error, "ENOENT")) {
+          console.error("Failed to load Agent Projects:", error);
+        }
       }
-    } catch (error) {
-      if (!_hasCode(error, "ENOENT")) {
-        console.error("Failed to load external Agent Projects:", error);
+    }
+    await this._refreshWorkspaceProjects();
+  }
+
+  private async _refreshWorkspaceProjects(): Promise<void> {
+    const discovered = new Set<string>();
+    for (const projectRoot of await _discoverAgentProjects(
+      this._workspaceRoot
+    )) {
+      const id = _projectId(projectRoot);
+      discovered.add(id);
+      this._registry.set(id, {
+        path: projectRoot,
+        trusted: true,
+        origin: "workspace",
+      });
+    }
+    for (const [id, entry] of this._registry) {
+      if (entry.origin === "workspace" && !discovered.has(id)) {
+        this._registry.delete(id);
+        this._closeLoaded(id);
       }
     }
   }
 
   private async _saveRegistry(): Promise<void> {
     await mkdir(path.dirname(this._settingsFile), { recursive: true });
-    const file: RegistryFile = { projects: [...this._registry.values()] };
+    const file: RegistryFile = {
+      projects: [...this._registry.values()]
+        .filter((entry) => entry.origin === "registered")
+        .map(({ path: projectPath, trusted }) => ({
+          path: projectPath,
+          trusted,
+        })),
+    };
     await _atomicJsonWrite(this._settingsFile, file);
   }
 
@@ -370,6 +420,7 @@ export class ExternalAgentProjectManager {
         resolved: null,
         snapshot: null,
         error: null,
+        missing: false,
         watcher: null,
         reloadTimer: null,
         snapshots: new Map(),
@@ -386,6 +437,7 @@ export class ExternalAgentProjectManager {
       const snapshot = await loadAgentProject(resolved.agentRoot);
       state.resolved = resolved;
       state.snapshot = snapshot;
+      state.missing = false;
       state.error = snapshot.diagnostics.some(
         (diagnostic) => diagnostic.severity === "error"
       )
@@ -398,6 +450,7 @@ export class ExternalAgentProjectManager {
       this._ensureWatcher(projectId, state, resolved.projectRoot);
     } catch (error) {
       state.error = _message(error);
+      state.missing = _hasCode(error, "ENOENT");
       if (_hasCode(error, "ENOENT")) {
         state.resolved = null;
         state.watcher?.close();
@@ -435,11 +488,14 @@ export class ExternalAgentProjectManager {
       id: projectId,
       name: path.basename(entry.path),
       path: entry.path,
+      removable: entry.origin === "registered",
       status: loaded.resolved
         ? loaded.error
           ? "invalid"
           : "ready"
-        : "missing",
+        : loaded.missing
+          ? "missing"
+          : "invalid",
       ...(loaded.error ? { error: loaded.error } : {}),
       threads: await this._listThreads(projectId),
     };
@@ -570,6 +626,41 @@ function _projectTools(
   }));
 }
 
+async function _discoverAgentProjects(root: string): Promise<string[]> {
+  let entries;
+  try {
+    entries = await readdir(root, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const projects: string[] = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+    const candidate = path.join(root, entry.name);
+    let children;
+    try {
+      children = await readdir(candidate, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    const isProject = children.some(
+      (child) =>
+        (child.name === "llm-space.json" && child.isFile()) ||
+        (child.name === "agent" && child.isDirectory())
+    );
+    if (isProject) {
+      try {
+        projects.push(await realpath(candidate));
+      } catch {
+        // The directory moved or disappeared between listing and resolution.
+      }
+    } else if (entry.name !== "node_modules") {
+      projects.push(...(await _discoverAgentProjects(candidate)));
+    }
+  }
+  return projects;
+}
+
 function _reconcileThread(
   input: Thread,
   project: ExternalAgentProjectView
@@ -636,6 +727,10 @@ async function _atomicJsonWrite(target: string, value: unknown): Promise<void> {
 
 function _projectId(root: string): string {
   return createHash("sha256").update(root).digest("hex").slice(0, 24);
+}
+
+function _within(root: string, candidate: string): boolean {
+  return candidate === root || candidate.startsWith(root + path.sep);
 }
 
 function _textFingerprint(text: string): string {

@@ -37,6 +37,9 @@ export interface CodeEditorHandle {
   insertText: (text: string) => void;
 }
 
+export type CodeEditorLanguage =
+  "javascript" | "json" | "markdown" | "typescript";
+
 export interface CodeEditorProps {
   className?: string;
   autoFocus?: boolean;
@@ -56,7 +59,7 @@ export interface CodeEditorProps {
    * no longer scales with message count.
    */
   plain?: boolean;
-  language?: "markdown" | "json";
+  language?: CodeEditorLanguage;
   /**
    * The value is a live streaming preview: syntax highlighting is skipped
    * (restored by whatever renders the settled value — the streamed message
@@ -73,6 +76,8 @@ export interface CodeEditorProps {
    * (Lite) fallback. Pass a stable reference to avoid reconfiguring the editor.
    */
   extraExtensions?: Extension[];
+  /** Reports the live document without making the editor controlled. */
+  onDraftChange?: (value: string) => void;
   onChange?: (value: string) => void;
   onKeyDown?: (e: KeyboardEvent) => void;
   onPaste?: (e: ClipboardEvent) => void;
@@ -91,6 +96,7 @@ function _CodeEditor(
     streaming,
     readonly,
     extraExtensions,
+    onDraftChange,
     onChange,
     onKeyDown,
     onPaste,
@@ -108,7 +114,7 @@ function _CodeEditor(
   const [syncedValue, setSyncedValue] = useState(value);
 
   const detectLanguage = useCallback(
-    (text: string): "markdown" | "json" => {
+    (text: string): CodeEditorLanguage => {
       // While streaming, the extensions memo overrides the language to "none";
       // this branch only pins the detection *state* so a JSON-looking chunk
       // can't flip `detectedLanguage` (and reconfigure the editor) mid-stream.
@@ -150,7 +156,11 @@ function _CodeEditor(
   );
 
   useEffect(() => {
-    if (isFocusedRef.current && !readonly) {
+    if (
+      isFocusedRef.current &&
+      !readonly &&
+      draftRef.current !== committedRef.current
+    ) {
       return;
     }
     // Once the view exists, dispatch external values directly instead of via
@@ -224,8 +234,9 @@ function _CodeEditor(
     (next: string) => {
       draftRef.current = next;
       refreshLanguage(next);
+      onDraftChange?.(next);
     },
-    [refreshLanguage]
+    [onDraftChange, refreshLanguage]
   );
 
   const handleBlur = useCallback(() => {

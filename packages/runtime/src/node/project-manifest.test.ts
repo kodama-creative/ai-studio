@@ -27,6 +27,21 @@ async function _fixture(agent = "./agent") {
 }
 
 describe("loadAgentProjectManifest", () => {
+  test("defaults a manifestless project to the agent directory", async () => {
+    const root = path.join(
+      tmpdir(),
+      `llm-space-manifest-${crypto.randomUUID()}`
+    );
+    roots.push(root);
+    await mkdir(path.join(root, "agent"), { recursive: true });
+
+    const loaded = await loadAgentProjectManifest(root);
+    const canonical = await realpath(root);
+    expect(loaded.projectRoot).toBe(canonical);
+    expect(loaded.agentRoot).toBe(path.join(canonical, "agent"));
+    expect(loaded.manifest).toEqual({ schemaVersion: 1, agent: "agent" });
+  });
+
   test("resolves a confined Agent root", async () => {
     const root = await _fixture();
     const loaded = await loadAgentProjectManifest(root);

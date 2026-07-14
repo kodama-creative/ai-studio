@@ -11,6 +11,7 @@ const PROJECT = {
   id: "project-1",
   name: "Project",
   path: "/tmp/project",
+  removable: true,
   status: "ready",
   threads: [],
   agentPath: "/tmp/project/agent",

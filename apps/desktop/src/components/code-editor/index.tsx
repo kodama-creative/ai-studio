@@ -20,7 +20,11 @@ import { Textarea } from "../ui/textarea";
 
 import type { CodeEditorHandle, CodeEditorProps } from "./editor";
 
-export type { CodeEditorHandle, CodeEditorProps } from "./editor";
+export type {
+  CodeEditorHandle,
+  CodeEditorLanguage,
+  CodeEditorProps,
+} from "./editor";
 
 // CodeMirror is the single heaviest first-paint dependency (~200 kB gzipped) and
 // only mounts inside editors, so load it on demand. The surrounding UI and the
@@ -113,6 +117,7 @@ const PlainTextCodeEditor = forwardRef<
     readonly,
     scrollOnFocus,
     value,
+    onDraftChange,
     onChange,
     onKeyDown,
     onPaste,
@@ -180,9 +185,13 @@ const PlainTextCodeEditor = forwardRef<
     [commit, insertText]
   );
 
-  const handleChange = useCallback((event: ChangeEvent<HTMLTextAreaElement>) => {
-    draftRef.current = event.currentTarget.value;
-  }, []);
+  const handleChange = useCallback(
+    (event: ChangeEvent<HTMLTextAreaElement>) => {
+      draftRef.current = event.currentTarget.value;
+      onDraftChange?.(event.currentTarget.value);
+    },
+    [onDraftChange]
+  );
 
   return (
     <div

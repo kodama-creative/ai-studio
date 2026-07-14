@@ -114,7 +114,7 @@ export interface EnableExternalAgentProjectToolsCommand extends GenericCommand<
 /** Save an Agent Project source file through the trusted Bun-side boundary. */
 export interface SaveExternalAgentProjectSourceCommand extends GenericCommand<
   "saveExternalAgentProjectSource",
-  { projectId: string; path: string; text: string }
+  { projectId: string; path: string; text: string; overwrite?: boolean }
 > {}
 
 /** Create a new folder (with in-place rename). `parent` defaults to the root. */

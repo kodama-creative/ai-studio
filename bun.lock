@@ -36,6 +36,7 @@
       "dependencies": {
         "@base-ui/react": "^1.6.0",
         "@codemirror/autocomplete": "6.20.3",
+        "@codemirror/lang-javascript": "6.2.5",
         "@codemirror/lang-json": "^6.0.2",
         "@codemirror/lang-markdown": "^6.5.0",
         "@codemirror/language": "6.12.4",
@@ -95,6 +96,13 @@
         "tailwindcss": "^4.0.15",
         "typescript": "^5.7.2",
         "vite": "^6.0.3",
+      },
+    },
+    "apps/example-agent": {
+      "name": "@llm-space/example-agent",
+      "version": "0.1.0",
+      "devDependencies": {
+        "@llm-space/runtime": "workspace:*",
       },
     },
     "packages/cli": {
@@ -572,6 +580,8 @@
     "@llm-space/core": ["@llm-space/core@workspace:packages/core"],
 
     "@llm-space/desktop": ["@llm-space/desktop@workspace:apps/desktop"],
+
+    "@llm-space/example-agent": ["@llm-space/example-agent@workspace:apps/example-agent"],
 
     "@llm-space/runtime": ["@llm-space/runtime@workspace:packages/runtime"],
 
