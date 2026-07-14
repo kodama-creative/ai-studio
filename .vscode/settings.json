@@ -1,0 +1,12 @@
+{
+  "editor.tabSize": 2,
+  "search.exclude": {
+    "**/.vscode": true
+  },
+  "js/ts.format.placeOpenBraceOnNewLineForControlBlocks": false,
+  "js/ts.format.placeOpenBraceOnNewLineForFunctions": false,
+  "js/ts.preferences.quoteStyle": "single",
+  "js/ts.tsdk.path": "node_modules/typescript/lib",
+  "sfmt.braces": "knr",
+  "sfmt.insize": 2
+}
