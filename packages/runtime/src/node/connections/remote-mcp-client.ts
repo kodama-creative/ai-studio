@@ -1,5 +1,4 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import {
   type CallToolResult,
@@ -7,15 +6,12 @@ import {
   type Tool as McpTool
 } from "@modelcontextprotocol/sdk/types.js";
 
-import type { McpRemoteTransport } from "../../public/definitions/connections/mcp";
-
 const CONNECT_TIMEOUT_MS = 10_000;
 const LIST_TIMEOUT_MS = 10_000;
 const CALL_TIMEOUT_MS = 5 * 60_000;
 const MAX_OUTPUT_CHARS = 20_000;
 
 export interface RemoteMcpClientOptions {
-  readonly transport: McpRemoteTransport;
   readonly url: string;
   readonly headers: Readonly<Record<string, string>>;
 }
@@ -39,22 +35,7 @@ export class RemoteMcpClient {
       Object.keys(options.headers).length > 0
         ? { headers: { ...options.headers } }
         : undefined;
-    const transport =
-      options.transport === "streamableHttp"
-        ? new StreamableHTTPClientTransport(url, { requestInit })
-        : new SSEClientTransport(url, {
-          requestInit,
-          eventSourceInit: {
-            fetch: async (input, init) =>
-              fetch(input, {
-                ...init,
-                headers: {
-                  ...options.headers,
-                  ..._headersToRecord(init.headers)
-                }
-              })
-          }
-        });
+    const transport = new StreamableHTTPClientTransport(url, { requestInit });
     try {
       await client.connect(transport, { timeout: CONNECT_TIMEOUT_MS });
       return new RemoteMcpClient(client);
@@ -130,20 +111,4 @@ export function flattenMcpToolResult(
         : text,
     isError: result.isError ?? false
   };
-}
-
-function _headersToRecord(
-  headers: RequestInit["headers"] | undefined
-): Record<string, string> {
-  if (!headers) { return {}; }
-  if (headers instanceof Headers) { return Object.fromEntries(headers.entries()); }
-  if (Array.isArray(headers)) { return Object.fromEntries(headers); }
-  return Object.fromEntries(
-    Object.entries(headers).map(([key, value]) =>
-      [
-        key,
-        typeof value === "string" ? value : Array.from(value).join(", ")
-      ] as const
-    )
-  );
 }

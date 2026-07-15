@@ -55,7 +55,7 @@ function _normalizeStatus(value: unknown): TodoStatus {
  * with a leading status affordance — an empty circle (pending), a spinner
  * (in_progress), or a filled check (completed, struck through and dimmed).
  */
-function _TodoWriteView({
+const _TodoWriteView = function TodoWriteView({
   todos,
   input
 }: {
@@ -101,7 +101,7 @@ function _TodoWriteView({
       </ul>
     </div>
   );
-}
+};
 export const TodoWriteView = memo(_TodoWriteView);
 
 function TodoRow({ todo }: { readonly todo: TodoItem; }) {

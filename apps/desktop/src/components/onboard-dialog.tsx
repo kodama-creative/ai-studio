@@ -56,6 +56,8 @@ export function OnboardDialog({
     }
 
     let cancelled = false;
+    // Clear the previous request's error when a new external fetch begins.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoadError(null);
     void fetchBuiltinProviders()
       .then(providers => {
@@ -131,7 +133,7 @@ export function OnboardDialog({
 
   const handleReady = useCallback(() => {
     onOpenChange(false);
-  }, []);
+  }, [onOpenChange]);
 
   const readyProviderName =
     addedProviderName ?? models[0]?.name ?? models[0]?.id ?? null;
@@ -218,7 +220,7 @@ export function OnboardDialog({
               detectedProviders={detectedProviders}
               loadError={loadError}
               loading={builtinProviders === null && models.length === 0}
-              onAddProvider={handleAddProvider}
+              onAddProvider={providerId => { void handleAddProvider(providerId); }}
               onConfigureModels={handleConfigureModels}
               onReady={handleReady}
               readyProviderName={readyProviderName}
@@ -263,7 +265,7 @@ function _sortProviderForOnboarding(
   return normalizedA - normalizedB || a.name.localeCompare(b.name);
 }
 
-function _OnboardSetupPanel({
+const _OnboardSetupPanel = function OnboardSetupPanel({
   className,
   configured,
   readyProviderName,
@@ -330,9 +332,9 @@ function _OnboardSetupPanel({
               )}
     </div>
   );
-}
+};
 
-function _LoadingSetupState() {
+const _LoadingSetupState = function LoadingSetupState() {
   return (
     <div className="flex items-center gap-3">
       <Spinner className="size-4 text-white/80" />
@@ -344,9 +346,9 @@ function _LoadingSetupState() {
       </div>
     </div>
   );
-}
+};
 
-function _ReadySetupState({
+const _ReadySetupState = function ReadySetupState({
   providerName,
   onReady
 }: {
@@ -368,9 +370,9 @@ function _ReadySetupState({
       </div>
     </div>
   );
-}
+};
 
-function _DetectedSetupState({
+const _DetectedSetupState = function DetectedSetupState({
   providers,
   addingProviderId,
   onAddProvider
@@ -430,9 +432,9 @@ function _DetectedSetupState({
       </div>
     </div>
   );
-}
+};
 
-function _ManualSetupState({
+const _ManualSetupState = function ManualSetupState({
   title,
   description,
   recommendedProviders,
@@ -496,4 +498,4 @@ function _ManualSetupState({
       </Button>
     </div>
   );
-}
+};

@@ -85,9 +85,11 @@ function LazyOverlay({
   readonly children: ReactNode;
   readonly open: boolean;
 }) {
-  const mounted = useRef(false);
-  if (open) { mounted.current = true; }
-  if (!mounted.current) { return null; }
+  const [mounted, setMounted] = useState(open);
+  if (open && !mounted) {
+    setMounted(true);
+  }
+  if (!mounted) { return null; }
   return <Suspense fallback={null}>{children}</Suspense>;
 }
 
@@ -100,7 +102,7 @@ function _loadSidebarMode(): SidebarMode {
   return stored === "agents" || stored === "traces" ? stored : "threads";
 }
 
-function _SidebarModeSwitch({
+const _SidebarModeSwitch = function SidebarModeSwitch({
   mode,
   onModeChange,
   tracingEnabled
@@ -152,7 +154,7 @@ function _SidebarModeSwitch({
         : null}
     </div>
   );
-}
+};
 
 export function Page() {
   return (
@@ -209,9 +211,6 @@ function PageInner() {
   const models = useModels();
   const { tracingEnabled } = useExperimental();
 
-  // The active tab is read through a ref so command handlers never go stale.
-  const activeTabIdRef = useRef(tabs.activeId);
-  activeTabIdRef.current = tabs.activeId;
   const {
     close,
     closeOthers,
@@ -238,7 +237,7 @@ function PageInner() {
     if (settingsOpen) { track({ event: "settings_opened", properties: {} }); }
   }, [settingsOpen]);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
-  const [onboardOpen, setOnboardOpen] = useState(false);
+  const [onboardOpen, setOnboardOpen] = useState(() => models.length === 0);
   const [examplesOpen, setExamplesOpen] = useState(false);
   const [externalProjectsRefresh, setExternalProjectsRefresh] = useState(0);
   const [pendingTrust, setPendingTrust] =
@@ -251,7 +250,11 @@ function PageInner() {
   useEffect(() => {
     const next =
       !tracingEnabled && sidebarMode === "traces" ? "threads" : sidebarMode;
-    if (next !== sidebarMode) { setSidebarMode(next); }
+    if (next !== sidebarMode) {
+      // Disabling tracing invalidates the selected mode and must persist Threads.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSidebarMode(next);
+    }
     window.localStorage.setItem(SIDEBAR_MODE_STORAGE_KEY, next);
   }, [sidebarMode, tracingEnabled]);
   // Which folder a chosen example's thread is created into (default: root).
@@ -274,6 +277,12 @@ function PageInner() {
       }
     },
     [tabs]
+  );
+  const handleOpenExternalProject = useCallback(
+    (project: ExternalAgentProjectSummary) => {
+      void openExternalProjectView(project);
+    },
+    [openExternalProjectView]
   );
   const openExternalProjectThread = useCallback(
     (
@@ -370,11 +379,11 @@ function PageInner() {
       requestExternalProjectSource(projectId, sourcePath);
     },
     closeTab: async ({ id, path }) => {
-      const target = id ?? (path ? `thread:${path}` : activeTabIdRef.current);
+      const target = id ?? (path ? `thread:${path}` : tabs.activeId);
       if (target && (await canCloseTabs([target]))) { close(target); }
     },
     closeOtherTabs: async ({ id, path }) => {
-      const target = id ?? (path ? `thread:${path}` : activeTabIdRef.current);
+      const target = id ?? (path ? `thread:${path}` : tabs.activeId);
       const closing = tabs.tabs
         .filter(tab => tab.id !== target)
         .map(tab => tab.id);
@@ -416,13 +425,6 @@ function PageInner() {
       fileInputRef.current?.click();
     }
   });
-
-  // On a fresh launch with no configured models, prompt onboarding. Runs once on
-  // mount; adding or removing providers afterwards won't re-trigger it.
-  // Deps intentionally empty: this is a one-shot startup check, not reactive.
-  useEffect(() => {
-    if (models.length === 0) { setOnboardOpen(true); }
-  }, []);
 
   // Bridge commands dispatched from the bun process (native menu / shortcuts)
   // into the renderer dispatcher.
@@ -560,7 +562,7 @@ function PageInner() {
               ? (
                 <ExternalAgentProjectsPanel
                   className="min-h-0 flex-1"
-                  onOpenProject={openExternalProjectView}
+                  onOpenProject={handleOpenExternalProject}
                   onOpenThread={openExternalProjectThread}
                   refreshNonce={externalProjectsRefresh}
                 />

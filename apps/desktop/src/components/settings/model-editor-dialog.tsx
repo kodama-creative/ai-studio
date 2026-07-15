@@ -1,7 +1,7 @@
 "use client";
 
 import { CableIcon, Loader2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 
 import type { CustomModel } from "@llm-space/core";
@@ -109,14 +109,6 @@ export function ModelEditorDialog({
   const [form, setForm] = useState<FormState>(() =>
     initialState(model, providerApi));
   const [testing, setTesting] = useState(false);
-
-  // Reset the form whenever the dialog opens (for a fresh create or a different
-  // model to edit).
-  useEffect(() => {
-    if (open) {
-      setForm(initialState(model, providerApi));
-    }
-  }, [open, model, providerApi]);
 
   const isEdit = Boolean(model);
 

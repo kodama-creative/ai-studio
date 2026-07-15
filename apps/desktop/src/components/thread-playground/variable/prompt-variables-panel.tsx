@@ -81,7 +81,7 @@ type VariableListItem =
     warning?: boolean;
   };
 
-function _PromptVariablesPanel({
+const _PromptVariablesPanel = function PromptVariablesPanel({
   className,
   disabled,
   initialSelection
@@ -117,8 +117,10 @@ function _PromptVariablesPanel({
       ),
     [variableVariants]
   );
-  const customValues =
-    variableVariants.variants[DEFAULT_VARIABLE_VARIANT_NAME] ?? {};
+  const customValues = useMemo(
+    () => variableVariants.variants[DEFAULT_VARIABLE_VARIANT_NAME] ?? {},
+    [variableVariants]
+  );
 
   // Seed from the chip-open target so the fallback effect below (which runs in
   // the same mount commit) doesn't clobber it back to the first variable.
@@ -389,7 +391,7 @@ function _PromptVariablesPanel({
       />
     </section>
   );
-}
+};
 
 function VariableListGroup({
   title,
@@ -587,6 +589,7 @@ function CurrentDateVariableDetail({
             disabled={disabled}
             isAvailable={next =>
               _isBuiltInNameAvailable(next, name, variables, customNames)}
+            key={name}
             name={name}
             onCommit={next => onRename(name, next)}
           />
@@ -691,6 +694,7 @@ function SkillsVariableDetail({
             disabled={disabled}
             isAvailable={next =>
               _isBuiltInNameAvailable(next, name, variables, customNames)}
+            key={name}
             name={name}
             onCommit={next => onRename(name, next)}
           />
@@ -796,6 +800,7 @@ function CustomVariableDetail({
           disabled={disabled}
           isAvailable={next =>
             _isCustomNameAvailable(next, name, variables, customNames)}
+          key={name}
           name={name}
           onCommit={next => onRename(name, next)}
         />
@@ -900,9 +905,6 @@ function VariableNameInput({
   readonly showFeedback?: boolean;
 }) {
   const [draft, setDraft] = useState(name);
-  useEffect(() => {
-    setDraft(name);
-  }, [name]);
   const trimmedDraft = draft.trim();
   const valid = _isNameAvailable(trimmedDraft);
   const available = trimmedDraft === name || isAvailable(trimmedDraft);

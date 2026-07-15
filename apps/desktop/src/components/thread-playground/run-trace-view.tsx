@@ -11,7 +11,7 @@ import {
   summarizeRun
 } from "./run-history-utils";
 
-function _RunTraceView({
+const _RunTraceView = function RunTraceView({
   className,
   run
 }: {
@@ -78,6 +78,6 @@ function _RunTraceView({
       />
     </div>
   );
-}
+};
 
 export const RunTraceView = memo(_RunTraceView);

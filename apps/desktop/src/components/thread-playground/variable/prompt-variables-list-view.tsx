@@ -69,8 +69,10 @@ export function PromptVariablesListView({
       }),
     [rawVariableVariants, rawVariables]
   );
-  const customValues =
-    variableVariants.variants[DEFAULT_VARIABLE_VARIANT_NAME] ?? {};
+  const customValues = useMemo(
+    () => variableVariants.variants[DEFAULT_VARIABLE_VARIANT_NAME] ?? {},
+    [variableVariants]
+  );
   const items = useMemo<VariableListItem[]>(() => {
     const builtIns = Object.entries(variables).map(([name, variable]) => {
       if (variable.type === "currentDate") {
@@ -179,7 +181,7 @@ export function PromptVariablesListView({
   );
 }
 
-function _VariableEntry({
+const _VariableEntry = function VariableEntry({
   item,
   disabled,
   onOpen
@@ -254,7 +256,7 @@ function _VariableEntry({
       </Tooltip>
     </div>
   );
-}
+};
 
 const VariableEntry = memo(_VariableEntry);
 

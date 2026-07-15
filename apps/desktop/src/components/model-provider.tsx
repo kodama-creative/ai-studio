@@ -304,6 +304,8 @@ export function ModelProvider({
   }, [fetcher]);
 
   useEffect(() => {
+    // Starts an external RPC fetch; state updates happen after the promise settles.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void refresh();
   }, [refresh]);
 
@@ -501,5 +503,9 @@ export function useModel(ref: {
   provider: string;
 }): pi.Model<pi.Api> | null {
   const ctx = useModelProvider();
-  return useMemo(() => ctx.getModel(ref), [ctx, ref.id, ref.provider]);
+  const { id, provider } = ref;
+  return useMemo(
+    () => ctx.getModel({ id, provider }),
+    [ctx, id, provider]
+  );
 }

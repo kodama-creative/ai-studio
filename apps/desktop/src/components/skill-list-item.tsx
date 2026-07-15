@@ -21,7 +21,7 @@ interface SkillListItemProps {
   readonly onCheckedChange: (checked: boolean) => void;
 }
 
-function _SkillListItem({
+const _SkillListItem = function SkillListItem({
   name,
   description,
   checked,
@@ -46,6 +46,6 @@ function _SkillListItem({
       />
     </Item>
   );
-}
+};
 
 export const SkillListItem = memo(_SkillListItem);

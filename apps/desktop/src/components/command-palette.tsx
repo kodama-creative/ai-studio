@@ -15,6 +15,8 @@ import {
   type CommandType
 } from "@/shared/commands";
 
+const EMPTY_BLACKLIST: string[] = [];
+
 /**
  * The ⌘⇧P command palette. Lists every registered command (from
  * {@link COMMAND_META}) and runs the selected one. Commands are shown by
@@ -24,7 +26,7 @@ import {
 export function CommandPalette({
   open,
   onOpenChange,
-  blacklist = []
+  blacklist = EMPTY_BLACKLIST
 }: {
   readonly blacklist?: string[];
   readonly onOpenChange: (open: boolean) => void;

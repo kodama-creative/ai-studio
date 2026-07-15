@@ -1,14 +1,12 @@
 #!/usr/bin/env bun
 // Intentionally preserved as durable kaizen evidence: this fixture reproduces
-// remote Streamable HTTP/SSE MCP setup states without real third-party services
+// remote Streamable HTTP MCP setup states without real third-party services
 // or secrets, so future reviews can rerun the Remote MCP Diagnostics V1 matrix.
 import { McpServer } from "../../../apps/desktop/node_modules/@modelcontextprotocol/sdk/dist/esm/server/mcp.js";
 import { createMcpExpressApp } from "../../../apps/desktop/node_modules/@modelcontextprotocol/sdk/dist/esm/server/express.js";
-import { SSEServerTransport } from "../../../apps/desktop/node_modules/@modelcontextprotocol/sdk/dist/esm/server/sse.js";
 import { StreamableHTTPServerTransport } from "../../../apps/desktop/node_modules/@modelcontextprotocol/sdk/dist/esm/server/streamableHttp.js";
 
 const PORT = Number(process.env.PORT ?? 8765);
-const TRANSPORT = process.env.TRANSPORT ?? "streamableHttp";
 const MODE = process.env.MODE ?? "success";
 const CALL_DELAY_MS = Number(process.env.CALL_DELAY_MS ?? 0);
 
@@ -68,26 +66,6 @@ if (MODE === "timeout") {
   app.all("/mcp", (_req, res) => {
     res.status(200).type("text/plain").send("not an MCP response");
   });
-} else if (TRANSPORT === "sse") {
-  const transports = {};
-  app.get("/mcp", async (_req, res) => {
-    const transport = new SSEServerTransport("/messages", res);
-    transports[transport.sessionId] = transport;
-    transport.onclose = () => {
-      delete transports[transport.sessionId];
-    };
-    await _createServer().connect(transport);
-  });
-  app.post("/messages", async (req, res) => {
-    const sessionId = req.query.sessionId;
-    const transport =
-      typeof sessionId === "string" ? transports[sessionId] : undefined;
-    if (!transport) {
-      res.status(400).send("Missing or invalid sessionId");
-      return;
-    }
-    await transport.handlePostMessage(req, res, req.body);
-  });
 } else {
   app.post("/mcp", async (req, res) => {
     const server = _createServer();
@@ -123,6 +101,6 @@ app.listen(PORT, (error) => {
     process.exit(1);
   }
   console.log(
-    `Remote MCP fixture listening on http://127.0.0.1:${PORT}/mcp (${TRANSPORT}, ${MODE})`
+    `Remote MCP fixture listening on http://127.0.0.1:${PORT}/mcp (Streamable HTTP, ${MODE})`
   );
 });

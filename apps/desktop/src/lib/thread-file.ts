@@ -98,7 +98,7 @@ export function validateThreadFileStem(
   }
   if (
     INVALID_FILE_STEM_CHARS.test(trimmed)
-    || [...trimmed].some(char => char.charCodeAt(0) < 32)
+    || Array.from(trimmed).some(char => char.charCodeAt(0) < 32)
   ) {
     return {
       valid: false,

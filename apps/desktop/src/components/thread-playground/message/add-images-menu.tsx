@@ -113,7 +113,7 @@ export function AddImagesMenu({
             <FileIcon />
             From Files
           </DropdownMenuItem>
-          <DropdownMenuItem onSelect={handleFromClipboard}>
+          <DropdownMenuItem onSelect={() => { void handleFromClipboard(); }}>
             <ClipboardPasteIcon />
             From Clipboard
           </DropdownMenuItem>

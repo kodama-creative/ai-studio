@@ -12,7 +12,7 @@ import type {
   StreamThreadResponsePayload
 } from "@/shared/rpc";
 
-const ABORT_ERROR = () =>
+const createAbortError = () =>
   new DOMException("The operation was aborted.", "AbortError");
 
 /**
@@ -40,6 +40,11 @@ export function createRpcTransport(options?: {
       wake?.();
       wake = null;
     };
+    const waitForEvent = async () => {
+      await new Promise<void>(resolve => {
+        wake = resolve;
+      });
+    };
 
     const onResponse = (message: StreamThreadResponsePayload) => {
       if (message.streamId !== streamId) {
@@ -66,7 +71,7 @@ export function createRpcTransport(options?: {
     };
 
     if (signal?.aborted) {
-      throw ABORT_ERROR();
+      throw createAbortError();
     }
 
     rpc.addMessageListener("receiveStreamThreadResponse", onResponse);
@@ -83,7 +88,7 @@ export function createRpcTransport(options?: {
           yield events.shift()!;
         }
         if (aborted) {
-          throw ABORT_ERROR();
+          throw createAbortError();
         }
         if (errorMessage !== null) {
           throw new Error(errorMessage);
@@ -91,9 +96,7 @@ export function createRpcTransport(options?: {
         if (finished) {
           return;
         }
-        await new Promise<void>(resolve => {
-          wake = resolve;
-        });
+        await waitForEvent();
       }
     } finally {
       rpc.removeMessageListener("receiveStreamThreadResponse", onResponse);

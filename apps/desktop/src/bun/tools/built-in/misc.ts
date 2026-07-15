@@ -75,7 +75,7 @@ export async function sleep(durationMs: number): Promise<"OK"> {
   if (!Number.isFinite(durationMs) || durationMs < 0) {
     throw new Error("duration_ms must be a non-negative number.");
   }
-  await new Promise(resolve => setTimeout(resolve, durationMs));
+  await new Promise(resolve => { setTimeout(resolve, durationMs); });
   return "OK";
 }
 

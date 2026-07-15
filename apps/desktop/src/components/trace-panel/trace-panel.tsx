@@ -155,19 +155,6 @@ export function TracePanel({ className, onOpenTrace }: TracePanelProps) {
     return project?.source.mode === "manual" ? project : null;
   }, [importProjectId, projects]);
 
-  useEffect(() => {
-    if (!selectedProjectId && projects[0]) {
-      setSelectedProjectId(projects[0].id);
-    }
-    if (
-      selectedProjectId
-      && projects.length > 0
-      && !projects.some(project => project.id === selectedProjectId)
-    ) {
-      setSelectedProjectId(projects[0]?.id ?? null);
-    }
-  }, [projects, selectedProjectId]);
-
   const createProject = useCallback(
     async (name: string) => {
       try {
@@ -447,7 +434,7 @@ export function TracePanel({ className, onOpenTrace }: TracePanelProps) {
   );
 }
 
-function _EmptyProjects({ onAddProject }: { readonly onAddProject: () => void; }) {
+const _EmptyProjects = function EmptyProjects({ onAddProject }: { readonly onAddProject: () => void; }) {
   return (
     <Empty className="h-full border-0 px-3">
       <EmptyHeader>
@@ -464,9 +451,9 @@ function _EmptyProjects({ onAddProject }: { readonly onAddProject: () => void; }
       </EmptyContent>
     </Empty>
   );
-}
+};
 
-function _TraceProjectDialog({
+const _TraceProjectDialog = function TraceProjectDialog({
   open,
   pending,
   onOpenChange,
@@ -549,9 +536,9 @@ function _TraceProjectDialog({
       </DialogContent>
     </Dialog>
   );
-}
+};
 
-function _ManualProjectForm({
+const _ManualProjectForm = function ManualProjectForm({
   projectName,
   onNameChange,
   onCreate,
@@ -599,9 +586,9 @@ function _ManualProjectForm({
       </DialogFooter>
     </div>
   );
-}
+};
 
-function _ConnectProjectForm({
+const _ConnectProjectForm = function ConnectProjectForm({
   onCreate,
   onCancel,
   pending = false
@@ -684,9 +671,9 @@ function _ConnectProjectForm({
       </DialogFooter>
     </div>
   );
-}
+};
 
-function _Field({
+const _Field = function Field({
   label,
   children,
   className
@@ -701,9 +688,9 @@ function _Field({
       {children}
     </label>
   );
-}
+};
 
-function _TraceProjectGroup({
+const _TraceProjectGroup = function TraceProjectGroup({
   project,
   selected,
   adding,
@@ -799,11 +786,11 @@ function _TraceProjectGroup({
         : null}
     </section>
   );
-}
+};
 
 const TraceProjectGroup = memo(_TraceProjectGroup);
 
-function _ImportLangfuseDialog({
+const _ImportLangfuseDialog = function ImportLangfuseDialog({
   open,
   project,
   importing,
@@ -947,9 +934,9 @@ function _ImportLangfuseDialog({
         : null}
     </Dialog>
   );
-}
+};
 
-function _SyncProjectDialog({
+const _SyncProjectDialog = function SyncProjectDialog({
   open,
   project,
   syncing,
@@ -1288,7 +1275,7 @@ function _SyncProjectDialog({
         : null}
     </Dialog>
   );
-}
+};
 
 function _projectSourceSummary(project: TraceProject): string {
   if (project.source.mode === "connected") {
@@ -1348,7 +1335,7 @@ function _datetimeLocalToIso(value: string): string | undefined {
   return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
 }
 
-function _RemoteTraceRow({
+const _RemoteTraceRow = function RemoteTraceRow({
   trace,
   selected,
   onToggle
@@ -1387,7 +1374,7 @@ function _RemoteTraceRow({
       </span>
     </button>
   );
-}
+};
 
 const RemoteTraceRow = memo(_RemoteTraceRow);
 
@@ -1425,7 +1412,7 @@ function _formatDateTime(value: number | string): string {
   });
 }
 
-function _TraceRow({
+const _TraceRow = function TraceRow({
   trace,
   onOpen
 }: {
@@ -1466,6 +1453,6 @@ function _TraceRow({
       )}
     </button>
   );
-}
+};
 
 const TraceRow = memo(_TraceRow);

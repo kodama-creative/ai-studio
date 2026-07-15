@@ -12,9 +12,9 @@ import { getSettingsDir } from "@llm-space/core/server";
 
 import type {
   CustomModel,
-  ModelConfig
+  ModelConfig,
+  ModelProviderGroup
 } from "@llm-space/core";
-import type { ModelProviderGroup } from "@llm-space/core";
 
 import {
   BUILTIN_PROVIDER_META,
@@ -57,7 +57,10 @@ export class ModelManager {
 
   /** The `Models` registry of configured providers. Built once, then cached. */
   async getAvailableModels(): Promise<Models> {
-    return (this._models ??= await Promise.resolve(this._buildModels()));
+    if (!this._models) {
+      this._models = await Promise.resolve(this._buildModels());
+    }
+    return this._models;
   }
 
   /**

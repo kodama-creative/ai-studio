@@ -6,11 +6,11 @@
  * "DeepSeek" → "DS", "MiniMax" → "MM").
  */
 export default function extractInitials(name: string): string {
-  name = name.replace(/-/, " ");
-  const number = /\d+(?:\.\d+)?/.exec(name);
+  const normalizedName = name.replace(/-/, " ");
+  const number = /\d+(?:\.\d+)?/.exec(normalizedName);
   if (number) { return number[0]; }
 
-  const words = name.trim().split(/\s+/).filter(Boolean);
+  const words = normalizedName.trim().split(/\s+/).filter(Boolean);
   if (words.length >= 2) {
     return (words[0]![0]! + words[1]![0]!).toUpperCase();
   }
@@ -21,5 +21,5 @@ export default function extractInitials(name: string): string {
     return capitals.slice(0, 2).join("");
   }
 
-  return name.slice(0, 2).toUpperCase();
+  return normalizedName.slice(0, 2).toUpperCase();
 }

@@ -13,7 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 export type PreviewType = "json" | "text";
 export type PreviewMode = "code" | "html" | "markdown";
 
-function _PreviewDialog({
+const _PreviewDialog = function PreviewDialog({
   open,
   onOpenChange,
   title = "Preview",
@@ -89,6 +89,6 @@ function _PreviewDialog({
       </DialogContent>
     </Dialog>
   );
-}
+};
 
 export const PreviewDialog = memo(_PreviewDialog);

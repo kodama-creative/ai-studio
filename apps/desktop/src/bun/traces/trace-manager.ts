@@ -872,7 +872,7 @@ function _normalizeTraceTitle(value: string): string {
   if (!title) {
     throw new Error("Trace title is required.");
   }
-  if ([...title].some(char => char.charCodeAt(0) < 32)) {
+  if (Array.from(title).some(char => char.charCodeAt(0) < 32)) {
     throw new Error("Trace title contains a control character.");
   }
   return title;
@@ -1508,7 +1508,7 @@ function _textFromJsonWrapper(text: string): string {
 
 function _looksLikeTextContentRecord(value: unknown): boolean {
   const record = _asRecord(value);
-  return Boolean(record?.text !== undefined || record?.content !== undefined);
+  return record?.text !== undefined || record?.content !== undefined;
 }
 
 function _textFromValue(value: unknown): string {

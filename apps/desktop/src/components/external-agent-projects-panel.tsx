@@ -31,7 +31,7 @@ import { cn } from "@/lib/utils";
 
 import type { ExternalAgentProjectSummary } from "@/shared/external-agent-project";
 
-function _ExternalAgentProjectsPanel({
+const _ExternalAgentProjectsPanel = function ExternalAgentProjectsPanel({
   className,
   refreshNonce,
   onOpenProject,
@@ -435,6 +435,6 @@ function _ExternalAgentProjectsPanel({
       />
     </section>
   );
-}
+};
 
 export const ExternalAgentProjectsPanel = memo(_ExternalAgentProjectsPanel);

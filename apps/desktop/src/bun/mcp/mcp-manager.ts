@@ -8,7 +8,6 @@ import {
 } from "@llm-space/runtime/node";
 import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { SseError } from "@modelcontextprotocol/sdk/client/sse.js";
 import {
   getDefaultEnvironment,
   StdioClientTransport
@@ -88,8 +87,7 @@ const diagnosticSchema = z.object({
   checkedAt: z.number(),
   transport: z.union([
     z.literal("stdio"),
-    z.literal("streamableHttp"),
-    z.literal("sse")
+    z.literal("streamableHttp")
   ]),
   endpoint: z.string().optional(),
   headline: z.string(),
@@ -116,8 +114,7 @@ const serverConfigSchema = z.object({
   serverName: z.string(),
   transport: z.union([
     z.literal("stdio"),
-    z.literal("streamableHttp"),
-    z.literal("sse")
+    z.literal("streamableHttp")
   ]),
   command: z.string().optional(),
   args: z.array(z.string()).optional(),
@@ -458,7 +455,6 @@ export class McpManager {
     }
     try {
       const client = await RemoteMcpClient.connect({
-        transport: server.transport === "sse" ? "sse" : "streamableHttp",
         url: endpoint.href,
         headers
       });
@@ -661,9 +657,7 @@ export class McpManager {
     if (!url) {
       throw new Error("Remote MCP servers require a URL.");
     }
-    try {
-      new URL(url);
-    } catch {
+    if (!URL.canParse(url)) {
       throw new Error("Remote MCP server URL is invalid.");
     }
     return {
@@ -748,10 +742,13 @@ export class McpManager {
 
   private _loadConfig(): McpServersConfig {
     try {
-      const parsed = serversConfigSchema.parse(
+      const persisted = _withoutSseServers(
         JSON.parse(readFileSync(this._configPath, "utf8"))
       );
-      return {
+      const parsed = serversConfigSchema.parse(
+        persisted.value
+      );
+      const config: McpServersConfig = {
         servers: parsed.servers.map(server => ({
           ...server,
           createdAt: server.createdAt ?? Date.now(),
@@ -761,6 +758,14 @@ export class McpManager {
             : undefined
         }))
       };
+      if (persisted.removed) {
+        writeFileSync(
+          this._configPath,
+          `${JSON.stringify(config, null, 2)}\n`,
+          "utf8"
+        );
+      }
+      return config;
     } catch (error) {
       if (!(
         error instanceof z.ZodError
@@ -794,7 +799,7 @@ const DIAGNOSTIC_STEP_LABELS: Record<string, string> = {
 /**
  * Starts a remote-only diagnostic snapshot. Inputs are the saved server config;
  * output is a mutable draft whose endpoint has query strings stripped. This
- * helper must only be called for Streamable HTTP/SSE servers because stdio
+ * helper must only be called for Streamable HTTP servers because stdio
  * diagnostics are outside the V1 scope.
  */
 function _createDiagnosticDraft(server: McpServerConfig): McpDiagnosticDraft {
@@ -961,7 +966,7 @@ function _markConnectFailure(
 ): void {
   const category = _classifyMcpError(error);
   const message = _safeErrorMessage(error, server);
-  const guidance = _categoryGuidance(category, server);
+  const guidance = _categoryGuidance(category);
   const detail = [message, guidance].filter(Boolean).join(" ");
   if (category === "protocol" || category === "unknown") {
     _passDiagnosticStep(diagnostic, "transport", "Transport opened.");
@@ -1117,7 +1122,7 @@ function _classifyMcpError(error: unknown): McpDiagnosticCategory {
   if (error instanceof UnauthorizedError || code === 401 || code === 403) {
     return "unauthorized";
   }
-  if (error instanceof StreamableHTTPError || error instanceof SseError) {
+  if (error instanceof StreamableHTTPError) {
     if (code === 404 || code === 405 || code === 406 || code === 415) {
       return "transportMismatch";
     }
@@ -1133,7 +1138,7 @@ function _classifyMcpError(error: unknown): McpDiagnosticCategory {
   ) {
     return "protocol";
   }
-  if (error instanceof StreamableHTTPError || error instanceof SseError) {
+  if (error instanceof StreamableHTTPError) {
     if (code !== undefined && code > 0) {
       return "httpStatus";
     }
@@ -1166,17 +1171,12 @@ function _classifyMcpError(error: unknown): McpDiagnosticCategory {
  * Adds short recovery guidance for categories that commonly come from URL,
  * header, network, or protocol mistakes.
  */
-function _categoryGuidance(
-  category: McpDiagnosticCategory,
-  server: McpServerConfig
-): string {
+function _categoryGuidance(category: McpDiagnosticCategory): string {
   if (category === "unauthorized") {
     return "Confirm the Authorization header or required token environment variable.";
   }
   if (category === "transportMismatch") {
-    return server.transport === "sse"
-      ? "Confirm this is a legacy SSE endpoint and that its message endpoint is available."
-      : "Confirm this URL is the Streamable HTTP MCP endpoint, usually a path such as /mcp.";
+    return "Confirm this URL is the Streamable HTTP MCP endpoint, usually a path such as /mcp.";
   }
   if (category === "httpStatus") {
     return "Confirm the endpoint path, transport type, and server-side routing.";
@@ -1245,7 +1245,7 @@ function _safeEndpoint(server: McpServerConfig): string | undefined {
 function _isRemoteTransport(
   transport: McpServerConfig["transport"]
 ): transport is McpRemoteTransportType {
-  return transport === "streamableHttp" || transport === "sse";
+  return transport === "streamableHttp";
 }
 
 /**
@@ -1255,10 +1255,33 @@ function _transportLabel(transport: McpServerConfig["transport"]): string {
   if (transport === "streamableHttp") {
     return "Streamable HTTP";
   }
-  if (transport === "sse") {
-    return "SSE";
-  }
   return "stdio";
+}
+
+function _withoutSseServers(value: unknown): {
+  removed: boolean;
+  value: unknown;
+} {
+  if (!value || typeof value !== "object" || !("servers" in value)) {
+    return { removed: false, value };
+  }
+  const servers = (value as { servers?: unknown; }).servers;
+  if (!Array.isArray(servers)) {
+    return { removed: false, value };
+  }
+  const supported = servers.filter(server => !(
+    server
+    && typeof server === "object"
+    && "transport" in server
+    && (server as { transport?: unknown; }).transport === "sse"
+  ));
+  return {
+    removed: supported.length !== servers.length,
+    value: {
+      ...(value as Record<string, unknown>),
+      servers: supported
+    }
+  };
 }
 
 function _normalizeReadiness(

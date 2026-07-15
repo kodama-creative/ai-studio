@@ -12,7 +12,7 @@ import {
   usageBreakdownRows
 } from "../token-usage";
 
-function _TokenUsageSummary({
+const _TokenUsageSummary = function TokenUsageSummary({
   className,
   usage,
   variant = "default"
@@ -79,6 +79,6 @@ function _TokenUsageSummary({
       </div>
     </Tooltip>
   );
-}
+};
 
 export const TokenUsageSummary = memo(_TokenUsageSummary);

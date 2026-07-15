@@ -88,7 +88,7 @@ export interface CodeEditorProps {
   readonly onPaste?: (e: ClipboardEvent) => void;
 }
 
-function _CodeEditor(
+const _CodeEditor = function CodeEditor(
   {
     className,
     autoFocus,
@@ -333,6 +333,6 @@ function _CodeEditor(
       />
     </div>
   );
-}
+};
 
 export const CodeEditor = memo(forwardRef(_CodeEditor));

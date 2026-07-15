@@ -29,7 +29,7 @@ interface SkillSelectionDialogProps {
   readonly onApply: (skillNames: string[]) => void;
 }
 
-function _SkillSelectionDialog({
+const _SkillSelectionDialog = function SkillSelectionDialog({
   open,
   disabled,
   loading,
@@ -184,6 +184,6 @@ function _SkillSelectionDialog({
       </DialogContent>
     </Dialog>
   );
-}
+};
 
 export const SkillSelectionDialog = memo(_SkillSelectionDialog);

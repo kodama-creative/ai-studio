@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const CURRENT_DIRNAME = path.dirname(fileURLToPath(import.meta.url));
 
 const CODEMIRROR_SINGLETON_DEPS = [
   "@codemirror/language",
@@ -16,7 +16,7 @@ export default defineConfig({
   root: "src/mainview",
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "src")
+      "@": path.resolve(CURRENT_DIRNAME, "src")
     },
     // CodeMirror extensions carry identity-sensitive values from these packages.
     // Bun may keep older nested copies in transitive package folders, so force

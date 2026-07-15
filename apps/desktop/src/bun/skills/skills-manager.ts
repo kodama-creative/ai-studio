@@ -1,4 +1,10 @@
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  type Dirent,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { getSettingsDir } from "@llm-space/core/server";
@@ -117,7 +123,7 @@ export class SkillsManager {
     const hidden = new Set(entry?.hiddenSkills ?? []);
     const dir = this._expand(inputPath);
 
-    let dirents: Array<import("node:fs").Dirent>;
+    let dirents: Dirent[];
     try {
       dirents = readdirSync(dir, { withFileTypes: true });
     } catch {

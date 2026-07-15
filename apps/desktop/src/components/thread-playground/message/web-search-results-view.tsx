@@ -70,7 +70,7 @@ function _prettyUrl(url: string): string {
  * A read-only, Google-style rendering of `web_search` results. Height is capped
  * to match the code editor it replaces, scrolling internally past that.
  */
-function _WebSearchResultsView({ results }: { readonly results: WebSearchResult[]; }) {
+const _WebSearchResultsView = function WebSearchResultsView({ results }: { readonly results: WebSearchResult[]; }) {
   return (
     <div className="flex max-h-96 w-full flex-col gap-4 overflow-y-auto rounded-lg bg-(--textarea) px-3 py-2.5 select-auto">
       {results.map((result, index) => (
@@ -78,10 +78,10 @@ function _WebSearchResultsView({ results }: { readonly results: WebSearchResult[
       ))}
     </div>
   );
-}
+};
 export const WebSearchResultsView = memo(_WebSearchResultsView);
 
-function _WebSearchResultRow({ result }: { readonly result: WebSearchResult; }) {
+const _WebSearchResultRow = function WebSearchResultRow({ result }: { readonly result: WebSearchResult; }) {
   const description = result.snippet ?? result.content;
   return (
     <div className="flex min-w-0 flex-col gap-0.5">
@@ -107,5 +107,5 @@ function _WebSearchResultRow({ result }: { readonly result: WebSearchResult; }) 
         : null}
     </div>
   );
-}
+};
 const WebSearchResultRow = memo(_WebSearchResultRow);

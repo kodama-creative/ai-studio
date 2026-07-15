@@ -24,7 +24,7 @@ const dragOverVariants = cva("bg-primary/20 text-primary-foreground");
 // aligned, so no per-leaf offset is needed here.
 const INDENT_PX = 16;
 function indentStyle(level: number): React.CSSProperties {
-  return { paddingLeft: 8 + level * INDENT_PX };
+  return { paddingLeft: 8 + (level * INDENT_PX) };
 }
 
 interface TreeDataItem {
@@ -95,15 +95,7 @@ const TreeView = React.forwardRef<HTMLDivElement, TreeProps>(
     const [selectedItemId, setSelectedItemId] = React.useState<
       string | undefined
     >(initialSelectedItemId);
-
-    // Sync externally-driven selection (e.g. revealing a freshly created node)
-    // into internal state. Only runs when the prop changes, so it never fights
-    // user clicks.
-    React.useEffect(() => {
-      if (selectedId !== undefined && selectedId !== null) {
-        setSelectedItemId(selectedId);
-      }
-    }, [selectedId]);
+    const effectiveSelectedItemId = selectedId ?? selectedItemId;
 
     const [draggedItem, setDraggedItem] = React.useState<TreeDataItem | null>(
       null
@@ -182,7 +174,7 @@ const TreeView = React.forwardRef<HTMLDivElement, TreeProps>(
           level={0}
           ref={ref}
           renderItem={renderItem}
-          selectedItemId={selectedItemId}
+          selectedItemId={effectiveSelectedItemId}
           {...props}
         />
         {/* Drop target for the storage root; fills the empty space below the
@@ -246,13 +238,11 @@ const TreeItem = React.forwardRef<HTMLDivElement, TreeItemProps>(
     },
     ref
   ) => {
-    if (!Array.isArray(data)) {
-      data = [data];
-    }
+    const items = Array.isArray(data) ? data : [data];
     return (
       <div className={className} ref={ref} role="tree" {...props}>
         <ul>
-          {data.map(item => (
+          {items.map(item => (
             <li key={item.id}>
               {item.children
                 ? (
@@ -394,7 +384,7 @@ const TreeNode = ({
                   item={item}
                 />
                 <span className="truncate text-sm">{item.name}</span>
-                <TreeActions isSelected={isSelected}>{item.actions}</TreeActions>
+                <TreeActions>{item.actions}</TreeActions>
               </>
             )}
         </AccordionTrigger>
@@ -539,7 +529,7 @@ const TreeLeaf = React.forwardRef<
                 item={item}
               />
               <span className="grow truncate text-sm">{item.name}</span>
-              <TreeActions isSelected={isSelected ? !item.disabled : false}>
+              <TreeActions>
                 {item.actions}
               </TreeActions>
             </>
@@ -551,7 +541,7 @@ const TreeLeaf = React.forwardRef<
 TreeLeaf.displayName = "TreeLeaf";
 
 const AccordionTrigger = React.forwardRef<
-  React.ElementRef<typeof AccordionPrimitive.Trigger>,
+  React.ComponentRef<typeof AccordionPrimitive.Trigger>,
   {
     readonly loading?: boolean;
   } & React.ComponentPropsWithoutRef<typeof AccordionPrimitive.Trigger>
@@ -579,7 +569,7 @@ const AccordionTrigger = React.forwardRef<
 AccordionTrigger.displayName = AccordionPrimitive.Trigger.displayName;
 
 const AccordionContent = React.forwardRef<
-  React.ElementRef<typeof AccordionPrimitive.Content>,
+  React.ComponentRef<typeof AccordionPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof AccordionPrimitive.Content>
 >(({ className, children, ...props }, ref) => (
   <AccordionPrimitive.Content
@@ -615,14 +605,13 @@ const TreeIcon = ({
   } else if (item.icon) {
     Icon = item.icon;
   }
-  return Icon ? <Icon className="mr-2 h-4 w-4 shrink-0" /> : <></>;
+  return Icon ? <Icon className="mr-2 h-4 w-4 shrink-0" /> : null;
 };
 
 const TreeActions = ({
   children
 }: {
   readonly children: React.ReactNode;
-  readonly isSelected: boolean;
 }) => {
   return (
     <div className={cn("absolute right-3 hidden group-hover:block")}>

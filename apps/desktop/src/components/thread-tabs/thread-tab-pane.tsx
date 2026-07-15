@@ -76,7 +76,9 @@ export function ThreadTabPane({
   const writeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pending = useRef<Thread | null>(null);
   const pathRef = useRef(path);
-  pathRef.current = path;
+  useEffect(() => {
+    pathRef.current = path;
+  }, [path]);
 
   const flushPending = useCallback(async () => {
     if (writeTimer.current) {

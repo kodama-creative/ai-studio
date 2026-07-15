@@ -29,7 +29,7 @@ export class AgentEventProjector {
     listener: (event: AgentSessionEvent) => Promise<void> | void
   ): () => void {
     this._listeners.add(listener);
-    return () => this._listeners.delete(listener);
+    return () => { this._listeners.delete(listener); };
   }
 
   async handleToolResultsResolved(): Promise<void> {

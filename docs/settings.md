@@ -165,12 +165,12 @@ MCP Server settings:
 | Setting | Description |
 | --- | --- |
 | Name | Server display name. LLM Space generates a tool prefix from it. |
-| Transport | Connection type. Supports `stdio`, `Streamable HTTP`, and `SSE`. |
+| Transport | Connection type. Supports `stdio` and `Streamable HTTP`. |
 | Command | Command used to start the MCP Server in `stdio` mode. |
 | Args | Arguments passed to the command in `stdio` mode, one argument per line. |
 | Working directory | Working directory in `stdio` mode. |
 | Environment | Environment variables passed to the process in `stdio` mode. |
-| URL | Remote MCP endpoint for `Streamable HTTP` or `SSE` mode. |
+| URL | Remote MCP endpoint for `Streamable HTTP` mode. |
 | Headers | Extra HTTP headers for remote MCP requests. |
 
 After configuration, click `Save`.

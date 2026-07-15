@@ -143,7 +143,7 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
     });
     Electrobun.events.on(
       "before-quit",
-      (event: ElectrobunEvent<{}, { allow: boolean; }>) => {
+      (event: ElectrobunEvent<Record<string, never>, { allow: boolean; }>) => {
         if (dirtyAgentSources.dirty) {
           event.response = { allow: false };
           dirtyAgentSources.request("quit", () => { app.quit(); });

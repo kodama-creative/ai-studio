@@ -12,6 +12,8 @@ function _installBeforeUnloadGuard(): void {
   window.addEventListener("beforeunload", event => {
     if (DIRTY_TABS.size === 0) { return; }
     event.preventDefault();
+    // Required by older embedded Chromium versions to trigger beforeunload.
+    // eslint-disable-next-line @typescript-eslint/no-deprecated
     event.returnValue = "";
   });
 }

@@ -11,7 +11,7 @@ import { useThreadStoreActions } from "../stores";
 
 const FRAME_SIZE_PX = 192; // size-48
 
-function _ImageContentView({
+const _ImageContentView = function ImageContentView({
   image,
   readonly,
   onRemove,
@@ -113,11 +113,11 @@ function _ImageContentView({
       </Dialog>
     </>
   );
-}
+};
 
 export const ImageContentView = React.memo(_ImageContentView);
 
-function _ImageContentList({
+const _ImageContentList = function ImageContentList({
   messageId,
   images,
   readonly,
@@ -148,6 +148,6 @@ function _ImageContentList({
       ))}
     </div>
   );
-}
+};
 
 export const ImageContentList = React.memo(_ImageContentList);

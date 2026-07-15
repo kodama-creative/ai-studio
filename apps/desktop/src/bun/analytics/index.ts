@@ -98,11 +98,13 @@ export class Analytics {
     if (!this._available || !this._enabled) { return; }
     try {
       // Desktop app: flush eagerly so events aren't lost when the window closes.
-      this._client ??= new PostHog(POSTHOG_KEY, {
-        host: POSTHOG_HOST,
-        flushAt: 1,
-        flushInterval: 5_000
-      });
+      if (!this._client) {
+        this._client = new PostHog(POSTHOG_KEY, {
+          host: POSTHOG_HOST,
+          flushAt: 1,
+          flushInterval: 5_000
+        });
+      }
       this._client.capture({
         distinctId: this._anonymousId,
         event,

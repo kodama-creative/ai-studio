@@ -363,7 +363,7 @@ export function RunEvaluationDialog({
   );
 }
 
-function _RunComparisonPanel({
+const _RunComparisonPanel = function RunComparisonPanel({
   label,
   run,
   onInspectRun
@@ -418,18 +418,18 @@ function _RunComparisonPanel({
       </div>
     </section>
   );
-}
+};
 
-function _MetaValue({ label, value }: { readonly label: string; readonly value: string; }) {
+const _MetaValue = function MetaValue({ label, value }: { readonly label: string; readonly value: string; }) {
   return (
     <div className="flex min-w-0 gap-1">
       <span className="text-muted-foreground shrink-0">{label}</span>
       <span className="truncate">{value}</span>
     </div>
   );
-}
+};
 
-function _TextExcerpt({ label, value }: { readonly label: string; readonly value: string; }) {
+const _TextExcerpt = function TextExcerpt({ label, value }: { readonly label: string; readonly value: string; }) {
   return (
     <div className="flex min-h-0 flex-col gap-1">
       <div className="text-muted-foreground text-[0.625rem] font-medium">
@@ -445,4 +445,4 @@ function _TextExcerpt({ label, value }: { readonly label: string; readonly value
       </pre>
     </div>
   );
-}
+};

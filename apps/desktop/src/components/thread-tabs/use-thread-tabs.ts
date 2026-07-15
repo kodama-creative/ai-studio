@@ -750,6 +750,6 @@ export function useThreadTabs(): ThreadTabs {
     handleRemove,
     handleMove,
     handleTraceTitleChange,
-    reopenClosed
+    reopenClosed: () => { void reopenClosed(); }
   };
 }

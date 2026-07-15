@@ -18,7 +18,7 @@ interface SystemPromptEditorProps {
   readonly onStreamingChange?: (streaming: boolean) => void;
 }
 
-function _SystemPromptEditor({
+const _SystemPromptEditor = function SystemPromptEditor({
   className,
   readonly,
   onStreamingChange
@@ -135,6 +135,6 @@ function _SystemPromptEditor({
       />
     </div>
   );
-}
+};
 
 export const SystemPromptEditor = memo(_SystemPromptEditor);

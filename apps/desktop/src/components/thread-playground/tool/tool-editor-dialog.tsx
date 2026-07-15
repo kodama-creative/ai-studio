@@ -2,9 +2,11 @@
 
 import {
   type FunctionTool,
+  type LegacyTool,
   type Message,
   normalizeTool,
   parseJSON,
+  type Tool,
   uuid
 } from "@llm-space/core";
 import { useEffect, useState } from "react";
@@ -77,6 +79,8 @@ export function ToolEditorDialog({
   // Stream the generated definition straight into the editor.
   useEffect(() => {
     if (generated) {
+      // Streamed external output intentionally replaces the editor draft.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setText(generated);
     }
   }, [generated]);
@@ -109,7 +113,7 @@ export function ToolEditorDialog({
   const handleSave = () => {
     let parsed: FunctionTool;
     try {
-      const normalized = normalizeTool(parseJSON(text));
+      const normalized = normalizeTool(parseJSON(text) as LegacyTool | Tool);
       if (normalized.type !== "function") {
         toast.error("Error", {
           description: "MCP tools cannot be edited as function tools"

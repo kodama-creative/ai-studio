@@ -26,7 +26,7 @@ interface TraceTabPaneProps {
   readonly onRenameTitle?: (projectId: string, traceKey: string, title: string) => void;
 }
 
-function _TraceTabPane({
+const _TraceTabPane = function TraceTabPane({
   projectId,
   traceKey,
   active,
@@ -153,11 +153,11 @@ function _TraceTabPane({
       />
     </div>
   );
-}
+};
 
 export const TraceTabPane = memo(_TraceTabPane);
 
-function _TraceHeaderDetails({ trace }: { readonly trace: TraceRecord; }) {
+const _TraceHeaderDetails = function TraceHeaderDetails({ trace }: { readonly trace: TraceRecord; }) {
   const traceId = trace.source.traceId;
   const copyTraceId = useCallback(async () => {
     try {
@@ -186,7 +186,7 @@ function _TraceHeaderDetails({ trace }: { readonly trace: TraceRecord; }) {
       <Tooltip content="Copy Trace ID">
         <Button
           aria-label="Copy trace ID"
-          onClick={copyTraceId}
+          onClick={() => { void copyTraceId(); }}
           size="icon-xs"
           variant="ghost"
         >
@@ -195,7 +195,7 @@ function _TraceHeaderDetails({ trace }: { readonly trace: TraceRecord; }) {
       </Tooltip>
     </div>
   );
-}
+};
 
 const TraceHeaderDetails = memo(_TraceHeaderDetails);
 
@@ -204,7 +204,7 @@ function _validateTraceTitle(value: string) {
   if (!title) {
     return { valid: false, value: title, error: "Trace title is required." };
   }
-  if ([...title].some(char => char.charCodeAt(0) < 32)) {
+  if (Array.from(title).some(char => char.charCodeAt(0) < 32)) {
     return {
       valid: false,
       value: title,

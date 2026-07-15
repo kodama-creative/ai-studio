@@ -42,4 +42,16 @@ describe("defineMcpClientConnection", () => {
         tools: { allow: [] }
       })).toThrow("tools.allow must contain at least one tool name");
   });
+
+  test("rejects legacy SSE transport at typecheck", () => {
+    const typecheck = () => defineMcpClientConnection({
+      url: "https://example.com/sse",
+      description: "Legacy endpoint.",
+      // @ts-expect-error MCP connections support Streamable HTTP only
+      transport: "sse",
+      tools: { allow: ["search"] }
+    });
+
+    expect(typecheck).toBeFunction();
+  });
 });

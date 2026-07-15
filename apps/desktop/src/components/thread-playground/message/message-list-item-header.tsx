@@ -21,7 +21,7 @@ import { Tooltip } from "../../tooltip";
 import { Button } from "../../ui/button";
 import { useThreadStoreActions } from "../stores";
 
-function _MessageListItemHeader({
+const _MessageListItemHeader = function MessageListItemHeader({
   className,
   message,
   readonly = false,
@@ -195,7 +195,7 @@ function _MessageListItemHeader({
               <Button
                 aria-label={runAriaLabel}
                 disabled={readonly || runDisabled || !runnable}
-                onClick={handleRun}
+                onClick={() => { void handleRun(); }}
                 size="icon-sm"
                 variant="ghost"
               >
@@ -239,6 +239,6 @@ function _MessageListItemHeader({
       />
     </header>
   );
-}
+};
 
 export const MessageListItemHeader = memo(_MessageListItemHeader);

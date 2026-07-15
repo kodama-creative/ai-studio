@@ -32,7 +32,7 @@ import { Skeleton } from "../../ui/skeleton";
 import { useThreadStore, useThreadStoreActions } from "../stores";
 import { usePromptVariableExtensionForContext } from "../variable/use-prompt-variable-extension";
 
-function _MessageListItem({
+const _MessageListItem = function MessageListItem({
   className,
   context,
   message,
@@ -263,9 +263,9 @@ function _MessageListItem({
       </CollapsibleContent>
     </div>
   );
-}
+};
 
-function _ToolStepContinuation({
+const _ToolStepContinuation = function ToolStepContinuation({
   messageId,
   toolCalls,
   readonly,
@@ -386,7 +386,7 @@ function _ToolStepContinuation({
       </div>
     </div>
   );
-}
+};
 const ToolStepContinuation = memo(_ToolStepContinuation);
 
 function StreamingMessageSkeleton({ className }: { readonly className?: string; }) {

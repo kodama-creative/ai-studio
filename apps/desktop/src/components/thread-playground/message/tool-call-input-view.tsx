@@ -89,7 +89,7 @@ function _linkKindFor(
   return undefined;
 }
 
-function _ToolCallInputView({ input }: { readonly input: ToolCallInput; }) {
+const _ToolCallInputView = function ToolCallInputView({ input }: { readonly input: ToolCallInput; }) {
   const todos = parseTodoWriteInput(input);
   if (todos) {
     return <TodoWriteView input={input} todos={todos} />;
@@ -143,10 +143,10 @@ function _ToolCallInputView({ input }: { readonly input: ToolCallInput; }) {
       </div>
     </div>
   );
-}
+};
 export const ToolCallInputView = memo(_ToolCallInputView);
 
-function _ToolCallArgumentRow({
+const _ToolCallArgumentRow = function ToolCallArgumentRow({
   argumentKey,
   value,
   trailingComma,
@@ -336,7 +336,7 @@ function _ToolCallArgumentRow({
         : null}
     </div>
   );
-}
+};
 const ToolCallArgumentRow = memo(_ToolCallArgumentRow);
 
 /**
@@ -344,7 +344,7 @@ const ToolCallArgumentRow = memo(_ToolCallArgumentRow);
  * inline (code-style) with each element as its own click-to-reveal link, rather
  * than as a single opaque JSON blob.
  */
-function _PathArrayArgumentRow({
+const _PathArrayArgumentRow = function PathArrayArgumentRow({
   paths,
   trailingComma
 }: {
@@ -381,7 +381,7 @@ function _PathArrayArgumentRow({
       </div>
     </div>
   );
-}
+};
 const PathArrayArgumentRow = memo(_PathArrayArgumentRow);
 
 /**

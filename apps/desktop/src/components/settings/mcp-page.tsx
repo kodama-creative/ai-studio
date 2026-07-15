@@ -183,15 +183,19 @@ export function McpPage() {
   }, [creating]);
 
   useEffect(() => {
+    // Starts an external RPC fetch; state updates happen after the promise settles.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void refresh();
   }, [refresh]);
 
   useEffect(() => {
     if (!creating) {
+      // The selected server is the identity boundary for this local edit draft.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setForm(_formFromServer(selectedServer));
       setTools([]);
     }
-  }, [creating, selectedServer?.id]);
+  }, [creating, selectedServer]);
 
   const createServer = () => {
     setSelectedIdBeforeCreate(selectedId);
@@ -605,7 +609,6 @@ function ServerEditor({
             <SelectContent>
               <SelectItem value="stdio">stdio</SelectItem>
               <SelectItem value="streamableHttp">Streamable HTTP</SelectItem>
-              <SelectItem value="sse">SSE</SelectItem>
             </SelectContent>
           </Select>
         </Field>

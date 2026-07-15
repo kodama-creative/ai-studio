@@ -3,7 +3,7 @@ import { memo, useMemo } from "react";
 import { resolveModelIcon } from "@/lib/brand-icons";
 import { BrandAvatar } from "./brand-avatar";
 
-function _ModelAvatar({
+const _ModelAvatar = function ModelAvatar({
   id,
   name,
   icon,
@@ -37,6 +37,6 @@ function _ModelAvatar({
       size={size}
     />
   );
-}
+};
 
 export const ModelAvatar = memo(_ModelAvatar);

@@ -431,7 +431,7 @@ export class ExternalAgentProjectManager {
         return _rejectedToolCall(`Project tool not found: ${input.name}`);
       }
       const active = loaded.connectionSessions.get(input.threadId);
-      if (!active || active.snapshot !== input.snapshot) {
+      if (active?.snapshot !== input.snapshot) {
         return _rejectedToolCall(
           "This Project MCP connection is not active. Reopen the Thread and retry manually."
         );
@@ -651,7 +651,7 @@ export class ExternalAgentProjectManager {
     const active = this._loaded
       .get(projectId)
       ?.connectionSessions.get(threadId);
-    if (!active || active.snapshot !== snapshot) { return new Set(); }
+    if (active?.snapshot !== snapshot) { return new Set(); }
     return new Set(
       active.tools
         .filter(
@@ -1122,7 +1122,7 @@ export class ExternalAgentProjectManager {
       (tool): tool is ProjectTool =>
         tool.type === "project" && Boolean(tool.connectionName)
     );
-    if (!active || active.snapshot !== snapshot.fingerprint) {
+    if (active?.snapshot !== snapshot.fingerprint) {
       return [...local, ...storedRemote];
     }
     const remote: ProjectTool[] = [];

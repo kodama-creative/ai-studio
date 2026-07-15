@@ -4,7 +4,7 @@ import React, { useCallback, useState } from "react";
 import { cn } from "@/lib/utils";
 import { CollapsibleContent } from "../../ui/collapsible-content";
 
-function _ThinkingView({
+const _ThinkingView = function ThinkingView({
   className,
   thinking
 }: {
@@ -50,6 +50,6 @@ function _ThinkingView({
       </CollapsibleContent>
     </div>
   );
-}
+};
 
 export const ThinkingView = React.memo(_ThinkingView);

@@ -12,7 +12,7 @@ const PreviewDialogImpl = lazy(async () =>
  * in the same render that opens it — keeping its close animation and later
  * reopens instant. The public props mirror {@link PreviewDialog} exactly.
  */
-function _PreviewDialog(props: {
+const _PreviewDialog = function PreviewDialog(props: {
   readonly mode?: PreviewMode;
   readonly onOpenChange: (open: boolean) => void;
   readonly open: boolean;
@@ -28,6 +28,6 @@ function _PreviewDialog(props: {
       <PreviewDialogImpl {...props} />
     </Suspense>
   );
-}
+};
 
 export const PreviewDialog = memo(_PreviewDialog);

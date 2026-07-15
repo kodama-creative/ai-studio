@@ -81,6 +81,8 @@ export function normalizeToThread(
     }
     const role = typeof m.role === "string" ? m.role : undefined;
 
+    // Unknown and missing roles are ignored by the default branch.
+    // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check
     switch (role) {
       case "system":
       case "developer": {
@@ -282,6 +284,8 @@ function _resolveContent(content: unknown): ResolvedContent {
     }
     const type = typeof b.type === "string" ? b.type : undefined;
 
+    // Unknown and missing block types are ignored by the default branch.
+    // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check
     switch (type) {
       case "text":
       case "input_text":
@@ -405,7 +409,7 @@ function _parseArguments(raw: unknown): {
       return { args: {} };
     }
     try {
-      const parsed = parseJSON<unknown>(raw);
+      const parsed = parseJSON(raw);
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
         return { args: parsed as Record<string, unknown> };
       }

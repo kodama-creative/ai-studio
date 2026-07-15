@@ -57,7 +57,7 @@ import {
 } from "./external-project-source-navigation";
 import { registerTabCloseGuard, setTabDirty } from "./tab-close-guards";
 
-function _ExternalProjectTabPane({
+const _ExternalProjectTabPane = function ExternalProjectTabPane({
   tabId,
   projectId,
   threadId,
@@ -91,9 +91,9 @@ function _ExternalProjectTabPane({
         )}
     </section>
   );
-}
+};
 
-function _ProjectThreadPane({
+const _ProjectThreadPane = function ProjectThreadPane({
   projectId,
   threadId,
   active,
@@ -528,12 +528,14 @@ function _ProjectThreadPane({
                   className="h-5 px-1.5 text-[10px]"
                   disabled={running || project.status !== "ready"}
                   onClick={() => {
-                    locallyChanged
-                      ? setSyncConfirmOpen(true)
-                      : executeCommand({
+                    if (locallyChanged) {
+                      setSyncConfirmOpen(true);
+                    } else {
+                      executeCommand({
                         type: "syncExternalAgentProjectThreadFromAgent",
                         args: { projectId, threadId }
                       });
+                    }
                   }}
                   size="sm"
                   variant="outline"
@@ -605,9 +607,9 @@ function _ProjectThreadPane({
       />
     </>
   );
-}
+};
 
-function _ProjectBuildPane({
+const _ProjectBuildPane = function ProjectBuildPane({
   tabId,
   projectId,
   active,
@@ -1139,7 +1141,7 @@ function _ProjectBuildPane({
       />
     </div>
   );
-}
+};
 
 interface SourceBuffer {
   path: string;

@@ -21,7 +21,7 @@ The runtime owns three boundaries:
 - `@llm-space/runtime/tools` is the authored local-action contract. It exports
   `defineTool()` and the bounded `ToolContext`.
 - `@llm-space/runtime/connections` is the authored remote-action contract. It
-  exports `defineMcpClientConnection()` for HTTP/SSE MCP connections.
+  exports `defineMcpClientConnection()` for Streamable HTTP MCP connections.
 
 ## Architecture
 

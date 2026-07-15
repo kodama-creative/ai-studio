@@ -82,6 +82,8 @@ function _parseAuroraThread(data: object): Thread | undefined {
     const content = _asRecord(m.Content);
     const text = _auroraText(content);
 
+    // Unknown and missing roles are ignored by the default branch.
+    // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check
     switch (role) {
       case "system":
         if (text) {
@@ -193,7 +195,7 @@ function _parseAuroraArguments(raw: unknown): {
     return { args: {} };
   }
   try {
-    const parsed = parseJSON<unknown>(raw);
+    const parsed = parseJSON(raw);
     if (
       parsed !== null
       && typeof parsed === "object"

@@ -165,12 +165,12 @@ MCP Server 需要配置：
 | 配置项 | 说明 |
 | --- | --- |
 | Name | Server 显示名称。LLM Space 会根据名称生成工具前缀。 |
-| Transport | 连接方式，支持 `stdio`、`Streamable HTTP` 和 `SSE`。 |
+| Transport | 连接方式，支持 `stdio` 和 `Streamable HTTP`。 |
 | Command | `stdio` 模式下启动 MCP Server 的命令。 |
 | Args | `stdio` 模式下传给命令的参数，每行一个参数。 |
 | Working directory | `stdio` 模式下的工作目录。 |
 | Environment | `stdio` 模式下传给进程的环境变量。 |
-| URL | `Streamable HTTP` 或 `SSE` 模式下的远程 MCP 地址。 |
+| URL | `Streamable HTTP` 模式下的远程 MCP 地址。 |
 | Headers | 远程 MCP 请求附加的 HTTP Header。 |
 
 配置完成后，单击 `Save` 保存。

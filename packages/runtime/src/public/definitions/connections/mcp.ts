@@ -4,7 +4,7 @@ const MCP_CONNECTION_DEFINITION_BRAND = Symbol.for(
   "llm-space.mcp-connection-definition"
 );
 
-export type McpRemoteTransport = "sse" | "streamableHttp";
+export type McpRemoteTransport = "streamableHttp";
 
 export interface ConnectionContext {
   readonly abortSignal: AbortSignal;

@@ -58,7 +58,7 @@ const WEB_TOOL_NAMES = new Set([
   "weather_report"
 ]);
 
-function _BuiltInToolImportDialog({
+const _BuiltInToolImportDialog = function BuiltInToolImportDialog({
   existingToolNames,
   initialToolName,
   onAdd,
@@ -273,7 +273,7 @@ function _BuiltInToolImportDialog({
       </DialogContent>
     </Dialog>
   );
-}
+};
 
 export const BuiltInToolImportDialog = memo(_BuiltInToolImportDialog);
 

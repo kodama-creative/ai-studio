@@ -72,7 +72,7 @@ export interface MainWindowRPCDependencies {
   updater: UpdaterService;
 }
 
-const MAX_REQUEST_TIME_MS = 5 * 60_000 + 10_000;
+const MAX_REQUEST_TIME_MS = (5 * 60_000) + 10_000;
 
 export function createMainWindowRPC({
   analytics,

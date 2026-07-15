@@ -192,6 +192,8 @@ function _checkJsonSchema(schema: unknown, value: unknown): boolean {
     return types.some(type =>
       _checkJsonSchema({ ...definition, type }, value));
   }
+  // A missing schema type accepts the value through the default branch.
+  // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check
   switch (types[0]) {
     case "array":
       return (
@@ -255,7 +257,6 @@ async function _activateConnection(
         headers.Authorization = `Bearer ${auth.token}`;
       }
       client = await connector({
-        transport: definition.transport,
         url: definition.url,
         headers
       });

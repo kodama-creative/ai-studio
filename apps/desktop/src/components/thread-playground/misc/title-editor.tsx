@@ -12,7 +12,7 @@ import { Input } from "../../ui/input";
 
 export type TitleValidator = (value: string) => FileStemValidationResult;
 
-function _TitleEditor({
+const _TitleEditor = function TitleEditor({
   className,
   title,
   readonly,
@@ -179,6 +179,6 @@ function _TitleEditor({
       </div>
     </div>
   );
-}
+};
 
 export const TitleEditor = memo(_TitleEditor);

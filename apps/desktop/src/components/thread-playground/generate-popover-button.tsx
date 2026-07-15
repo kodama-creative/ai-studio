@@ -16,7 +16,7 @@ interface GeneratePopoverButtonProps {
   readonly onGenerate: (prompt: string) => void;
 }
 
-function _GeneratePopoverButton({
+const _GeneratePopoverButton = function GeneratePopoverButton({
   className,
   iconOnly = false,
   placeholder = "Describe what your function does (or paste your code), and we'll generate a definition.",
@@ -100,6 +100,6 @@ function _GeneratePopoverButton({
       </PopoverContent>
     </Popover>
   );
-}
+};
 
 export const GeneratePopoverButton = memo(_GeneratePopoverButton);

@@ -22,7 +22,7 @@ export function createExtensions(language: "none" | CodeEditorLanguage) {
     case "typescript":
       extensions.push(javascript({ typescript: true }));
       break;
-    default:
+    case "markdown":
       extensions.push(
         markdown({
           codeLanguages: languages

@@ -499,7 +499,6 @@ export function createThreadStore(
           const message = createUserMessage();
           updateMessages(messages => [...messages, message]);
           set({ autoFocusMessageId: message.id });
-          return message.id;
         },
         insertMessageBefore(beforeMessageId: string) {
           const messages = get().thread.context?.messages ?? [];
@@ -582,7 +581,7 @@ export function createThreadStore(
             return false;
           }
           const nextVariables = { ...variables };
-          delete nextVariables[oldName];
+          Reflect.deleteProperty(nextVariables, oldName);
           nextVariables[newName] = variable;
           patchThread({
             context: replaceThreadPromptVariableReferences(
@@ -636,7 +635,7 @@ export function createThreadStore(
           }
           const nextValues = { ...customValues };
           const value = nextValues[oldName];
-          delete nextValues[oldName];
+          Reflect.deleteProperty(nextValues, oldName);
           nextValues[newName] = value;
           patchThread({
             context: replaceThreadPromptVariableReferences(
@@ -654,7 +653,7 @@ export function createThreadStore(
         removeCustomVariable(name) {
           const { variables, variableVariants } = getVariableState();
           const nextValues = { ...defaultCustomValues(variableVariants) };
-          delete nextValues[name];
+          Reflect.deleteProperty(nextValues, name);
           setDefaultCustomValues(variables, nextValues);
         },
         updateTitle(title: string | undefined) {

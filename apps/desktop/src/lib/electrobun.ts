@@ -7,7 +7,7 @@ import type { DesktopRPCType } from "../shared/rpc";
 // "RPC request timed out." Model listing, large `fsRead`s, and MCP-backed
 // requests routinely exceed that. Match the bun side's ceiling
 // (`MAX_REQUEST_TIME_MS` in `bun/rpc/index.ts`).
-const MAX_REQUEST_TIME_MS = 5 * 60_000 + 10_000;
+const MAX_REQUEST_TIME_MS = (5 * 60_000) + 10_000;
 
 const rpc = Electroview.defineRPC<DesktopRPCType>({
   maxRequestTime: MAX_REQUEST_TIME_MS,

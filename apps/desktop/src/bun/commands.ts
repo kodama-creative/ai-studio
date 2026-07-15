@@ -60,6 +60,8 @@ export function executeCommandInBun(
     dependencies.sendToWebview(command);
     return;
   }
+  // Webview-targeted variants were forwarded by the guard above.
+  // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check
   switch (command.type) {
     case "zoomIn": {
       const zoom = clampZoom(window.getPageZoom() + ZOOM_STEP);

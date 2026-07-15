@@ -25,7 +25,7 @@ import {
   type McpToolSummary
 } from "@/shared/mcp";
 
-function _McpToolImportDialog({
+const _McpToolImportDialog = function McpToolImportDialog({
   existingToolNames,
   initialServerId,
   initialToolName,
@@ -351,7 +351,7 @@ function _McpToolImportDialog({
       </DialogContent>
     </Dialog>
   );
-}
+};
 
 export const McpToolImportDialog = memo(_McpToolImportDialog);
 

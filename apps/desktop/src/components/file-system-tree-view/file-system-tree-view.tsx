@@ -48,7 +48,7 @@ const TRASH_NAME =
     ? "Recycle Bin"
     : "Trash";
 
-function _FileSystemTreeView({
+const _FileSystemTreeView = function FileSystemTreeView({
   className,
   headerStart,
   onSelectFile,
@@ -518,7 +518,7 @@ function _FileSystemTreeView({
       />
     </div>
   );
-}
+};
 
 // Memoized so opening/closing a thread tab (which re-renders the page shell it
 // sits in) doesn't redraw the whole tree — its props (the tab callbacks and the

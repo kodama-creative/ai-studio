@@ -13,7 +13,7 @@ import {
   Search,
   Trash2
 } from "lucide-react";
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import type { CustomModel, ModelProviderGroup } from "@llm-space/core";
@@ -105,18 +105,13 @@ export function ModelsPage() {
     [providers]
   );
   const [selectedId, setSelectedId] = useState<string | null>(firstProviderId);
-
-  useEffect(() => {
-    if (
-      !selectedId
-      || !providers.some(provider => provider.id === selectedId)
-    ) {
-      setSelectedId(firstProviderId);
-    }
-  }, [firstProviderId, providers, selectedId]);
+  const effectiveSelectedId =
+    selectedId && providers.some(provider => provider.id === selectedId)
+      ? selectedId
+      : firstProviderId;
 
   const selected =
-    providers.find(provider => provider.id === selectedId) ?? null;
+    providers.find(provider => provider.id === effectiveSelectedId) ?? null;
 
   return (
     <SettingsPage
@@ -128,7 +123,7 @@ export function ModelsPage() {
         onAdd={setSelectedId}
         onSelect={setSelectedId}
         providers={providers}
-        selectedId={selectedId}
+        selectedId={effectiveSelectedId}
       />
       <ProviderEditor key={selected?.id} provider={selected} />
     </SettingsPage>
@@ -459,7 +454,7 @@ function ProviderEditor({ provider }: { readonly provider: ModelProviderGroup | 
     "all"
   );
   const [apiValue, setApiValue] = useState<CustomProviderApi>(
-    DEFAULT_CUSTOM_PROVIDER_API
+    provider?.api ?? DEFAULT_CUSTOM_PROVIDER_API
   );
   const [modelListRef] = useAutoAnimation<HTMLDivElement>();
   const [editorOpen, setEditorOpen] = useState(false);
@@ -485,10 +480,6 @@ function ProviderEditor({ provider }: { readonly provider: ModelProviderGroup | 
     () => new Set(provider?.customModels ?? []),
     [provider]
   );
-
-  useEffect(() => {
-    setApiValue(provider?.api ?? DEFAULT_CUSTOM_PROVIDER_API);
-  }, [provider?.api, provider?.id]);
 
   // Persist on blur, but only when the value actually changed. An empty field
   // clears the key (stored as `null`).
@@ -691,7 +682,7 @@ function ProviderEditor({ provider }: { readonly provider: ModelProviderGroup | 
                 <div className="text-muted-foreground pl-5 text-xs">
                   <div className="list-item">
                     {
-                      'Use "${ENV_NAME}" to reference environment variables. e.g. "$OPENAI_API_KEY"'
+                      `Use "\${ENV_NAME}" to reference environment variables. e.g. "$OPENAI_API_KEY"`
                     }
                   </div>
                   <div className="list-item">
@@ -859,6 +850,7 @@ function ProviderEditor({ provider }: { readonly provider: ModelProviderGroup | 
       </ScrollArea>
 
       <ModelEditorDialog
+        key={`${editingModel?.id ?? "new"}:${editorOpen ? "open" : "closed"}`}
         model={editingModel}
         onOpenChange={setEditorOpen}
         open={editorOpen}

@@ -16,9 +16,9 @@ export function defineToolRuntime<TDefinition extends object>(
 export function defineMcpClientConnectionRuntime<
   TDefinition extends {
     readonly tools: { readonly allow: readonly string[]; };
-    readonly transport?: "sse" | "streamableHttp";
+    readonly transport?: "streamableHttp";
   }
->(input: TDefinition): { readonly transport: "sse" | "streamableHttp"; } & TDefinition {
+>(input: TDefinition): { readonly transport: "streamableHttp"; } & TDefinition {
   if (input.tools.allow.length === 0) {
     throw new TypeError("tools.allow must contain at least one tool name");
   }

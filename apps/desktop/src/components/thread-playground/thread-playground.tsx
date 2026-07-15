@@ -158,7 +158,7 @@ export function ThreadPlayground({
   );
 }
 
-function _ThreadPlayground({
+const _ThreadPlayground = function ThreadPlayground({
   initialValue,
   transport,
   toolExecutor = executeTool,
@@ -247,7 +247,7 @@ function _ThreadPlayground({
       </ToolExecutionProvider>
     </PromptSkillsProvider>
   );
-}
+};
 
 /** Size the Run history panel expands to when toggled open. */
 const RUN_HISTORY_PANEL_SIZE = "16rem";
@@ -318,7 +318,7 @@ function ThreadPlaygroundContent({
     } catch {
       // Ignored
     }
-  }, []);
+  }, [abort]);
   const runHistoryPanelRef = usePanelRef();
   const [historyOpen, setHistoryOpen] = useState(false);
   const toggleHistory = useCallback(() => {
@@ -334,7 +334,7 @@ function ThreadPlaygroundContent({
   }, [runHistoryPanelRef]);
   const closeHistory = useCallback(() => {
     runHistoryPanelRef.current?.collapse();
-  }, []);
+  }, [runHistoryPanelRef]);
   const handleShortcuts = useShortcuts({
     readonly: readonlyFromProps || (runDisabled && status !== "running")
   });

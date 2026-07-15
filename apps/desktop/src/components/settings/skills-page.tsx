@@ -64,13 +64,10 @@ export function SkillsPage() {
 
   const paths = settings.discoveryPaths;
   const firstPath = paths[0]?.path ?? null;
-
-  // Keep a valid selection as paths are added/removed.
-  useEffect(() => {
-    if (!selectedPath || !paths.some(entry => entry.path === selectedPath)) {
-      setSelectedPath(firstPath);
-    }
-  }, [firstPath, paths, selectedPath]);
+  const effectiveSelectedPath =
+    selectedPath && paths.some(entry => entry.path === selectedPath)
+      ? selectedPath
+      : firstPath;
 
   const handleAdd = useCallback(async () => {
     try {
@@ -133,9 +130,12 @@ export function SkillsPage() {
         onRemove={path => void handleRemove(path)}
         onSelect={setSelectedPath}
         paths={paths}
-        selectedPath={selectedPath}
+        selectedPath={effectiveSelectedPath}
       />
-      <PathSkills key={`${selectedPath}:${reloadToken}`} path={selectedPath} />
+      <PathSkills
+        key={`${effectiveSelectedPath}:${reloadToken}`}
+        path={effectiveSelectedPath}
+      />
     </SettingsPage>
   );
 }
@@ -289,16 +289,14 @@ function PathListItem({
 }
 
 function PathSkills({ path }: { readonly path: string | null; }) {
-  const [skills, setSkills] = useState<SkillInfo[] | null>(null);
+  const [skills, setSkills] = useState<SkillInfo[] | null>(() => (path ? null : []));
   const [listRef] = useAutoAnimation<HTMLDivElement>();
 
   useEffect(() => {
     if (!path) {
-      setSkills([]);
       return;
     }
     let cancelled = false;
-    setSkills(null);
     void listSkills(path)
       .then(loaded => {
         if (!cancelled) {

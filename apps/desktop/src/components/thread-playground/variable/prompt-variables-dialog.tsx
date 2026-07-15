@@ -21,7 +21,7 @@ interface PromptVariablesDialogProps {
   readonly onOpenChange: (open: boolean) => void;
 }
 
-function _PromptVariablesDialog({
+const _PromptVariablesDialog = function PromptVariablesDialog({
   open,
   disabled,
   initialSelection,
@@ -50,6 +50,6 @@ function _PromptVariablesDialog({
       </DialogContent>
     </Dialog>
   );
-}
+};
 
 export const PromptVariablesDialog = memo(_PromptVariablesDialog);

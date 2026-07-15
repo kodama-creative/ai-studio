@@ -6,7 +6,7 @@ import { CodeEditor } from "@/components/code-editor";
 import { electrobun } from "@/lib/electrobun";
 import { cn } from "@/lib/utils";
 
-function _SourceTabPane({
+const _SourceTabPane = function SourceTabPane({
   path,
   active,
   refreshNonce
@@ -84,6 +84,6 @@ function _SourceTabPane({
         )}
     </section>
   );
-}
+};
 
 export const SourceTabPane = memo(_SourceTabPane);

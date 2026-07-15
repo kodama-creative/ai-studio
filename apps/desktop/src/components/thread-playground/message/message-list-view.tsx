@@ -49,7 +49,7 @@ export function MessageListView({
     const { source, destination } = result;
     if (!destination || source.index === destination.index) { return; }
     moveMessage(source.index, destination.index);
-  }, []);
+  }, [moveMessage]);
 
   const contentRef = useRef<HTMLDivElement>(null);
   const scrollToBottom = useCallback(() => {
@@ -165,6 +165,7 @@ export const SnapshotMessageListView = memo(({
   );
 });
 
+/* eslint-disable react-hooks/refs -- @hello-pangea/dnd exposes its callback ref through a render-prop object. */
 function DroppableMessageList({
   droppableProvided,
   messages,
@@ -201,6 +202,7 @@ function DroppableMessageList({
     </div>
   );
 }
+/* eslint-enable react-hooks/refs */
 
 // One draggable row. The `memo` boundary sits *above* the `<Draggable>` (not
 // inside its render prop) so that editing one message doesn't re-render every

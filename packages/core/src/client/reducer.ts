@@ -43,6 +43,8 @@ export function reduceMessages(
     streamingMessage?: AssistantMessage | null;
   }
 ): ReduceResult | null {
+  // Lifecycle-only events are intentionally ignored by the default branch.
+  // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check
   switch (event.type) {
     case "message_start":
       if (event.message.role !== "assistant") {
@@ -189,6 +191,8 @@ function _reduceAssistantMessageEvent(
   content: ReducedMessageContent[]
 ): ReduceResult | null {
   const message = streamingMessage!;
+  // Non-delta boundary events do not change the accumulated message.
+  // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check
   switch (event.type) {
     case "thinking_start": {
       content[event.contentIndex] = { type: "thinking", thinking: "" };
@@ -253,7 +257,7 @@ function _reduceAssistantMessageEvent(
       toolCallContent.arguments += event.delta;
       let args: Record<string, unknown> = {};
       try {
-        args = parseJSON<Record<string, unknown>>(toolCallContent.arguments);
+        args = parseJSON(toolCallContent.arguments) as Record<string, unknown>;
       } catch {
         return _createUpdateMessageEvent(message, content);
       }

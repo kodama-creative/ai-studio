@@ -7,6 +7,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState
 } from "react";
@@ -44,7 +45,7 @@ interface UpdateStatusValue {
  * `toast.custom` so it owns the whole card look rather than sonner's default
  * toast chrome. Manual checks use {@link UpdateDialog} instead.
  */
-function _UpdateReadyCard({
+const _UpdateReadyCard = function UpdateReadyCard({
   version,
   onRestart,
   onDismiss
@@ -79,14 +80,14 @@ function _UpdateReadyCard({
       </div>
     </div>
   );
-}
+};
 
 /**
  * The passive "downloading" progress card for the bottom-right corner. A
  * download can take a while and needs no interaction, so it stays out of the way
  * (never a modal) with an indeterminate bar until the "ready" card replaces it.
  */
-function _UpdateDownloadingCard({
+const _UpdateDownloadingCard = function UpdateDownloadingCard({
   version,
   onDismiss
 }: {
@@ -122,7 +123,7 @@ function _UpdateDownloadingCard({
       </div>
     </div>
   );
-}
+};
 
 const UpdateStatusContext = createContext<UpdateStatusValue | null>(null);
 
@@ -199,7 +200,7 @@ export function UpdateStatusProvider({ children }: { readonly children: ReactNod
             toast.custom(
               id => (
                 <_UpdateDownloadingCard
-                  onDismiss={() => toast.dismiss(id)}
+                  onDismiss={() => { toast.dismiss(id); }}
                   version={status.version}
                 />
               ),
@@ -224,7 +225,7 @@ export function UpdateStatusProvider({ children }: { readonly children: ReactNod
           toast.custom(
             id => (
               <_UpdateReadyCard
-                onDismiss={() => toast.dismiss(id)}
+                onDismiss={() => { toast.dismiss(id); }}
                 onRestart={restart}
                 version={status.version}
               />
@@ -269,8 +270,10 @@ export function UpdateStatusProvider({ children }: { readonly children: ReactNod
     };
   }, [executeCommand]);
 
+  const contextValue = useMemo(() => ({ readyVersion }), [readyVersion]);
+
   return (
-    <UpdateStatusContext.Provider value={{ readyVersion }}>
+    <UpdateStatusContext.Provider value={contextValue}>
       {children}
       <UpdateDialog
         onOpenChange={handleDialogOpenChange}

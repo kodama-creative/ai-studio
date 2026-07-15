@@ -91,7 +91,7 @@ function SettingsSection({
 /** A row label with a title and an optional muted one-line explanation. */
 function RowLabel({ title, hint }: { readonly hint?: string; readonly title: string; }) {
   if (!hint) {
-    return <>{title}</>;
+    return title;
   }
   return (
     <span className="flex flex-col gap-0.5">

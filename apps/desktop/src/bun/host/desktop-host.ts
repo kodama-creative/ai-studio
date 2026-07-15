@@ -53,7 +53,7 @@ export class DesktopHost {
     for (const module of this._modules) {
       try {
         const cleanup = await module.start?.();
-        if (cleanup) {
+        if (typeof cleanup === "function") {
           this._cleanups.push({ moduleId: module.id, cleanup });
         }
       } catch (error) {
@@ -70,6 +70,8 @@ export class DesktopHost {
     for (let index = this._cleanups.length - 1; index >= 0; index -= 1) {
       const { moduleId, cleanup } = this._cleanups[index];
       try {
+        // The cleanup union is callable; typed lint cannot resolve void | Promise<void> here.
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-call
         await cleanup();
       } catch (error) {
         this._onShutdownError(moduleId, _asError(error));

@@ -94,9 +94,9 @@ function _primaryForeground(hex: string): string {
     return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
   };
   const luminance =
-    0.2126 * toLinear((n >> 16) & 255)
-    + 0.7152 * toLinear((n >> 8) & 255)
-    + 0.0722 * toLinear(n & 255);
+    (0.2126 * toLinear((n >> 16) & 255))
+    + (0.7152 * toLinear((n >> 8) & 255))
+    + (0.0722 * toLinear(n & 255));
   // Dark ink on bright accents (yellows/ambers), near-white on the rest.
   return luminance > 0.45 ? "oklch(0.216 0.006 56)" : "oklch(0.985 0 0)";
 }
@@ -111,10 +111,6 @@ function _applyPrimary(hex: string) {
 
 function _systemTheme(): ResolvedTheme {
   return window.matchMedia(DARK_QUERY).matches ? "dark" : "light";
-}
-
-function _resolve(theme: Theme): ResolvedTheme {
-  return theme === "system" ? _systemTheme() : theme;
 }
 
 /** Toggle the `.dark` class the Tailwind `dark` variant keys off of. */
@@ -133,8 +129,8 @@ function _applyFidelity(fidelity: RenderingFidelity) {
 
 export function ThemeProvider({ children }: { readonly children: ReactNode; }) {
   const [theme, setThemeState] = useState<Theme>(_readStoredTheme);
-  const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>(() =>
-    _resolve(_readStoredTheme()));
+  const [systemTheme, setSystemTheme] = useState<ResolvedTheme>(_systemTheme);
+  const resolvedTheme = theme === "system" ? systemTheme : theme;
 
   const [primaryColor, setPrimaryState] = useState<string>(_readStoredPrimary);
   const [hasPrimaryColorOverride, setHasPrimaryColorOverride] = useState(
@@ -185,9 +181,7 @@ export function ThemeProvider({ children }: { readonly children: ReactNode; }) {
   // Apply the resolved theme to the document, and — while following the system
   // — re-resolve when the OS color scheme flips.
   useEffect(() => {
-    const resolved = _resolve(theme);
-    setResolvedTheme(resolved);
-    _applyTheme(resolved);
+    _applyTheme(resolvedTheme);
 
     if (theme !== "system") {
       return;
@@ -195,12 +189,12 @@ export function ThemeProvider({ children }: { readonly children: ReactNode; }) {
     const media = window.matchMedia(DARK_QUERY);
     const onChange = () => {
       const next = _systemTheme();
-      setResolvedTheme(next);
+      setSystemTheme(next);
       _applyTheme(next);
     };
     media.addEventListener("change", onChange);
     return () => { media.removeEventListener("change", onChange); };
-  }, [theme]);
+  }, [resolvedTheme, theme]);
 
   const themeValue = useMemo(
     (): ThemeContextValue => ({ theme, resolvedTheme, setTheme }),

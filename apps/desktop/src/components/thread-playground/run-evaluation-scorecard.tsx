@@ -276,7 +276,7 @@ export function RunEvaluationScorecard({
   );
 }
 
-function _ScoreButtons({
+const _ScoreButtons = function ScoreButtons({
   label,
   criterionName,
   value,
@@ -313,7 +313,7 @@ function _ScoreButtons({
       </ButtonGroup>
     </div>
   );
-}
+};
 
 function _handleScoreKeyDown(
   event: KeyboardEvent<HTMLButtonElement>,

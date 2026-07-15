@@ -29,7 +29,6 @@ describe("RemoteMcpClient", () => {
     await _waitUntilReady(process);
 
     const client = await RemoteMcpClient.connect({
-      transport: "streamableHttp",
       url: `http://127.0.0.1:${port}/mcp`,
       headers: {}
     });
@@ -65,7 +64,6 @@ describe("RemoteMcpClient", () => {
     await _waitUntilReady(process);
 
     const client = await RemoteMcpClient.connect({
-      transport: "streamableHttp",
       url: `http://127.0.0.1:${port}/mcp`,
       headers: {}
     });

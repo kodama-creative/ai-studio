@@ -54,7 +54,7 @@ const VERDICT_LABELS: Record<EvaluationRecord["verdict"], string> = {
   fail: "Fail"
 };
 
-function _RunHistoryListView({ onClose }: { readonly onClose: () => void; }) {
+const _RunHistoryListView = function RunHistoryListView({ onClose }: { readonly onClose: () => void; }) {
   const [containerRef] = useAutoAnimation();
   const runHistory = useThreadStore(s => s.runHistory);
   const evaluations = useThreadStore(s => s.evaluations);
@@ -94,8 +94,12 @@ function _RunHistoryListView({ onClose }: { readonly onClose: () => void; }) {
       .map(id => runById.get(id))
       .filter((run): run is RunSnapshot => Boolean(run));
   }, [runById, selectedRunIds]);
-  const comparisonRuns =
-    selectedRuns.length === 2 ? [selectedRuns[0], selectedRuns[1]] : null;
+  const comparisonRuns = useMemo(
+    () => (selectedRuns.length === 2
+      ? [selectedRuns[0], selectedRuns[1]] as const
+      : null),
+    [selectedRuns]
+  );
   const selectedEvaluation = useMemo(() => {
     if (!comparisonRuns) {
       return null;
@@ -341,11 +345,11 @@ function _RunHistoryListView({ onClose }: { readonly onClose: () => void; }) {
       />
     </div>
   );
-}
+};
 
 export const RunHistoryListView = memo(_RunHistoryListView);
 
-function _RunHistoryItem({
+const _RunHistoryItem = function RunHistoryItem({
   run,
   newest,
   selected,
@@ -487,11 +491,11 @@ function _RunHistoryItem({
       </div>
     </Item>
   );
-}
+};
 
 const RunHistoryItem = memo(_RunHistoryItem);
 
-function _EvaluationList({
+const _EvaluationList = function EvaluationList({
   evaluations,
   runById,
   onOpenEvaluation,
@@ -534,9 +538,9 @@ function _EvaluationList({
       </ItemGroup>
     </div>
   );
-}
+};
 
-function _EvaluationListItem({
+const _EvaluationListItem = function EvaluationListItem({
   evaluation,
   leftRun,
   rightRun,
@@ -644,6 +648,6 @@ function _EvaluationListItem({
         : null}
     </Item>
   );
-}
+};
 
 const EvaluationListItem = memo(_EvaluationListItem);

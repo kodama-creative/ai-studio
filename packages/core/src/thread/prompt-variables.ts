@@ -156,7 +156,7 @@ export function removePromptVariableSnapshotPlaces(
   let changed = false;
   for (const placeKey of remove) {
     if (Object.hasOwn(variables, placeKey)) {
-      delete variables[placeKey];
+      Reflect.deleteProperty(variables, placeKey);
       changed = true;
     }
   }
@@ -487,7 +487,7 @@ function _renamePromptVariableSnapshotReference(
       continue;
     }
     placeValues[newName] = placeValues[oldName]!;
-    delete placeValues[oldName];
+    Reflect.deleteProperty(placeValues, oldName);
     changed = true;
   }
 

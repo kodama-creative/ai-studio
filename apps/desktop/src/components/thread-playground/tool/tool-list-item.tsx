@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils";
 import { getBuiltInToolIcon } from "./built-in-tool-icon";
 import { Tooltip } from "../../tooltip";
 
-function _ToolListItem({
+const _ToolListItem = function ToolListItem({
   tool,
   readonly,
   onEdit,
@@ -123,5 +123,5 @@ function _ToolListItem({
       </Tooltip>
     </div>
   );
-}
+};
 export const ToolListItem = memo(_ToolListItem);

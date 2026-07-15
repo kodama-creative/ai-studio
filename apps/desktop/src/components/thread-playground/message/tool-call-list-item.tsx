@@ -40,7 +40,7 @@ import { Input } from "../../ui/input";
 import { useThreadStoreActions } from "../stores";
 import { usePromptVariableExtensionForContext } from "../variable/use-prompt-variable-extension";
 
-function _ToolCallListItem({
+const _ToolCallListItem = function ToolCallListItem({
   context,
   messageId,
   toolCall,
@@ -247,7 +247,7 @@ function _ToolCallListItem({
       />
     </div>
   );
-}
+};
 export const ToolCallListItem = memo(_ToolCallListItem);
 
 function formatJson(value: unknown): string {
@@ -261,7 +261,7 @@ function formatJson(value: unknown): string {
  * {@link AskUserQuestionEditor}) render only when the tool call's input matches
  * their expected shape; anything else falls back to the plain code editor.
  */
-function _ToolCallResponseEditor({
+const _ToolCallResponseEditor = function ToolCallResponseEditor({
   input,
   plain,
   value,
@@ -318,7 +318,7 @@ function _ToolCallResponseEditor({
       value={value}
     />
   );
-}
+};
 const ToolCallResponseEditor = memo(_ToolCallResponseEditor);
 
 // -- ask_user_question --------------------------------------------------------
