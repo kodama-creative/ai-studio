@@ -150,6 +150,20 @@ durable transcript through `initialMessages` and the optional persistence
 driver. Desktop Project Threads are the durable authority; runtime sessions
 own live prompt/tool/continuation execution.
 
+The session core deliberately uses Pi `Agent`, not `AgentHarness`. Pi `Agent`
+owns the official provider stream, ReAct/tool lifecycle, abort settlement, and
+prompt-free `continue()` loop. LLM Space `AgentSession` owns only product
+semantics Pi does not provide: execution-mode policy, settled manual tool
+placeholders, exact result replacement, public event projection, and the host
+persistence boundary. This is the single Agent Project session owner; hosts
+must not drive a second ReAct or continuation loop.
+
+`AgentHarness` is not a compatible replacement for this boundary today. Its
+public turn entry points always add a user message, and its append-only Session
+does not replace an editable Thread transcript. Harness compaction and Session
+tree capabilities may be adopted later only through a separately approved
+integration that preserves settled manual continuation.
+
 Execution modes are `manual`, `autoOnce`, and `react`. Manual deferred tool
 results remain internal control messages and are exposed as pending calls until
 the host supplies real results and calls `continue()`.

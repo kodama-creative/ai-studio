@@ -12,18 +12,18 @@ LLM Space is an Agent Studio: Agent Project source is the portable product, Thre
 - [ ] Give each loop one product-level metric, one main recommendation, two alternatives, explicit V1 boundaries, non-goals, and stop conditions.
 - [ ] Run `$grill-me` before product-code edits. Routine defaults inside the approved roadmap are `yes`; stop for material scope, security, persistence, or data-boundary changes.
 - [ ] For UI work, confirm the interaction scheme and verify through real Electrobun CEF plus a current product-design audit.
-- [ ] Mark a task complete only after implementation, focused tests, relevant TypeScript checks, lint/build, review, capability-map refresh, and a completed kaizen log.
+- [ ] Mark a task complete only after implementation, focused tests, relevant TypeScript checks, lint/non-packaging build checks, review, capability-map refresh, and a completed kaizen log. Never run Electrobun packaging, DMG, update-patch, signing, notarization, `build:canary`, `build:stable`, `pack*`, or release validation in this worktree.
 - [ ] Preserve unrelated worktree changes. Never use this TODO as permission to revert or rewrite concurrent work.
 
 ## Primary Build-To-Server Spine
 
-- [ ] **01 — Pi AgentHarness alignment**
+- [ ] **01 — Pi Agent session authority**
   - Depends on: current runtime.
-  - Run: `$kaizen-loop Make Pi AgentHarness the authoritative LLM Space session core without changing shipped behavior.`
-  - Done when: existing manual, auto-once, ReAct, persistence, abort, reload, tool, and event fixtures run through `AgentHarness`; overlapping custom session semantics are removed or have one documented owner.
+  - Run: `$kaizen-loop Make the Pi Agent-backed LLM Space session core authoritative without changing shipped behavior.`
+  - Done when: existing manual, auto-once, ReAct, persistence, abort, reload, tool, and event fixtures run through one LLM Space `AgentSession` backed by Pi `Agent`; Pi owns the official loop/tool lifecycle while Thread persistence, settled manual policy, and event projection each have one documented LLM Space owner.
   - Boundary: behavior-preserving runtime convergence only; no new Server, source slot, UI, or workflow-durability claim.
-  - Metric: existing runtime behavior coverage through AgentHarness.
-  - Blocked (2026-07-15): installed Pi 0.80.3 and current upstream/npm 0.80.7 `AgentHarness` still have no prompt-free `continue()` or transcript replacement operation. Preserving LLM Space's settled manual-tool workflow would therefore require a Pi fork/private lifecycle copy or a material Thread/Pi Session persistence change, all outside this item's approved boundary. Retry after an upstream Harness continuation seam exists or after an explicit roadmap decision changes the boundary.
+  - Metric: existing runtime behavior coverage through the Pi Agent-backed session core.
+  - Decision (2026-07-15): current Pi `AgentHarness` can keep a run busy on an unresolved tool Promise but cannot express LLM Space's settled manual workflow—finish the run, externally resolve/edit exact tool results, then continue without a new user message. Item 01 therefore standardizes on Pi `Agent.continue()` and an LLM Space-owned session adapter instead of waiting for or privately copying Harness lifecycle behavior.
 
 - [ ] **02 — Inspectable compiled Agent artifact V1**
   - Depends on: 01.
