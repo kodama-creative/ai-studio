@@ -12,11 +12,13 @@ import {
   EyeIcon,
   Loader2,
   PlayIcon,
+  RotateCcwIcon,
 } from "lucide-react";
 import { memo, useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { openFirecrawlLimitDialog } from "@/components/firecrawl-limit-dialog";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { PreviewDialog } from "@/components/preview-dialog-lazy";
 import { useRenderingFidelity } from "@/components/theme-provider";
 import { Tooltip } from "@/components/tooltip";
@@ -30,7 +32,10 @@ import { useThreadStoreActions } from "../stores";
 import { usePromptVariableExtensionForContext } from "../variable/use-prompt-variable-extension";
 
 import { ToolCallInputView } from "./tool-call-input-view";
-import { getToolCallOutputText } from "./tool-call-status";
+import {
+  getToolCallOutputText,
+  isToolCallOutcomeUnknown,
+} from "./tool-call-status";
 import { useToolCallRunner } from "./use-tool-call-runner";
 import {
   parseWebSearchOutput,
@@ -63,9 +68,10 @@ function _ToolCallListItem({
   const executable = tool !== undefined && isExecutableTool(tool);
   const [calling, setCalling] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [retryOpen, setRetryOpen] = useState(false);
   const outputText = useMemo(() => getToolCallOutputText(toolCall), [toolCall]);
   const isError = toolCall.output?.isError ?? false;
-  const outcomeUnknown = Boolean(toolCall.attempt && !toolCall.output && !calling);
+  const outcomeUnknown = isToolCallOutcomeUnknown(toolCall) && !calling;
   const handleOutputChange = useCallback(
     (value: string) => {
       if (readonly) {
@@ -129,6 +135,10 @@ function _ToolCallListItem({
       toast.error("Failed to copy arguments");
     }
   }, [toolCall.input.arguments]);
+  const handleRetry = useCallback(() => {
+    setRetryOpen(false);
+    void handleCall();
+  }, [handleCall]);
   return (
     <div className="bg-foreground/4 flex w-full flex-col gap-2 rounded-md px-3 pt-2 pb-3">
       <div className="relative flex min-w-0 items-start">
@@ -144,13 +154,13 @@ function _ToolCallListItem({
               <CopyIcon className="size-3" />
             </Button>
           </Tooltip>
-          {executable ? (
+          {executable && !outcomeUnknown ? (
             <Tooltip content="Call this tool">
               <Button
                 className="invisible shrink-0 group-hover/message:visible"
                 size="icon"
                 variant="secondary"
-                disabled={readonly || calling || outcomeUnknown}
+                disabled={readonly || calling}
                 onClick={() => void handleCall()}
               >
                 {calling ? (
@@ -183,6 +193,17 @@ function _ToolCallListItem({
             </MarkerContent>
           </Marker>
           <div className="flex items-center">
+            {outcomeUnknown && executable ? (
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={readonly || calling}
+                onClick={() => setRetryOpen(true)}
+              >
+                <RotateCcwIcon />
+                Retry
+              </Button>
+            ) : null}
             <Button
               className="invisible shrink-0 group-hover/message:visible"
               size="xs"
@@ -211,6 +232,15 @@ function _ToolCallListItem({
           onKeyDown={handleKeyDown}
         />
       </div>
+      <ConfirmDialog
+        open={retryOpen}
+        title="Retry this tool?"
+        description="The previous call may have completed remotely. Retrying can repeat side effects."
+        confirmLabel="Retry tool"
+        confirmVariant="default"
+        onConfirm={handleRetry}
+        onOpenChange={setRetryOpen}
+      />
     </div>
   );
 }

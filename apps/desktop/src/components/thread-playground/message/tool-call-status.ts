@@ -24,6 +24,11 @@ export function isToolCallPending(toolCall: ToolCall): boolean {
   return toolCall.output === undefined && toolCall.attempt === undefined;
 }
 
+/** Whether a remote call may have completed without returning its result. */
+export function isToolCallOutcomeUnknown(toolCall: ToolCall): boolean {
+  return toolCall.output === undefined && toolCall.attempt !== undefined;
+}
+
 /**
  * Derive the user-facing state from existing thread data; no extra schema.
  */

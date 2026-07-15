@@ -426,6 +426,64 @@ export default defineMcpClientConnection({
     expect(signal.aborted).toBe(true);
   });
 
+  test("shutdown waits for Project MCP client disposal", async () => {
+    let signalCloseStarted!: () => void;
+    const closeStarted = new Promise<void>((resolve) => {
+      signalCloseStarted = resolve;
+    });
+    let releaseClose!: () => void;
+    const closeReleased = new Promise<void>((resolve) => {
+      releaseClose = resolve;
+    });
+    const { manager, project } = await _fixture({
+      connector: async () => ({
+        async listTools() {
+          return [
+            {
+              name: "forecast",
+              description: "Read a forecast",
+              inputSchema: { type: "object" },
+            },
+          ];
+        },
+        async callTool() {
+          return { contentText: "sunny", isError: false };
+        },
+        async close() {
+          signalCloseStarted();
+          await closeReleased;
+        },
+      }),
+    });
+    await mkdir(path.join(project, "agent", "connections"), {
+      recursive: true,
+    });
+    await writeFile(
+      path.join(project, "agent", "connections", "weather.ts"),
+      `import { defineMcpClientConnection } from "@llm-space/runtime/connections";
+export default defineMcpClientConnection({
+  url: "https://weather.example.test/mcp",
+  description: "Weather service",
+  tools: { allow: ["forecast"] }
+});`,
+      "utf8"
+    );
+    const opened = await manager.trustAndOpen(project);
+    await manager.activateConnections(opened.id, opened.threads[0]!.id);
+
+    let shutdownFinished = false;
+    const shutdown = manager.shutdown().then(() => {
+      shutdownFinished = true;
+    });
+    await closeStarted;
+    await Bun.sleep(0);
+
+    expect(shutdownFinished).toBe(false);
+    releaseClose();
+    await shutdown;
+    expect(shutdownFinished).toBe(true);
+  });
+
   test("activates project MCP per Thread without persisting connection secrets", async () => {
     let schemaVersion = 1;
     let connectionAvailable = true;

@@ -227,7 +227,7 @@ export class ExternalAgentProjectManager {
       throw new Error("Workspace Agents are discovered automatically.");
     }
     this._registry.delete(projectId);
-    this._closeLoaded(projectId);
+    await this._closeLoaded(projectId);
     await this._saveRegistry();
     this._notify(projectId);
   }
@@ -617,9 +617,10 @@ export class ExternalAgentProjectManager {
     return this.inspect(projectId);
   }
 
-  shutdown(): Promise<void> {
-    for (const id of [...this._loaded.keys()]) this._closeLoaded(id);
-    return Promise.resolve();
+  async shutdown(): Promise<void> {
+    await Promise.all(
+      [...this._loaded.keys()].map((id) => this._closeLoaded(id))
+    );
   }
 
   private async _ensureRegistry(): Promise<void> {
@@ -666,7 +667,7 @@ export class ExternalAgentProjectManager {
     for (const [id, entry] of this._registry) {
       if (entry.origin === "workspace" && !discovered.has(id)) {
         this._registry.delete(id);
-        this._closeLoaded(id);
+        await this._closeLoaded(id);
       }
     }
   }
@@ -719,9 +720,11 @@ export class ExternalAgentProjectManager {
       }
       const snapshot = await loadAgentProject(resolved.agentRoot);
       if (state.snapshot?.fingerprint !== snapshot.fingerprint) {
-        for (const active of state.connectionSessions.values()) {
-          void active.session.close();
-        }
+        await Promise.allSettled(
+          [...state.connectionSessions.values()].map((active) =>
+            active.session.close()
+          )
+        );
         state.connectionSessions.clear();
       }
       state.resolved = resolved;
@@ -1050,15 +1053,17 @@ export class ExternalAgentProjectManager {
     return path.join(this._threadsRoot(projectId), `${threadId}.json`);
   }
 
-  private _closeLoaded(projectId: string): void {
+  private async _closeLoaded(projectId: string): Promise<void> {
     const state = this._loaded.get(projectId);
     if (!state) return;
     if (state.reloadTimer) clearTimeout(state.reloadTimer);
     state.watcher?.close();
-    for (const active of state.connectionSessions.values()) {
-      void active.session.close();
-    }
+    const closeSessions = [...state.connectionSessions.values()].map(
+      (active) => active.session.close()
+    );
+    state.connectionSessions.clear();
     this._loaded.delete(projectId);
+    await Promise.allSettled(closeSessions);
   }
 
   private _notify(projectId: string): void {
