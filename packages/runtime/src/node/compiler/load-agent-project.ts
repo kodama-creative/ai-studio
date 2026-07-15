@@ -241,6 +241,7 @@ async function _compileConnections(
   occupiedToolNames: Map<string, string>
 ): Promise<CompiledMcpConnection[]> {
   const connections: CompiledMcpConnection[] = [];
+  const connectionNames = new Map<string, string>();
   for (const sourceRef of sourceRefs) {
     const name = path.basename(
       sourceRef.absolutePath,
@@ -255,6 +256,17 @@ async function _compileConnections(
       });
       continue;
     }
+    const previousConnection = connectionNames.get(name);
+    if (previousConnection) {
+      diagnostics.push({
+        severity: "error",
+        code: "connection_name_duplicate",
+        message: `Connection name "${name}" is also exported by ${path.basename(previousConnection)}`,
+        path: sourceRef.absolutePath,
+      });
+      continue;
+    }
+    connectionNames.set(name, sourceRef.absolutePath);
     try {
       const source = await readFile(sourceRef.absolutePath);
       hash.update(sourceRef.absolutePath);

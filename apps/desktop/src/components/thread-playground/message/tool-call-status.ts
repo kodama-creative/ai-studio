@@ -19,6 +19,11 @@ export function getToolCallOutputText(toolCall: ToolCall): string {
   );
 }
 
+/** Whether a manual batch may safely execute this call for the first time. */
+export function isToolCallPending(toolCall: ToolCall): boolean {
+  return toolCall.output === undefined && toolCall.attempt === undefined;
+}
+
 /**
  * Derive the user-facing state from existing thread data; no extra schema.
  */

@@ -181,7 +181,40 @@ describe("ProjectMcpSession", () => {
     controller.abort(new Error("cancelled"));
 
     await expect(call).rejects.toThrow("cancelled");
-    expect(observedSignal).toBe(controller.signal);
+    expect(observedSignal?.aborted).toBe(true);
+    expect(observedSignal?.reason).toEqual(new Error("cancelled"));
+  });
+
+  test("aborts in-flight tools/call attempts when the session closes", async () => {
+    let observedSignal: AbortSignal | undefined;
+    const session = await ProjectMcpSession.activate([_connection()], {
+      connector: async () => ({
+        async listTools() {
+          return [
+            {
+              name: "forecast",
+              description: "Read a forecast",
+              inputSchema: { type: "object" },
+            },
+          ];
+        },
+        callTool(_name, _input, signal) {
+          observedSignal = signal;
+          return new Promise((_resolve, reject) => {
+            signal?.addEventListener("abort", () => reject(signal.reason), {
+              once: true,
+            });
+          });
+        },
+        async close() {},
+      }),
+    });
+
+    const call = session.callTool("weather__forecast", {});
+    await session.close();
+
+    await expect(call).rejects.toThrow("session closed");
+    expect(observedSignal?.aborted).toBe(true);
   });
 });
 

@@ -339,6 +339,93 @@ describe("ExternalAgentProjectManager", () => {
     ).toBe(false);
   });
 
+  test("deactivation cancels an in-flight Project MCP call", async () => {
+    let resolveStarted!: (signal: AbortSignal) => void;
+    const started = new Promise<AbortSignal>((resolve) => {
+      resolveStarted = resolve;
+    });
+    const { manager, project } = await _fixture({
+      connector: async () => ({
+        async listTools() {
+          return [
+            {
+              name: "forecast",
+              description: "Read a forecast",
+              inputSchema: { type: "object" },
+            },
+          ];
+        },
+        callTool(_name, _input, signal) {
+          if (!signal) throw new Error("Missing Project MCP abort signal");
+          resolveStarted(signal);
+          return new Promise((_resolve, reject) => {
+            signal.addEventListener("abort", () => reject(signal.reason), {
+              once: true,
+            });
+          });
+        },
+        async close() {},
+      }),
+    });
+    await mkdir(path.join(project, "agent", "connections"), {
+      recursive: true,
+    });
+    await writeFile(
+      path.join(project, "agent", "connections", "weather.ts"),
+      `import { defineMcpClientConnection } from "@llm-space/runtime/connections";
+export default defineMcpClientConnection({
+  url: "https://weather.example.test/mcp",
+  description: "Weather service",
+  tools: { allow: ["forecast"] }
+});`,
+      "utf8"
+    );
+    const opened = await manager.trustAndOpen(project);
+    const threadId = opened.threads[0]!.id;
+    await manager.activateConnections(opened.id, threadId);
+    const record = await manager.readThread(opened.id, threadId);
+    await manager.writeThread(opened.id, threadId, {
+      ...record,
+      thread: {
+        ...record.thread,
+        context: {
+          ...record.thread.context,
+          messages: [
+            {
+              id: "assistant-one",
+              role: "assistant",
+              content: [],
+              toolCalls: [
+                {
+                  id: "call-one",
+                  input: { name: "weather__forecast", arguments: {} },
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
+
+    const call = manager.callTool({
+      projectId: opened.id,
+      threadId,
+      snapshot: opened.snapshot,
+      name: "weather__forecast",
+      arguments: {},
+      attempt: {
+        messageId: "assistant-one",
+        toolCallId: "call-one",
+        at: "2026-07-15T00:00:00.000Z",
+      },
+    });
+    const signal = await started;
+    await manager.deactivateConnections(opened.id, threadId);
+
+    await expect(call).rejects.toThrow("session closed");
+    expect(signal.aborted).toBe(true);
+  });
+
   test("activates project MCP per Thread without persisting connection secrets", async () => {
     let schemaVersion = 1;
     let connectionAvailable = true;
@@ -429,9 +516,11 @@ export default defineMcpClientConnection({
         snapshot: opened.snapshot,
         name: "weather__forecast",
         arguments: {},
-        messageId: "assistant-one",
-        toolCallId: "call-one",
-        attemptAt: "2026-07-15T00:00:00.000Z",
+        attempt: {
+          messageId: "assistant-one",
+          toolCallId: "call-one",
+          at: "2026-07-15T00:00:00.000Z",
+        },
       })
     ).toEqual({ contentText: "sunny", isError: false });
     const attempted = await manager.readThread(opened.id, threadId);
@@ -459,9 +548,11 @@ export default defineMcpClientConnection({
         snapshot: opened.snapshot,
         name: "weather__forecast",
         arguments: { version: 2 },
-        messageId: "assistant-one",
-        toolCallId: "call-one",
-        attemptAt: "2026-07-15T00:01:00.000Z",
+        attempt: {
+          messageId: "assistant-one",
+          toolCallId: "call-one",
+          at: "2026-07-15T00:01:00.000Z",
+        },
       })
     ).rejects.toThrow("Sync from Agent");
     expect(

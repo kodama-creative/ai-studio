@@ -10,6 +10,7 @@ import { StreamableHTTPServerTransport } from "../../../apps/desktop/node_module
 const PORT = Number(process.env.PORT ?? 8765);
 const TRANSPORT = process.env.TRANSPORT ?? "streamableHttp";
 const MODE = process.env.MODE ?? "success";
+const CALL_DELAY_MS = Number(process.env.CALL_DELAY_MS ?? 0);
 
 /**
  * Creates one MCP server instance with a single echo tool. Each request gets a
@@ -28,9 +29,14 @@ function _createServer() {
         (process.env.DESCRIPTION_SUFFIX ?? ""),
       inputSchema: {},
     },
-    async () => ({
-      content: [{ type: "text", text: "remote fixture ok" }],
-    })
+    async () => {
+      if (CALL_DELAY_MS > 0) {
+        await new Promise((resolve) => setTimeout(resolve, CALL_DELAY_MS));
+      }
+      return {
+        content: [{ type: "text", text: "remote fixture ok" }],
+      };
+    }
   );
   return server;
 }

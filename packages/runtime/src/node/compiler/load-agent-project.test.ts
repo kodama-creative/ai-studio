@@ -174,6 +174,37 @@ describe("loadAgentProject", () => {
     ]);
   });
 
+  test("returns a blocking diagnostic for duplicate connection source names", async () => {
+    const root = await _fixture();
+    await writeFile(join(root, "instructions.md"), "Test.\n");
+    await mkdir(join(root, "connections"));
+    const connection = (toolName: string) =>
+      `import { defineMcpClientConnection } from "@llm-space/runtime/connections";
+      export default defineMcpClientConnection({
+        url: "https://example.com/mcp",
+        description: "Remote project data.",
+        tools: { allow: ["${toolName}"] }
+      });`;
+    await writeFile(
+      join(root, "connections", "project.ts"),
+      connection("search")
+    );
+    await writeFile(
+      join(root, "connections", "project.js"),
+      connection("lookup")
+    );
+
+    const snapshot = await loadAgentProject(root);
+
+    expect(snapshot.diagnostics).toEqual([
+      expect.objectContaining({
+        severity: "error",
+        code: "connection_name_duplicate",
+        message: expect.stringContaining('Connection name "project"'),
+      }),
+    ]);
+  });
+
   test("returns a blocking diagnostic when the required definition is missing", async () => {
     const root = await _fixture();
     await rm(join(root, "agent.ts"));

@@ -59,6 +59,13 @@ export interface ExternalAgentProjectConnectionActivation {
   hasSchemaDrift: boolean;
 }
 
+/** Durable identity written before a remote Project tool call starts. */
+export interface RemoteToolCallAttempt {
+  readonly messageId: string;
+  readonly toolCallId: string;
+  readonly at: string;
+}
+
 export interface ExternalAgentProjectThreadRecord {
   thread: Thread;
   promptFingerprint: string;

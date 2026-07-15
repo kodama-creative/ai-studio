@@ -30,7 +30,7 @@ import { ImageContentList } from "./image-content-view";
 import { MessageListItemHeader } from "./message-list-item-header";
 import { ThinkingView } from "./thinking-view";
 import { ToolCallListItem } from "./tool-call-list-item";
-import { summarizeToolCalls } from "./tool-call-status";
+import { isToolCallPending, summarizeToolCalls } from "./tool-call-status";
 import { useToolCallRunner } from "./use-tool-call-runner";
 
 function _MessageListItem({
@@ -280,7 +280,7 @@ function _ToolStepContinuation({
   const callableToolCalls = useMemo(
     () =>
       toolCalls.filter((toolCall) => {
-        if (toolCall.attempt && !toolCall.output) return false;
+        if (!isToolCallPending(toolCall)) return false;
         const tool = resolveTool(toolCall.input.name);
         return tool !== undefined && isExecutableTool(tool);
       }),

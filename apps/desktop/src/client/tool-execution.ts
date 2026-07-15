@@ -3,6 +3,7 @@ import type { BuiltinTool, McpTool, ProjectTool } from "@llm-space/core";
 import { callBuiltInTool } from "@/client/built-in-tools";
 import { callMcpTool } from "@/client/mcp";
 import { electrobun } from "@/lib/electrobun";
+import type { RemoteToolCallAttempt } from "@/shared/external-agent-project";
 
 /**
  * A tool call's result, normalized across the two backends. MCP surfaces
@@ -15,9 +16,7 @@ export interface ToolCallResult {
 }
 
 export interface ToolExecutionContext {
-  messageId?: string;
-  toolCallId?: string;
-  attemptAt?: string;
+  attempt?: RemoteToolCallAttempt;
 }
 
 export type ToolExecutor = (
@@ -54,9 +53,7 @@ export async function executeTool(
       snapshot: tool.snapshot,
       name: tool.name,
       arguments: args,
-      messageId: context.messageId,
-      toolCallId: context.toolCallId,
-      attemptAt: context.attemptAt,
+      attempt: context.attempt,
     });
   }
   const result = await callBuiltInTool({ name: tool.name, arguments: args });

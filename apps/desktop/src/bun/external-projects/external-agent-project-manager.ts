@@ -49,6 +49,7 @@ import type {
   ExternalAgentProjectThreadRecord,
   ExternalAgentProjectThreadSummary,
   ExternalAgentProjectView,
+  RemoteToolCallAttempt,
 } from "../../shared/external-agent-project";
 
 import { agentDefinitionFingerprint } from "./agent-definition-fingerprint";
@@ -400,9 +401,7 @@ export class ExternalAgentProjectManager {
       snapshot: string;
       name: string;
       arguments: Record<string, unknown>;
-      messageId?: string;
-      toolCallId?: string;
-      attemptAt?: string;
+      attempt?: RemoteToolCallAttempt;
     },
     abortSignal?: AbortSignal
   ): Promise<{ contentText: string; isError: boolean }> {
@@ -432,14 +431,14 @@ export class ExternalAgentProjectManager {
           "Remote action schema changed. Sync from Agent before calling it."
         );
       }
-      if (!input.messageId || !input.toolCallId || !input.attemptAt) {
+      if (!input.attempt) {
         throw new Error("Project MCP calls require a durable attempt marker.");
       }
-      await this._markToolCallAttempt(input.projectId, input.threadId, {
-        messageId: input.messageId,
-        toolCallId: input.toolCallId,
-        at: input.attemptAt,
-      });
+      await this._markToolCallAttempt(
+        input.projectId,
+        input.threadId,
+        input.attempt
+      );
       return active.session.callTool(input.name, input.arguments, abortSignal);
     }
     const result = await tool.execute(randomUUID(), input.arguments);
@@ -933,7 +932,7 @@ export class ExternalAgentProjectManager {
   private async _markToolCallAttempt(
     projectId: string,
     threadId: string,
-    attempt: { messageId: string; toolCallId: string; at: string }
+    attempt: RemoteToolCallAttempt
   ): Promise<void> {
     const record = await this._readThreadFile(projectId, threadId);
     let found = false;

@@ -62,6 +62,7 @@ export class ProjectMcpSession {
   readonly statuses: readonly ProjectMcpConnectionStatus[];
   private readonly _activeTools: ReadonlyMap<string, ActiveTool>;
   private readonly _clients: readonly ProjectMcpRemoteClient[];
+  private readonly _abortController = new AbortController();
 
   private constructor(input: {
     tools: ProjectMcpToolDescriptor[];
@@ -122,10 +123,20 @@ export class ProjectMcpSession {
     }
     // Deliberately one attempt: tools/call may have completed remotely even
     // when its response is interrupted, so automatic retry is unsafe.
-    return await active.client.callTool(active.remoteToolName, input, signal);
+    const callSignal = signal
+      ? AbortSignal.any([signal, this._abortController.signal])
+      : this._abortController.signal;
+    return await active.client.callTool(
+      active.remoteToolName,
+      input,
+      callSignal
+    );
   }
 
   async close(): Promise<void> {
+    if (!this._abortController.signal.aborted) {
+      this._abortController.abort(new Error("Project MCP session closed"));
+    }
     await Promise.allSettled(this._clients.map((client) => client.close()));
   }
 }

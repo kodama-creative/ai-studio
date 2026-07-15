@@ -44,16 +44,20 @@ export function useToolCallRunner(messageId: string) {
       const isRemoteProjectTool =
         tool.type === "project" && Boolean(tool.connectionName);
       try {
-        const attemptAt = isRemoteProjectTool
-          ? new Date().toISOString()
+        const attempt = isRemoteProjectTool
+          ? {
+              messageId,
+              toolCallId: toolCall.id,
+              at: new Date().toISOString(),
+            }
           : undefined;
-        if (attemptAt) {
-          markToolCallAttempt(messageId, toolCall.id, attemptAt);
+        if (attempt) {
+          markToolCallAttempt(attempt.messageId, attempt.toolCallId, attempt.at);
         }
         const { contentText, isError } = await executeTool(
           tool,
           toolCall.input.arguments,
-          { messageId, toolCallId: toolCall.id, attemptAt }
+          { attempt }
         );
         updateToolCallOutputText(messageId, toolCall.id, contentText, isError);
         if (isRemoteProjectTool) {

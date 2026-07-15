@@ -21,6 +21,7 @@ import type {
   ExternalAgentProjectSummary,
   ExternalAgentProjectThreadRecord,
   ExternalAgentProjectView,
+  RemoteToolCallAttempt,
 } from "./external-agent-project";
 import type {
   McpCallToolResponse,
@@ -280,9 +281,7 @@ export interface DesktopRPCType {
           snapshot: string;
           name: string;
           arguments: Record<string, unknown>;
-          messageId?: string;
-          toolCallId?: string;
-          attemptAt?: string;
+          attempt?: RemoteToolCallAttempt;
         };
         response: { contentText: string; isError: boolean };
       };

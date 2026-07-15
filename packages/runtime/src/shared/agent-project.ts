@@ -11,6 +11,7 @@ export type AgentProjectDiagnosticCode =
   | "tool_name_duplicate"
   | "connection_import_failed"
   | "connection_export_invalid"
+  | "connection_name_duplicate"
   | "connection_name_invalid"
   | "skill_invalid";
 
