@@ -1,0 +1,32 @@
+## Agent Studio roadmap executor
+
+### Spec
+Advance /Users/feng/Projects/ai-studio/LOOP_PLAN.md to completion. The finish line is reached only when every numbered roadmap item 01 through 29 is checked and each item satisfies its own Done when clause plus the shared execution rules. The authoritative machine-checkable finish line is the loop goal.
+
+Treat LOOP_PLAN.md as the roadmap and .agents/kaizen-loop/logs/2026-07-15-215209-agent-studio-eve-gap-roadmap.md as its originating product evidence. On every run:
+
+Before selecting roadmap work, determine whether the immediately preceding scheduled time window is still executing. Use the automation memory, this file's latest Timeline entry, branch/remote state, git status, and task-specific active processes as evidence; do not treat unrelated editor, Codex, or long-lived development processes as an active roadmap run. If that prior window is still executing, skip the entire current window and wait for the next one: do not select an item, change repository files, commit, or push. Record the skipped overlap and current run time in the automation memory and return a skipped status. This overlap guard is the only exception to the repository-update and commit/push rules below.
+Read this task file, LOOP_PLAN.md, the current product source, the latest capability map, recent kaizen logs, and git status. Re-check current Pi capabilities before proposing custom runtime behavior. Preserve all unrelated worktree changes.
+Select exactly one unchecked numbered item whose declared dependencies are complete. Prefer the lowest numbered eligible item. Never combine numbered capabilities in one run.
+Execute that item's exact Run: prompt as its own $kaizen-loop. Follow the installed kaizen-loop skill end to end, including its market/product evidence requirements, one north-star product metric, one main recommendation, two alternatives, V1 boundaries, non-goals, stop conditions, and approval gate.
+Before any product-code edit, run $grill-me. This loop is explicitly pre-authorized to accept every recommendation produced by the model during grill-me: answer yes, choose the model's recommended/default option, resolve follow-up choices autonomously, and continue without asking or waiting for the user. This standing approval also applies to the kaizen approval gate. Do not pause for interactive confirmation. Stay inside the selected roadmap item's stated boundary and the repository's safety rules.
+Implement the approved coherent capability. For UI work, confirm the interaction scheme from current evidence and verify in the real Electrobun CEF renderer using the project skill; never mock electrobun.rpc in a browser.
+Mark the numbered item complete only after its implementation, focused tests, relevant package TypeScript checks, bun run lint:check, the relevant build, code review, capability-map refresh, and completed kaizen log all succeed. Use Bun for all project commands. If the full repository check is blocked by a pre-existing unrelated failure, record precise evidence and do not misrepresent the selected item as complete.
+Update this file's ## Current understanding and append one concise dated ## Timeline entry. Keep the timeline bounded by folding stale history into Current understanding.
+Every execution must end with a commit and push on the branch that was current at run start. Stage only changes owned by this run, including this task memory; never stage unrelated changes. Use a descriptive commit message containing the roadmap item number and result. If the run produced no file delta, create an empty commit with git commit --allow-empty. Push with git push origin HEAD.
+
+### Current understanding
+The repository is /Users/feng/Projects/ai-studio, currently tracking develop against origin/develop.
+Execution status is BLOCKED on roadmap item 01; no later item is dependency-eligible.
+LOOP_PLAN.md currently has 29 unchecked numbered items. Item 01 is the first eligible capability.
+Item 01 is blocked inside its approved behavior-preserving boundary: installed Pi 0.80.3 and current upstream/npm 0.80.7 AgentHarness have neither prompt-free continuation nor transcript replacement. Moving the settled manual-tool workflow onto Harness would currently require a Pi fork/private lifecycle copy or a material Thread/Pi Session persistence decision.
+The blocker was revalidated on 2026-07-15 at upstream main commit 5e336cfa808c7b6056f168d42482c27f3acfc5cc; the focused runtime/desktop behavior matrix still passes 11/11 through Pi Agent.
+The focused existing runtime/desktop streaming matrix is healthy (11/11), but it confirms the baseline is still Pi Agent behind LLM Space AgentSession, not AgentHarness; item 01 remains unchecked.
+The plan's explicit deferrals and exclusions remain binding throughout all runs.
+The user has pre-authorized all model-recommended/default answers during grill-me and the kaizen approval gate so unattended runs do not stop for questions.
+Every run must create a commit and push it, including blocked or no-delta runs.
+The 2026-07-15 23:36 +0800 overlap check found the preceding window complete: its blocked item-01 result was committed and pushed as 9ece6cf, develop matched origin/develop, and no task-specific process remained active. The current window therefore ran normally rather than being skipped.
+
+## Timeline
+
+* 2026-07-15 23:38 +0800 - DONE (BLOCKED) - Previous window was complete, so item 01 was rechecked. Pi upstream remains at 5e336cf, npm latest remains 0.80.7, and the focused behavior matrix passes 11/11 through Pi Agent; AgentHarness still lacks prompt-free continuation and transcript replacement, so item 01 remains unchecked.
