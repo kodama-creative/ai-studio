@@ -164,6 +164,15 @@ async function _compileTools(
         });
         continue;
       }
+      if ("name" in definition || "label" in definition) {
+        diagnostics.push({
+          severity: "error",
+          code: "tool_export_invalid",
+          message: `${path.basename(sourceRef.absolutePath)}: Remove authored name/label fields; tool identity comes from the filename.`,
+          path: sourceRef.absolutePath,
+        });
+        continue;
+      }
       const name = path.basename(sourceRef.absolutePath, path.extname(sourceRef.absolutePath));
       if (!_isModelName(name)) {
         diagnostics.push({

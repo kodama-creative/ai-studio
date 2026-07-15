@@ -138,6 +138,36 @@ describe("loadAgentProject", () => {
     ]);
   });
 
+  test("rejects authored tool identity with a migration diagnostic", async () => {
+    const root = await _fixture();
+    await writeFile(join(root, "instructions.md"), "Test.\n");
+    await mkdir(join(root, "tools"));
+    await writeFile(
+      join(root, "tools", "weather.js"),
+      `import { defineTool } from "@llm-space/runtime/tools";
+      import { Type } from "typebox";
+      export default defineTool({
+        name: "legacy_weather",
+        label: "Legacy weather",
+        description: "Legacy identity.",
+        inputSchema: Type.Object({}),
+        execute() { return "sunny"; }
+      });`
+    );
+
+    const snapshot = await loadAgentProject(root);
+
+    expect(snapshot.tools).toEqual([]);
+    expect(snapshot.diagnostics).toEqual([
+      expect.objectContaining({
+        code: "tool_export_invalid",
+        message: expect.stringContaining(
+          "Remove authored name/label fields; tool identity comes from the filename"
+        ),
+      }),
+    ]);
+  });
+
   test("rejects qualified MCP names that collide with another project action", async () => {
     const root = await _fixture();
     await writeFile(join(root, "instructions.md"), "Test.\n");
