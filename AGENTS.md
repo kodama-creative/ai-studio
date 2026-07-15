@@ -154,7 +154,8 @@ Prefer dropping new images into the existing `src/mainview/public/images/` folde
   - Functions, variables, hooks, and command `type` discriminants are **camelCase** (`createMainWindowRPC`, `useThreadTabs`, `newFile`, `closeTab`).
   - Module-level constants are **UPPER_SNAKE_CASE** (`DOCS_URL`, `ZOOM_STEP`, `COMMAND_META`, `BUILTIN_PROVIDERS`).
 - **Leading underscore for what's private**:
-  - Module-private (non-exported) functions: `_foo()`.
+  - Project-defined module-private (non-exported) functions: `_foo()`.
+  - Third-party APIs and their imported or destructured callables keep their upstream names (for example, `Type.Object()`). Do not add a leading underscore to them.
   - Private class members: `_config`, `_models`, `_loadConfig()` (see `ModelManager`).
   - When a wrapper re-exports a primitive under the same name, alias the primitive with a leading underscore to avoid the collision (`import { Tooltip as _Tooltip } from "./ui/tooltip"` in `components/tooltip.tsx`).
 

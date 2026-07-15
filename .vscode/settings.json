@@ -5,8 +5,16 @@
   },
   "js/ts.format.placeOpenBraceOnNewLineForControlBlocks": false,
   "js/ts.format.placeOpenBraceOnNewLineForFunctions": false,
-  "js/ts.preferences.quoteStyle": "single",
+  "js/ts.preferences.quoteStyle": "double",
   "js/ts.tsdk.path": "node_modules/typescript/lib",
   "sfmt.braces": "knr",
-  "sfmt.insize": 2
+  "sfmt.insize": 2,
+  // Compatibility settings for older VS Code versions.
+  "javascript.format.placeOpenBraceOnNewLineForControlBlocks": false,
+  "javascript.format.placeOpenBraceOnNewLineForFunctions": false,
+  "javascript.preferences.quoteStyle": "double",
+  "typescript.format.placeOpenBraceOnNewLineForControlBlocks": false,
+  "typescript.format.placeOpenBraceOnNewLineForFunctions": false,
+  "typescript.preferences.quoteStyle": "double",
+  "typescript.tsdk": "node_modules/typescript/lib"
 }
