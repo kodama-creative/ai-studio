@@ -1,9 +1,24 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  getToolCallStatus,
   isToolCallOutcomeUnknown,
   isToolCallPending,
+  summarizeToolCalls,
 } from "./tool-call-status";
+
+test("a model tool request without a result still needs a response", () => {
+  const toolCall = {
+    id: "pending",
+    input: { name: "weather", arguments: {} },
+  };
+
+  expect(getToolCallStatus(toolCall)).toBe("needsResponse");
+  expect(summarizeToolCalls([toolCall])).toMatchObject({
+    needsResponseCount: 1,
+    canContinue: false,
+  });
+});
 
 describe("isToolCallPending", () => {
   test("includes only calls without a result or a prior remote attempt", () => {

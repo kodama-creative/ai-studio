@@ -274,7 +274,10 @@ function _reduceAssistantMessageEvent(
       return _createUpdateMessageEvent(
         _replaceToolCall(message, event.toolCall.id, (toolCall) => ({
           ...toolCall,
-          output: { content: [{ type: "text", text: "" }] },
+          input: {
+            name: event.toolCall.name,
+            arguments: event.toolCall.arguments,
+          },
         })),
         content
       );

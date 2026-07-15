@@ -75,6 +75,8 @@ interface LoadedProject {
   runtime: AgentRuntime | null;
   models: Models | null;
   connectionSessions: Map<string, ProjectConnectionSession>;
+  connectionActivationEpochs: Map<string, number>;
+  connectionActivationTails: Map<string, Promise<void>>;
 }
 
 interface ProjectConnectionSession {
@@ -455,6 +457,45 @@ export class ExternalAgentProjectManager {
   ): Promise<ExternalAgentProjectConnectionActivation> {
     await this._ensureProject(projectId);
     const loaded = this._state(projectId);
+    const activationEpoch = loaded.connectionActivationEpochs.get(threadId) ?? 0;
+    loaded.connectionActivationEpochs.set(threadId, activationEpoch);
+    const previousActivation = loaded.connectionActivationTails.get(threadId);
+    let releaseActivation!: () => void;
+    const activationTurn = new Promise<void>((resolve) => {
+      releaseActivation = resolve;
+    });
+    const activationTail = (previousActivation ?? Promise.resolve())
+      .catch(() => undefined)
+      .then(() => activationTurn);
+    loaded.connectionActivationTails.set(threadId, activationTail);
+    await previousActivation?.catch(() => undefined);
+    try {
+      if (
+        this._loaded.get(projectId) !== loaded ||
+        loaded.connectionActivationEpochs.get(threadId) !== activationEpoch
+      ) {
+        return _emptyConnectionActivation();
+      }
+      return await this._activateConnectionsNow(
+        projectId,
+        threadId,
+        loaded,
+        activationEpoch
+      );
+    } finally {
+      releaseActivation();
+      if (loaded.connectionActivationTails.get(threadId) === activationTail) {
+        loaded.connectionActivationTails.delete(threadId);
+      }
+    }
+  }
+
+  private async _activateConnectionsNow(
+    projectId: string,
+    threadId: string,
+    loaded: LoadedProject,
+    activationEpoch: number
+  ): Promise<ExternalAgentProjectConnectionActivation> {
     const snapshot = loaded.snapshot;
     if (loaded.error || !snapshot) {
       throw new Error(loaded.error ?? "Agent Project is unavailable.");
@@ -465,8 +506,20 @@ export class ExternalAgentProjectManager {
     const session = await ProjectMcpSession.activate(snapshot.connections, {
       connector: this._projectMcpConnector,
     });
+    const activationIsCurrent = () =>
+      this._loaded.get(projectId) === loaded &&
+      loaded.snapshot?.fingerprint === snapshot.fingerprint &&
+      loaded.connectionActivationEpochs.get(threadId) === activationEpoch;
+    if (!activationIsCurrent()) {
+      await session.close();
+      return _emptyConnectionActivation();
+    }
     const tools = _remoteProjectTools(projectId, snapshot, session.tools);
     const stored = await this._readThreadFile(projectId, threadId);
+    if (!activationIsCurrent()) {
+      await session.close();
+      return _emptyConnectionActivation();
+    }
     const storedRemote = (stored.thread.context?.tools ?? []).filter(
       (tool): tool is ProjectTool =>
         tool.type === "project" && Boolean(tool.connectionName)
@@ -553,8 +606,13 @@ export class ExternalAgentProjectManager {
     threadId: string
   ): Promise<void> {
     await this._ensureProject(projectId);
-    const active = this._state(projectId).connectionSessions.get(threadId);
-    this._state(projectId).connectionSessions.delete(threadId);
+    const loaded = this._state(projectId);
+    loaded.connectionActivationEpochs.set(
+      threadId,
+      (loaded.connectionActivationEpochs.get(threadId) ?? 0) + 1
+    );
+    const active = loaded.connectionSessions.get(threadId);
+    loaded.connectionSessions.delete(threadId);
     await active?.session.close();
   }
 
@@ -708,6 +766,8 @@ export class ExternalAgentProjectManager {
         runtime: null,
         models: null,
         connectionSessions: new Map(),
+        connectionActivationEpochs: new Map(),
+        connectionActivationTails: new Map(),
       };
       this._loaded.set(projectId, state);
     }
@@ -720,10 +780,16 @@ export class ExternalAgentProjectManager {
       }
       const snapshot = await loadAgentProject(resolved.agentRoot);
       if (state.snapshot?.fingerprint !== snapshot.fingerprint) {
+        for (const [threadId, epoch] of state.connectionActivationEpochs) {
+          state.connectionActivationEpochs.set(threadId, epoch + 1);
+        }
         await Promise.allSettled(
-          [...state.connectionSessions.values()].map((active) =>
-            active.session.close()
-          )
+          [
+            ...[...state.connectionSessions.values()].map((active) =>
+              active.session.close()
+            ),
+            ...state.connectionActivationTails.values(),
+          ]
         );
         state.connectionSessions.clear();
       }
@@ -1061,9 +1127,10 @@ export class ExternalAgentProjectManager {
     const closeSessions = [...state.connectionSessions.values()].map(
       (active) => active.session.close()
     );
+    const pendingActivations = [...state.connectionActivationTails.values()];
     state.connectionSessions.clear();
     this._loaded.delete(projectId);
-    await Promise.allSettled(closeSessions);
+    await Promise.allSettled([...closeSessions, ...pendingActivations]);
   }
 
   private _notify(projectId: string): void {
@@ -1155,6 +1222,10 @@ function _connectionStatusWithDrift(
     state: "drift" as const,
     message: "Remote tool schemas changed. Sync from Agent before running.",
   };
+}
+
+function _emptyConnectionActivation(): ExternalAgentProjectConnectionActivation {
+  return { tools: [], statuses: [], hasSchemaDrift: false };
 }
 
 async function _discoverAgentProjects(root: string): Promise<string[]> {

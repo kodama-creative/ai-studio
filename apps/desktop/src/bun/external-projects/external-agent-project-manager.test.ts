@@ -426,6 +426,53 @@ export default defineMcpClientConnection({
     expect(signal.aborted).toBe(true);
   });
 
+  test("deactivation disposes a connection that finishes activating late", async () => {
+    let signalListStarted!: () => void;
+    const listStarted = new Promise<void>((resolve) => {
+      signalListStarted = resolve;
+    });
+    let releaseList!: () => void;
+    const listReleased = new Promise<void>((resolve) => {
+      releaseList = resolve;
+    });
+    let closeCount = 0;
+    const { manager, project } = await _fixture({
+      connector: async () => ({
+        async listTools() {
+          signalListStarted();
+          await listReleased;
+          return [
+            {
+              name: "forecast",
+              description: "Read a forecast",
+              inputSchema: { type: "object" },
+            },
+          ];
+        },
+        async callTool() {
+          return { contentText: "sunny", isError: false };
+        },
+        async close() {
+          closeCount += 1;
+        },
+      }),
+    });
+    await _writeWeatherConnection(project);
+    const opened = await manager.trustAndOpen(project);
+    const threadId = opened.threads[0]!.id;
+
+    const activation = manager.activateConnections(opened.id, threadId);
+    await listStarted;
+    await manager.deactivateConnections(opened.id, threadId);
+    releaseList();
+    await activation;
+
+    expect(
+      manager.getActiveRemoteToolNames(opened.id, threadId, opened.snapshot)
+    ).toEqual(new Set());
+    expect(closeCount).toBe(1);
+  });
+
   test("shutdown waits for Project MCP client disposal", async () => {
     let signalCloseStarted!: () => void;
     const closeStarted = new Promise<void>((resolve) => {
@@ -663,3 +710,19 @@ export default defineMcpClientConnection({
     expect(closeCount).toBe(3);
   });
 });
+
+async function _writeWeatherConnection(project: string): Promise<void> {
+  await mkdir(path.join(project, "agent", "connections"), {
+    recursive: true,
+  });
+  await writeFile(
+    path.join(project, "agent", "connections", "weather.ts"),
+    `import { defineMcpClientConnection } from "@llm-space/runtime/connections";
+export default defineMcpClientConnection({
+  url: "https://weather.example.test/mcp",
+  description: "Weather service",
+  tools: { allow: ["forecast"] }
+});`,
+    "utf8"
+  );
+}

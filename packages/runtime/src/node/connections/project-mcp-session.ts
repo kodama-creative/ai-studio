@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import type { Tool as McpTool } from "@modelcontextprotocol/sdk/types.js";
 
 import type { CompiledMcpConnection } from "../../runtime/agent/agent-project-snapshot";
+import { qualifyProjectMcpToolName } from "../../internal/project-mcp-tool-name";
 
 import {
   RemoteMcpClient,
@@ -274,7 +275,10 @@ async function _activateConnection(
       const tools = definition.tools.allow.map((remoteToolName) => {
         const remote = byName.get(remoteToolName)!;
         return {
-          name: `${connection.name}__${remoteToolName}`,
+          name: qualifyProjectMcpToolName(
+            connection.name,
+            remoteToolName
+          ),
           description: remote.description ?? "",
           parameters: remote.inputSchema,
           sourcePath: connection.logicalPath,

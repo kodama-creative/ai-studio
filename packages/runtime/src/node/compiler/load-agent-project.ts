@@ -9,6 +9,7 @@ import {
 import { Compile } from "typebox/compile";
 
 import { normalizeAgentDefinition } from "../../internal/authored-definition/normalize-agent-definition";
+import { qualifyProjectMcpToolName } from "../../internal/project-mcp-tool-name";
 import {
   type AgentProjectSnapshot,
   type CompiledMcpConnection,
@@ -294,7 +295,7 @@ async function _compileConnections(
         if (!_isModelName(toolName)) {
           throw new TypeError(`Invalid allowlisted MCP tool name: ${toolName}`);
         }
-        const qualifiedName = `${name}__${toolName}`;
+        const qualifiedName = qualifyProjectMcpToolName(name, toolName);
         if (!_isModelName(qualifiedName)) {
           throw new TypeError(
             `Qualified MCP tool name is not provider-safe: ${qualifiedName}`
