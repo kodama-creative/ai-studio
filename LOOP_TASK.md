@@ -25,8 +25,9 @@ The focused existing runtime/desktop streaming matrix is healthy (11/11), but it
 The plan's explicit deferrals and exclusions remain binding throughout all runs.
 The user has pre-authorized all model-recommended/default answers during grill-me and the kaizen approval gate so unattended runs do not stop for questions.
 Every run must create a commit and push it, including blocked or no-delta runs.
-The 2026-07-15 23:36 +0800 overlap check found the preceding window complete: its blocked item-01 result was committed and pushed as 9ece6cf, develop matched origin/develop, and no task-specific process remained active. The current window therefore ran normally rather than being skipped.
+The 2026-07-15 23:41 +0800 overlap check found the preceding window complete: its blocked item-01 result and overlap-guard update were committed and pushed as b509d36, develop matched origin/develop, and no task-specific process remained active. The current window therefore ran normally rather than being skipped.
 
 ## Timeline
 
 * 2026-07-15 23:38 +0800 - DONE (BLOCKED) - Previous window was complete, so item 01 was rechecked. Pi upstream remains at 5e336cf, npm latest remains 0.80.7, and the focused behavior matrix passes 11/11 through Pi Agent; AgentHarness still lacks prompt-free continuation and transcript replacement, so item 01 remains unchecked.
+* 2026-07-15 23:43 +0800 - DONE (BLOCKED) - Commit b509d36 was already pushed and no item-01 process remained, so this window did not overlap. Pi upstream and npm remain unchanged, and the 11/11 focused matrix still runs through Pi Agent; item 01 remains blocked and unchecked.
