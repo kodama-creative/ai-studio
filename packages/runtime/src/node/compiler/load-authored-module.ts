@@ -5,6 +5,12 @@ import { pathToFileURL } from "node:url";
 
 import * as TypeBox from "typebox";
 
+import {
+  createAuthoredDefinitionVirtualModule,
+  defineMcpClientConnectionRuntime,
+  defineToolRuntime,
+} from "../../internal/authored-action-definitions";
+
 const TYPEBOX_RUNTIME_KEY = Symbol.for("llm-space.typebox-runtime");
 
 Object.defineProperty(globalThis, TYPEBOX_RUNTIME_KEY, {
@@ -63,16 +69,10 @@ export async function loadAuthoredModule({
                   namespace: "llm-space-runtime",
                 },
                 () => ({
-                  contents: `
-                    const brand = Symbol.for("llm-space.tool-definition");
-                    export const defineTool = (definition) =>
-                      Object.defineProperty(definition, brand, {
-                        value: true,
-                        enumerable: false,
-                        configurable: false,
-                        writable: false,
-                      });
-                  `,
+                  contents: createAuthoredDefinitionVirtualModule(
+                    "defineTool",
+                    defineToolRuntime
+                  ),
                   loader: "js",
                 })
               );
@@ -89,24 +89,10 @@ export async function loadAuthoredModule({
                   namespace: "llm-space-runtime",
                 },
                 () => ({
-                  contents: `
-                    const brand = Symbol.for("llm-space.mcp-connection-definition");
-                    export const defineMcpClientConnection = (input) => {
-                      if (input.tools.allow.length === 0) {
-                        throw new TypeError("tools.allow must contain at least one tool name");
-                      }
-                      return Object.defineProperty(
-                        { ...input, transport: input.transport ?? "streamableHttp" },
-                        brand,
-                        {
-                          value: true,
-                          enumerable: false,
-                          configurable: false,
-                          writable: false,
-                        }
-                      );
-                    };
-                  `,
+                  contents: createAuthoredDefinitionVirtualModule(
+                    "defineMcpClientConnection",
+                    defineMcpClientConnectionRuntime
+                  ),
                   loader: "js",
                 })
               );

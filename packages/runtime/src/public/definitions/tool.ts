@@ -1,5 +1,7 @@
 import type { Static, TSchema } from "typebox";
 
+import { defineToolRuntime } from "../../internal/authored-action-definitions";
+
 const TOOL_DEFINITION_BRAND = Symbol.for("llm-space.tool-definition");
 
 export type JsonValue =
@@ -44,12 +46,10 @@ export function defineTool<
 >(
   definition: ToolDefinitionInput<TInputSchema, TOutput>
 ): ToolDefinition<TInputSchema, TOutput> {
-  return Object.defineProperty(definition, TOOL_DEFINITION_BRAND, {
-    value: true,
-    enumerable: false,
-    configurable: false,
-    writable: false,
-  }) as ToolDefinition<TInputSchema, TOutput>;
+  return defineToolRuntime(definition) as ToolDefinition<
+    TInputSchema,
+    TOutput
+  >;
 }
 
 export function isToolDefinition(value: unknown): value is ToolDefinition {

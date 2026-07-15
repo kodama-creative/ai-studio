@@ -1,19 +1,23 @@
 # Example Agent
 
 A portable LLM Space Agent Project for validating the definition, manifest,
-tool, skill, and desktop import workflow. Its weather data is deterministic and does not
-use the network, credentials, or a live model.
+local tool, source-declared MCP connection, skill, and desktop import workflow.
+Its weather data and optional MCP fixture are deterministic and use no
+credentials or live model.
 
 ## Open In LLM Space
 
-1. Start the desktop app from the repository root with `bun dev`.
-2. Choose **Open Agent Project** from the welcome screen or Agent Projects
+1. In one terminal, start the deterministic MCP fixture with
+   `bun .agents/kaizen-loop/fixtures/remote-mcp-fixture.mjs`.
+2. In another terminal, start the desktop app from the repository root with
+   `bun dev`.
+3. Choose **Open Agent Project** from the welcome screen or Agent Projects
    sidebar.
-3. Select this `apps/example-agent` directory.
-4. Review the warning, then choose **Trust and open**. Agent Project tools are
+4. Select this `apps/example-agent` directory.
+5. Review the warning, then choose **Trust and open**. Agent Project tools are
    local code and run with your user permissions.
-5. Open the default Thread. With a model configured, ask for the weather in
-   Shanghai and inspect the `get-weather` call and result.
+6. Open the default Thread. Confirm `get-weather` and
+   `fixture__remote_echo`, then inspect their source chips and explicit calls.
 
 LLM Space watches the files under `agent/`. Project Threads, messages, tool
 results, and trust settings are stored under `LLM_SPACE_HOME`, not in this
@@ -29,6 +33,7 @@ bun test apps/example-agent
 
 The test loads this exact project through `@llm-space/runtime`, resolves the
 model/reasoning defaults from `agent.ts`, discovers the `weather-brief` skill,
+compiles the source-owned `fixture__remote_echo` allowlist without connecting,
 and verifies that `get-weather({ city: "Shanghai" })` returns structured,
 JSON-compatible weather data.
 

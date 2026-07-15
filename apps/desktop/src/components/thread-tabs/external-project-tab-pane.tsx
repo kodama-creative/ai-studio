@@ -319,6 +319,18 @@ function _ProjectThreadPane({
           return syncFromAgent();
         }
       },
+      retryExternalAgentProjectConnections: ({
+        projectId: commandProjectId,
+        threadId: commandThreadId,
+      }) => {
+        if (
+          commandProjectId === projectId &&
+          commandThreadId === threadId &&
+          !running
+        ) {
+          return load();
+        }
+      },
     },
     active
   );
@@ -555,7 +567,12 @@ function _ProjectThreadPane({
                 size="sm"
                 variant="outline"
                 disabled={running || project.status !== "ready"}
-                onClick={() => void load()}
+                onClick={() =>
+                  executeCommand({
+                    type: "retryExternalAgentProjectConnections",
+                    args: { projectId, threadId },
+                  })
+                }
               >
                 <RefreshCwIcon className="size-3" /> Retry connections
               </Button>

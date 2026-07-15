@@ -105,11 +105,28 @@ export class StreamThreadController {
       throw new Error("Agent Project runtime is unavailable.");
     }
     const sourceTools = payload.request.context.sourceTools ?? [];
-    const extraTools = sourceTools
+    const projectSnapshot = sourceTools.find(
+      (tool): tool is ProjectTool => tool.type === "project"
+    )?.snapshot;
+    const activeRemoteToolNames =
+      projectSnapshot === undefined
+        ? new Set<string>()
+        : this._externalAgentProjects.getActiveRemoteToolNames(
+            payload.runtime.projectId,
+            payload.runtime.threadId,
+            projectSnapshot
+          );
+    const activeSourceTools = sourceTools.filter(
+      (tool) =>
+        tool.type !== "project" ||
+        !tool.connectionName ||
+        activeRemoteToolNames.has(tool.name)
+    );
+    const extraTools = activeSourceTools
       .filter((tool) => tool.type !== "project")
       .map((tool) => this._runtimeTool(tool));
     extraTools.push(
-      ...sourceTools
+      ...activeSourceTools
         .filter(
           (tool): tool is ProjectTool =>
             tool.type === "project" && Boolean(tool.connectionName)
@@ -132,7 +149,7 @@ export class StreamThreadController {
         reasoning: payload.request.config?.model?.reasoning,
         initialMessages: payload.request.context.messages as AgentMessage[],
         extraTools,
-        activeToolNames: sourceTools.map((tool) => tool.name),
+        activeToolNames: activeSourceTools.map((tool) => tool.name),
         systemPrompt: payload.request.context.systemPrompt,
         executionMode: payload.runtime.executionMode,
         streamFn: async (model, context, options) => {

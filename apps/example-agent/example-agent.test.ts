@@ -20,6 +20,12 @@ describe("example Agent Project", () => {
     });
     expect(snapshot.instructions).toContain("concise weather assistant");
     expect(snapshot.tools.map((tool) => tool.name)).toEqual(["get-weather"]);
+    expect(
+      snapshot.connections.map((connection) => ({
+        name: connection.name,
+        allow: connection.definition.tools.allow,
+      }))
+    ).toEqual([{ name: "fixture", allow: ["remote_echo"] }]);
     expect(snapshot.resources.skills?.map((skill) => skill.name)).toEqual([
       "weather-brief",
     ]);

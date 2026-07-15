@@ -26,10 +26,10 @@ export interface RemoteMcpCallResult {
 }
 
 export class RemoteMcpClient {
-  readonly #client: Client;
+  private readonly _client: Client;
 
   private constructor(client: Client) {
-    this.#client = client;
+    this._client = client;
   }
 
   static async connect(options: RemoteMcpClientOptions): Promise<RemoteMcpClient> {
@@ -68,7 +68,7 @@ export class RemoteMcpClient {
     const tools: McpTool[] = [];
     let cursor: string | undefined;
     do {
-      const response = await this.#client.listTools(
+      const response = await this._client.listTools(
         cursor ? { cursor } : undefined,
         { timeout: LIST_TIMEOUT_MS }
       );
@@ -80,18 +80,19 @@ export class RemoteMcpClient {
 
   async callTool(
     name: string,
-    input: Record<string, unknown>
+    input: Record<string, unknown>,
+    signal?: AbortSignal
   ): Promise<RemoteMcpCallResult> {
-    const result = await this.#client.callTool(
+    const result = await this._client.callTool(
       { name, arguments: input },
       CompatibilityCallToolResultSchema,
-      { timeout: CALL_TIMEOUT_MS }
+      { timeout: CALL_TIMEOUT_MS, signal }
     );
     return flattenMcpToolResult(result as CallToolResult);
   }
 
   close(): Promise<void> {
-    return this.#client.close();
+    return this._client.close();
   }
 }
 

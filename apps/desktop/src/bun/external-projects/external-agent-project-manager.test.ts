@@ -341,9 +341,11 @@ describe("ExternalAgentProjectManager", () => {
 
   test("activates project MCP per Thread without persisting connection secrets", async () => {
     let schemaVersion = 1;
+    let connectionAvailable = true;
     let closeCount = 0;
     const connector: ProjectMcpConnector = async () => ({
       async listTools() {
+        if (!connectionAvailable) return [];
         return [
           {
             name: "forecast",
@@ -450,6 +452,18 @@ export default defineMcpClientConnection({
     const drifted = await manager.activateConnections(opened.id, threadId);
     expect(drifted.hasSchemaDrift).toBe(true);
     expect(drifted.statuses[0]?.state).toBe("drift");
+    await expect(
+      manager.callTool({
+        projectId: opened.id,
+        threadId,
+        snapshot: opened.snapshot,
+        name: "weather__forecast",
+        arguments: { version: 2 },
+        messageId: "assistant-one",
+        toolCallId: "call-one",
+        attemptAt: "2026-07-15T00:01:00.000Z",
+      })
+    ).rejects.toThrow("Sync from Agent");
     expect(
       (await manager.readThread(opened.id, threadId)).thread.context?.tools?.find(
         (tool): tool is ProjectTool =>
@@ -464,6 +478,14 @@ export default defineMcpClientConnection({
           tool.type === "project" && tool.name === "weather__forecast"
       )?.schemaFingerprint
     ).not.toBe(oldFingerprint);
+
+    connectionAvailable = false;
+    const unavailable = await manager.activateConnections(opened.id, threadId);
+    expect(unavailable.statuses[0]?.state).toBe("unavailable");
+    expect(
+      manager.getActiveRemoteToolNames(opened.id, threadId, opened.snapshot)
+    ).toEqual(new Set());
+    connectionAvailable = true;
 
     await rm(path.join(project, "agent", "connections", "weather.ts"));
     await manager.refresh(opened.id);
@@ -489,6 +511,6 @@ export default defineMcpClientConnection({
     expect(persisted).not.toContain("secret-host");
     expect(persisted).not.toContain("secret-token");
     await manager.deactivateConnections(opened.id, threadId);
-    expect(closeCount).toBe(2);
+    expect(closeCount).toBe(3);
   });
 });

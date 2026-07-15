@@ -138,6 +138,42 @@ describe("loadAgentProject", () => {
     ]);
   });
 
+  test("rejects qualified MCP names that collide with another project action", async () => {
+    const root = await _fixture();
+    await writeFile(join(root, "instructions.md"), "Test.\n");
+    await mkdir(join(root, "tools"));
+    await mkdir(join(root, "connections"));
+    await writeFile(
+      join(root, "tools", "weather__forecast.ts"),
+      `import { defineTool } from "@llm-space/runtime/tools";
+      import { Type } from "typebox";
+      export default defineTool({
+        description: "Local forecast.",
+        inputSchema: Type.Object({}),
+        execute() { return "local"; }
+      });`
+    );
+    await writeFile(
+      join(root, "connections", "weather.ts"),
+      `import { defineMcpClientConnection } from "@llm-space/runtime/connections";
+      export default defineMcpClientConnection({
+        url: "https://example.com/mcp",
+        description: "Remote weather.",
+        tools: { allow: ["forecast", "forecast"] }
+      });`
+    );
+
+    const snapshot = await loadAgentProject(root);
+
+    expect(snapshot.connections).toEqual([]);
+    expect(snapshot.diagnostics).toEqual([
+      expect.objectContaining({
+        code: "tool_name_duplicate",
+        message: expect.stringContaining("weather__forecast"),
+      }),
+    ]);
+  });
+
   test("returns a blocking diagnostic when the required definition is missing", async () => {
     const root = await _fixture();
     await rm(join(root, "agent.ts"));

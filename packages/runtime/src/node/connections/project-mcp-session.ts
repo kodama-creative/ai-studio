@@ -14,7 +14,8 @@ export interface ProjectMcpRemoteClient {
   listTools(): Promise<McpTool[]>;
   callTool(
     name: string,
-    input: Record<string, unknown>
+    input: Record<string, unknown>,
+    signal?: AbortSignal
   ): Promise<RemoteMcpCallResult>;
   close(): Promise<void>;
 }
@@ -59,8 +60,8 @@ interface ActiveTool {
 export class ProjectMcpSession {
   readonly tools: readonly ProjectMcpToolDescriptor[];
   readonly statuses: readonly ProjectMcpConnectionStatus[];
-  readonly #activeTools: ReadonlyMap<string, ActiveTool>;
-  readonly #clients: readonly ProjectMcpRemoteClient[];
+  private readonly _activeTools: ReadonlyMap<string, ActiveTool>;
+  private readonly _clients: readonly ProjectMcpRemoteClient[];
 
   private constructor(input: {
     tools: ProjectMcpToolDescriptor[];
@@ -70,8 +71,8 @@ export class ProjectMcpSession {
   }) {
     this.tools = Object.freeze(input.tools);
     this.statuses = Object.freeze(input.statuses);
-    this.#activeTools = input.activeTools;
-    this.#clients = input.clients;
+    this._activeTools = input.activeTools;
+    this._clients = input.clients;
   }
 
   static async activate(
@@ -111,20 +112,21 @@ export class ProjectMcpSession {
 
   async callTool(
     name: string,
-    input: Record<string, unknown>
+    input: Record<string, unknown>,
+    signal?: AbortSignal
   ): Promise<RemoteMcpCallResult> {
-    const active = this.#activeTools.get(name);
+    const active = this._activeTools.get(name);
     if (!active) throw new Error(`Project MCP tool is unavailable: ${name}`);
     if (!_checkJsonSchema(active.inputSchema, input)) {
       throw new TypeError(`Invalid input for project MCP tool "${name}"`);
     }
     // Deliberately one attempt: tools/call may have completed remotely even
     // when its response is interrupted, so automatic retry is unsafe.
-    return await active.client.callTool(active.remoteToolName, input);
+    return await active.client.callTool(active.remoteToolName, input, signal);
   }
 
   async close(): Promise<void> {
-    await Promise.allSettled(this.#clients.map((client) => client.close()));
+    await Promise.allSettled(this._clients.map((client) => client.close()));
   }
 }
 

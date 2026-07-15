@@ -20,7 +20,7 @@ describe("RemoteMcpClient", () => {
       ["bun", ".agents/kaizen-loop/fixtures/remote-mcp-fixture.mjs"],
       {
         cwd: new URL("../../../../../", import.meta.url).pathname,
-        env: { ...processEnv(), PORT: String(port) },
+        env: { ..._processEnv(), PORT: String(port) },
         stdout: "pipe",
         stderr: "pipe",
       }
@@ -47,7 +47,7 @@ describe("RemoteMcpClient", () => {
   });
 });
 
-function processEnv(): Record<string, string> {
+function _processEnv(): Record<string, string> {
   return Object.fromEntries(
     Object.entries(process.env).filter(
       (entry): entry is [string, string] => entry[1] !== undefined

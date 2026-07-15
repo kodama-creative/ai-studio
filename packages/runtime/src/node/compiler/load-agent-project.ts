@@ -53,7 +53,13 @@ async function _compileAgentProject(
   const connections = await _compileConnections(
     discovered.connections,
     diagnostics,
-    hash
+    hash,
+    new Map(
+      tools.map((tool) => [
+        tool.name,
+        tool.sourcePath ?? `tools/${tool.name}.ts`,
+      ])
+    )
   );
   const skills = await _compileSkills(discovered, diagnostics, hash);
   return createImmutableAgentProjectSnapshot({
@@ -231,7 +237,8 @@ async function _compileTools(
 async function _compileConnections(
   sourceRefs: readonly AgentProjectSourceRef[],
   diagnostics: AgentProjectDiagnostic[],
-  hash: ReturnType<typeof createHash>
+  hash: ReturnType<typeof createHash>,
+  occupiedToolNames: Map<string, string>
 ): Promise<CompiledMcpConnection[]> {
   const connections: CompiledMcpConnection[] = [];
   for (const sourceRef of sourceRefs) {
@@ -269,15 +276,38 @@ async function _compileConnections(
         });
         continue;
       }
+      const qualifiedNames: string[] = [];
+      let collision = false;
       for (const toolName of definition.tools.allow) {
         if (!_isModelName(toolName)) {
           throw new TypeError(`Invalid allowlisted MCP tool name: ${toolName}`);
         }
-        if (!_isModelName(`${name}__${toolName}`)) {
+        const qualifiedName = `${name}__${toolName}`;
+        if (!_isModelName(qualifiedName)) {
           throw new TypeError(
-            `Qualified MCP tool name is not provider-safe: ${name}__${toolName}`
+            `Qualified MCP tool name is not provider-safe: ${qualifiedName}`
           );
         }
+        const previous =
+          occupiedToolNames.get(qualifiedName) ??
+          (qualifiedNames.includes(qualifiedName)
+            ? sourceRef.logicalPath
+            : undefined);
+        if (previous) {
+          diagnostics.push({
+            severity: "error",
+            code: "tool_name_duplicate",
+            message: `Tool name "${qualifiedName}" is also exported by ${path.basename(previous)}`,
+            path: sourceRef.absolutePath,
+          });
+          collision = true;
+          break;
+        }
+        qualifiedNames.push(qualifiedName);
+      }
+      if (collision) continue;
+      for (const qualifiedName of qualifiedNames) {
+        occupiedToolNames.set(qualifiedName, sourceRef.logicalPath);
       }
       connections.push({ name, logicalPath: sourceRef.logicalPath, definition });
     } catch (error) {

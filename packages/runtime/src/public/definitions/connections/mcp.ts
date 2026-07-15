@@ -1,3 +1,5 @@
+import { defineMcpClientConnectionRuntime } from "../../../internal/authored-action-definitions";
+
 const MCP_CONNECTION_DEFINITION_BRAND = Symbol.for(
   "llm-space.mcp-connection-definition"
 );
@@ -45,19 +47,9 @@ type McpClientConnectionDefinitionInput = Omit<
 export function defineMcpClientConnection(
   input: McpClientConnectionDefinitionInput
 ): McpClientConnectionDefinition {
-  if (input.tools.allow.length === 0) {
-    throw new TypeError("tools.allow must contain at least one tool name");
-  }
-  const definition = {
-    ...input,
-    transport: input.transport ?? "streamableHttp",
-  } as McpClientConnectionDefinition;
-  return Object.defineProperty(definition, MCP_CONNECTION_DEFINITION_BRAND, {
-    value: true,
-    enumerable: false,
-    configurable: false,
-    writable: false,
-  });
+  return defineMcpClientConnectionRuntime(
+    input
+  ) as McpClientConnectionDefinition;
 }
 
 export function isMcpClientConnectionDefinition(

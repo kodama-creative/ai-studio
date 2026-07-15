@@ -83,6 +83,7 @@ interface ProjectConnectionSession {
   connectionNames: Set<string>;
   unavailableConnections: Set<string>;
   driftConnections: Set<string>;
+  blockedToolNames: Set<string>;
 }
 
 interface ThreadFile {
@@ -350,6 +351,7 @@ export class ExternalAgentProjectManager {
     }
     const active = this._state(projectId).connectionSessions.get(threadId);
     active?.driftConnections.clear();
+    active?.blockedToolNames.clear();
     const tools = this._toolsForThread(projectId, threadId, record.thread);
     const next = {
       promptFingerprint: project.promptFingerprint,
@@ -391,16 +393,19 @@ export class ExternalAgentProjectManager {
     await writeFile(target, text, "utf8");
   }
 
-  async callTool(input: {
-    projectId: string;
-    threadId?: string;
-    snapshot: string;
-    name: string;
-    arguments: Record<string, unknown>;
-    messageId?: string;
-    toolCallId?: string;
-    attemptAt?: string;
-  }): Promise<{ contentText: string; isError: boolean }> {
+  async callTool(
+    input: {
+      projectId: string;
+      threadId?: string;
+      snapshot: string;
+      name: string;
+      arguments: Record<string, unknown>;
+      messageId?: string;
+      toolCallId?: string;
+      attemptAt?: string;
+    },
+    abortSignal?: AbortSignal
+  ): Promise<{ contentText: string; isError: boolean }> {
     await this._ensureProject(input.projectId);
     const loaded = this._state(input.projectId);
     const snapshot = loaded.snapshots.get(input.snapshot);
@@ -422,6 +427,11 @@ export class ExternalAgentProjectManager {
           "This Project MCP connection is not active. Reopen the Thread and retry manually."
         );
       }
+      if (active.blockedToolNames.has(input.name)) {
+        throw new Error(
+          "Remote action schema changed. Sync from Agent before calling it."
+        );
+      }
       if (!input.messageId || !input.toolCallId || !input.attemptAt) {
         throw new Error("Project MCP calls require a durable attempt marker.");
       }
@@ -430,7 +440,7 @@ export class ExternalAgentProjectManager {
         toolCallId: input.toolCallId,
         at: input.attemptAt,
       });
-      return active.session.callTool(input.name, input.arguments);
+      return active.session.callTool(input.name, input.arguments, abortSignal);
     }
     const result = await tool.execute(randomUUID(), input.arguments);
     const text = result.content
@@ -482,6 +492,15 @@ export class ExternalAgentProjectManager {
       connectionNames,
       stored.thread.agentRuntime?.snapshot === snapshot.fingerprint
     );
+    const blockedToolNames = new Set(
+      storedRemote
+        .filter(
+          (tool) =>
+            tool.connectionName &&
+            driftConnections.has(tool.connectionName)
+        )
+        .map((tool) => tool.name)
+    );
     loaded.connectionSessions.set(threadId, {
       snapshot: snapshot.fingerprint,
       session,
@@ -489,6 +508,7 @@ export class ExternalAgentProjectManager {
       connectionNames,
       unavailableConnections,
       driftConnections,
+      blockedToolNames,
     });
     const reconciled = this._toolsForThread(projectId, threadId, stored.thread);
     if (
@@ -537,6 +557,26 @@ export class ExternalAgentProjectManager {
     const active = this._state(projectId).connectionSessions.get(threadId);
     this._state(projectId).connectionSessions.delete(threadId);
     await active?.session.close();
+  }
+
+  getActiveRemoteToolNames(
+    projectId: string,
+    threadId: string,
+    snapshot: string
+  ): Set<string> {
+    const active = this._loaded
+      .get(projectId)
+      ?.connectionSessions.get(threadId);
+    if (!active || active.snapshot !== snapshot) return new Set();
+    return new Set(
+      active.tools
+        .filter(
+          (tool) =>
+            tool.connectionName &&
+            !active.driftConnections.has(tool.connectionName)
+        )
+        .map((tool) => tool.name)
+    );
   }
 
   async createRuntimeSession(

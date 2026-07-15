@@ -5,7 +5,7 @@ import {
   type ToolExecutor,
 } from "@/client/tool-execution";
 
-const ToolExecutionContext = createContext<ToolExecutor>(executeTool);
+const TOOL_EXECUTION_CONTEXT = createContext<ToolExecutor>(executeTool);
 
 export function ToolExecutionProvider({
   children,
@@ -15,12 +15,12 @@ export function ToolExecutionProvider({
   execute: ToolExecutor;
 }) {
   return (
-    <ToolExecutionContext.Provider value={execute}>
+    <TOOL_EXECUTION_CONTEXT.Provider value={execute}>
       {children}
-    </ToolExecutionContext.Provider>
+    </TOOL_EXECUTION_CONTEXT.Provider>
   );
 }
 
 export function useToolExecutor(): ToolExecutor {
-  return useContext(ToolExecutionContext);
+  return useContext(TOOL_EXECUTION_CONTEXT);
 }

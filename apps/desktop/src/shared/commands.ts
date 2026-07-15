@@ -105,6 +105,12 @@ export interface SyncExternalAgentProjectThreadFromAgentCommand extends GenericC
   { projectId: string; threadId: string }
 > {}
 
+/** Reconnect one active Project Thread's source-declared MCP connections. */
+export interface RetryExternalAgentProjectConnectionsCommand extends GenericCommand<
+  "retryExternalAgentProjectConnections",
+  { projectId: string; threadId: string }
+> {}
+
 /** Open the Build tab and focus the source that owns a project action. */
 export interface OpenExternalAgentProjectSourceCommand extends GenericCommand<
   "openExternalAgentProjectSource",
@@ -355,6 +361,7 @@ export type Command =
   | DuplicateExternalAgentProjectThreadCommand
   | DeleteExternalAgentProjectThreadCommand
   | SyncExternalAgentProjectThreadFromAgentCommand
+  | RetryExternalAgentProjectConnectionsCommand
   | OpenExternalAgentProjectSourceCommand
   | SaveExternalAgentProjectSourceCommand
   | NewFolderCommand
@@ -460,6 +467,10 @@ export const COMMAND_META: Record<
   },
   syncExternalAgentProjectThreadFromAgent: {
     label: "Sync from Agent",
+    target: "webview",
+  },
+  retryExternalAgentProjectConnections: {
+    label: "Retry Agent Project Connections",
     target: "webview",
   },
   openExternalAgentProjectSource: {

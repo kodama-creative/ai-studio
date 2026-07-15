@@ -280,6 +280,7 @@ function _ToolStepContinuation({
   const callableToolCalls = useMemo(
     () =>
       toolCalls.filter((toolCall) => {
+        if (toolCall.attempt && !toolCall.output) return false;
         const tool = resolveTool(toolCall.input.name);
         return tool !== undefined && isExecutableTool(tool);
       }),
