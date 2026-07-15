@@ -27,6 +27,7 @@
   "catalog": {
     "@earendil-works/pi-ai": "^0.80.3",
     "@earendil-works/pi-agent-core": "^0.80.3",
+    "@modelcontextprotocol/sdk": "1.29.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "typebox": "^1.2.8"

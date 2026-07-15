@@ -272,6 +272,18 @@ export function createMainWindowRPC({
           externalAgentProjects.createThread(projectId, title),
         externalAgentProjectReadThread: ({ projectId, threadId }) =>
           externalAgentProjects.readThread(projectId, threadId),
+        externalAgentProjectActivateConnections: ({ projectId, threadId }) =>
+          externalAgentProjects.activateConnections(projectId, threadId),
+        externalAgentProjectDeactivateConnections: async ({
+          projectId,
+          threadId,
+        }) => {
+          await externalAgentProjects.deactivateConnections(
+            projectId,
+            threadId
+          );
+          return null;
+        },
         externalAgentProjectWriteThread: async ({
           projectId,
           threadId,

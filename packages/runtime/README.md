@@ -18,6 +18,10 @@ The runtime owns three boundaries:
   project discovery/compilation, `AgentRuntime`, `AgentSession`, the
   `PreparedAgentTool` host contract, and `LocalAgentRuntime`. It does not
   re-export the root entrypoint.
+- `@llm-space/runtime/tools` is the authored local-action contract. It exports
+  `defineTool()` and the bounded `ToolContext`.
+- `@llm-space/runtime/connections` is the authored remote-action contract. It
+  exports `defineMcpClientConnection()` for HTTP/SSE MCP connections.
 
 ## Architecture
 
@@ -59,6 +63,8 @@ agent/
 ├── instructions.md
 ├── tools/
 │   └── *.ts
+├── connections/
+│   └── *.ts
 └── skills/
     └── <name>/SKILL.md
 ```
@@ -77,6 +83,47 @@ export default defineAgent({
 The model string splits on its first `/`. Reasoning accepts
 `provider-default`, `none`, `minimal`, `low`, `medium`, `high`, and `xhigh`;
 `none` maps to Pi's internal `off` value.
+
+## Actions
+
+Local action identity is the exact tool filename stem. Authors provide schemas
+and JSON-compatible results; runtime validates and adapts them to Pi:
+
+```ts
+import { defineTool } from "@llm-space/runtime/tools";
+import { Type } from "typebox";
+
+export default defineTool({
+  description: "Return the weather for a city.",
+  inputSchema: Type.Object({ city: Type.String() }),
+  outputSchema: Type.Object({ city: Type.String(), summary: Type.String() }),
+  execute({ city }, { abortSignal, callId, toolName }) {
+    return { city, summary: `${city} is sunny` };
+  },
+});
+```
+
+Project-scoped MCP connections are flat files under `connections/`. Their file
+stem owns the connection name, and an exact non-empty allowlist controls the
+remote tools exposed as `<connection>__<tool>`:
+
+```ts
+import { defineMcpClientConnection } from "@llm-space/runtime/connections";
+
+export default defineMcpClientConnection({
+  url: "https://mcp.example.com",
+  description: "Project weather data.",
+  auth: async () => ({ token: await resolveToken() }),
+  headers: () => ({ "X-Workspace": "demo" }),
+  tools: { allow: ["forecast"] },
+});
+```
+
+Discovery never imports authored modules or resolves credentials. Auth/header
+callbacks run only in Bun when a Project Thread activates or reconnects. The
+runtime uses per-Thread clients, does not retry `tools/call`, and persists only
+safe provenance/schema fingerprints through the Desktop host—not URLs,
+headers, tokens, callback results, clients, or readiness.
 
 Build the runtime before creating a session:
 

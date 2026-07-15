@@ -43,13 +43,13 @@ describe("loadAgentProject", () => {
     await mkdir(join(root, "tools"));
     await writeFile(
       join(root, "tools", "weather.ts"),
-      `export default {
-        name: "get_weather",
-        label: "Get weather",
+      `import { defineTool } from "@llm-space/runtime/tools";
+      import { Type } from "typebox";
+      export default defineTool({
         description: "Returns demo weather.",
-        parameters: { type: "object", properties: {}, additionalProperties: false },
-        async execute() { return { content: [{ type: "text", text: "Sunny" }], details: undefined }; }
-      };`
+        inputSchema: Type.Object({}),
+        async execute() { return { weather: "Sunny" }; }
+      });`
     );
     await mkdir(join(root, "skills", "forecast"), { recursive: true });
     await writeFile(
@@ -60,7 +60,7 @@ describe("loadAgentProject", () => {
     const snapshot = await loadAgentProject(root);
 
     expect(snapshot.instructions).toBe("You are helpful.\n");
-    expect(snapshot.tools.map((tool) => tool.name)).toEqual(["get_weather"]);
+    expect(snapshot.tools.map((tool) => tool.name)).toEqual(["weather"]);
     expect(snapshot.resources.skills?.map((skill) => skill.name)).toEqual([
       "forecast",
     ]);
@@ -68,37 +68,67 @@ describe("loadAgentProject", () => {
     expect(snapshot.fingerprint).toHaveLength(64);
   });
 
+  test("compiles source-owned MCP connections without resolving callbacks", async () => {
+    const root = await _fixture();
+    await writeFile(join(root, "instructions.md"), "You are helpful.\n");
+    await mkdir(join(root, "connections"));
+    await writeFile(
+      join(root, "connections", "project.ts"),
+      `import { defineMcpClientConnection } from "@llm-space/runtime/connections";
+      export default defineMcpClientConnection({
+        url: "https://example.com/mcp",
+        description: "Project data.",
+        auth() { globalThis.__MCP_AUTH_CALLED__ = true; return { token: "secret" }; },
+        tools: { allow: ["search"] }
+      });`
+    );
+
+    const snapshot = await loadAgentProject(root);
+
+    expect(
+      (globalThis as Record<string, unknown>).__MCP_AUTH_CALLED__
+    ).toBeUndefined();
+    expect(snapshot.connections.map((connection) => ({
+      name: connection.name,
+      transport: connection.definition.transport,
+      allow: connection.definition.tools.allow,
+    }))).toEqual([
+      { name: "project", transport: "streamableHttp", allow: ["search"] },
+    ]);
+    expect(snapshot.diagnostics).toEqual([]);
+  });
+
   test("preserves code-point tool ordering for runtime and fingerprint input", async () => {
     const root = await _fixture();
     await writeFile(join(root, "instructions.md"), "You are helpful.\n");
     await mkdir(join(root, "tools"));
-    const tool = (name: string) => `export default {
-      name: "${name}",
-      label: "${name}",
+    const tool = (value: string) => `import { defineTool } from "@llm-space/runtime/tools";
+      import { Type } from "typebox";
+      export default defineTool({
       description: "Ordered tool.",
-      parameters: { type: "object", properties: {} },
-      async execute() { return { content: [{ type: "text", text: "${name}" }], details: undefined }; }
-    };`;
+      inputSchema: Type.Object({}),
+      async execute() { return "${value}"; }
+    });`;
     await writeFile(join(root, "tools", "Z.ts"), tool("upper"));
     await writeFile(join(root, "tools", "a.ts"), tool("lower"));
 
     const snapshot = await loadAgentProject(root);
 
-    expect(snapshot.tools.map((item) => item.name)).toEqual(["upper", "lower"]);
+    expect(snapshot.tools.map((item) => item.name)).toEqual(["Z", "a"]);
   });
 
   test("returns blocking diagnostics for missing instructions and duplicate tools", async () => {
     const root = await _fixture();
     await mkdir(join(root, "tools"));
-    const tool = `export default {
-      name: "same",
-      label: "Same",
+    const tool = `import { defineTool } from "@llm-space/runtime/tools";
+      import { Type } from "typebox";
+      export default defineTool({
       description: "Duplicate.",
-      parameters: { type: "object", properties: {} },
-      async execute() { return { content: [{ type: "text", text: "ok" }], details: undefined }; }
-    };`;
+      inputSchema: Type.Object({}),
+      async execute() { return "ok"; }
+    });`;
     await writeFile(join(root, "tools", "a.ts"), tool);
-    await writeFile(join(root, "tools", "b.ts"), tool);
+    await writeFile(join(root, "tools", "a.js"), tool);
 
     const snapshot = await loadAgentProject(root);
 
@@ -174,13 +204,13 @@ describe("loadAgentProject", () => {
     await writeFile(join(root, "instructions.md"), "Test.\n");
     await mkdir(join(root, "tools"));
     const toolPath = join(root, "tools", "value.ts");
-    const source = (value: string) => `export default {
-      name: "value",
-      label: "Value",
+    const source = (value: string) => `import { defineTool } from "@llm-space/runtime/tools";
+      import { Type } from "typebox";
+      export default defineTool({
       description: "Return value.",
-      parameters: { type: "object", properties: {} },
-      async execute() { return { content: [{ type: "text", text: "${value}" }], details: undefined }; }
-    };`;
+      inputSchema: Type.Object({}),
+      async execute() { return "${value}"; }
+    });`;
     await writeFile(toolPath, source("one"));
     const first = await loadAgentProject(root);
     await writeFile(toolPath, source("two"));

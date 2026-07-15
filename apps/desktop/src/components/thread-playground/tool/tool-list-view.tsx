@@ -1,6 +1,10 @@
 "use client";
 
-import { type FunctionTool, type Tool } from "@llm-space/core";
+import {
+  type FunctionTool,
+  type ProjectTool,
+  type Tool,
+} from "@llm-space/core";
 import {
   CableIcon,
   FunctionSquareIcon,
@@ -33,9 +37,11 @@ import { ToolListItem } from "./tool-list-item";
 export function ToolListView({
   className,
   readonly,
+  onOpenProjectTool,
 }: {
   className?: string;
   readonly?: boolean;
+  onOpenProjectTool?: (tool: ProjectTool) => void;
 }) {
   const tools = useThreadStore((s) => s.thread.context?.tools);
   const { addTool, removeTool } = useThreadStoreActions();
@@ -77,11 +83,12 @@ export function ToolListView({
       return;
     }
     if (tool.type === "project") {
+      onOpenProjectTool?.(tool);
       return;
     }
     setEditingTool(tool);
     setDialogOpen(true);
-  }, []);
+  }, [onOpenProjectTool]);
 
   const handleRemoveTool = useCallback(
     (tool: Tool) => {
@@ -103,9 +110,10 @@ export function ToolListView({
             readonly={readonly}
             onEdit={openEditDialog}
             onRemove={handleRemoveTool}
+            projectSourceNavigable={Boolean(onOpenProjectTool)}
           />
         ))}
-        <DropdownMenu>
+        {!onOpenProjectTool ? <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
               className={cn(
@@ -146,7 +154,7 @@ export function ToolListView({
               Add Custom Function Tool
             </DropdownMenuItem>
           </DropdownMenuContent>
-        </DropdownMenu>
+        </DropdownMenu> : null}
         <McpToolImportDialog
           open={mcpOpen}
           onOpenChange={(open) => {

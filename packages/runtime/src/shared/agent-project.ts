@@ -9,6 +9,9 @@ export type AgentProjectDiagnosticCode =
   | "tool_import_failed"
   | "tool_export_invalid"
   | "tool_name_duplicate"
+  | "connection_import_failed"
+  | "connection_export_invalid"
+  | "connection_name_invalid"
   | "skill_invalid";
 
 export interface AgentProjectDiagnostic {

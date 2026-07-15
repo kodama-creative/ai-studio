@@ -1,10 +1,10 @@
 import { isExecutableTool, type Tool, type ToolCall } from "@llm-space/core";
 import { useCallback, useMemo } from "react";
 
-import { executeTool } from "@/client/tool-execution";
 import { isFirecrawlLimitError } from "@/lib/firecrawl";
 
 import { useThreadStore, useThreadStoreActions } from "../stores";
+import { useToolExecutor } from "../tool-execution-context";
 
 export interface ToolCallOutcome {
   isError: boolean;
@@ -19,7 +19,12 @@ export interface ToolCallOutcome {
  */
 export function useToolCallRunner(messageId: string) {
   const tools = useThreadStore((state) => state.thread.context?.tools);
-  const { updateToolCallOutputText } = useThreadStoreActions();
+  const {
+    continueAfterProjectToolResult,
+    markToolCallAttempt,
+    updateToolCallOutputText,
+  } = useThreadStoreActions();
+  const executeTool = useToolExecutor();
 
   const toolsByName = useMemo(
     () => new Map((tools ?? []).map((tool) => [tool.name, tool])),
@@ -36,23 +41,51 @@ export function useToolCallRunner(messageId: string) {
       if (!tool || !isExecutableTool(tool)) {
         return null;
       }
+      const isRemoteProjectTool =
+        tool.type === "project" && Boolean(tool.connectionName);
       try {
+        const attemptAt = isRemoteProjectTool
+          ? new Date().toISOString()
+          : undefined;
+        if (attemptAt) {
+          markToolCallAttempt(messageId, toolCall.id, attemptAt);
+        }
         const { contentText, isError } = await executeTool(
           tool,
-          toolCall.input.arguments
+          toolCall.input.arguments,
+          { messageId, toolCallId: toolCall.id, attemptAt }
         );
         updateToolCallOutputText(messageId, toolCall.id, contentText, isError);
+        if (isRemoteProjectTool) {
+          await continueAfterProjectToolResult(messageId);
+        }
         return {
           isError,
           isFirecrawlLimit: isError && isFirecrawlLimitError(contentText),
         };
       } catch (error) {
         const text = error instanceof Error ? error.message : "Tool call failed";
+        if (isRemoteProjectTool) {
+          // A transport failure does not prove the remote side effect failed.
+          // Keep only the durable pre-call marker so recovery renders Outcome
+          // unknown and never advances the ReAct loop automatically.
+          return {
+            isError: true,
+            isFirecrawlLimit: isFirecrawlLimitError(text),
+          };
+        }
         updateToolCallOutputText(messageId, toolCall.id, text, true);
         return { isError: true, isFirecrawlLimit: isFirecrawlLimitError(text) };
       }
     },
-    [messageId, resolveTool, updateToolCallOutputText]
+    [
+      executeTool,
+      continueAfterProjectToolResult,
+      markToolCallAttempt,
+      messageId,
+      resolveTool,
+      updateToolCallOutputText,
+    ]
   );
 
   return { resolveTool, runToolCall };

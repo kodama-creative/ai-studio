@@ -4,6 +4,7 @@ import {
   type BuiltinTool,
   type CustomModel,
   type McpTool,
+  type ProjectTool,
   type Tool,
 } from "@llm-space/core";
 import { streamAgent } from "@llm-space/core/server";
@@ -107,6 +108,22 @@ export class StreamThreadController {
     const extraTools = sourceTools
       .filter((tool) => tool.type !== "project")
       .map((tool) => this._runtimeTool(tool));
+    extraTools.push(
+      ...sourceTools
+        .filter(
+          (tool): tool is ProjectTool =>
+            tool.type === "project" && Boolean(tool.connectionName)
+        )
+        .map((tool) => ({
+          kind: "deferred" as const,
+          definition: {
+            name: tool.name,
+            label: tool.name,
+            description: tool.description,
+            parameters: tool.parameters,
+          },
+        }))
+    );
     const session = await this._externalAgentProjects.createRuntimeSession(
       payload.runtime.projectId,
       {

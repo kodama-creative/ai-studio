@@ -8,6 +8,7 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "@llm-space/runtime": "workspace:*"
+    "@llm-space/runtime": "workspace:*",
+    "typebox": "catalog:"
   }
 }

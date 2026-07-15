@@ -16,6 +16,7 @@ import type { AnalyticsEvent, AnalyticsStatus } from "./analytics";
 import type { Command } from "./commands";
 import type {
   ExternalAgentProjectChangedPayload,
+  ExternalAgentProjectConnectionActivation,
   ExternalAgentProjectPreview,
   ExternalAgentProjectSummary,
   ExternalAgentProjectThreadRecord,
@@ -236,6 +237,14 @@ export interface DesktopRPCType {
         params: { projectId: string; threadId: string };
         response: ExternalAgentProjectThreadRecord;
       };
+      externalAgentProjectActivateConnections: {
+        params: { projectId: string; threadId: string };
+        response: ExternalAgentProjectConnectionActivation;
+      };
+      externalAgentProjectDeactivateConnections: {
+        params: { projectId: string; threadId: string };
+        response: null;
+      };
       externalAgentProjectWriteThread: {
         params: {
           projectId: string;
@@ -267,9 +276,13 @@ export interface DesktopRPCType {
       externalAgentProjectCallTool: {
         params: {
           projectId: string;
+          threadId?: string;
           snapshot: string;
           name: string;
           arguments: Record<string, unknown>;
+          messageId?: string;
+          toolCallId?: string;
+          attemptAt?: string;
         };
         response: { contentText: string; isError: boolean };
       };

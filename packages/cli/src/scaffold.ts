@@ -85,28 +85,21 @@ export default defineAgent({
   }
   await writeFile(
     path.join(agent, "instructions.md"),
-    "You are a concise weather assistant. Use get_weather before answering questions about a city. The data is intentionally mocked for this starter project.\n",
+    "You are a concise weather assistant. Use get-weather before answering questions about a city. The data is intentionally mocked for this starter project.\n",
     "utf8"
   );
   await writeFile(
     path.join(agent, "tools", "get-weather.ts"),
-    `export default {
-  name: "get_weather",
-  label: "Get weather",
+    `import { defineTool } from "@llm-space/runtime/tools";
+import { Type } from "typebox";
+
+export default defineTool({
   description: "Return deterministic example weather for a city.",
-  parameters: {
-    type: "object",
-    properties: { city: { type: "string" } },
-    required: ["city"],
-    additionalProperties: false,
+  inputSchema: Type.Object({ city: Type.String() }),
+  execute({ city }) {
+    return { city, mocked: true, weather: city + ": Sunny, 22°C" };
   },
-  async execute(_toolCallId, { city }) {
-    return {
-      content: [{ type: "text", text: city + ": Sunny, 22°C" }],
-      details: { city, mocked: true },
-    };
-  },
-};
+});
 `,
     "utf8"
   );

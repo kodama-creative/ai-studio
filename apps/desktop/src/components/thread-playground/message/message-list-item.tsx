@@ -340,7 +340,11 @@ function _ToolStepContinuation({
     } finally {
       setCallingTools(false);
     }
-  }, [callableToolCalls, canCallTools, runToolCall]);
+  }, [
+    callableToolCalls,
+    canCallTools,
+    runToolCall,
+  ]);
 
   return (
     <div className="bg-foreground/4 flex min-w-0 items-center justify-between gap-3 rounded-md px-3 py-1">

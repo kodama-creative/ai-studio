@@ -1,6 +1,6 @@
 "use client";
 
-import type { AgentTransport, Thread } from "@llm-space/core";
+import type { AgentTransport, ProjectTool, Thread } from "@llm-space/core";
 import {
   ChevronDownIcon,
   HistoryIcon,
@@ -18,7 +18,10 @@ import {
 } from "react";
 import { usePanelRef } from "react-resizable-panels";
 
-import { executeTool } from "@/client/tool-execution";
+import {
+  executeTool,
+  type ToolExecutor,
+} from "@/client/tool-execution";
 import { useRegisterCommands } from "@/commands";
 import {
   resolveModelConfig,
@@ -67,6 +70,7 @@ import {
   useThreadStoreActions,
 } from "./stores";
 import { ToolListView } from "./tool/tool-list-view";
+import { ToolExecutionProvider } from "./tool-execution-context";
 import { useShortcuts } from "./use-shortcuts";
 import { useThreadPlaygroundEvents } from "./use-thread-playground-events";
 import {
@@ -93,6 +97,12 @@ export interface ThreadPlaygroundProps {
   active?: boolean;
   /** The streaming transport used by runs (e.g. HTTP or Electrobun RPC). */
   transport: AgentTransport;
+  /** Execute a tool with owning-surface context such as a Project Thread id. */
+  toolExecutor?: ToolExecutor;
+  /** Project-authored actions are source-owned and cannot be added/removed. */
+  toolsReadonly?: boolean;
+  /** Navigate from a source-owned action chip to its authored file. */
+  onOpenProjectTool?: (tool: ProjectTool) => void;
   /** The transport executes tool batches and ReAct continuation itself. */
   runtimeOwnsToolLoop?: boolean;
   /** Keep an unavailable saved model visible instead of resolving a fallback. */
@@ -141,6 +151,7 @@ export function ThreadPlayground({
 function _ThreadPlayground({
   initialValue,
   transport,
+  toolExecutor = executeTool,
   runtimeOwnsToolLoop,
   preserveSavedModel,
   prepareRunSnapshot,
@@ -177,7 +188,7 @@ function _ThreadPlayground({
             ),
       getAutoRunTools,
       getReactLoop,
-      executeTool,
+      executeTool: toolExecutor,
       loadPromptSkills: loadPromptSkills
         ? () =>
             (loadPromptSkillsRef.current ?? listEnabledPromptVariableSkills)()
@@ -217,12 +228,14 @@ function _ThreadPlayground({
   });
   return (
     <PromptSkillsProvider loader={loadPromptSkills}>
-      <ThreadStoreContext.Provider value={store}>
-        <ThreadPlaygroundContent
-          {...props}
-          preserveSavedModel={preserveSavedModel}
-        />
-      </ThreadStoreContext.Provider>
+      <ToolExecutionProvider execute={toolExecutor}>
+        <ThreadStoreContext.Provider value={store}>
+          <ThreadPlaygroundContent
+            {...props}
+            preserveSavedModel={preserveSavedModel}
+          />
+        </ThreadStoreContext.Provider>
+      </ToolExecutionProvider>
     </PromptSkillsProvider>
   );
 }
@@ -241,6 +254,8 @@ function ThreadPlaygroundContent({
   runDisabled = false,
   active = false,
   preserveSavedModel = false,
+  toolsReadonly = false,
+  onOpenProjectTool,
 }: Omit<
   ThreadPlaygroundProps,
   | "initialValue"
@@ -507,7 +522,10 @@ function ThreadPlaygroundContent({
                       Tools
                     </div>
                     <div className="flex grow items-center">
-                      <ToolListView readonly={readonly} />
+                      <ToolListView
+                        readonly={readonly || toolsReadonly}
+                        onOpenProjectTool={onOpenProjectTool}
+                      />
                     </div>
                   </div>
                   <div className={"flex w-full border-b py-2"}>

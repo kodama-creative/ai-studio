@@ -16,6 +16,7 @@ export interface DiscoveredAgentProject {
   readonly definition?: AgentProjectSourceRef;
   readonly instructions?: AgentProjectSourceRef;
   readonly tools: readonly AgentProjectSourceRef[];
+  readonly connections: readonly AgentProjectSourceRef[];
   readonly skillsRoot?: string;
   readonly diagnostics: readonly AgentProjectDiagnostic[];
 }
@@ -40,6 +41,7 @@ export async function discoverAgentProject(
     diagnostics,
   });
   const tools = await _discoverTools(root, diagnostics);
+  const connections = await _discoverConnections(root, diagnostics);
   const skillsRootCandidate = path.join(root, "skills");
   let skillsRoot: string | undefined = skillsRootCandidate;
   try {
@@ -76,9 +78,60 @@ export async function discoverAgentProject(
     definition,
     instructions,
     tools,
+    connections,
     skillsRoot,
     diagnostics,
   };
+}
+
+async function _discoverConnections(
+  root: string,
+  diagnostics: AgentProjectDiagnostic[]
+): Promise<AgentProjectSourceRef[]> {
+  const connectionsRoot = path.join(root, "connections");
+  let entries;
+  try {
+    if (await _isSymlink(connectionsRoot)) {
+      diagnostics.push({
+        severity: "error",
+        code: "connection_import_failed",
+        message: "The connections source directory cannot be a symbolic link",
+        path: connectionsRoot,
+      });
+      return [];
+    }
+    entries = await readdir(connectionsRoot, { withFileTypes: true });
+  } catch (error) {
+    if (_hasCode(error, "ENOENT")) return [];
+    diagnostics.push({
+      severity: "error",
+      code: "connection_import_failed",
+      message: `Unable to list connections: ${_errorMessage(error)}`,
+      path: connectionsRoot,
+    });
+    return [];
+  }
+  const connections: AgentProjectSourceRef[] = [];
+  for (const entry of entries.sort((left, right) =>
+    left.name < right.name ? -1 : left.name > right.name ? 1 : 0
+  )) {
+    if (!entry.name.endsWith(".ts") && !entry.name.endsWith(".js")) continue;
+    const absolutePath = path.join(connectionsRoot, entry.name);
+    if (entry.isSymbolicLink() || !entry.isFile()) {
+      diagnostics.push({
+        severity: "error",
+        code: "connection_import_failed",
+        message: `Connection source must be a regular file: ${entry.name}`,
+        path: absolutePath,
+      });
+      continue;
+    }
+    connections.push({
+      absolutePath,
+      logicalPath: path.posix.join("connections", entry.name),
+    });
+  }
+  return connections;
 }
 
 async function _discoverRequiredFile({

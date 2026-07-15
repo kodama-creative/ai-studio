@@ -5,12 +5,18 @@ import path from "node:path";
 import {
   loadSkills,
   NodeExecutionEnv,
-  type AgentTool,
 } from "@earendil-works/pi-agent-core/node";
+import { Compile } from "typebox/compile";
 
 import { normalizeAgentDefinition } from "../../internal/authored-definition/normalize-agent-definition";
-import type { AgentProjectSnapshot } from "../../runtime/agent/agent-project-snapshot";
+import {
+  type AgentProjectSnapshot,
+  type CompiledMcpConnection,
+  type CompiledProjectTool,
+} from "../../runtime/agent/agent-project-snapshot";
 import { createImmutableAgentProjectSnapshot } from "../../runtime/agent/create-immutable-agent-project-snapshot";
+import { isMcpClientConnectionDefinition } from "../../public/definitions/connections/mcp";
+import { isToolDefinition } from "../../public/definitions/tool";
 import type { CompiledAgentDefinition } from "../../shared/agent-definition";
 import type { AgentProjectDiagnostic } from "../../shared/agent-project";
 import {
@@ -44,12 +50,18 @@ async function _compileAgentProject(
     hash
   );
   const tools = await _compileTools(discovered.tools, diagnostics, hash);
+  const connections = await _compileConnections(
+    discovered.connections,
+    diagnostics,
+    hash
+  );
   const skills = await _compileSkills(discovered, diagnostics, hash);
   return createImmutableAgentProjectSnapshot({
     root: discovered.root,
     definition,
     instructions,
     tools,
+    connections,
     resources: { skills },
     diagnostics,
     fingerprint: hash.digest("hex"),
@@ -129,8 +141,8 @@ async function _compileTools(
   sourceRefs: readonly AgentProjectSourceRef[],
   diagnostics: AgentProjectDiagnostic[],
   hash: ReturnType<typeof createHash>
-): Promise<AgentTool[]> {
-  const tools: AgentTool[] = [];
+): Promise<CompiledProjectTool[]> {
+  const tools: CompiledProjectTool[] = [];
   const names = new Map<string, string>();
   for (const sourceRef of sourceRefs) {
     try {
@@ -138,33 +150,72 @@ async function _compileTools(
       hash.update(sourceRef.absolutePath);
       hash.update(source);
       const version = createHash("sha256").update(source).digest("hex");
-      const tool = (
+      const definition = (
         await loadAuthoredModule({
           sourcePath: sourceRef.absolutePath,
           version,
+          authoredSdk: true,
         })
       ).default;
-      if (!_isAgentTool(tool)) {
+      if (!isToolDefinition(definition)) {
         diagnostics.push({
           severity: "error",
           code: "tool_export_invalid",
-          message: `${path.basename(sourceRef.absolutePath)} must default-export a Pi AgentTool`,
+          message: `${path.basename(sourceRef.absolutePath)} must default-export defineTool({ description, inputSchema, execute })`,
           path: sourceRef.absolutePath,
         });
         continue;
       }
-      const previous = names.get(tool.name);
+      const name = path.basename(sourceRef.absolutePath, path.extname(sourceRef.absolutePath));
+      if (!_isModelName(name)) {
+        diagnostics.push({
+          severity: "error",
+          code: "tool_export_invalid",
+          message: `Tool filename must match ${MODEL_NAME_PATTERN.source}: ${name}`,
+          path: sourceRef.absolutePath,
+        });
+        continue;
+      }
+      const previous = names.get(name);
       if (previous) {
         diagnostics.push({
           severity: "error",
           code: "tool_name_duplicate",
-          message: `Tool name "${tool.name}" is also exported by ${path.basename(previous)}`,
+          message: `Tool name "${name}" is also exported by ${path.basename(previous)}`,
           path: sourceRef.absolutePath,
         });
         continue;
       }
-      names.set(tool.name, sourceRef.absolutePath);
-      tools.push(tool);
+      names.set(name, sourceRef.absolutePath);
+      const inputValidator = Compile(definition.inputSchema);
+      const outputValidator = definition.outputSchema
+        ? Compile(definition.outputSchema)
+        : null;
+      tools.push({
+        name,
+        label: name,
+        description: definition.description,
+        parameters: definition.inputSchema,
+        sourcePath: sourceRef.logicalPath,
+        async execute(toolCallId, input, signal) {
+          if (!inputValidator.Check(input)) {
+            throw new TypeError(`Invalid input for tool "${name}"`);
+          }
+          const output = await definition.execute(input, {
+            abortSignal: signal ?? new AbortController().signal,
+            callId: toolCallId,
+            toolName: name,
+          });
+          if (outputValidator && !outputValidator.Check(output)) {
+            throw new TypeError(`Invalid output from tool "${name}"`);
+          }
+          const text = _serializeToolOutput(output, name);
+          return {
+            content: [{ type: "text", text }],
+            details: output,
+          };
+        },
+      });
     } catch (error) {
       diagnostics.push({
         severity: "error",
@@ -175,6 +226,70 @@ async function _compileTools(
     }
   }
   return tools;
+}
+
+async function _compileConnections(
+  sourceRefs: readonly AgentProjectSourceRef[],
+  diagnostics: AgentProjectDiagnostic[],
+  hash: ReturnType<typeof createHash>
+): Promise<CompiledMcpConnection[]> {
+  const connections: CompiledMcpConnection[] = [];
+  for (const sourceRef of sourceRefs) {
+    const name = path.basename(
+      sourceRef.absolutePath,
+      path.extname(sourceRef.absolutePath)
+    );
+    if (!_isModelName(name)) {
+      diagnostics.push({
+        severity: "error",
+        code: "connection_name_invalid",
+        message: `Connection filename must match ${MODEL_NAME_PATTERN.source}: ${name}`,
+        path: sourceRef.absolutePath,
+      });
+      continue;
+    }
+    try {
+      const source = await readFile(sourceRef.absolutePath);
+      hash.update(sourceRef.absolutePath);
+      hash.update(source);
+      const version = createHash("sha256").update(source).digest("hex");
+      const definition = (
+        await loadAuthoredModule({
+          sourcePath: sourceRef.absolutePath,
+          version,
+          authoredSdk: true,
+        })
+      ).default;
+      if (!isMcpClientConnectionDefinition(definition)) {
+        diagnostics.push({
+          severity: "error",
+          code: "connection_export_invalid",
+          message: `${path.basename(sourceRef.absolutePath)} must default-export defineMcpClientConnection({ ... })`,
+          path: sourceRef.absolutePath,
+        });
+        continue;
+      }
+      for (const toolName of definition.tools.allow) {
+        if (!_isModelName(toolName)) {
+          throw new TypeError(`Invalid allowlisted MCP tool name: ${toolName}`);
+        }
+        if (!_isModelName(`${name}__${toolName}`)) {
+          throw new TypeError(
+            `Qualified MCP tool name is not provider-safe: ${name}__${toolName}`
+          );
+        }
+      }
+      connections.push({ name, logicalPath: sourceRef.logicalPath, definition });
+    } catch (error) {
+      diagnostics.push({
+        severity: "error",
+        code: "connection_import_failed",
+        message: `Unable to import ${path.basename(sourceRef.absolutePath)}: ${_errorMessage(error)}`,
+        path: sourceRef.absolutePath,
+      });
+    }
+  }
+  return connections;
 }
 
 async function _compileSkills(
@@ -212,16 +327,53 @@ async function _compileSkills(
   }
 }
 
-function _isAgentTool(value: unknown): value is AgentTool {
-  if (!value || typeof value !== "object") return false;
-  const candidate = value as Partial<AgentTool>;
-  return (
-    typeof candidate.name === "string" &&
-    candidate.name.length > 0 &&
-    typeof candidate.description === "string" &&
-    typeof candidate.execute === "function" &&
-    candidate.parameters !== undefined
-  );
+const MODEL_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_-]{0,63}$/;
+
+function _isModelName(value: string): boolean {
+  return MODEL_NAME_PATTERN.test(value);
+}
+
+function _serializeToolOutput(output: unknown, name: string): string {
+  _assertJsonValue(output, name, new WeakSet());
+  if (typeof output === "string") return output;
+  const text = JSON.stringify(output);
+  if (text === undefined) {
+    throw new TypeError(`Tool "${name}" returned a non-JSON value`);
+  }
+  return text;
+}
+
+function _assertJsonValue(
+  value: unknown,
+  name: string,
+  ancestors: WeakSet<object>
+): void {
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "boolean"
+  ) {
+    return;
+  }
+  if (typeof value === "number") {
+    if (Number.isFinite(value)) return;
+    throw new TypeError(`Tool "${name}" returned a non-JSON number`);
+  }
+  if (typeof value !== "object") {
+    throw new TypeError(`Tool "${name}" returned a non-JSON value`);
+  }
+  if (ancestors.has(value)) {
+    throw new TypeError(`Tool "${name}" returned circular JSON data`);
+  }
+  const prototype = Object.getPrototypeOf(value) as object | null;
+  if (!Array.isArray(value) && prototype !== Object.prototype && prototype !== null) {
+    throw new TypeError(`Tool "${name}" returned a non-plain JSON object`);
+  }
+  ancestors.add(value);
+  for (const child of Array.isArray(value) ? value : Object.values(value)) {
+    _assertJsonValue(child, name, ancestors);
+  }
+  ancestors.delete(value);
 }
 
 function _errorMessage(error: unknown): string {

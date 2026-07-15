@@ -29,23 +29,16 @@ describe("LocalAgentRuntime", () => {
     let executions = 0;
     await writeFile(
       join(agentRoot, "tools", "echo.ts"),
-      `export default {
-        name: "echo",
-        label: "Echo",
+      `import { defineTool } from "@llm-space/runtime/tools";
+      import { Type } from "typebox";
+
+      export default defineTool({
         description: "Echo text.",
-        parameters: {
-          type: "object",
-          properties: { text: { type: "string" } },
-          required: ["text"],
-          additionalProperties: false
-        },
-        async execute(_toolCallId, input) {
-          return {
-            content: [{ type: "text", text: "echo:" + input.text }],
-            details: { echoed: input.text }
-          };
+        inputSchema: Type.Object({ text: Type.String() }),
+        execute(input) {
+          return { text: "echo:" + input.text, echoed: input.text };
         }
-      };`
+      });`
     );
     const runtime = await LocalAgentRuntime.create({
       agentRoot,

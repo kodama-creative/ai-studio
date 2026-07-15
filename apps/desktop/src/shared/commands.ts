@@ -105,10 +105,15 @@ export interface SyncExternalAgentProjectThreadFromAgentCommand extends GenericC
   { projectId: string; threadId: string }
 > {}
 
-/** Enable every currently available project tool on one project Thread. */
-export interface EnableExternalAgentProjectToolsCommand extends GenericCommand<
-  "enableExternalAgentProjectTools",
-  { projectId: string; threadId: string }
+/** Open the Build tab and focus the source that owns a project action. */
+export interface OpenExternalAgentProjectSourceCommand extends GenericCommand<
+  "openExternalAgentProjectSource",
+  {
+    projectId: string;
+    projectPath: string;
+    projectName: string;
+    sourcePath: string;
+  }
 > {}
 
 /** Save an Agent Project source file through the trusted Bun-side boundary. */
@@ -350,7 +355,7 @@ export type Command =
   | DuplicateExternalAgentProjectThreadCommand
   | DeleteExternalAgentProjectThreadCommand
   | SyncExternalAgentProjectThreadFromAgentCommand
-  | EnableExternalAgentProjectToolsCommand
+  | OpenExternalAgentProjectSourceCommand
   | SaveExternalAgentProjectSourceCommand
   | NewFolderCommand
   | RenameFileCommand
@@ -457,8 +462,8 @@ export const COMMAND_META: Record<
     label: "Sync from Agent",
     target: "webview",
   },
-  enableExternalAgentProjectTools: {
-    label: "Enable All Agent Project Tools",
+  openExternalAgentProjectSource: {
+    label: "Open Agent Project Source",
     target: "webview",
   },
   saveExternalAgentProjectSource: {

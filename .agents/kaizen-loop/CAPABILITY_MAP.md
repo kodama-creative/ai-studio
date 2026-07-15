@@ -1,7 +1,7 @@
 # LLM Space Capability Map
 
-- Last updated: 2026-07-14
-- Map status: refreshed after Agent Definition And Runtime V1. Workspace and explicitly opened Agents share one Build + Project Threads product, required `agent.ts` model/reasoning defaults, and the same Pi Agent-backed runtime execution path. Public or dynamically loaded plugins remain absent.
+- Last updated: 2026-07-15
+- Map status: refreshed after Portable Agent Actions V1 implementation. Workspace and explicitly opened Agents share one Build + Project Threads product and one Pi Agent-backed runtime; Agent source now owns portable local tools and allowlisted HTTP/SSE MCP connections, while ordinary Threads retain machine-local MCP Settings and explicit tool selection. Public or dynamically loaded plugins remain absent.
 - Evidence rule: entries marked `confirmed` cite current rendered-product or current-code evidence. Entries marked `stale` rely on previous logs or code paths not fully re-inspected in this loop. Entries marked `unknown` need a future product-surface check before they can drive a recommendation.
 
 ## First-Run Model Setup
@@ -167,6 +167,23 @@
 - Explicit non-goals: dynamic model resolvers, automatic compaction/session budgets, database/cloud persistence, crash-safe tool replay, distributed workflow durability, channels, schedules, sandbox provisioning, subagents, public plugin SDK, dynamic third-party loading, or separate Desktop Builder/Target Agent model.
 - Visible gaps: isolated CEF could not prove a live external provider completion; deterministic Bun integration covers the runtime branch instead. Trusted project tools remain unsandboxed. Pi has no native durable pause-before-tool state, so manual mode uses runtime-internal deferred results. Full Pi Harness compaction/tree navigation and automatic session budgets remain future capabilities.
 
+## Agent Action Authoring
+
+- Status: shipped Portable Agent Actions V1
+- Freshness: confirmed
+- Last checked: 2026-07-15
+- Evidence:
+  - `packages/runtime/src/public/tools` exposes branded `defineTool()` definitions with path-owned identity, typed input, optional output validation, a bounded execution context, and JSON-compatible results; raw Pi `AgentTool` exports are rejected.
+  - `packages/runtime/src/public/connections` exposes branded `defineMcpClientConnection()` definitions with HTTP/SSE transport, Bun-only auth/header callbacks, and required exact allowlists. Discovery remains offline and the trusted compiler owns callbacks and fingerprints.
+  - Runtime tests cover local adaptation, allowlist filtering, qualified `<connection>__<tool>` names, metadata re-auth, one-attempt calls, schema validation, connection-local degradation, attempt persistence, client disposal, and connection/schema removal drift.
+  - Fresh CEF screenshots `audits/2026-07-15-103250-portable-agent-actions-v1/01-ready-1280x800.png` and `02-source-jump-1280x800.png` show local `get-weather` plus remote `fixture__remote_echo` as read-only Project actions and the remote chip opening `connections/fixture.ts` in Build.
+  - Fresh CEF screenshots `03-unavailable-900x700.png`, `04-schema-drift-900x700.png`, and `05-schema-synced-900x700.png` show connection-local retry, retained descriptors, explicit drift blocking, and Sync recovery at narrow size with no document overflow.
+  - Fresh restart screenshot `06-outcome-unknown-900x700.png` shows a persisted remote pre-call attempt without output rendering `Outcome unknown`; the stored call remained without output and was not automatically retried.
+  - The same audit found only Vite/React development console information, no application errors, and native button semantics/focusability for source chips, Retry, and Sync.
+- Boundary: a trusted Agent Project can package path-owned local TypeScript tools and flat source-declared HTTP/SSE MCP connections. Opening a Project Thread activates allowlisted remote descriptors without Settings or per-Thread selection; all Project actions are source-owned/read-only, remote names are qualified exactly, remote calls remain visibly manual, safe provenance/attempts persist, and schema/connection drift blocks new runs until Sync.
+- Explicit non-goals: no project stdio, OAuth browser/refresh/account lifecycle, dynamic connection search, blocklists, `tools/listChanged`, automatic project-MCP calls, authored approval policy, OpenAPI connections, MCP resources/prompts, sandbox, or public plugin SDK.
+- Visible gaps: no durable approve/deny policy beyond manual V1 execution, no live third-party authenticated service audit, no dynamic remote tool-list subscription, and no automatic test harness for the CEF workflow yet.
+
 ## Agent Project Activation
 
 - Status: shipped One Agent Project Model V1
@@ -235,9 +252,9 @@
 
 ## Tool Step Orchestration
 
-- Status: shipped V1 manual loop
+- Status: shipped manual, auto-once, and ReAct execution paths
 - Freshness: confirmed
-- Last checked: 2026-07-04
+- Last checked: 2026-07-14
 - Evidence:
   - Current discovery screenshot `audits/2026-07-04-110944-core-capability-discovery/03-general-agent-open.png` shows the General Agent example ships with tool definitions such as `web_search`, `web_fetch`, `bash`, `read`, `write`, and `edit`.
   - Current fixture screenshot `audits/2026-07-04-110944-core-capability-discovery/04-tool-step-fixture-after-run.png` shows a thread with an assistant tool call and editable `Response` field, but no product-level pending-tool state or explicit `Continue` action tied to completed tool outputs.
@@ -249,15 +266,18 @@
   - `apps/desktop/src/components/thread-playground/message/tool-call-status.ts` derives pending/ready/error summary state from existing `toolCall.output` data without changing the thread schema.
   - `apps/desktop/src/components/thread-playground/message/message-list-item.tsx` shows `Waiting for Tools` / `Tool Results Ready` and a message-level `Continue` CTA that calls the existing `run(message.id)` path.
   - `apps/desktop/src/components/thread-playground/message/tool-call-list-item.tsx` lets users mark or clear error results with the existing `isError` flag and keeps Cmd+Enter continuation gated until all tool calls have text output.
-- Boundary: users can define tool schemas, receive model tool calls as assistant messages, manually edit tool-call outputs, mark failed/rejected results as error text, see all-tools-ready status, and continue from the assistant tool-call message once every visible tool call has output.
-- Explicit non-goals: no automatic web/search/shell/filesystem execution, no MCP runtime, no permission system, no background tool queue, no multi-agent runtime orchestration.
-- Visible gaps: live paid/provider continuation was not exercised in this loop; no automatic local execution sandbox, permission system, background queue, or rich multi-step trace timeline; error marking is a compact text toggle rather than a dedicated reject dialog.
+  - Current `packages/runtime/src/shared/runtime-execution-mode.ts`, `execution/tool-execution-policy.ts`, and `runtime/sessions/agent-session.ts` own `manual`, `autoOnce`, and `react` execution, internal deferred results, continuation, and mode changes behind the public Agent session.
+  - Current `apps/desktop/src/components/thread-playground/stores/run-mode.ts` preserves explicit user preferences for manual calls, one-step auto-run, and the full ReAct loop. `tool-call-list-item.tsx` still provides the visible per-call play action and editable/error result path.
+  - Fresh CEF Thread inspection on 2026-07-14 showed the current Tools row and run controls render without document overflow; no live provider tool turn was attempted in this discovery loop.
+- Boundary: ordinary Threads and Agent Project Threads can receive model tool calls, run visible executable tools manually, edit/mark tool results, continue after all results are ready, or opt into automatic one-step/ReAct behavior. Agent Project runtime sessions own the Pi loop and deferred state; Desktop Thread data remains the durable transcript.
+- Explicit non-goals: no per-tool permission policy, durable approve/deny state, sandbox, background tool queue, crash-safe side-effect replay, or multi-agent orchestration.
+- Visible gaps: tool safety is a global/manual-vs-auto execution choice rather than authored per-tool policy; trusted project tools remain unsandboxed; error marking is a compact result toggle rather than a dedicated denial record; live paid-provider continuation remains unaudited.
 
 ## MCP Server Integration
 
 - Status: shipped V1
 - Freshness: confirmed
-- Last checked: 2026-07-04
+- Last checked: 2026-07-15
 - Evidence:
   - Implementation screenshot `audits/2026-07-04-122756-mcp-integration-v1/01-settings-mcp-empty.png` shows Settings now has an `MCP` page and empty server state.
   - Implementation screenshot `audits/2026-07-04-122756-mcp-integration-v1/02-settings-mcp-fixture-tools.png` shows a configured stdio fixture server tested through Settings with one discovered tool, `mcp__fixture__echo`.
@@ -277,9 +297,12 @@
   - Current discovery screenshot `audits/2026-07-04-202128-remote-mcp-diagnostics-discovery/05-add-mcp-error-popover.png` shows the thread Add MCP popover carries the persisted remote error and retry/open-settings paths.
   - Remote diagnostics implementation screenshots `audits/2026-07-04-211429-remote-mcp-diagnostics-v1/01-settings-remote-success-diagnostics.png`, `02-settings-remote-auth-diagnostics.png`, and `03-settings-remote-env-diagnostics.png` show successful, unauthorized, and missing-env Streamable HTTP tests with redacted diagnostic timelines.
   - Remote diagnostics implementation screenshot `audits/2026-07-04-211429-remote-mcp-diagnostics-v1/04-add-mcp-diagnostic-headline.png` shows the thread Add MCP popover surfacing the latest diagnostic headline and Settings path.
-- Boundary: users can configure MCP servers in local settings, with stdio, Streamable HTTP, or SSE transport fields; discover MCP tools; inspect persisted readiness status, last-known tool summaries, and latest redacted diagnostic timeline; explicitly refresh/test a server; copy a safe diagnostic summary; explicitly add selected tools to a thread as `mcp__{server_name}__{tool_name}` direct tools; and explicitly execute visible assistant MCP tool calls after a click, writing flattened text output into the existing tool-response field.
-- Explicit non-goals: no full built-in OAuth authorization-code callback, token refresh, revoke, or account-management flow; no resources browser; no prompts browser; no sampling, elicitation, or tasks; no automatic MCP execution during agent streaming; no MCP registry browsing; no global permission policy beyond explicit per-call user action.
-- Visible gaps: real third-party authenticated remote MCP services remain unaudited; full OAuth lifecycle is intentionally out of scope; readiness stores a last-known snapshot rather than a background health monitor; MCP outputs are flattened to text rather than preserving rich resource/blob payloads; threads must add MCP tools explicitly one by one; direct tool names are disabled rather than auto-suffixed when normalized MCP tool names collide. Resources/prompts are an intentional near-term non-goal because expected usage is low for the current product stage.
+  - Fresh CEF screenshot `audits/2026-07-14-225653-tools-connections-discovery/04-current-mcp-import-empty.png` confirms the current boundary remains machine-local: Add MCP tools says `No MCP servers configured` and routes to `Configure MCP` / `Open settings`; it has no Agent Project or source-declared connection path.
+  - Current `apps/desktop/src/components/thread-playground/tool/mcp-tool-import-popover.tsx`, `components/settings/mcp-page.tsx`, `bun/mcp/mcp-manager.ts`, and typed RPC source confirm the same Settings -> readiness/list -> explicit Thread selection -> explicit call flow. The already-running Vite server could not load the lazy Settings module during this CEF run, so the Settings sub-surface was not freshly screenshot-verified.
+  - Portable Agent Actions V1 extracts the shared HTTP/SSE transport and result flattening into `@llm-space/runtime/node`; focused TypeScript/build checks and the fresh CEF fixture confirm ordinary Settings remains separate while Project connections use the shared protocol client.
+- Boundary: users can configure machine-local MCP servers in Settings, with stdio, Streamable HTTP, or SSE transport fields; discover MCP tools; inspect persisted readiness status, last-known tool summaries, and latest redacted diagnostic timeline; explicitly refresh/test a server; copy a safe diagnostic summary; explicitly add selected tools to an ordinary Thread as `mcp__{server_name}__{tool_name}` direct tools; and explicitly execute visible assistant MCP tool calls after a click. Agent Projects separately declare portable allowlisted HTTP/SSE connections in source without mutating Settings.
+- Explicit non-goals: no full built-in OAuth authorization-code callback, token refresh, revoke, or account-management flow; no resources/prompts browser; no sampling, elicitation, tasks, registry browsing, or authored per-connection approval policy.
+- Visible gaps: real third-party authenticated remote services remain unaudited; full OAuth is intentionally out of scope; readiness is last-known rather than monitored; outputs are flattened to text; ordinary Threads still add Settings tools explicitly one by one; direct normalized-name collisions disable ordinary tools rather than auto-suffixing. Resources/prompts remain an intentional near-term non-goal.
 
 ## Remote MCP Diagnostics
 

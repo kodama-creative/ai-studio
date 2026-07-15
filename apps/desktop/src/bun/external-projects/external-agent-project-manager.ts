@@ -33,14 +33,18 @@ import {
   AgentRuntime,
   loadAgentProject,
   loadAgentProjectManifest,
+  ProjectMcpSession,
   type AgentSession,
   type CreateAgentSessionOptions,
   type AgentProjectSnapshot,
+  type ProjectMcpConnectionStatus,
+  type ProjectMcpConnector,
   type ResolvedAgentProjectManifest,
 } from "@llm-space/runtime/node";
 
 import type {
   ExternalAgentProjectPreview,
+  ExternalAgentProjectConnectionActivation,
   ExternalAgentProjectSummary,
   ExternalAgentProjectThreadRecord,
   ExternalAgentProjectThreadSummary,
@@ -69,6 +73,16 @@ interface LoadedProject {
   snapshots: Map<string, AgentProjectSnapshot>;
   runtime: AgentRuntime | null;
   models: Models | null;
+  connectionSessions: Map<string, ProjectConnectionSession>;
+}
+
+interface ProjectConnectionSession {
+  snapshot: string;
+  session: ProjectMcpSession;
+  tools: ProjectTool[];
+  connectionNames: Set<string>;
+  unavailableConnections: Set<string>;
+  driftConnections: Set<string>;
 }
 
 interface ThreadFile {
@@ -85,6 +99,7 @@ export class ExternalAgentProjectManager {
   private readonly _dataRoot: string;
   private readonly _workspaceRoot: string;
   private readonly _getModels: () => Promise<Models>;
+  private readonly _projectMcpConnector?: ProjectMcpConnector;
   private readonly _registry = new Map<string, RegistryEntry>();
   private readonly _loaded = new Map<string, LoadedProject>();
   private _loadedRegistry = false;
@@ -94,12 +109,14 @@ export class ExternalAgentProjectManager {
     homePath: string;
     workspaceRoot: string;
     getModels?: () => Promise<Models>;
+    projectMcpConnector?: ProjectMcpConnector;
   }) {
     const { homePath, workspaceRoot } = options;
     this._getModels =
       options.getModels ??
       (() =>
         Promise.resolve({ getModel: () => undefined } as unknown as Models));
+    this._projectMcpConnector = options.projectMcpConnector;
     this._settingsFile = path.join(
       homePath,
       "settings",
@@ -265,14 +282,20 @@ export class ExternalAgentProjectManager {
     projectId: string,
     threadId: string
   ): Promise<ExternalAgentProjectThreadRecord> {
-    const loaded = await this.inspect(projectId);
+    await this.inspect(projectId);
     const stored = await this._readThreadFile(projectId, threadId);
     return {
       promptFingerprint: stored.promptFingerprint,
       syncedPrompt: stored.syncedPrompt,
       definitionFingerprint: stored.definitionFingerprint,
       syncedDefinition: stored.syncedDefinition,
-      thread: _reconcileThread(stored.thread, loaded),
+      thread: {
+        ...ensureThreadVariableState(normalizeThread(stored.thread)),
+        context: {
+          ...stored.thread.context,
+          tools: this._toolsForThread(projectId, threadId, stored.thread),
+        },
+      },
     };
   }
 
@@ -311,6 +334,7 @@ export class ExternalAgentProjectManager {
   }
 
   async deleteThread(projectId: string, threadId: string): Promise<void> {
+    await this.deactivateConnections(projectId, threadId);
     await rm(this._threadFile(projectId, threadId), { force: true });
     this._notify(projectId);
   }
@@ -324,6 +348,9 @@ export class ExternalAgentProjectManager {
     if (!project.definition) {
       throw new Error("Agent Project has no valid definition.");
     }
+    const active = this._state(projectId).connectionSessions.get(threadId);
+    active?.driftConnections.clear();
+    const tools = this._toolsForThread(projectId, threadId, record.thread);
     const next = {
       promptFingerprint: project.promptFingerprint,
       syncedPrompt: project.instructions,
@@ -341,6 +368,7 @@ export class ExternalAgentProjectManager {
         context: {
           ...record.thread.context,
           systemPrompt: project.instructions,
+          tools,
         },
       },
     };
@@ -365,9 +393,13 @@ export class ExternalAgentProjectManager {
 
   async callTool(input: {
     projectId: string;
+    threadId?: string;
     snapshot: string;
     name: string;
     arguments: Record<string, unknown>;
+    messageId?: string;
+    toolCallId?: string;
+    attemptAt?: string;
   }): Promise<{ contentText: string; isError: boolean }> {
     await this._ensureProject(input.projectId);
     const loaded = this._state(input.projectId);
@@ -381,7 +413,24 @@ export class ExternalAgentProjectManager {
       (candidate) => candidate.name === input.name
     );
     if (!tool) {
-      throw new Error(`Project tool not found: ${input.name}`);
+      if (!input.threadId) {
+        throw new Error(`Project tool not found: ${input.name}`);
+      }
+      const active = loaded.connectionSessions.get(input.threadId);
+      if (!active || active.snapshot !== input.snapshot) {
+        throw new Error(
+          "This Project MCP connection is not active. Reopen the Thread and retry manually."
+        );
+      }
+      if (!input.messageId || !input.toolCallId || !input.attemptAt) {
+        throw new Error("Project MCP calls require a durable attempt marker.");
+      }
+      await this._markToolCallAttempt(input.projectId, input.threadId, {
+        messageId: input.messageId,
+        toolCallId: input.toolCallId,
+        at: input.attemptAt,
+      });
+      return active.session.callTool(input.name, input.arguments);
     }
     const result = await tool.execute(randomUUID(), input.arguments);
     const text = result.content
@@ -389,6 +438,105 @@ export class ExternalAgentProjectManager {
       .map((item) => item.text)
       .join("\n");
     return { contentText: text, isError: false };
+  }
+
+  async activateConnections(
+    projectId: string,
+    threadId: string
+  ): Promise<ExternalAgentProjectConnectionActivation> {
+    await this._ensureProject(projectId);
+    const loaded = this._state(projectId);
+    const snapshot = loaded.snapshot;
+    if (loaded.error || !snapshot) {
+      throw new Error(loaded.error ?? "Agent Project is unavailable.");
+    }
+    const previous = loaded.connectionSessions.get(threadId);
+    loaded.connectionSessions.delete(threadId);
+    await previous?.session.close();
+    const session = await ProjectMcpSession.activate(snapshot.connections, {
+      connector: this._projectMcpConnector,
+    });
+    const tools = _remoteProjectTools(projectId, snapshot, session.tools);
+    const stored = await this._readThreadFile(projectId, threadId);
+    const storedRemote = (stored.thread.context?.tools ?? []).filter(
+      (tool): tool is ProjectTool =>
+        tool.type === "project" && Boolean(tool.connectionName)
+    );
+    const readyConnections = new Set(
+      session.statuses
+        .filter((status) => status.state === "ready")
+        .map((status) => status.connectionName)
+    );
+    const connectionNames = new Set(
+      snapshot.connections.map((connection) => connection.name)
+    );
+    const unavailableConnections = new Set(
+      session.statuses
+        .filter((status) => status.state === "unavailable")
+        .map((status) => status.connectionName)
+    );
+    const driftConnections = _schemaDriftConnections(
+      storedRemote,
+      tools,
+      readyConnections,
+      connectionNames,
+      stored.thread.agentRuntime?.snapshot === snapshot.fingerprint
+    );
+    loaded.connectionSessions.set(threadId, {
+      snapshot: snapshot.fingerprint,
+      session,
+      tools,
+      connectionNames,
+      unavailableConnections,
+      driftConnections,
+    });
+    const reconciled = this._toolsForThread(projectId, threadId, stored.thread);
+    if (
+      JSON.stringify(reconciled) !==
+      JSON.stringify(stored.thread.context?.tools ?? [])
+    ) {
+      await this._writeThreadFile(projectId, threadId, {
+        ...stored,
+        thread: {
+          ...stored.thread,
+          context: { ...stored.thread.context, tools: reconciled },
+        },
+      });
+    }
+    const statuses = session.statuses.map((status) =>
+      _connectionStatusWithDrift(status, driftConnections)
+    );
+    for (const connectionName of driftConnections) {
+      if (statuses.some((status) => status.connectionName === connectionName)) {
+        continue;
+      }
+      const previousTool = storedRemote.find(
+        (tool) => tool.connectionName === connectionName
+      );
+      statuses.push({
+        connectionName,
+        description: "",
+        sourcePath:
+          previousTool?.sourcePath ?? `connections/${connectionName}.ts`,
+        state: "drift",
+        message: "Remote actions were removed. Sync from Agent before running.",
+      });
+    }
+    return {
+      tools,
+      statuses,
+      hasSchemaDrift: driftConnections.size > 0,
+    };
+  }
+
+  async deactivateConnections(
+    projectId: string,
+    threadId: string
+  ): Promise<void> {
+    await this._ensureProject(projectId);
+    const active = this._state(projectId).connectionSessions.get(threadId);
+    this._state(projectId).connectionSessions.delete(threadId);
+    await active?.session.close();
   }
 
   async createRuntimeSession(
@@ -519,6 +667,7 @@ export class ExternalAgentProjectManager {
         snapshots: new Map(),
         runtime: null,
         models: null,
+        connectionSessions: new Map(),
       };
       this._loaded.set(projectId, state);
     }
@@ -530,6 +679,12 @@ export class ExternalAgentProjectManager {
         throw new Error("The Agent Project canonical path changed.");
       }
       const snapshot = await loadAgentProject(resolved.agentRoot);
+      if (state.snapshot?.fingerprint !== snapshot.fingerprint) {
+        for (const active of state.connectionSessions.values()) {
+          void active.session.close();
+        }
+        state.connectionSessions.clear();
+      }
       state.resolved = resolved;
       state.snapshot = snapshot;
       state.missing = false;
@@ -735,6 +890,39 @@ export class ExternalAgentProjectManager {
     });
   }
 
+  private async _markToolCallAttempt(
+    projectId: string,
+    threadId: string,
+    attempt: { messageId: string; toolCallId: string; at: string }
+  ): Promise<void> {
+    const record = await this._readThreadFile(projectId, threadId);
+    let found = false;
+    const messages = (record.thread.context?.messages ?? []).map((message) => {
+      if (message.id !== attempt.messageId || message.role !== "assistant") {
+        return message;
+      }
+      const toolCalls = message.toolCalls?.map((toolCall) => {
+        if (toolCall.id !== attempt.toolCallId) return toolCall;
+        found = true;
+        return {
+          ...toolCall,
+          attempt: { status: "started" as const, at: attempt.at },
+        };
+      });
+      return { ...message, toolCalls };
+    });
+    if (!found) {
+      throw new Error("Project MCP tool call is no longer present in the Thread.");
+    }
+    await this._writeThreadFile(projectId, threadId, {
+      ...record,
+      thread: {
+        ...record.thread,
+        context: { ...record.thread.context, messages },
+      },
+    });
+  }
+
   private async _writeThreadFile(
     projectId: string,
     threadId: string,
@@ -769,6 +957,49 @@ export class ExternalAgentProjectManager {
     return state;
   }
 
+  private _toolsForThread(
+    projectId: string,
+    threadId: string,
+    thread: Thread
+  ): ProjectTool[] {
+    const loaded = this._state(projectId);
+    const snapshot = loaded.snapshot;
+    if (!snapshot) {
+      return (thread.context?.tools ?? []).filter(
+        (tool): tool is ProjectTool => tool.type === "project"
+      );
+    }
+    const local = _projectTools(projectId, snapshot);
+    const active = loaded.connectionSessions.get(threadId);
+    const storedRemote = (thread.context?.tools ?? []).filter(
+      (tool): tool is ProjectTool =>
+        tool.type === "project" && Boolean(tool.connectionName)
+    );
+    if (!active || active.snapshot !== snapshot.fingerprint) {
+      return [...local, ...storedRemote];
+    }
+    const remote: ProjectTool[] = [];
+    const connectionNames = new Set([
+      ...active.connectionNames,
+      ...storedRemote.map((tool) => tool.connectionName!),
+    ]);
+    for (const connectionName of connectionNames) {
+      const current = active.tools.filter(
+        (tool) => tool.connectionName === connectionName
+      );
+      const stored = storedRemote.filter(
+        (tool) => tool.connectionName === connectionName
+      );
+      remote.push(
+        ...(active.driftConnections.has(connectionName) ||
+        active.unavailableConnections.has(connectionName)
+          ? stored
+          : current)
+      );
+    }
+    return [...local, ...remote];
+  }
+
   private _threadsRoot(projectId: string): string {
     return path.join(this._dataRoot, projectId, "threads");
   }
@@ -785,6 +1016,9 @@ export class ExternalAgentProjectManager {
     if (!state) return;
     if (state.reloadTimer) clearTimeout(state.reloadTimer);
     state.watcher?.close();
+    for (const active of state.connectionSessions.values()) {
+      void active.session.close();
+    }
     this._loaded.delete(projectId);
   }
 
@@ -804,7 +1038,79 @@ function _projectTools(
     name: tool.name,
     description: tool.description,
     parameters: tool.parameters,
+    sourcePath: tool.sourcePath ?? `tools/${tool.name}.ts`,
   }));
+}
+
+function _remoteProjectTools(
+  projectId: string,
+  snapshot: AgentProjectSnapshot,
+  tools: ProjectMcpSession["tools"]
+): ProjectTool[] {
+  return tools.map((tool) => ({
+    type: "project",
+    projectId,
+    snapshot: snapshot.fingerprint,
+    name: tool.name,
+    description: tool.description,
+    parameters: tool.parameters,
+    sourcePath: tool.sourcePath,
+    connectionName: tool.connectionName,
+    remoteToolName: tool.remoteToolName,
+    schemaFingerprint: tool.schemaFingerprint,
+  }));
+}
+
+function _schemaDriftConnections(
+  stored: readonly ProjectTool[],
+  current: readonly ProjectTool[],
+  readyConnections: ReadonlySet<string>,
+  currentConnections: ReadonlySet<string>,
+  threadMatchesSnapshot: boolean
+): Set<string> {
+  const drift = new Set<string>();
+  const storedConnections = new Set<string>();
+  for (const tool of stored) {
+    if (tool.connectionName) storedConnections.add(tool.connectionName);
+  }
+  const connectionNames = new Set([
+    ...storedConnections,
+    ...currentConnections,
+  ]);
+  for (const connectionName of connectionNames) {
+    if (!currentConnections.has(connectionName)) {
+      drift.add(connectionName);
+      continue;
+    }
+    if (!readyConnections.has(connectionName)) continue;
+    const previous = stored
+      .filter((tool) => tool.connectionName === connectionName)
+      .map((tool) => `${tool.name}:${tool.schemaFingerprint ?? ""}`)
+      .sort();
+    const next = current
+      .filter((tool) => tool.connectionName === connectionName)
+      .map((tool) => `${tool.name}:${tool.schemaFingerprint ?? ""}`)
+      .sort();
+    if (previous.length === 0 && threadMatchesSnapshot) continue;
+    if (JSON.stringify(previous) !== JSON.stringify(next)) {
+      drift.add(connectionName);
+    }
+  }
+  return drift;
+}
+
+function _connectionStatusWithDrift(
+  status: ProjectMcpConnectionStatus,
+  driftConnections: ReadonlySet<string>
+) {
+  if (!driftConnections.has(status.connectionName)) return status;
+  return {
+    connectionName: status.connectionName,
+    description: status.description,
+    sourcePath: status.sourcePath,
+    state: "drift" as const,
+    message: "Remote tool schemas changed. Sync from Agent before running.",
+  };
 }
 
 async function _discoverAgentProjects(root: string): Promise<string[]> {
@@ -840,23 +1146,6 @@ async function _discoverAgentProjects(root: string): Promise<string[]> {
     }
   }
   return projects;
-}
-
-function _reconcileThread(
-  input: Thread,
-  project: ExternalAgentProjectView
-): Thread {
-  const thread = ensureThreadVariableState(normalizeThread(input));
-  const enabledToolNames = new Set(
-    (thread.context?.tools ?? [])
-      .filter((tool) => tool.type === "project")
-      .map((tool) => tool.name)
-  );
-  const tools = project.tools.filter((tool) => enabledToolNames.has(tool.name));
-  return {
-    ...thread,
-    context: { ...thread.context, tools },
-  };
 }
 
 async function _listSourceFiles(root: string, prefix = ""): Promise<string[]> {

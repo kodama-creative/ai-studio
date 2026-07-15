@@ -65,6 +65,7 @@ function _ToolCallListItem({
   const [previewOpen, setPreviewOpen] = useState(false);
   const outputText = useMemo(() => getToolCallOutputText(toolCall), [toolCall]);
   const isError = toolCall.output?.isError ?? false;
+  const outcomeUnknown = Boolean(toolCall.attempt && !toolCall.output && !calling);
   const handleOutputChange = useCallback(
     (value: string) => {
       if (readonly) {
@@ -149,7 +150,7 @@ function _ToolCallListItem({
                 className="invisible shrink-0 group-hover/message:visible"
                 size="icon"
                 variant="secondary"
-                disabled={readonly || calling}
+                disabled={readonly || calling || outcomeUnknown}
                 onClick={() => void handleCall()}
               >
                 {calling ? (
@@ -167,7 +168,7 @@ function _ToolCallListItem({
         <div className="text-muted-foreground flex min-w-0 items-center justify-between gap-2 text-xs">
           <Marker role="status" className="gap-1">
             <MarkerContent className="flex items-center text-xs">
-              Response
+              {outcomeUnknown ? "Outcome unknown" : "Response"}
               <Tooltip content="Preview response">
                 <Button
                   className="invisible shrink-0 group-hover/message:visible"

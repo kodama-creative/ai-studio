@@ -4,6 +4,19 @@ export {
   type ResolvedAgentProjectManifest,
 } from "./discover/manifest";
 export {
+  flattenMcpToolResult,
+  RemoteMcpClient,
+  type RemoteMcpCallResult,
+  type RemoteMcpClientOptions,
+} from "./connections/remote-mcp-client";
+export {
+  ProjectMcpSession,
+  type ProjectMcpConnectionStatus,
+  type ProjectMcpConnector,
+  type ProjectMcpRemoteClient,
+  type ProjectMcpToolDescriptor,
+} from "./connections/project-mcp-session";
+export {
   discoverAgentProject,
   type AgentProjectSourceRef,
   type DiscoveredAgentProject,
@@ -12,7 +25,11 @@ export {
   LocalAgentRuntime,
   type LocalAgentRuntimeOptions,
 } from "./local-agent-runtime";
-export { type AgentProjectSnapshot } from "../runtime/agent/agent-project-snapshot";
+export {
+  type AgentProjectSnapshot,
+  type CompiledMcpConnection,
+  type CompiledProjectTool,
+} from "../runtime/agent/agent-project-snapshot";
 export {
   AgentRuntime,
   type AgentRuntimeOptions,

@@ -48,6 +48,18 @@ export const ToolCall = Type.Object({
   input: ToolCallInput,
 
   /**
+   * Durable marker written before a remote project MCP call starts. If the
+   * process exits before an output is saved, the call's outcome is unknown and
+   * must never be retried automatically.
+   */
+  attempt: Type.Optional(
+    Type.Object({
+      status: Type.Literal("started"),
+      at: Type.String(),
+    })
+  ),
+
+  /**
    * The output of the tool call.
    */
   output: Type.Optional(ToolCallOutput),

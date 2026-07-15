@@ -20,6 +20,7 @@ function _ToolListItem({
   readonly,
   onEdit,
   onRemove,
+  projectSourceNavigable = false,
 }: {
   tool: Tool;
   readonly?: boolean;
@@ -27,6 +28,7 @@ function _ToolListItem({
   onEdit: (tool: Tool) => void;
 
   onRemove: (tool: Tool) => void;
+  projectSourceNavigable?: boolean;
 }) {
   const keys = useMemo(
     () =>
@@ -54,7 +56,8 @@ function _ToolListItem({
         : tool.type === "project"
           ? PackageIcon
           : FunctionSquareIcon;
-  const editDisabled = readonly || tool.type === "project";
+  const editDisabled =
+    tool.type === "project" ? !projectSourceNavigable : readonly;
 
   return (
     <div className="group/tool bg-secondary hover:text-accent-foreground inline-flex h-6 shrink-0 items-center rounded-md text-xs/relaxed transition-colors">
@@ -91,7 +94,7 @@ function _ToolListItem({
             className="focus-visible:ring-ring/30 text-muted-foreground group-hover/tool:text-foreground inline-flex h-full items-center gap-1 rounded-l-md pl-2 outline-none focus-visible:ring-2 disabled:pointer-events-none disabled:opacity-50"
             aria-label={
               tool.type === "project"
-                ? `${tool.name} project tool`
+                ? `Open source for ${tool.name} project tool`
                 : tool.type === "function"
                   ? `Edit ${tool.name} tool`
                   : `Manage ${tool.name} ${tool.type === "mcp" ? "MCP" : "built-in"} tool`

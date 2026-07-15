@@ -20,6 +20,7 @@ describe("discoverAgentProject", () => {
   test("discovers authored sources without executing their modules", async () => {
     const root = _root();
     await mkdir(path.join(root, "tools"), { recursive: true });
+    await mkdir(path.join(root, "connections"), { recursive: true });
     await writeFile(
       path.join(root, "agent.ts"),
       "globalThis.__LLM_SPACE_DISCOVERY_EXECUTED__ = true; export default {};\n"
@@ -27,6 +28,10 @@ describe("discoverAgentProject", () => {
     await writeFile(path.join(root, "instructions.md"), "Be concise.\n");
     await writeFile(
       path.join(root, "tools", "danger.ts"),
+      "globalThis.__LLM_SPACE_DISCOVERY_EXECUTED__ = true; export default {};\n"
+    );
+    await writeFile(
+      path.join(root, "connections", "project.ts"),
       "globalThis.__LLM_SPACE_DISCOVERY_EXECUTED__ = true; export default {};\n"
     );
 
@@ -42,6 +47,8 @@ describe("discoverAgentProject", () => {
     expect(discovered.tools.map((tool) => tool.logicalPath)).toEqual([
       "tools/danger.ts",
     ]);
+    expect(discovered.connections.map((connection) => connection.logicalPath))
+      .toEqual(["connections/project.ts"]);
     expect(discovered.diagnostics).toEqual([]);
   });
 

@@ -151,6 +151,8 @@ export interface ThreadState {
     text: string,
     isError?: boolean
   ): void;
+  markToolCallAttempt(messageId: string, toolCallId: string, at: string): void;
+  continueAfterProjectToolResult(messageId: string): Promise<boolean>;
   addTool(tool: Tool): boolean;
   updateTool(name: string, tool: Tool): boolean;
   removeTool(name: string): void;
@@ -773,6 +775,47 @@ export function createThreadStore(
           patchContext({
             tools: get().thread.context?.tools?.filter((t) => t.name !== name),
           });
+        },
+        markToolCallAttempt(messageId, toolCallId, at) {
+          const context = get().thread.context ?? {};
+          const messages = context.messages ?? [];
+          let changed = false;
+          const nextMessages = messages.map((message) => {
+            if (message.id !== messageId || message.role !== "assistant") {
+              return message;
+            }
+            let messageChanged = false;
+            const toolCalls = message.toolCalls?.map((toolCall) => {
+              if (toolCall.id !== toolCallId) return toolCall;
+              changed = true;
+              messageChanged = true;
+              return {
+                ...toolCall,
+                attempt: { status: "started" as const, at },
+              };
+            });
+            return messageChanged ? { ...message, toolCalls } : message;
+          });
+          if (changed) patchContext({ messages: nextMessages });
+        },
+        async continueAfterProjectToolResult(messageId) {
+          if (
+            !options.runtimeOwnsToolLoop ||
+            !(options.getReactLoop?.() ?? false) ||
+            get().status === "running"
+          ) {
+            return false;
+          }
+          const message = getMessage(messageId);
+          if (
+            message?.role !== "assistant" ||
+            !message.toolCalls?.length ||
+            message.toolCalls.some((toolCall) => !toolCall.output)
+          ) {
+            return false;
+          }
+          await get().run(messageId);
+          return true;
         },
         updateToolCallOutputTextContent(messageId, toolCallId, text, isError) {
           const context = get().thread.context ?? {};
@@ -1436,6 +1479,8 @@ const selectActions = (s: ThreadState) => ({
   addMessageImageContent: s.addMessageImageContent,
   removeMessageImageContent: s.removeMessageImageContent,
   updateToolCallOutputText: s.updateToolCallOutputTextContent,
+  markToolCallAttempt: s.markToolCallAttempt,
+  continueAfterProjectToolResult: s.continueAfterProjectToolResult,
   addTool: s.addTool,
   updateTool: s.updateTool,
   removeTool: s.removeTool,

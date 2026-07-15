@@ -1,16 +1,31 @@
-import type { Thread, ThreadAgentRuntimeProvenance } from "@llm-space/core";
+import type {
+  ProjectTool,
+  Thread,
+  ThreadAgentRuntimeProvenance,
+} from "@llm-space/core";
 import { agentModelMatchesDefinition } from "@llm-space/runtime";
 import {
   AlertTriangleIcon,
   BotIcon,
+  CableIcon,
   RefreshCwIcon,
-  WrenchIcon,
   XIcon,
 } from "lucide-react";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { toast } from "sonner";
 
 import { createRpcTransport, externalAgentProjects } from "@/client";
+import {
+  executeTool,
+  type ToolExecutor,
+} from "@/client/tool-execution";
 import { useCommands, useRegisterCommands } from "@/commands";
 import {
   CodeEditor,
@@ -31,11 +46,16 @@ import {
   getExternalAgentProjectRunBlockReason,
   hasPendingExternalAgentProjectToolResult,
   type ExternalAgentProjectRunBlockReason,
+  type ExternalAgentProjectConnectionActivation,
   type ExternalAgentProjectThreadRecord,
   type ExternalAgentProjectView,
 } from "@/shared/external-agent-project";
 
 import { registerTabCloseGuard, setTabDirty } from "./tab-close-guards";
+import {
+  consumeExternalProjectSource,
+  subscribeExternalProjectSource,
+} from "./external-project-source-navigation";
 
 function _ExternalProjectTabPane({
   tabId,
@@ -86,6 +106,8 @@ function _ProjectThreadPane({
   const [record, setRecord] = useState<ExternalAgentProjectThreadRecord | null>(
     null
   );
+  const [connectionActivation, setConnectionActivation] =
+    useState<ExternalAgentProjectConnectionActivation | null>(null);
   const [externalUpdate, setExternalUpdate] = useState<{
     revision: number;
     update: (thread: Thread) => Thread;
@@ -121,6 +143,11 @@ function _ProjectThreadPane({
       }),
     [projectId, threadId]
   );
+  const projectToolExecutor: ToolExecutor = useCallback(
+    (tool, args, context) =>
+      executeTool(tool, args, { ...context, threadId }),
+    [threadId]
+  );
 
   const flush = useCallback(async () => {
     if (writeTimer.current) clearTimeout(writeTimer.current);
@@ -135,10 +162,19 @@ function _ProjectThreadPane({
   const load = useCallback(async () => {
     await flush();
     try {
-      const [nextProject, nextRecord] = await Promise.all([
-        externalAgentProjects.inspect(projectId),
-        externalAgentProjects.readThread(projectId, threadId),
-      ]);
+      const nextProject = await externalAgentProjects.inspect(projectId);
+      const nextActivation =
+        nextProject.status === "ready"
+          ? await externalAgentProjects.activateConnections(
+              projectId,
+              threadId
+            )
+          : null;
+      const nextRecord = await externalAgentProjects.readThread(
+        projectId,
+        threadId
+      );
+      setConnectionActivation(nextActivation);
       setProject(nextProject);
       if (
         recordRef.current &&
@@ -165,64 +201,26 @@ function _ProjectThreadPane({
   }, [flush, projectId, threadId]);
 
   useEffect(() => {
+    if (!active) return;
     void load();
     return () => {
       void flush();
+      void externalAgentProjects.deactivateConnections(projectId, threadId);
     };
-  }, [load, flush, refreshNonce]);
+  }, [active, load, flush, projectId, refreshNonce, threadId]);
 
   const refreshProject = useCallback(
     async (runEnded = false) => {
-      const nextProject = await externalAgentProjects.inspect(projectId);
+      if (!active) return;
+      if (running && !runEnded) return;
       const current = pending.current ?? recordRef.current;
-      if (!current) return;
-      const enabledToolNames = new Set(
-        (current.thread.context?.tools ?? [])
-          .filter((tool) => tool.type === "project")
-          .map((tool) => tool.name)
-      );
-      const tools = nextProject.tools.filter((tool) =>
-        enabledToolNames.has(tool.name)
-      );
-      const toolsChanged =
-        JSON.stringify(tools) !==
-        JSON.stringify(current.thread.context?.tools ?? []);
-      const title = nextProject.threads.find(
-        (thread) => thread.id === threadId
-      )?.title;
-      const awaitingToolResult =
-        hasPendingExternalAgentProjectToolResult(current);
-      if ((running && !runEnded) || awaitingToolResult) {
-        if (title && title !== current.thread.title) {
-          setRecord({
-            ...current,
-            thread: { ...current.thread, title },
-          });
-        }
-        if (!running || runEnded) setProject(nextProject);
+      if (current && hasPendingExternalAgentProjectToolResult(current)) {
+        setProject(await externalAgentProjects.inspect(projectId));
         return;
       }
-      setProject(nextProject);
-      if (!toolsChanged && (!title || title === current.thread.title)) return;
-      setRecord({
-        ...current,
-        thread: {
-          ...current.thread,
-          ...(title ? { title } : {}),
-          context: { ...current.thread.context, tools },
-        },
-      });
-      if (toolsChanged) {
-        setExternalUpdate((update) => ({
-          revision: (update?.revision ?? 0) + 1,
-          update: (thread) => ({
-            ...thread,
-            context: { ...thread.context, tools },
-          }),
-        }));
-      }
+      await load();
     },
-    [projectId, running, threadId]
+    [active, load, projectId, running]
   );
 
   useEffect(() => {
@@ -287,6 +285,11 @@ function _ProjectThreadPane({
       projectId,
       threadId
     );
+    const nextActivation = await externalAgentProjects.activateConnections(
+      projectId,
+      threadId
+    );
+    setConnectionActivation(nextActivation);
     setRecord(next);
     setExternalUpdate((current) => ({
       revision: (current?.revision ?? 0) + 1,
@@ -296,33 +299,12 @@ function _ProjectThreadPane({
         context: {
           ...thread.context,
           systemPrompt: next.thread.context?.systemPrompt,
+          tools: next.thread.context?.tools,
         },
       }),
     }));
   }, [flush, projectId, threadId]);
 
-  const enableAllTools = useCallback(async () => {
-    if (!project || !recordRef.current) return;
-    const next = {
-      ...recordRef.current,
-      thread: {
-        ...recordRef.current.thread,
-        context: {
-          ...recordRef.current.thread.context,
-          tools: project.tools,
-        },
-      },
-    };
-    await externalAgentProjects.writeThread(projectId, threadId, next);
-    setRecord(next);
-    setExternalUpdate((current) => ({
-      revision: (current?.revision ?? 0) + 1,
-      update: (thread) => ({
-        ...thread,
-        context: { ...thread.context, tools: project.tools },
-      }),
-    }));
-  }, [project, projectId, threadId]);
   useRegisterCommands(
     {
       syncExternalAgentProjectThreadFromAgent: ({
@@ -337,24 +319,27 @@ function _ProjectThreadPane({
           return syncFromAgent();
         }
       },
-      enableExternalAgentProjectTools: ({
-        projectId: commandProjectId,
-        threadId: commandThreadId,
-      }) => {
-        if (
-          commandProjectId === projectId &&
-          commandThreadId === threadId &&
-          !running
-        ) {
-          return enableAllTools();
-        }
-      },
     },
     active
   );
   const loadPromptSkills = useCallback(
     () => Promise.resolve(project?.skills ?? []),
     [project?.skills]
+  );
+  const openProjectToolSource = useCallback(
+    (tool: ProjectTool) => {
+      if (!project || !tool.sourcePath) return;
+      executeCommand({
+        type: "openExternalAgentProjectSource",
+        args: {
+          projectId,
+          projectPath: project.path,
+          projectName: project.name,
+          sourcePath: tool.sourcePath,
+        },
+      });
+    },
+    [executeCommand, project, projectId]
   );
   const prepareRunSnapshot = useCallback(
     (thread: Thread): Thread => {
@@ -486,15 +471,20 @@ function _ProjectThreadPane({
   const agentOutOfSync =
     record.promptFingerprint !== project.promptFingerprint ||
     record.definitionFingerprint !== project.definitionFingerprint ||
-    locallyChanged;
+    locallyChanged ||
+    connectionActivation?.hasSchemaDrift === true;
   const replacedFields = [
     ...(promptLocallyChanged ? ["instructions"] : []),
     ...(modelLocallyChanged ? ["model"] : []),
     ...(reasoningLocallyChanged ? ["reasoning"] : []),
   ];
-  const enabledProjectTools = (record.thread.context?.tools ?? []).filter(
-    (tool) => tool.type === "project"
-  ).length;
+  const unavailableConnections =
+    connectionActivation?.statuses.filter(
+      (status) => status.state === "unavailable"
+    ) ?? [];
+  const driftedConnections =
+    connectionActivation?.statuses.filter((status) => status.state === "drift") ??
+    [];
   return (
     <>
       <ThreadPlayground
@@ -503,9 +493,16 @@ function _ProjectThreadPane({
         title={record.thread.title ?? "untitled"}
         initialValue={record.thread}
         externalUpdate={externalUpdate}
-        runDisabled={runBlockReason !== null || !savedModelAvailable}
+        runDisabled={
+          runBlockReason !== null ||
+          !savedModelAvailable ||
+          connectionActivation?.hasSchemaDrift === true
+        }
         active={active}
         transport={runtimeTransport}
+        toolExecutor={projectToolExecutor}
+        toolsReadonly
+        onOpenProjectTool={openProjectToolSource}
         runtimeOwnsToolLoop
         preserveSavedModel
         prepareRunSnapshot={prepareRunSnapshot}
@@ -548,20 +545,19 @@ function _ProjectThreadPane({
                 <RefreshCwIcon className="size-3" /> Sync from Agent
               </Button>
             ) : null}
-            {enabledProjectTools < project.tools.length ? (
+            {driftedConnections.length > 0 ? (
+              <span className="text-destructive flex shrink-0 items-center gap-1">
+                <CableIcon className="size-3" /> Remote actions changed
+              </span>
+            ) : unavailableConnections.length > 0 ? (
               <Button
                 className="h-5 px-1.5 text-[10px]"
                 size="sm"
                 variant="outline"
                 disabled={running || project.status !== "ready"}
-                onClick={() =>
-                  executeCommand({
-                    type: "enableExternalAgentProjectTools",
-                    args: { projectId, threadId },
-                  })
-                }
+                onClick={() => void load()}
               >
-                <WrenchIcon className="size-3" /> Enable all project tools
+                <RefreshCwIcon className="size-3" /> Retry connections
               </Button>
             ) : null}
           </div>
@@ -674,6 +670,16 @@ function _ProjectBuildPane({
       }
     },
     [projectId, updateBuffer]
+  );
+
+  useEffect(
+    () =>
+      subscribeExternalProjectSource(projectId, (path) => {
+        consumeExternalProjectSource(projectId, path);
+        initializedRef.current = true;
+        void openSource(path);
+      }),
+    [openSource, projectId]
   );
 
   const loadProject = useCallback(async () => {

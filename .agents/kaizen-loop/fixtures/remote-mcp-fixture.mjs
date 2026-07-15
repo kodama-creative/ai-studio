@@ -23,7 +23,9 @@ function _createServer() {
   server.registerTool(
     "remote_echo",
     {
-      description: "Echoes a fixture response for remote MCP diagnostics.",
+      description:
+        "Echoes a fixture response for remote MCP diagnostics." +
+        (process.env.DESCRIPTION_SUFFIX ?? ""),
       inputSchema: {},
     },
     async () => ({

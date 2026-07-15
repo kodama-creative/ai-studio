@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { afterEach, describe, expect, test } from "bun:test";
+import type { ProjectTool } from "@llm-space/core";
+import type { ProjectMcpConnector } from "@llm-space/runtime/node";
 
 import { ExternalAgentProjectManager } from "./external-agent-project-manager";
 
@@ -16,7 +18,7 @@ afterEach(async () => {
   );
 });
 
-async function _fixture() {
+async function _fixture(options: { connector?: ProjectMcpConnector } = {}) {
   const root = path.join(tmpdir(), `llm-space-external-${crypto.randomUUID()}`);
   const home = path.join(root, "home");
   const workspace = path.join(home, "workspace");
@@ -42,13 +44,14 @@ async function _fixture() {
   await writeFile(
     path.join(project, "agent", "tools", "echo.ts"),
     `import { writeFileSync } from "node:fs";
+import { defineTool } from "@llm-space/runtime/tools";
+import { Type } from "typebox";
 writeFileSync(${JSON.stringify(marker)}, "loaded");
-export default {
-  name: "echo",
+export default defineTool({
   description: "Echo text",
-  parameters: { type: "object", properties: { text: { type: "string" } }, required: ["text"] },
-  async execute(_id, { text }) { return { content: [{ type: "text", text }], details: {} }; }
-};
+  inputSchema: Type.Object({ text: Type.String() }),
+  execute({ text }) { return { text }; }
+});
 `,
     "utf8"
   );
@@ -56,6 +59,7 @@ export default {
   const manager = new ExternalAgentProjectManager({
     homePath: home,
     workspaceRoot: workspace,
+    projectMcpConnector: options.connector,
   });
   managers.push(manager);
   return { home, manager, marker, project, workspace };
@@ -97,7 +101,7 @@ describe("ExternalAgentProjectManager", () => {
         name: tool.name,
         arguments: { text: "hello" },
       })
-    ).toEqual({ contentText: "hello", isError: false });
+    ).toEqual({ contentText: '{"text":"hello"}', isError: false });
 
     for (let index = 0; index < 12; index += 1) {
       await writeFile(
@@ -114,7 +118,7 @@ describe("ExternalAgentProjectManager", () => {
         name: tool.name,
         arguments: { text: "frozen" },
       })
-    ).toEqual({ contentText: "frozen", isError: false });
+    ).toEqual({ contentText: '{"text":"frozen"}', isError: false });
 
     expect(await Bun.file(path.join(project, ".llm-space")).exists()).toBe(
       false
@@ -333,5 +337,158 @@ describe("ExternalAgentProjectManager", () => {
         path.join(home, "settings", "external-agent-projects.json")
       ).exists()
     ).toBe(false);
+  });
+
+  test("activates project MCP per Thread without persisting connection secrets", async () => {
+    let schemaVersion = 1;
+    let closeCount = 0;
+    const connector: ProjectMcpConnector = async () => ({
+      async listTools() {
+        return [
+          {
+            name: "forecast",
+            description: "Read a forecast",
+            inputSchema: {
+              type: "object",
+              properties: { version: { const: schemaVersion } },
+            },
+          },
+        ];
+      },
+      async callTool() {
+        return { contentText: "sunny", isError: false };
+      },
+      async close() {
+        closeCount += 1;
+      },
+    });
+    const { home, manager, project } = await _fixture({ connector });
+    const callbackMarker = path.join(path.dirname(home), "auth-resolved.txt");
+    await mkdir(path.join(project, "agent", "connections"), {
+      recursive: true,
+    });
+    await writeFile(
+      path.join(project, "agent", "connections", "weather.ts"),
+      `import { writeFileSync } from "node:fs";
+import { defineMcpClientConnection } from "@llm-space/runtime/connections";
+export default defineMcpClientConnection({
+  url: "https://secret-host.example.test/mcp",
+  description: "Weather service",
+  auth() {
+    writeFileSync(${JSON.stringify(callbackMarker)}, "resolved");
+    return { token: "secret-token" };
+  },
+  tools: { allow: ["forecast"] }
+});`,
+      "utf8"
+    );
+
+    const opened = await manager.trustAndOpen(project);
+    expect(await Bun.file(callbackMarker).exists()).toBe(false);
+    const threadId = opened.threads[0]!.id;
+    const activation = await manager.activateConnections(opened.id, threadId);
+
+    expect(await Bun.file(callbackMarker).exists()).toBe(true);
+    expect(activation.hasSchemaDrift).toBe(false);
+    expect(activation.tools.map((tool) => tool.name)).toEqual([
+      "weather__forecast",
+    ]);
+    const record = await manager.readThread(opened.id, threadId);
+    expect(record.thread.context?.tools?.map((tool) => tool.name)).toContain(
+      "weather__forecast"
+    );
+    const callRecord = {
+      ...record,
+      thread: {
+        ...record.thread,
+        context: {
+          ...record.thread.context,
+          messages: [
+            {
+              id: "assistant-one",
+              role: "assistant" as const,
+              content: [],
+              toolCalls: [
+                {
+                  id: "call-one",
+                  input: { name: "weather__forecast", arguments: {} },
+                },
+              ],
+            },
+          ],
+        },
+      },
+    };
+    await manager.writeThread(opened.id, threadId, callRecord);
+    expect(
+      await manager.callTool({
+        projectId: opened.id,
+        threadId,
+        snapshot: opened.snapshot,
+        name: "weather__forecast",
+        arguments: {},
+        messageId: "assistant-one",
+        toolCallId: "call-one",
+        attemptAt: "2026-07-15T00:00:00.000Z",
+      })
+    ).toEqual({ contentText: "sunny", isError: false });
+    const attempted = await manager.readThread(opened.id, threadId);
+    const attemptedMessage = attempted.thread.context?.messages?.find(
+      (message) => message.role === "assistant"
+    );
+    expect(
+      attemptedMessage?.role === "assistant"
+        ? attemptedMessage.toolCalls?.[0]?.attempt
+        : undefined
+    ).toEqual({ status: "started", at: "2026-07-15T00:00:00.000Z" });
+
+    const oldFingerprint = record.thread.context?.tools?.find(
+      (tool): tool is ProjectTool =>
+        tool.type === "project" && tool.name === "weather__forecast"
+    )?.schemaFingerprint;
+    schemaVersion = 2;
+    const drifted = await manager.activateConnections(opened.id, threadId);
+    expect(drifted.hasSchemaDrift).toBe(true);
+    expect(drifted.statuses[0]?.state).toBe("drift");
+    expect(
+      (await manager.readThread(opened.id, threadId)).thread.context?.tools?.find(
+        (tool): tool is ProjectTool =>
+          tool.type === "project" && tool.name === "weather__forecast"
+      )?.schemaFingerprint
+    ).toBe(oldFingerprint);
+
+    const synced = await manager.syncThreadFromAgent(opened.id, threadId);
+    expect(
+      synced.thread.context?.tools?.find(
+        (tool): tool is ProjectTool =>
+          tool.type === "project" && tool.name === "weather__forecast"
+      )?.schemaFingerprint
+    ).not.toBe(oldFingerprint);
+
+    await rm(path.join(project, "agent", "connections", "weather.ts"));
+    await manager.refresh(opened.id);
+    const removed = await manager.activateConnections(opened.id, threadId);
+    expect(removed.hasSchemaDrift).toBe(true);
+    expect(removed.statuses).toEqual([
+      expect.objectContaining({ connectionName: "weather", state: "drift" }),
+    ]);
+    expect(
+      (await manager.readThread(opened.id, threadId)).thread.context?.tools?.map(
+        (tool) => tool.name
+      )
+    ).toContain("weather__forecast");
+    expect(
+      (
+        await manager.syncThreadFromAgent(opened.id, threadId)
+      ).thread.context?.tools?.map((tool) => tool.name)
+    ).not.toContain("weather__forecast");
+
+    const persisted = await Bun.file(
+      path.join(home, "projects", opened.id, "threads", `${threadId}.json`)
+    ).text();
+    expect(persisted).not.toContain("secret-host");
+    expect(persisted).not.toContain("secret-token");
+    await manager.deactivateConnections(opened.id, threadId);
+    expect(closeCount).toBe(2);
   });
 });

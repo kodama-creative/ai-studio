@@ -319,6 +319,7 @@ function _project(): AgentProjectSnapshot {
     },
     instructions: "Test agent.",
     tools: [],
+    connections: [],
     resources: { skills: [] },
     diagnostics: [],
     fingerprint: "snapshot-one",

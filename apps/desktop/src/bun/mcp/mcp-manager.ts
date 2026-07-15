@@ -5,23 +5,21 @@ import { uuid } from "@llm-space/core";
 import { getSettingsDir } from "@llm-space/core/server";
 import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import {
-  SSEClientTransport,
-  SseError,
-} from "@modelcontextprotocol/sdk/client/sse.js";
+import { SseError } from "@modelcontextprotocol/sdk/client/sse.js";
 import {
   getDefaultEnvironment,
   StdioClientTransport,
 } from "@modelcontextprotocol/sdk/client/stdio.js";
-import {
-  StreamableHTTPClientTransport,
-  StreamableHTTPError,
-} from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { StreamableHTTPError } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import {
   CompatibilityCallToolResultSchema,
   type CallToolResult,
   type Tool as SdkMcpTool,
 } from "@modelcontextprotocol/sdk/types.js";
+import {
+  flattenMcpToolResult,
+  RemoteMcpClient,
+} from "@llm-space/runtime/node";
 import { z } from "zod";
 
 import {
@@ -47,7 +45,6 @@ import {
 const CONNECT_TIMEOUT_MS = 10_000;
 const LIST_TIMEOUT_MS = 10_000;
 const CALL_TIMEOUT_MS = 5 * 60_000;
-const MAX_OUTPUT_CHARS = 20_000;
 const ENV_REFERENCE_PATTERN =
   /\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))/g;
 
@@ -139,7 +136,8 @@ const serversConfigSchema = z.object({
 });
 
 interface McpClientEntry {
-  client: Client;
+  client: Client | RemoteMcpClient;
+  kind: "remote" | "stdio";
   tools: SdkMcpTool[] | null;
 }
 
@@ -259,7 +257,7 @@ export class McpManager {
         );
       }
       const entry = await this._connect(server, diagnostic);
-      const tools = await this._fetchAllTools(entry.client, server, diagnostic);
+      const tools = await this._fetchAllTools(entry, server, diagnostic);
       entry.tools = tools;
       const toolViews = this._toToolViews(server, tools);
       const result = diagnostic
@@ -324,12 +322,15 @@ export class McpManager {
     const server = this._getServer(serverId);
     try {
       const entry = await this._connect(server);
-      const result = await entry.client.callTool(
+      if (entry.kind === "remote") {
+        return (entry.client as RemoteMcpClient).callTool(toolName, args);
+      }
+      const result = await (entry.client as Client).callTool(
         { name: toolName, arguments: args },
         CompatibilityCallToolResultSchema,
         { timeout: CALL_TIMEOUT_MS }
       );
-      return _flattenToolResult(result as CallToolResult);
+      return flattenMcpToolResult(result as CallToolResult);
     } catch (error) {
       const message = _safeErrorMessage(error, server);
       this._status.set(serverId, {
@@ -396,6 +397,9 @@ export class McpManager {
     server: McpServerConfig,
     diagnostic?: McpDiagnosticDraft
   ): Promise<McpClientEntry> {
+    if (_isRemoteTransport(server.transport)) {
+      return this._openRemoteConnection(server, diagnostic);
+    }
     const client = new Client({
       name: "llm-space",
       version: "1.0.0",
@@ -422,9 +426,59 @@ export class McpManager {
       }
       throw error;
     }
-    const entry: McpClientEntry = { client, tools: null };
+    const entry: McpClientEntry = { client, kind: "stdio", tools: null };
     this._clients.set(server.id, entry);
     return entry;
+  }
+
+  private async _openRemoteConnection(
+    server: McpServerConfig,
+    diagnostic?: McpDiagnosticDraft
+  ): Promise<McpClientEntry> {
+    let endpoint: URL;
+    try {
+      endpoint = new URL(server.url ?? "");
+    } catch (error) {
+      if (diagnostic) _markInvalidConfigFailure(diagnostic, error, server);
+      throw error;
+    }
+    let headers: Record<string, string>;
+    try {
+      headers = this._resolveValueMap(server.headers ?? {});
+    } catch (error) {
+      if (diagnostic) _markSecretFailure(diagnostic, error, server);
+      throw error;
+    }
+    if (diagnostic) {
+      _passDiagnosticStep(
+        diagnostic,
+        "secrets",
+        Object.keys(headers).length > 0
+          ? `${Object.keys(headers).length} header value${Object.keys(headers).length === 1 ? "" : "s"} resolved.`
+          : "No remote headers configured."
+      );
+    }
+    try {
+      const client = await RemoteMcpClient.connect({
+        transport: server.transport === "sse" ? "sse" : "streamableHttp",
+        url: endpoint.href,
+        headers,
+      });
+      if (diagnostic) {
+        _passDiagnosticStep(diagnostic, "transport", "Connection opened.");
+        _passDiagnosticStep(
+          diagnostic,
+          "initialize",
+          "MCP session initialized."
+        );
+      }
+      const entry: McpClientEntry = { client, kind: "remote", tools: null };
+      this._clients.set(server.id, entry);
+      return entry;
+    } catch (error) {
+      if (diagnostic) _markConnectFailure(diagnostic, error, server);
+      throw error;
+    }
   }
 
   private _createTransport(
@@ -460,73 +514,29 @@ export class McpManager {
       });
     }
 
-    let url: URL;
-    try {
-      url = new URL(server.url ?? "");
-    } catch (error) {
-      if (diagnostic) {
-        _markInvalidConfigFailure(diagnostic, error, server);
-      }
-      throw error;
-    }
-
-    let headers: Record<string, string>;
-    try {
-      headers = this._resolveValueMap(server.headers ?? {});
-    } catch (error) {
-      if (diagnostic) {
-        _markSecretFailure(diagnostic, error, server);
-      }
-      throw error;
-    }
-    if (diagnostic) {
-      _passDiagnosticStep(
-        diagnostic,
-        "secrets",
-        Object.keys(headers).length > 0
-          ? `${Object.keys(headers).length} header value${Object.keys(headers).length === 1 ? "" : "s"} resolved.`
-          : "No remote headers configured."
-      );
-    }
-    const requestInit =
-      Object.keys(headers).length > 0 ? { headers } : undefined;
-
-    if (server.transport === "streamableHttp") {
-      return new StreamableHTTPClientTransport(url, { requestInit });
-    }
-
-    const fetchWithHeaders =
-      Object.keys(headers).length > 0
-        ? (input: string | URL, init: RequestInit = {}) =>
-            fetch(input, {
-              ...init,
-              headers: { ...headers, ..._headersToRecord(init.headers) },
-            })
-        : undefined;
-    return new SSEClientTransport(url, {
-      requestInit,
-      eventSourceInit: fetchWithHeaders ? { fetch: fetchWithHeaders } : {},
-    });
+    throw new Error("Remote transports are opened by RemoteMcpClient.");
   }
 
   private async _fetchAllTools(
-    client: Client,
+    entry: McpClientEntry,
     server: McpServerConfig,
     diagnostic?: McpDiagnosticDraft
   ): Promise<SdkMcpTool[]> {
     const tools: SdkMcpTool[] = [];
-    let cursor: string | undefined;
     try {
-      do {
-        const response = await client.listTools(
-          cursor ? { cursor } : undefined,
-          {
-            timeout: LIST_TIMEOUT_MS,
-          }
-        );
-        tools.push(...response.tools);
-        cursor = response.nextCursor;
-      } while (cursor);
+      if (entry.kind === "remote") {
+        tools.push(...(await (entry.client as RemoteMcpClient).listTools()));
+      } else {
+        let cursor: string | undefined;
+        do {
+          const response = await (entry.client as Client).listTools(
+            cursor ? { cursor } : undefined,
+            { timeout: LIST_TIMEOUT_MS }
+          );
+          tools.push(...response.tools);
+          cursor = response.nextCursor;
+        } while (cursor);
+      }
     } catch (error) {
       if (diagnostic) {
         _failDiagnosticStep(diagnostic, "listTools", "Tool listing failed.", {
@@ -906,8 +916,8 @@ function _markSecretFailure(
 }
 
 /**
- * Handles malformed persisted remote URLs. It records config failure before any
- * secret resolution or network work can happen.
+ * Handles malformed persisted remote URLs before secret resolution or network
+ * work begins, preserving the Settings diagnostic contract.
  */
 function _markInvalidConfigFailure(
   diagnostic: McpDiagnosticDraft,
@@ -1372,21 +1382,6 @@ function _resolveValue(value: string): string {
   );
 }
 
-function _headersToRecord(
-  headers: HeadersInit | undefined
-): Record<string, string> {
-  if (!headers) {
-    return {};
-  }
-  if (headers instanceof Headers) {
-    return Object.fromEntries(headers.entries());
-  }
-  if (Array.isArray(headers)) {
-    return Object.fromEntries(headers);
-  }
-  return headers;
-}
-
 function _errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -1446,40 +1441,4 @@ function _redactErrorMessage(message: string, secrets: string[]): string {
     "$1=[redacted]"
   );
   return result;
-}
-
-function _flattenToolResult(result: CallToolResult): McpCallToolResponse {
-  const parts: string[] = [];
-  for (const content of result.content ?? []) {
-    if (content.type === "text") {
-      parts.push(content.text);
-    } else if (content.type === "image") {
-      parts.push(`[image: ${content.mimeType}, ${content.data.length} bytes]`);
-    } else if (content.type === "audio") {
-      parts.push(`[audio: ${content.mimeType}, ${content.data.length} bytes]`);
-    } else if (content.type === "resource") {
-      if ("text" in content.resource) {
-        parts.push(
-          `[resource: ${content.resource.uri}]\n${content.resource.text}`
-        );
-      } else {
-        parts.push(
-          `[resource: ${content.resource.uri}, ${content.resource.mimeType ?? "unknown"}, ${content.resource.blob.length} bytes]`
-        );
-      }
-    } else if (content.type === "resource_link") {
-      parts.push(`[resource link: ${content.name}] ${content.uri}`);
-    }
-  }
-  if (result.structuredContent) {
-    parts.push(JSON.stringify(result.structuredContent, null, 2));
-  }
-  const text = parts.join("\n\n").trim();
-  return {
-    contentText:
-      text.length > MAX_OUTPUT_CHARS
-        ? `${text.slice(0, MAX_OUTPUT_CHARS)}\n\n[truncated]`
-        : text,
-    isError: result.isError,
-  };
 }

@@ -1,17 +1,10 @@
-export default {
-  name: "get_weather",
-  label: "Get weather",
+import { defineTool } from "@llm-space/runtime/tools";
+import { Type } from "typebox";
+
+export default defineTool({
   description: "Return deterministic example weather for a city.",
-  parameters: {
-    type: "object",
-    properties: { city: { type: "string" } },
-    required: ["city"],
-    additionalProperties: false,
+  inputSchema: Type.Object({ city: Type.String() }),
+  execute({ city }) {
+    return { city, mocked: true, weather: `${city}: Sunny, 22°C` };
   },
-  execute(_toolCallId: string, { city }: { city: string }) {
-    return Promise.resolve({
-      content: [{ type: "text" as const, text: `${city}: Sunny, 22°C` }],
-      details: { city, mocked: true },
-    });
-  },
-};
+});

@@ -19,7 +19,7 @@ describe("example Agent Project", () => {
       reasoning: "high",
     });
     expect(snapshot.instructions).toContain("concise weather assistant");
-    expect(snapshot.tools.map((tool) => tool.name)).toEqual(["get_weather"]);
+    expect(snapshot.tools.map((tool) => tool.name)).toEqual(["get-weather"]);
     expect(snapshot.resources.skills?.map((skill) => skill.name)).toEqual([
       "weather-brief",
     ]);
@@ -28,8 +28,15 @@ describe("example Agent Project", () => {
       city: "Shanghai",
     });
     expect(result.content).toEqual([
-      { type: "text", text: "Shanghai: Sunny, 22°C" },
+      {
+        type: "text",
+        text: '{"city":"Shanghai","mocked":true,"weather":"Shanghai: Sunny, 22°C"}',
+      },
     ]);
-    expect(result.details).toEqual({ city: "Shanghai", mocked: true });
+    expect(result.details).toEqual({
+      city: "Shanghai",
+      mocked: true,
+      weather: "Shanghai: Sunny, 22°C",
+    });
   });
 });

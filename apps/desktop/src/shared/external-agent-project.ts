@@ -43,6 +43,22 @@ export interface ExternalAgentProjectView extends ExternalAgentProjectSummary {
   sourceFiles: string[];
 }
 
+export interface ExternalAgentProjectConnectionStatus {
+  connectionName: string;
+  description: string;
+  sourcePath: string;
+  state: "ready" | "unavailable" | "drift";
+  message?: string;
+  missingTools?: readonly string[];
+  toolNames?: readonly string[];
+}
+
+export interface ExternalAgentProjectConnectionActivation {
+  tools: ProjectTool[];
+  statuses: ExternalAgentProjectConnectionStatus[];
+  hasSchemaDrift: boolean;
+}
+
 export interface ExternalAgentProjectThreadRecord {
   thread: Thread;
   promptFingerprint: string;

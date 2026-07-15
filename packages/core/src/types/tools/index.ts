@@ -90,6 +90,14 @@ const ProjectTool = Type.Intersect([
     type: Type.Literal("project"),
     projectId: Type.String(),
     snapshot: Type.String(),
+    /** Agent-root-relative authored source that owns this action. */
+    sourcePath: Type.Optional(Type.String()),
+    /** Present only for a project-scoped remote MCP action. */
+    connectionName: Type.Optional(Type.String()),
+    /** Raw MCP tool name used for tools/call. */
+    remoteToolName: Type.Optional(Type.String()),
+    /** Fingerprint of the remote tool's name, description, and input schema. */
+    schemaFingerprint: Type.Optional(Type.String()),
   }),
 ]);
 export type ProjectTool = Static<typeof ProjectTool>;

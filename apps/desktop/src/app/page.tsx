@@ -13,6 +13,7 @@ import { toast } from "sonner";
 
 import { externalAgentProjects } from "@/client";
 import { CommandProvider, useCommands, useRegisterCommands } from "@/commands";
+import { requestExternalProjectSource } from "@/components/thread-tabs/external-project-source-navigation";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { useExperimental } from "@/components/experimental-provider";
 import { ExternalAgentProjectTrustDialog } from "@/components/external-agent-project-trust-dialog";
@@ -362,6 +363,15 @@ function PageInner() {
   // settings). `newFile` / `newFolder` / the tree ops are registered by the
   // file tree, which owns that state.
   useRegisterCommands({
+    openExternalAgentProjectSource: ({
+      projectId,
+      projectPath,
+      projectName,
+      sourcePath,
+    }) => {
+      tabs.openExternalProject({ projectId, path: projectPath, projectName });
+      requestExternalProjectSource(projectId, sourcePath);
+    },
     closeTab: async ({ id, path }) => {
       const target = id ?? (path ? `thread:${path}` : activeTabIdRef.current);
       if (target && (await canCloseTabs([target]))) close(target);

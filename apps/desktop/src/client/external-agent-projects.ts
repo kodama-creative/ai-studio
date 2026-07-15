@@ -1,6 +1,7 @@
 import { electrobun } from "@/lib/electrobun";
 import type {
   ExternalAgentProjectPreview,
+  ExternalAgentProjectConnectionActivation,
   ExternalAgentProjectSummary,
   ExternalAgentProjectThreadRecord,
   ExternalAgentProjectView,
@@ -41,6 +42,21 @@ export const externalAgentProjects = {
     threadId: string
   ): Promise<ExternalAgentProjectThreadRecord> {
     return _rpc().request.externalAgentProjectReadThread({
+      projectId,
+      threadId,
+    });
+  },
+  activateConnections(
+    projectId: string,
+    threadId: string
+  ): Promise<ExternalAgentProjectConnectionActivation> {
+    return _rpc().request.externalAgentProjectActivateConnections({
+      projectId,
+      threadId,
+    });
+  },
+  deactivateConnections(projectId: string, threadId: string): Promise<null> {
+    return _rpc().request.externalAgentProjectDeactivateConnections({
       projectId,
       threadId,
     });

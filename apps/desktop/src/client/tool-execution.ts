@@ -14,13 +14,26 @@ export interface ToolCallResult {
   isError: boolean;
 }
 
+export interface ToolExecutionContext {
+  messageId?: string;
+  toolCallId?: string;
+  attemptAt?: string;
+}
+
+export type ToolExecutor = (
+  tool: McpTool | BuiltinTool | ProjectTool,
+  args: Record<string, unknown>,
+  context?: ToolExecutionContext
+) => Promise<ToolCallResult>;
+
 /**
  * The single dispatch point for invoking an executable tool. Callers gate on
  * {@link isExecutableTool} so `function` tools never reach here.
  */
 export async function executeTool(
   tool: McpTool | BuiltinTool | ProjectTool,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
+  context: ToolExecutionContext & { threadId?: string } = {}
 ): Promise<ToolCallResult> {
   if (tool.type === "mcp") {
     const result = await callMcpTool({
@@ -37,9 +50,13 @@ export async function executeTool(
     if (!electrobun.rpc) throw new Error("Desktop RPC is not available.");
     return electrobun.rpc.request.externalAgentProjectCallTool({
       projectId: tool.projectId,
+      threadId: context.threadId,
       snapshot: tool.snapshot,
       name: tool.name,
       arguments: args,
+      messageId: context.messageId,
+      toolCallId: context.toolCallId,
+      attemptAt: context.attemptAt,
     });
   }
   const result = await callBuiltInTool({ name: tool.name, arguments: args });

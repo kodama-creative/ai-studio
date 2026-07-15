@@ -3,6 +3,17 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
+import * as TypeBox from "typebox";
+
+const TYPEBOX_RUNTIME_KEY = Symbol.for("llm-space.typebox-runtime");
+
+Object.defineProperty(globalThis, TYPEBOX_RUNTIME_KEY, {
+  value: TypeBox,
+  configurable: false,
+  enumerable: false,
+  writable: false,
+});
+
 export async function loadAuthoredModule({
   sourcePath,
   version,
@@ -36,6 +47,86 @@ export async function loadAuthoredModule({
                 () => ({
                   contents:
                     "export const defineAgent = (definition) => definition;",
+                  loader: "js",
+                })
+              );
+              build.onResolve(
+                { filter: /^@llm-space\/runtime\/tools$/ },
+                () => ({
+                  path: "tool-definition",
+                  namespace: "llm-space-runtime",
+                })
+              );
+              build.onLoad(
+                {
+                  filter: /^tool-definition$/,
+                  namespace: "llm-space-runtime",
+                },
+                () => ({
+                  contents: `
+                    const brand = Symbol.for("llm-space.tool-definition");
+                    export const defineTool = (definition) =>
+                      Object.defineProperty(definition, brand, {
+                        value: true,
+                        enumerable: false,
+                        configurable: false,
+                        writable: false,
+                      });
+                  `,
+                  loader: "js",
+                })
+              );
+              build.onResolve(
+                { filter: /^@llm-space\/runtime\/connections$/ },
+                () => ({
+                  path: "connection-definition",
+                  namespace: "llm-space-runtime",
+                })
+              );
+              build.onLoad(
+                {
+                  filter: /^connection-definition$/,
+                  namespace: "llm-space-runtime",
+                },
+                () => ({
+                  contents: `
+                    const brand = Symbol.for("llm-space.mcp-connection-definition");
+                    export const defineMcpClientConnection = (input) => {
+                      if (input.tools.allow.length === 0) {
+                        throw new TypeError("tools.allow must contain at least one tool name");
+                      }
+                      return Object.defineProperty(
+                        { ...input, transport: input.transport ?? "streamableHttp" },
+                        brand,
+                        {
+                          value: true,
+                          enumerable: false,
+                          configurable: false,
+                          writable: false,
+                        }
+                      );
+                    };
+                  `,
+                  loader: "js",
+                })
+              );
+              build.onResolve({ filter: /^typebox$/ }, () => ({
+                path: "typebox-runtime",
+                namespace: "llm-space-runtime",
+              }));
+              build.onLoad(
+                {
+                  filter: /^typebox-runtime$/,
+                  namespace: "llm-space-runtime",
+                },
+                () => ({
+                  contents: `
+                    const runtime = globalThis[Symbol.for("llm-space.typebox-runtime")];
+                    if (!runtime) throw new Error("TypeBox authored runtime is unavailable");
+                    export const Type = runtime.Type;
+                    export const Format = runtime.Format;
+                    export const Schema = runtime.Schema;
+                  `,
                   loader: "js",
                 })
               );

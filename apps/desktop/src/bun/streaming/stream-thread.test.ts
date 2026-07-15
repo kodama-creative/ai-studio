@@ -281,13 +281,13 @@ async function _fixture({
   if (projectTool) {
     await writeFile(
       path.join(agent, "tools", "echo.ts"),
-      `export default {
-        name: "echo",
-        label: "Echo",
+      `import { defineTool } from "@llm-space/runtime/tools";
+      import { Type } from "typebox";
+      export default defineTool({
         description: "Echo text.",
-        parameters: { type: "object", properties: { text: { type: "string" } }, required: ["text"] },
-        async execute(_id, { text }) { return { content: [{ type: "text", text }], details: {} }; }
-      };`
+        inputSchema: Type.Object({ text: Type.String() }),
+        execute({ text }) { return text; }
+      });`
     );
   }
   const models = _models(toolCall);

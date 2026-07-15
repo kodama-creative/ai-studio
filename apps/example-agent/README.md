@@ -13,7 +13,7 @@ use the network, credentials, or a live model.
 4. Review the warning, then choose **Trust and open**. Agent Project tools are
    local code and run with your user permissions.
 5. Open the default Thread. With a model configured, ask for the weather in
-   Shanghai and inspect the `get_weather` call and result.
+   Shanghai and inspect the `get-weather` call and result.
 
 LLM Space watches the files under `agent/`. Project Threads, messages, tool
 results, and trust settings are stored under `LLM_SPACE_HOME`, not in this
@@ -29,8 +29,8 @@ bun test apps/example-agent
 
 The test loads this exact project through `@llm-space/runtime`, resolves the
 model/reasoning defaults from `agent.ts`, discovers the `weather-brief` skill,
-and verifies that `get_weather({ city: "Shanghai" })`
-returns `Shanghai: Sunny, 22°C`.
+and verifies that `get-weather({ city: "Shanghai" })` returns structured,
+JSON-compatible weather data.
 
 This project is example code for local development. It does not provide live
 weather data, sandbox tool execution, or production deployment guarantees.
