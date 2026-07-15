@@ -23,6 +23,7 @@ Do not poll, sleep, or span more than one roadmap item in a run. A blocker shoul
 - The repository is `/Users/feng/Projects/ai-studio`, currently tracking `develop` against `origin/develop`.
 - `LOOP_PLAN.md` currently has 29 unchecked numbered items. Item 01 is the first eligible capability.
 - Item 01 is blocked inside its approved behavior-preserving boundary: installed Pi 0.80.3 and current upstream/npm 0.80.7 `AgentHarness` have neither prompt-free continuation nor transcript replacement. Moving the settled manual-tool workflow onto Harness would currently require a Pi fork/private lifecycle copy or a material Thread/Pi Session persistence decision.
+- The blocker was revalidated on 2026-07-15 at upstream `main` commit `5e336cfa808c7b6056f168d42482c27f3acfc5cc`; the focused runtime/desktop behavior matrix still passes 11/11 through Pi `Agent`.
 - The focused existing runtime/desktop streaming matrix is healthy (11/11), but it confirms the baseline is still Pi `Agent` behind LLM Space `AgentSession`, not `AgentHarness`; item 01 remains unchecked.
 - The plan's explicit deferrals and exclusions remain binding throughout all runs.
 - The user has pre-authorized all model-recommended/default answers during `grill-me` and the kaizen approval gate so unattended runs do not stop for questions.
@@ -33,3 +34,4 @@ Do not poll, sleep, or span more than one roadmap item in a run. A blocker shoul
 <!-- Append one concise dated entry per run; keep this history bounded. -->
 
 - 2026-07-15 23:05 CST — Item 01 kaizen stopped at its declared persistence boundary after current Pi 0.80.7 still lacked Harness continuation/replacement seams; recorded the blocker and left all 29 items unchecked.
+- 2026-07-15 23:18 CST — Revalidated item 01 against unchanged Pi 0.80.7/upstream Harness and the 11/11 focused behavior matrix; the known boundary blocker persists and all items remain unchecked.
