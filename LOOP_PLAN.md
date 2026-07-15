@@ -23,6 +23,7 @@ LLM Space is an Agent Studio: Agent Project source is the portable product, Thre
   - Done when: existing manual, auto-once, ReAct, persistence, abort, reload, tool, and event fixtures run through `AgentHarness`; overlapping custom session semantics are removed or have one documented owner.
   - Boundary: behavior-preserving runtime convergence only; no new Server, source slot, UI, or workflow-durability claim.
   - Metric: existing runtime behavior coverage through AgentHarness.
+  - Blocked (2026-07-15): installed Pi 0.80.3 and current upstream/npm 0.80.7 `AgentHarness` still have no prompt-free `continue()` or transcript replacement operation. Preserving LLM Space's settled manual-tool workflow would therefore require a Pi fork/private lifecycle copy or a material Thread/Pi Session persistence change, all outside this item's approved boundary. Retry after an upstream Harness continuation seam exists or after an explicit roadmap decision changes the boundary.
 
 - [ ] **02 — Inspectable compiled Agent artifact V1**
   - Depends on: 01.

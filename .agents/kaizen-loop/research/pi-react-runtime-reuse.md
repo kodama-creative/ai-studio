@@ -1,8 +1,8 @@
 # Pi ReAct runtime reuse research
 
-Date: 2026-07-14
-Scope: `@earendil-works/pi-agent-core` 0.80.3, current LLM Space runtime prototype, and Desktop Thread execution.
-Primary sources: the installed 0.80.3 package, the official `earendil-works/pi` `v0.80.3` tag, and this repository.
+Date: 2026-07-14; rechecked 2026-07-15
+Scope: installed `@earendil-works/pi-agent-core` 0.80.3, current npm/upstream 0.80.7, current LLM Space runtime, and Desktop Thread execution.
+Primary sources: the installed 0.80.3 package, the official `earendil-works/pi` `v0.80.3` tag, upstream main at `5e336cfa808c7b6056f168d42482c27f3acfc5cc`, current npm metadata, and this repository.
 
 ## Conclusion
 
@@ -17,6 +17,8 @@ Pi `Agent` owns `state.messages`, accepts initial messages, calls the same `runA
 | ReAct                 | Execute real tools without `terminate`                                                                                                                                                                 | Pi continues model -> tools -> model until the loop stops |
 
 `AgentHarness` cannot currently reproduce the manual boundary faithfully. It requires a Pi `Session`, executes or blocks every tool call before the turn ends, and has no public continuation method. `appendMessage(toolResult)` can persist an external result, but `prompt()` always adds a new user message; `nextTurn()` also queues a user message. A custom `SessionStorage` alone does **not** solve this missing lifecycle operation.
+
+The 2026-07-15 recheck found the same boundary in upstream/npm 0.80.7: `AgentHarness` still calls `runAgentLoop()` for its turn entry points and exposes no `continue()`/`runAgentLoopContinue()` path or transcript-replacement operation.
 
 The recommended V1 is therefore:
 

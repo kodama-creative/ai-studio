@@ -1,7 +1,7 @@
 # LLM Space Capability Map
 
 - Last updated: 2026-07-15
-- Map status: refreshed after Portable Agent Actions V1 implementation. Workspace and explicitly opened Agents share one Build + Project Threads product and one Pi Agent-backed runtime; Agent source now owns portable local tools and allowlisted HTTP/SSE MCP connections, while ordinary Threads retain machine-local MCP Settings and explicit tool selection. Public or dynamically loaded plugins remain absent.
+- Map status: refreshed after the roadmap item 01 AgentHarness alignment audit. Workspace and explicitly opened Agents share one Build + Project Threads product and one Pi Agent-backed runtime; Agent source owns portable local tools and allowlisted HTTP/SSE MCP connections. Behavior-preserving convergence onto Pi AgentHarness is blocked by its missing prompt-free continuation and transcript-replacement seams, so the shipped Pi Agent session adapter remains authoritative for manual continuation. Public or dynamically loaded plugins remain absent.
 - Evidence rule: entries marked `confirmed` cite current rendered-product or current-code evidence. Entries marked `stale` rely on previous logs or code paths not fully re-inspected in this loop. Entries marked `unknown` need a future product-surface check before they can drive a recommendation.
 
 ## First-Run Model Setup
@@ -152,7 +152,7 @@
 
 - Status: shipped Agent Definition And Runtime V1
 - Freshness: confirmed
-- Last checked: 2026-07-14
+- Last checked: 2026-07-15
 - Evidence:
   - Eve commit `626c17678b0398d64b1c38f5c293f88889807941` was inspected as the primary structural reference. `packages/runtime/src` now separates public definitions, shared authored/compiled representations, internal authored validation, non-executing discovery, trusted compiler normalization, runtime Agent/model preparation, runtime session lifecycle, and execution policy/event projection.
   - `@llm-space/runtime` now exports only authored and cross-environment pure contracts; `@llm-space/runtime/node` explicitly exports filesystem discovery/compiler and host execution without re-exporting root. A browser-target root bundle succeeds, and `public/`/`shared/` contain no Node/runtime/execution imports.
@@ -163,9 +163,10 @@
   - Current CEF audit `audits/2026-07-14-155043-agent-definition-runtime/` shows required `agent.ts` in Build, raw authored unavailable-model display without fallback, `From Agent`/`Thread override`, watched drift, field-specific sync confirmation, one-step undo, and no document overflow or relevant console errors at 1280×800 and 900×700.
   - The prior Desktop Builder/Target experiment is preserved as historical evidence in `audits/2026-07-13-002622-agent-builder-v1/`, but the current Desktop intentionally no longer exposes that second Agent product model.
   - Current CEF audit `audits/2026-07-14-005810-agent-navigation-editor/` shows one Agent Build surface for both default-directory and explicitly opened projects, with source editing and desktop-owned nested Threads behind the same typed runtime/RPC boundary.
+  - Roadmap item 01 rechecked installed `@earendil-works/pi-agent-core@0.80.3`, current npm `0.80.7`, and upstream main at `5e336cfa808c7b6056f168d42482c27f3acfc5cc`. `AgentHarness` still exposes prompt/template/skill turns and append-only Session writes but no prompt-free `continue()` or transcript replacement. The focused runtime/streaming matrix remains healthy (11 tests), but all target fixtures still execute through the LLM Space `AgentSession` over Pi `Agent`, not `AgentHarness`.
 - Boundary: a filesystem-authored Agent must define static model/reasoning defaults in `agent.ts`, plus instructions, TypeScript/JavaScript tools, and skills. Runtime snapshots are immutable; sessions may persistently override model/reasoning, and Desktop Project Threads execute/debug that same runtime while retaining editable messages and run history.
 - Explicit non-goals: dynamic model resolvers, automatic compaction/session budgets, database/cloud persistence, crash-safe tool replay, distributed workflow durability, channels, schedules, sandbox provisioning, subagents, public plugin SDK, dynamic third-party loading, or separate Desktop Builder/Target Agent model.
-- Visible gaps: isolated CEF could not prove a live external provider completion; deterministic Bun integration covers the runtime branch instead. Trusted project tools remain unsandboxed. Pi has no native durable pause-before-tool state, so manual mode uses runtime-internal deferred results. Full Pi Harness compaction/tree navigation and automatic session budgets remain future capabilities.
+- Visible gaps: isolated CEF could not prove a live external provider completion; deterministic Bun integration covers the runtime branch instead. Trusted project tools remain unsandboxed. Pi has no native durable pause-before-tool state, and AgentHarness cannot resume a settled externally resolved tool batch without inserting a user prompt, so manual mode remains owned by runtime-internal deferred results over Pi `Agent`. AgentHarness convergence, compaction/tree navigation, and automatic session budgets remain blocked or future capabilities.
 
 ## Agent Action Authoring
 
