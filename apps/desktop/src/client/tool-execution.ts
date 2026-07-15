@@ -18,6 +18,7 @@ export interface ToolCallResult {
 }
 
 export interface ToolExecutionContext {
+  callId?: string;
   attempt?: RemoteToolCallAttempt;
 }
 
@@ -49,11 +50,15 @@ export async function executeTool(
   }
   if (tool.type === "project") {
     if (!electrobun.rpc) throw new Error("Desktop RPC is not available.");
+    if (!context.callId) {
+      throw new Error("Project tool calls require the model tool-call id.");
+    }
     const result = await electrobun.rpc.request.externalAgentProjectCallTool({
       projectId: tool.projectId,
       threadId: context.threadId,
       snapshot: tool.snapshot,
       name: tool.name,
+      callId: context.callId,
       arguments: args,
       attempt: context.attempt,
     });

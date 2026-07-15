@@ -281,6 +281,7 @@ export interface DesktopRPCType {
           threadId?: string;
           snapshot: string;
           name: string;
+          callId: string;
           arguments: Record<string, unknown>;
           attempt?: RemoteToolCallAttempt;
         };

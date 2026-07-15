@@ -58,7 +58,7 @@ export function useToolCallRunner(messageId: string) {
         const { contentText, isError } = await executeTool(
           tool,
           toolCall.input.arguments,
-          { attempt }
+          { callId: toolCall.id, attempt }
         );
         updateToolCallOutputText(messageId, toolCall.id, contentText, isError);
         if (isRemoteProjectTool) {

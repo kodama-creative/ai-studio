@@ -99,6 +99,7 @@ describe("ExternalAgentProjectManager", () => {
         projectId: opened.id,
         snapshot: tool.snapshot,
         name: tool.name,
+        callId: "call-hello",
         arguments: { text: "hello" },
       })
     ).toEqual({ contentText: '{"text":"hello"}', isError: false });
@@ -116,6 +117,7 @@ describe("ExternalAgentProjectManager", () => {
         projectId: opened.id,
         snapshot: tool.snapshot,
         name: tool.name,
+        callId: "call-frozen",
         arguments: { text: "frozen" },
       })
     ).toEqual({ contentText: '{"text":"frozen"}', isError: false });
@@ -128,6 +130,33 @@ describe("ExternalAgentProjectManager", () => {
         path.join(home, "projects", opened.id, "threads", `${threadId}.json`)
       ).exists()
     ).toBe(true);
+  });
+
+  test("forwards the model tool-call id to a manually executed project tool", async () => {
+    const { manager, project } = await _fixture();
+    await writeFile(
+      path.join(project, "agent", "tools", "echo.ts"),
+      `import { defineTool } from "@llm-space/runtime/tools";
+import { Type } from "typebox";
+export default defineTool({
+  description: "Return call identity",
+  inputSchema: Type.Object({}),
+  execute(_input, { callId }) { return callId; }
+});`,
+      "utf8"
+    );
+    const opened = await manager.trustAndOpen(project);
+    const tool = opened.tools[0]!;
+
+    expect(
+      await manager.callTool({
+        projectId: opened.id,
+        snapshot: tool.snapshot,
+        name: tool.name,
+        callId: "model-tool-call-1",
+        arguments: {},
+      })
+    ).toEqual({ contentText: "model-tool-call-1", isError: false });
   });
 
   test("marks prompt copies out of sync until explicit sync", async () => {
@@ -412,6 +441,7 @@ export default defineMcpClientConnection({
       threadId,
       snapshot: opened.snapshot,
       name: "weather__forecast",
+      callId: "call-one",
       arguments: {},
       attempt: {
         messageId: "assistant-one",
@@ -689,6 +719,7 @@ export default defineMcpClientConnection({
         threadId,
         snapshot: opened.snapshot,
         name: "weather__forecast",
+        callId: "call-one",
         arguments: {},
         attempt: {
           messageId: "assistant-one",
@@ -721,6 +752,7 @@ export default defineMcpClientConnection({
         threadId,
         snapshot: opened.snapshot,
         name: "weather__forecast",
+        callId: "call-one",
         arguments: { version: 2 },
         attempt: {
           messageId: "assistant-one",

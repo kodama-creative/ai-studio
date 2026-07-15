@@ -81,20 +81,15 @@ async function _compileDefinition(
   hash: ReturnType<typeof createHash>
 ): Promise<CompiledAgentDefinition | undefined> {
   if (!sourceRef) return undefined;
-  let source: Uint8Array;
   let authored: unknown;
   try {
-    source = await readFile(sourceRef.absolutePath);
+    const loaded = await loadAuthoredModule({
+      sourcePath: sourceRef.absolutePath,
+      authoredSdk: true,
+    });
     hash.update(sourceRef.absolutePath);
-    hash.update(source);
-    const version = createHash("sha256").update(source).digest("hex");
-    authored = (
-      await loadAuthoredModule({
-        sourcePath: sourceRef.absolutePath,
-        version,
-        authoredSdk: true,
-      })
-    ).default;
+    hash.update(loaded.fingerprint);
+    authored = loaded.default;
   } catch (error) {
     diagnostics.push({
       severity: "error",
@@ -153,17 +148,13 @@ async function _compileTools(
   const names = new Map<string, string>();
   for (const sourceRef of sourceRefs) {
     try {
-      const source = await readFile(sourceRef.absolutePath);
+      const loaded = await loadAuthoredModule({
+        sourcePath: sourceRef.absolutePath,
+        authoredSdk: true,
+      });
       hash.update(sourceRef.absolutePath);
-      hash.update(source);
-      const version = createHash("sha256").update(source).digest("hex");
-      const definition = (
-        await loadAuthoredModule({
-          sourcePath: sourceRef.absolutePath,
-          version,
-          authoredSdk: true,
-        })
-      ).default;
+      hash.update(loaded.fingerprint);
+      const definition = loaded.default;
       if (!isToolDefinition(definition)) {
         diagnostics.push({
           severity: "error",
@@ -269,17 +260,13 @@ async function _compileConnections(
     }
     connectionNames.set(name, sourceRef.absolutePath);
     try {
-      const source = await readFile(sourceRef.absolutePath);
+      const loaded = await loadAuthoredModule({
+        sourcePath: sourceRef.absolutePath,
+        authoredSdk: true,
+      });
       hash.update(sourceRef.absolutePath);
-      hash.update(source);
-      const version = createHash("sha256").update(source).digest("hex");
-      const definition = (
-        await loadAuthoredModule({
-          sourcePath: sourceRef.absolutePath,
-          version,
-          authoredSdk: true,
-        })
-      ).default;
+      hash.update(loaded.fingerprint);
+      const definition = loaded.default;
       if (!isMcpClientConnectionDefinition(definition)) {
         diagnostics.push({
           severity: "error",

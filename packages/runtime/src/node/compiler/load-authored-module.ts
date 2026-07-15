@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -22,13 +23,11 @@ Object.defineProperty(globalThis, TYPEBOX_RUNTIME_KEY, {
 
 export async function loadAuthoredModule({
   sourcePath,
-  version,
   authoredSdk = false,
 }: {
   sourcePath: string;
-  version: string;
   authoredSdk?: boolean;
-}): Promise<{ default?: unknown }> {
+}): Promise<{ default?: unknown; fingerprint: string }> {
   const result = await Bun.build({
     entrypoints: [sourcePath],
     bundle: true,
@@ -128,13 +127,17 @@ export async function loadAuthoredModule({
     );
   }
   const source = await result.outputs[0].text();
+  const fingerprint = createHash("sha256")
+    .update(sourcePath)
+    .update(source)
+    .digest("hex");
   const cacheRoot = path.join(
     await realpath(tmpdir()),
     "llm-space-runtime-modules"
   );
   const cachePath = path.join(
     cacheRoot,
-    `${authoredSdk ? "definition" : "source"}-${version}.mjs`
+    `${authoredSdk ? "definition" : "source"}-${fingerprint}.mjs`
   );
   await mkdir(cacheRoot, { recursive: true });
   try {
@@ -143,11 +146,11 @@ export async function loadAuthoredModule({
     if (!_hasCode(error, "EEXIST")) throw error;
   }
   const module: unknown = await import(
-    `${pathToFileURL(cachePath).href}?v=${version}`
+    `${pathToFileURL(cachePath).href}?v=${fingerprint}`
   );
   return module && typeof module === "object" && "default" in module
-    ? { default: module.default }
-    : {};
+    ? { default: module.default, fingerprint }
+    : { fingerprint };
 }
 
 function _hasCode(error: unknown, code: string): boolean {

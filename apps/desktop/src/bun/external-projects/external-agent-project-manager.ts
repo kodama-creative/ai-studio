@@ -405,6 +405,7 @@ export class ExternalAgentProjectManager {
       threadId?: string;
       snapshot: string;
       name: string;
+      callId: string;
       arguments: Record<string, unknown>;
       attempt?: RemoteToolCallAttempt;
     },
@@ -467,7 +468,7 @@ export class ExternalAgentProjectManager {
         throw error;
       }
     }
-    const result = await tool.execute(randomUUID(), input.arguments);
+    const result = await tool.execute(input.callId, input.arguments);
     const text = result.content
       .filter((item) => item.type === "text")
       .map((item) => item.text)

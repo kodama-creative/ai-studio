@@ -290,6 +290,34 @@ describe("loadAgentProject", () => {
     });
   });
 
+  test("reloads tool modules when a bundled dependency changes", async () => {
+    const root = await _fixture();
+    await writeFile(join(root, "instructions.md"), "Test.\n");
+    await mkdir(join(root, "tools"));
+    await writeFile(
+      join(root, "tools", "value.ts"),
+      `import { defineTool } from "@llm-space/runtime/tools";
+      import { Type } from "typebox";
+      import { value } from "../value-helper";
+      export default defineTool({
+        description: "Return imported value.",
+        inputSchema: Type.Object({}),
+        execute() { return value; }
+      });`
+    );
+    const helperPath = join(root, "value-helper.ts");
+    await writeFile(helperPath, `export const value = "one";`);
+    const first = await loadAgentProject(root);
+    await writeFile(helperPath, `export const value = "two";`);
+    const second = await loadAgentProject(root);
+
+    expect(second.fingerprint).not.toBe(first.fingerprint);
+    expect((await second.tools[0]!.execute("call", {})).content[0]).toEqual({
+      type: "text",
+      text: "two",
+    });
+  });
+
   test("reloads changed Agent definitions in the same process", async () => {
     const root = await _fixture();
     await writeFile(join(root, "instructions.md"), "Test.\n");
