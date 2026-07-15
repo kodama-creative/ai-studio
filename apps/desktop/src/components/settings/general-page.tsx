@@ -1,11 +1,11 @@
 "use client";
 
 import {
+  type ReactNode,
   useCallback,
   useEffect,
   useMemo,
-  useState,
-  type ReactNode,
+  useState
 } from "react";
 import { toast } from "sonner";
 
@@ -16,15 +16,15 @@ import {
   isModelAvailable,
   useDefaultModel,
   useModels,
-  useSetDefaultModel,
+  useSetDefaultModel
 } from "@/components/model-provider";
 import {
   DEFAULT_PRIMARY,
-  usePrimaryColor,
-  useRenderingFidelity,
-  useTheme,
   type RenderingFidelity,
   type Theme,
+  usePrimaryColor,
+  useRenderingFidelity,
+  useTheme
 } from "@/components/theme-provider";
 import {
   Select,
@@ -34,19 +34,17 @@ import {
   SelectLabel,
   SelectSeparator,
   SelectTrigger,
-  SelectValue,
+  SelectValue
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { electrobun } from "@/lib/electrobun";
 import { DEFAULT_ANALYTICS_SETTINGS } from "@/shared/analytics";
 import { DEFAULT_UPDATE_MODE, type UpdateMode } from "@/shared/updates";
-
+import { PrimaryColorPicker } from "./primary-color-picker";
+import { SettingsPage } from "./settings-page";
 import { Link } from "../link";
 import { ModelAvatar } from "../thread-playground/model-avatar";
 import { Button } from "../ui/button";
-
-import { PrimaryColorPicker } from "./primary-color-picker";
-import { SettingsPage } from "./settings-page";
 
 /** Sentinel value for the "Automatic (first available model)" option. */
 const AUTO_DEFAULT_MODEL = "__auto__";
@@ -54,10 +52,10 @@ const AUTO_DEFAULT_MODEL = "__auto__";
 /** A single label-on-the-left, control-on-the-right settings row. */
 function SettingsRow({
   label,
-  children,
+  children
 }: {
-  label: ReactNode;
-  children: ReactNode;
+  readonly children: ReactNode;
+  readonly label: ReactNode;
 }) {
   return (
     <div className="flex h-14 items-center justify-between gap-4">
@@ -73,10 +71,10 @@ function SettingsRow({
  */
 function SettingsSection({
   title,
-  children,
+  children
 }: {
-  title: string;
-  children: ReactNode;
+  readonly children: ReactNode;
+  readonly title: string;
 }) {
   return (
     <section className="flex flex-col gap-2">
@@ -91,7 +89,7 @@ function SettingsSection({
 }
 
 /** A row label with a title and an optional muted one-line explanation. */
-function RowLabel({ title, hint }: { title: string; hint?: string }) {
+function RowLabel({ title, hint }: { readonly hint?: string; readonly title: string; }) {
   if (!hint) {
     return <>{title}</>;
   }
@@ -117,15 +115,15 @@ function DefaultModelSelect() {
     () =>
       [...providers]
         .sort((a, b) => a.name.localeCompare(b.name))
-        .map((group) => {
+        .map(group => {
           const disabled = new Set(group.disabledModels ?? []);
           return {
             id: group.id,
             name: group.name,
-            models: group.models.filter((model) => !disabled.has(model.id)),
+            models: group.models.filter(model => !disabled.has(model.id))
           };
         })
-        .filter((group) => group.models.length > 0),
+        .filter(group => group.models.length > 0),
     [providers]
   );
 
@@ -144,30 +142,30 @@ function DefaultModelSelect() {
     const separator = next.indexOf(":");
     void setDefaultModel({
       provider: next.slice(0, separator),
-      id: next.slice(separator + 1),
+      id: next.slice(separator + 1)
     });
   };
 
   return (
-    <Select value={value} onValueChange={handleChange}>
-      <SelectTrigger className="w-64" aria-label="Default model">
+    <Select onValueChange={handleChange} value={value}>
+      <SelectTrigger aria-label="Default model" className="w-64">
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
         <SelectItem value={AUTO_DEFAULT_MODEL}>Automatic</SelectItem>
         {groups.length > 0 ? <SelectSeparator /> : null}
-        {groups.map((group) => (
+        {groups.map(group => (
           <SelectGroup key={group.id}>
             <SelectLabel>{group.name}</SelectLabel>
-            {group.models.map((model) => (
+            {group.models.map(model => (
               <SelectItem
                 key={`${model.provider}:${model.id}`}
                 value={`${model.provider}:${model.id}`}
               >
                 <ModelAvatar
+                  icon={model.icon}
                   id={model.id}
                   name={model.name}
-                  icon={model.icon}
                   size={16}
                 />
                 <span className="font-mono">{model.name}</span>
@@ -195,8 +193,8 @@ function AnalyticsRow() {
   useEffect(() => {
     let cancelled = false;
     void getAnalyticsSettings()
-      .then((loaded) => {
-        if (cancelled) return;
+      .then(loaded => {
+        if (cancelled) { return; }
         setEnabled(loaded.enabled);
         setAvailable(loaded.available);
       })
@@ -216,7 +214,7 @@ function AnalyticsRow() {
       setEnabled(!next);
       toast.error("Failed to update analytics setting", {
         description:
-          error instanceof Error ? error.message : "Please try again.",
+          error instanceof Error ? error.message : "Please try again."
       });
     }
   }, []);
@@ -235,10 +233,10 @@ function AnalyticsRow() {
       }
     >
       <Switch
-        checked={available && enabled}
-        disabled={!available}
-        onCheckedChange={(next) => void handleChange(next)}
         aria-label="Share anonymous usage analytics"
+        checked={available ? enabled : false}
+        disabled={!available}
+        onCheckedChange={next => void handleChange(next)}
       />
     </SettingsRow>
   );
@@ -250,8 +248,8 @@ function WorkspaceFolderLink() {
   useEffect(() => {
     let cancelled = false;
     void getWorkspacePath()
-      .then((loaded) => {
-        if (!cancelled) setPath(loaded);
+      .then(loaded => {
+        if (!cancelled) { setPath(loaded); }
       })
       .catch(() => {
         // Non-fatal; leave the placeholder.
@@ -267,8 +265,8 @@ function WorkspaceFolderLink() {
 
   return (
     <Link
-      command={{ type: "openWorkspaceFolder", args: {} }}
       className="text-primary max-w-[50%] truncate font-mono text-sm underline underline-offset-2 hover:opacity-80"
+      command={{ type: "openWorkspaceFolder", args: {} }}
       title={path}
     >
       {path}
@@ -298,23 +296,23 @@ export function GeneralPage() {
     primaryColor,
     resetPrimaryColor,
     resetPrimaryColorVersion,
-    setPrimaryColor,
+    setPrimaryColor
   } = usePrimaryColor();
   const showResetPrimaryColor = primaryColor !== DEFAULT_PRIMARY;
   return (
-    <SettingsPage title="General" className="overflow-y-auto">
+    <SettingsPage className="overflow-y-auto" title="General">
       <div className="flex flex-col gap-7 pb-2">
         <SettingsSection title="Appearance">
           <SettingsRow
             label={
               <RowLabel
-                title="Language"
                 hint="English only for now — more languages are coming."
+                title="Language"
               />
             }
           >
             <Select defaultValue="en-US" disabled>
-              <SelectTrigger className="w-32" aria-label="Language">
+              <SelectTrigger aria-label="Language" className="w-32">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -326,13 +324,13 @@ export function GeneralPage() {
           <SettingsRow
             label={
               <RowLabel
-                title="Theme"
                 hint="Match your system setting, or force light or dark."
+                title="Theme"
               />
             }
           >
-            <Select value={theme} onValueChange={(v) => setTheme(v as Theme)}>
-              <SelectTrigger className="w-32" aria-label="Theme">
+            <Select onValueChange={v => { setTheme(v as Theme); }} value={theme}>
+              <SelectTrigger aria-label="Theme" className="w-32">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -346,25 +344,27 @@ export function GeneralPage() {
           <SettingsRow
             label={
               <RowLabel
-                title="Primary color"
                 hint="The accent color for buttons, links, and highlights."
+                title="Primary color"
               />
             }
           >
             <div className="flex items-center gap-2">
-              {showResetPrimaryColor ? (
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={resetPrimaryColor}
-                >
-                  Reset
-                </Button>
-              ) : null}
+              {showResetPrimaryColor
+                ? (
+                  <Button
+                    onClick={resetPrimaryColor}
+                    size="sm"
+                    variant="secondary"
+                  >
+                    Reset
+                  </Button>
+                )
+                : null}
               <PrimaryColorPicker
                 key={resetPrimaryColorVersion}
-                value={primaryColor}
                 onChange={setPrimaryColor}
+                value={primaryColor}
               />
             </div>
           </SettingsRow>
@@ -372,16 +372,16 @@ export function GeneralPage() {
           <SettingsRow
             label={
               <RowLabel
-                title="Rendering"
                 hint="Full renders messages with full editors. Fast shows them as plain text for smoother scrolling on large threads."
+                title="Rendering"
               />
             }
           >
             <Select
+              onValueChange={v => { setFidelity(v as RenderingFidelity); }}
               value={fidelity}
-              onValueChange={(v) => setFidelity(v as RenderingFidelity)}
             >
-              <SelectTrigger className="w-32" aria-label="Rendering fidelity">
+              <SelectTrigger aria-label="Rendering fidelity" className="w-32">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -396,8 +396,8 @@ export function GeneralPage() {
           <SettingsRow
             label={
               <RowLabel
-                title="Default model"
                 hint="Used for new threads, and when a thread's model is no longer available."
+                title="Default model"
               />
             }
           >
@@ -409,8 +409,8 @@ export function GeneralPage() {
           <SettingsRow
             label={
               <RowLabel
-                title="Workspace folder"
                 hint="Where your threads are stored on disk."
+                title="Workspace folder"
               />
             }
           >
@@ -424,17 +424,17 @@ export function GeneralPage() {
           <SettingsRow
             label={
               <RowLabel
-                title="Software updates"
                 hint="Automatic downloads updates in the background and prompts you to restart."
+                title="Software updates"
               />
             }
           >
             <div className="flex items-center gap-2">
               <Select
+                onValueChange={v => { setUpdateMode(v as UpdateMode); }}
                 value={updateMode}
-                onValueChange={(v) => setUpdateMode(v as UpdateMode)}
               >
-                <SelectTrigger className="w-40" aria-label="Software updates">
+                <SelectTrigger aria-label="Software updates" className="w-40">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -444,10 +444,8 @@ export function GeneralPage() {
                 </SelectContent>
               </Select>
               <Button
+                onClick={() => { executeCommand({ type: "checkForUpdates", args: {} }); }}
                 size="lg"
-                onClick={() =>
-                  executeCommand({ type: "checkForUpdates", args: {} })
-                }
               >
                 Check now
               </Button>

@@ -1,5 +1,5 @@
-import type { CustomProviderApi } from '../../types';
+import type { CustomProviderApi } from "../../types";
 
 export type CodexCredentials =
-  { mode: "oauth"; apiKey: string; }
-  | { mode: "apikey"; apiKey: string; baseUrl: string; api: CustomProviderApi; };
+  { api: CustomProviderApi; apiKey: string; baseUrl: string; mode: "apikey"; }
+  | { apiKey: string; mode: "oauth"; };

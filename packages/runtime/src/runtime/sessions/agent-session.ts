@@ -1,22 +1,10 @@
-import {
-  Agent,
-  type AgentMessage,
-  type StreamFn,
-  type ThinkingLevel,
-} from "@earendil-works/pi-agent-core";
-import type {
-  Api,
-  Model,
-  Models,
-  ToolResultMessage,
-} from "@earendil-works/pi-ai";
+import { Agent, type AgentMessage, type StreamFn, type ThinkingLevel } from "@earendil-works/pi-agent-core";
 
-import {
-  AgentEventProjector,
-  type AgentSessionEvent,
-  type AgentSessionPersistence,
-} from "../../execution/agent-event-projector";
+import type { Api, Model, Models, ToolResultMessage } from "@earendil-works/pi-ai";
+
+import { AgentEventProjector, type AgentSessionEvent, type AgentSessionPersistence } from "../../execution/agent-event-projector";
 import { ToolExecutionPolicy } from "../../execution/tool-execution-policy";
+
 import type { AgentModelSelector } from "../../shared/agent-definition";
 import type { RuntimeExecutionMode } from "../../shared/runtime-execution-mode";
 import type { AgentProjectSnapshot } from "../agent/agent-project-snapshot";
@@ -57,26 +45,26 @@ export class AgentSession {
     this._executionMode = options.executionMode;
     this._toolPolicy = new ToolExecutionPolicy({
       tools: options.tools,
-      activeToolNames: options.activeToolNames,
+      activeToolNames: options.activeToolNames
     });
     this._agent = new Agent({
       sessionId: options.id,
       initialState: {
         systemPrompt:
-          options.systemPrompt ??
-          _systemPrompt(options.project, options.instructionsPrefix),
+          options.systemPrompt
+          ?? _systemPrompt(options.project, options.instructionsPrefix),
         model: options.model,
         thinkingLevel: options.reasoning ?? "off",
         messages: this._toolPolicy.restoreDeferredPlaceholders(
           options.initialMessages,
           options.executionMode
         ),
-        tools: this._toolPolicy.toolsForMode(options.executionMode),
+        tools: this._toolPolicy.toolsForMode(options.executionMode)
       },
       streamFn:
-        options.streamFn ??
-        ((model, context, streamOptions) =>
-          options.models.streamSimple(model, context, streamOptions)),
+        options.streamFn
+        ?? ((model, context, streamOptions) =>
+          options.models.streamSimple(model, context, streamOptions))
     });
     this._eventProjector = new AgentEventProjector(
       () => this._executionMode,
@@ -84,7 +72,7 @@ export class AgentSession {
       () => this.messages,
       options.persistence
     );
-    this._agent.subscribe((event) => this._eventProjector.handle(event));
+    this._agent.subscribe(async event => this._eventProjector.handle(event));
   }
 
   get project(): AgentProjectSnapshot {
@@ -117,7 +105,7 @@ export class AgentSession {
     this._agent.state.tools = this._toolPolicy.toolsForMode(mode);
   }
 
-  prompt(message: AgentMessage | AgentMessage[] | string): Promise<void> {
+  async prompt(message: AgentMessage | AgentMessage[] | string): Promise<void> {
     return this._agent.prompt(message as AgentMessage | AgentMessage[]);
   }
 
@@ -134,7 +122,7 @@ export class AgentSession {
     await this._eventProjector.handleToolResultsResolved();
   }
 
-  continue(): Promise<void> {
+  async continue(): Promise<void> {
     return this._agent.continue();
   }
 
@@ -142,7 +130,7 @@ export class AgentSession {
     this._agent.abort();
   }
 
-  waitForIdle(): Promise<void> {
+  async waitForIdle(): Promise<void> {
     return this._agent.waitForIdle();
   }
 

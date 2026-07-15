@@ -3,7 +3,7 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 export type AgentModelDefinition = `${string}/${string}`;
 
 export type AgentReasoningDefinition =
-  "provider-default" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
+  "high" | "low" | "medium" | "minimal" | "none" | "provider-default" | "xhigh";
 
 export interface AgentDefinition {
   readonly model: AgentModelDefinition;

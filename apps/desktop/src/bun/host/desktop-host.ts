@@ -5,28 +5,28 @@ export type DesktopModuleCleanup = () => Promise<void> | void;
 export interface DesktopModule {
   id: string;
   register(tools: ToolRegistry): void;
-  start?(): Promise<DesktopModuleCleanup | void> | DesktopModuleCleanup | void;
+  start?(): DesktopModuleCleanup | Promise<DesktopModuleCleanup | void> | void;
 }
 
 export class DesktopHost {
   readonly tools: ToolRegistry;
   private readonly _modules: DesktopModule[];
   private readonly _onShutdownError: (moduleId: string, error: Error) => void;
-  private readonly _cleanups: {
-    moduleId: string;
+  private readonly _cleanups: Array<{
     cleanup: DesktopModuleCleanup;
-  }[] = [];
+    moduleId: string;
+  }> = [];
+
   private _registered = false;
 
   constructor({
     modules,
     tools = new ToolRegistry(),
-    onShutdownError = (moduleId, error) =>
-      console.error(`Failed to stop desktop module "${moduleId}":`, error),
+    onShutdownError = (moduleId, error) => { console.error(`Failed to stop desktop module "${moduleId}":`, error); }
   }: {
     modules: DesktopModule[];
-    tools?: ToolRegistry;
     onShutdownError?: (moduleId: string, error: Error) => void;
+    tools?: ToolRegistry;
   }) {
     this._modules = modules;
     this.tools = tools;

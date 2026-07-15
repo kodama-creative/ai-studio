@@ -21,7 +21,7 @@ Bun.serve({
       return new Response("not found", { status: 404 });
     }
     return new Response(file);
-  },
+  }
 });
 
 console.info(`update feed: http://localhost:${PORT} ← ${FEED_DIR}`);

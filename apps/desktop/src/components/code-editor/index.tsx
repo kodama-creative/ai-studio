@@ -1,20 +1,19 @@
 import { RefreshCw } from "lucide-react";
 import {
+  type ChangeEvent,
   Component,
   forwardRef,
   lazy,
+  type ReactElement,
   Suspense,
   useCallback,
   useEffect,
   useImperativeHandle,
   useRef,
-  useState,
-  type ChangeEvent,
-  type ReactNode,
+  useState
 } from "react";
 
 import { cn } from "@/lib/utils";
-
 import { Tooltip } from "../tooltip";
 import { Textarea } from "../ui/textarea";
 
@@ -23,16 +22,15 @@ import type { CodeEditorHandle, CodeEditorProps } from "./editor";
 export type {
   CodeEditorHandle,
   CodeEditorLanguage,
-  CodeEditorProps,
+  CodeEditorProps
 } from "./editor";
 
 // CodeMirror is the single heaviest first-paint dependency (~200 kB gzipped) and
 // only mounts inside editors, so load it on demand. The surrounding UI and the
 // message text paint immediately via the fallback below; the real editor swaps
 // in once its chunk resolves (one shared load covers every editor on the page).
-const LazyCodeEditor = lazy(() =>
-  import("./editor").then((m) => ({ default: m.CodeEditor }))
-);
+const LazyCodeEditor = lazy(async () =>
+  import("./editor").then(m => ({ default: m.CodeEditor })));
 
 /**
  * Non-interactive stand-in shown while the CodeMirror chunk loads. Mirrors the
@@ -44,7 +42,7 @@ function CodeEditorLoadingFallback({
   hideBorder,
   readonly,
   value,
-  placeholder,
+  placeholder
 }: CodeEditorProps) {
   return (
     <div
@@ -63,9 +61,9 @@ function CodeEditorLoadingFallback({
 }
 
 interface CodeEditorErrorBoundaryProps {
-  resetKey: number;
-  fallback: ReactNode;
-  children: ReactNode;
+  readonly resetKey: number;
+  readonly fallback: ReactElement;
+  readonly children: ReactElement;
 }
 
 interface CodeEditorErrorBoundaryState {
@@ -73,7 +71,7 @@ interface CodeEditorErrorBoundaryState {
 }
 
 interface PlainTextCodeEditorProps extends CodeEditorProps {
-  onRetry?: () => void;
+  readonly onRetry?: () => void;
 }
 
 /**
@@ -90,17 +88,17 @@ class CodeEditorErrorBoundary extends Component<
     return { failed: true };
   }
 
-  componentDidCatch(error: unknown) {
-    console.error("CodeEditor failed to render", error);
-  }
-
   componentDidUpdate(prevProps: CodeEditorErrorBoundaryProps) {
     if (prevProps.resetKey !== this.props.resetKey && this.state.failed) {
       this.setState({ failed: false });
     }
   }
 
-  render() {
+  componentDidCatch(error: unknown) {
+    console.error("CodeEditor failed to render", error);
+  }
+
+  render(): ReactElement {
     return this.state.failed ? this.props.fallback : this.props.children;
   }
 }
@@ -108,7 +106,7 @@ class CodeEditorErrorBoundary extends Component<
 const PlainTextCodeEditor = forwardRef<
   CodeEditorHandle,
   PlainTextCodeEditorProps
->(function PlainTextCodeEditor(
+>((
   {
     className,
     autoFocus,
@@ -121,10 +119,10 @@ const PlainTextCodeEditor = forwardRef<
     onChange,
     onKeyDown,
     onPaste,
-    onRetry,
+    onRetry
   },
   ref
-) {
+) => {
   const draftRef = useRef(value);
   const committedRef = useRef(value);
   const focusedRef = useRef(false);
@@ -180,7 +178,7 @@ const PlainTextCodeEditor = forwardRef<
     () => ({
       commit,
       getValue: () => draftRef.current,
-      insertText,
+      insertText
     }),
     [commit, insertText]
   );
@@ -208,11 +206,8 @@ const PlainTextCodeEditor = forwardRef<
       )}
     >
       <Textarea
-        ref={textareaRef}
-        className="text-foreground/80 my-0 min-h-0! w-full shrink-0 resize-none border-none bg-transparent! px-2 pt-2 pb-0 font-mono text-sm! outline-none focus-visible:border-transparent focus-visible:ring-0"
         autoFocus={autoFocus}
-        placeholder={placeholder}
-        readOnly={readonly}
+        className="text-foreground/80 my-0 min-h-0! w-full shrink-0 resize-none border-none bg-transparent! px-2 pt-2 pb-0 font-mono text-sm! outline-none focus-visible:border-transparent focus-visible:ring-0"
         defaultValue={value}
         onBlur={() => {
           focusedRef.current = false;
@@ -222,32 +217,37 @@ const PlainTextCodeEditor = forwardRef<
         onFocus={() => {
           focusedRef.current = true;
         }}
-        onKeyDown={(event) => {
+        onKeyDown={event => {
           if (event.key === "Enter" && event.metaKey) {
             commit();
           }
           onKeyDown?.(event);
         }}
         onPaste={onPaste}
+        placeholder={placeholder}
+        readOnly={readonly}
+        ref={textareaRef}
       />
-      {onRetry ? (
-        <Tooltip content="Retry CodeMirror editor">
-          <button
-            type="button"
-            aria-label="Retry CodeMirror editor"
-            className="text-muted-foreground hover:bg-accent hover:text-foreground absolute top-1 right-1 inline-flex size-6 items-center justify-center rounded transition-colors"
-            onClick={onRetry}
-          >
-            <RefreshCw className="size-3.5" />
-          </button>
-        </Tooltip>
-      ) : null}
+      {onRetry
+        ? (
+          <Tooltip content="Retry CodeMirror editor">
+            <button
+              aria-label="Retry CodeMirror editor"
+              className="text-muted-foreground hover:bg-accent hover:text-foreground absolute top-1 right-1 inline-flex size-6 items-center justify-center rounded transition-colors"
+              onClick={onRetry}
+              type="button"
+            >
+              <RefreshCw className="size-3.5" />
+            </button>
+          </Tooltip>
+        )
+        : null}
     </div>
   );
 });
 
 export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(
-  function CodeEditor(props, ref) {
+  (props, ref) => {
     const [retryKey, setRetryKey] = useState(0);
     // "Lite" rendering fidelity: skip CodeMirror and use the lightweight
     // plain-text editor (a <textarea>) — still editable, just no highlighting.
@@ -256,14 +256,14 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(
     }
     return (
       <CodeEditorErrorBoundary
-        resetKey={retryKey}
         fallback={
           <PlainTextCodeEditor
             {...props}
+            onRetry={() => { setRetryKey(key => key + 1); }}
             ref={ref}
-            onRetry={() => setRetryKey((key) => key + 1)}
           />
         }
+        resetKey={retryKey}
       >
         <Suspense fallback={<CodeEditorLoadingFallback {...props} />}>
           <LazyCodeEditor key={retryKey} {...props} ref={ref} />

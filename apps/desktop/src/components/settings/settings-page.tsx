@@ -11,12 +11,12 @@ export function SettingsPage({
   title,
   description,
   children,
-  className,
+  className
 }: {
-  title: string;
-  description?: ReactNode;
-  children?: ReactNode;
-  className?: string;
+  readonly children?: ReactNode;
+  readonly className?: string;
+  readonly description?: ReactNode;
+  readonly title: string;
 }) {
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -29,9 +29,11 @@ export function SettingsPage({
         )}
       >
         <h2 className="font-heading text-base font-medium">{title}</h2>
-        {description ? (
-          <p className="text-muted-foreground text-xs">{description}</p>
-        ) : null}
+        {description
+          ? (
+            <p className="text-muted-foreground text-xs">{description}</p>
+          )
+          : null}
       </header>
       <div className={cn("min-h-0 flex-1 overflow-x-hidden px-6 pb-6", className)}>
         {children}

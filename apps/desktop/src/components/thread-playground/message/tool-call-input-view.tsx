@@ -1,7 +1,8 @@
-import { type ToolCallInput } from "@llm-space/core";
 import { ChevronDown, ChevronRight, MoreHorizontal } from "lucide-react";
 import { memo, useCallback, useState } from "react";
 import { toast } from "sonner";
+
+import type { ToolCallInput } from "@llm-space/core";
 
 import { revealAbsolutePath, revealSkill } from "@/client/built-in-tools";
 import { useCommands } from "@/commands";
@@ -13,10 +14,9 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
-  DropdownMenuTrigger,
+  DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-
 import { parseTodoWriteInput, TodoWriteView } from "./todo-write-view";
 
 /**
@@ -30,7 +30,7 @@ const FS_TOOLS_WITH_PATH = new Set([
   "edit",
   "ls",
   "tree",
-  "grep",
+  "grep"
 ]);
 
 /**
@@ -59,7 +59,7 @@ async function _reveal(kind: "path" | "skill", value: string): Promise<void> {
 
 function _isStringArray(value: unknown): value is string[] {
   return (
-    Array.isArray(value) && value.every((item) => typeof item === "string")
+    Array.isArray(value) && value.every(item => typeof item === "string")
   );
 }
 
@@ -89,10 +89,10 @@ function _linkKindFor(
   return undefined;
 }
 
-function _ToolCallInputView({ input }: { input: ToolCallInput }) {
+function _ToolCallInputView({ input }: { readonly input: ToolCallInput; }) {
   const todos = parseTodoWriteInput(input);
   if (todos) {
-    return <TodoWriteView todos={todos} input={input} />;
+    return <TodoWriteView input={input} todos={todos} />;
   }
 
   const args = input.arguments as Record<string, unknown>;
@@ -105,16 +105,18 @@ function _ToolCallInputView({ input }: { input: ToolCallInput }) {
       <div>
         <span className="text-primary">{input.name}</span>
         <span className="text-muted-foreground">(</span>
-        {entries.length > 0 ? (
-          <span className="text-muted-foreground">{"{"}</span>
-        ) : null}
+        {entries.length > 0
+          ? (
+            <span className="text-muted-foreground">{"{"}</span>
+          )
+          : null}
       </div>
       {entries.map(([key, value], index) => {
         const trailingComma = index < entries.length - 1;
         if (
-          input.name === "present_files" &&
-          key === "paths" &&
-          _isStringArray(value)
+          input.name === "present_files"
+          && key === "paths"
+          && _isStringArray(value)
         ) {
           return (
             <PathArrayArgumentRow
@@ -126,11 +128,11 @@ function _ToolCallInputView({ input }: { input: ToolCallInput }) {
         }
         return (
           <ToolCallArgumentRow
-            key={key}
             argumentKey={key}
-            value={value}
-            trailingComma={trailingComma}
+            key={key}
             linkKind={_linkKindFor(input.name, isFsTool, key, value)}
+            trailingComma={trailingComma}
+            value={value}
           />
         );
       })}
@@ -148,12 +150,12 @@ function _ToolCallArgumentRow({
   argumentKey,
   value,
   trailingComma,
-  linkKind,
+  linkKind
 }: {
-  argumentKey: string;
-  value: unknown;
-  trailingComma: boolean;
-  linkKind?: LinkKind;
+  readonly argumentKey: string;
+  readonly linkKind?: LinkKind;
+  readonly trailingComma: boolean;
+  readonly value: unknown;
 }) {
   const [open, setOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -165,7 +167,7 @@ function _ToolCallArgumentRow({
   // and primitives always stay on their single truncated line.
   const toggleExpanded = useCallback(() => {
     if (isObject) {
-      setExpanded((prev) => !prev);
+      setExpanded(prev => !prev);
     }
   }, [isObject]);
   const copyText = useCallback(async (text: string, label: string) => {
@@ -209,7 +211,7 @@ function _ToolCallArgumentRow({
       className="group/argument relative flex w-full min-w-0 items-baseline py-0.5 pl-1.5"
       onContextMenu={handleContextMenu}
     >
-      <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenu onOpenChange={setOpen} open={open}>
         <DropdownMenuTrigger asChild>
           <Button
             aria-label={`Open actions for ${argumentKey}`}
@@ -222,19 +224,21 @@ function _ToolCallArgumentRow({
                 : "invisible group-hover/argument:visible",
               open && "visible"
             )}
+            onClick={event => { event.stopPropagation(); }}
             size="icon-xs"
             variant="ghost"
-            onClick={(event) => event.stopPropagation()}
           >
             {isObject ? (
               <>
                 {/* Chevron by default, swapped for the `...` actions icon while
                     the row is hovered (or the menu is open). */}
-                {expanded ? (
-                  <ChevronDown className="size-3.5 group-hover/argument:hidden group-aria-expanded/button:hidden" />
-                ) : (
-                  <ChevronRight className="size-3.5 group-hover/argument:hidden group-aria-expanded/button:hidden" />
-                )}
+                {expanded
+                  ? (
+                    <ChevronDown className="size-3.5 group-hover/argument:hidden group-aria-expanded/button:hidden" />
+                  )
+                  : (
+                    <ChevronRight className="size-3.5 group-hover/argument:hidden group-aria-expanded/button:hidden" />
+                  )}
                 <MoreHorizontal className="hidden size-3.5 group-hover/argument:block group-aria-expanded/button:block" />
               </>
             ) : (
@@ -243,79 +247,93 @@ function _ToolCallArgumentRow({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="min-w-44">
-          {linkKind ? (
-            <>
-              <DropdownMenuItem onSelect={handleActivate}>
-                {linkKind === "url"
-                  ? "Open in Browser"
-                  : "Reveal in File Manager"}
+          {linkKind
+            ? (
+              <>
+                <DropdownMenuItem onSelect={handleActivate}>
+                  {linkKind === "url"
+                    ? "Open in Browser"
+                    : "Reveal in File Manager"}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+              </>
+            )
+            : null}
+          {isObject
+            ? (
+              <>
+                <DropdownMenuItem onSelect={toggleExpanded}>
+                  {expanded ? "Collapse" : "Expand"}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+              </>
+            )
+            : null}
+          {typeof value === "string"
+            ? (
+              <DropdownMenuItem onSelect={copyTextContent}>
+                Copy Text Content
               </DropdownMenuItem>
-              <DropdownMenuSeparator />
-            </>
-          ) : null}
-          {isObject ? (
-            <>
-              <DropdownMenuItem onSelect={toggleExpanded}>
-                {expanded ? "Collapse" : "Expand"}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-            </>
-          ) : null}
-          {typeof value === "string" ? (
-            <DropdownMenuItem onSelect={copyTextContent}>
-              Copy Text Content
-            </DropdownMenuItem>
-          ) : null}
+            )
+            : null}
           <DropdownMenuItem onSelect={copyValueJson}>
             Copy Value as JSON
           </DropdownMenuItem>
-          {typeof value === "string" ? (
-            <>
-              <DropdownMenuSeparator />
+          {typeof value === "string"
+            ? (
+              <>
+                <DropdownMenuSeparator />
 
-              <DropdownMenuItem onSelect={openPreview}>
-                Preview Value...
-              </DropdownMenuItem>
-            </>
-          ) : null}
-          {isObject ? (
-            <>
-              <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={openPreview}>
+                  Preview Value...
+                </DropdownMenuItem>
+              </>
+            )
+            : null}
+          {isObject
+            ? (
+              <>
+                <DropdownMenuSeparator />
 
-              <DropdownMenuItem onSelect={openPreview}>
-                View JSON...
-              </DropdownMenuItem>
-            </>
-          ) : null}
+                <DropdownMenuItem onSelect={openPreview}>
+                  View JSON...
+                </DropdownMenuItem>
+              </>
+            )
+            : null}
         </DropdownMenuContent>
       </DropdownMenu>
       <ArgumentLine
+        activateTitle={linkKind === "url" ? "Open in browser" : "Reveal in file manager"}
         argumentKey={argumentKey}
-        valueText={valueText}
-        trailingComma={trailingComma}
         expandable={isObject}
         expanded={expanded}
-        onToggle={toggleExpanded}
         onActivate={linkKind ? handleActivate : undefined}
-        activateTitle={linkKind === "url" ? "Open in browser" : "Reveal in file manager"}
+        onToggle={toggleExpanded}
+        trailingComma={trailingComma}
+        valueText={valueText}
       />
-      {typeof value === "string" ? (
-        <PreviewDialog
-          open={previewOpen}
-          title={`View value of "${argumentKey}"`}
-          value={value}
-          onOpenChange={setPreviewOpen}
-        />
-      ) : null}
-      {isObject ? (
-        <PreviewDialog
-          open={previewOpen}
-          title={`View value of "${argumentKey}"`}
-          type="json"
-          value={valueText}
-          onOpenChange={setPreviewOpen}
-        />
-      ) : null}
+      {typeof value === "string"
+        ? (
+          <PreviewDialog
+            onOpenChange={setPreviewOpen}
+            open={previewOpen}
+            title={`View value of "${argumentKey}"`}
+            value={value}
+          />
+        )
+        : null}
+      {isObject
+        ? (
+          <PreviewDialog
+            onOpenChange={setPreviewOpen}
+            open={previewOpen}
+            title={`View value of "${argumentKey}"`}
+            type="json"
+            value={valueText}
+          />
+        )
+        : null}
     </div>
   );
 }
@@ -328,10 +346,10 @@ const ToolCallArgumentRow = memo(_ToolCallArgumentRow);
  */
 function _PathArrayArgumentRow({
   paths,
-  trailingComma,
+  trailingComma
 }: {
-  paths: string[];
-  trailingComma: boolean;
+  readonly paths: string[];
+  readonly trailingComma: boolean;
 }) {
   return (
     <div className="w-full min-w-0 py-0.5 pl-1.5">
@@ -342,15 +360,15 @@ function _PathArrayArgumentRow({
       </div>
       {paths.map((p, index) => (
         <div
-          key={index}
           className="flex min-w-0 items-baseline whitespace-pre"
+          key={index}
         >
           <span className="shrink-0">{"    "}</span>
           <button
-            type="button"
-            title="Reveal in file manager"
             className="hover:text-primary min-w-0 cursor-pointer truncate underline-offset-2 hover:underline"
             onClick={() => void _reveal("path", p)}
+            title="Reveal in file manager"
+            type="button"
           >
             {formatJson(p)}
           </button>
@@ -381,58 +399,62 @@ function ArgumentLine({
   expanded,
   onToggle,
   onActivate,
-  activateTitle,
+  activateTitle
 }: {
-  argumentKey: string;
-  valueText: string;
-  trailingComma: boolean;
-  expandable: boolean;
-  expanded: boolean;
-  onToggle: () => void;
-  onActivate?: () => void;
-  activateTitle?: string;
+  readonly activateTitle?: string;
+  readonly argumentKey: string;
+  readonly expandable: boolean;
+  readonly expanded: boolean;
+  readonly onActivate?: () => void;
+  readonly onToggle: () => void;
+  readonly trailingComma: boolean;
+  readonly valueText: string;
 }) {
   const line =
-    expandable && expanded ? (
-      <div
-        className="min-w-max flex-1 cursor-pointer whitespace-pre"
-        onClick={onToggle}
-      >
-        {"  "}
-        <span className="text-foreground">{argumentKey}</span>
-        <span className="text-muted-foreground">: </span>
-        {valueText}
-        {trailingComma ? "," : ""}
-      </div>
-    ) : (
-      <span
-        className={cn(
-          "flex min-w-0 flex-1 items-baseline whitespace-pre",
-          expandable && "cursor-pointer"
-        )}
-        onClick={expandable ? onToggle : undefined}
-      >
-        <span className="shrink-0">{"  "}</span>
-        <span className="text-foreground shrink-0">{argumentKey}</span>
-        <span className="text-muted-foreground shrink-0">: </span>
-        {onActivate ? (
-          <button
-            type="button"
-            title={activateTitle}
-            className="hover:text-primary min-w-0 cursor-pointer truncate underline-offset-2 hover:underline"
-            onClick={(event) => {
-              event.stopPropagation();
-              onActivate();
-            }}
-          >
-            {valueText}
-          </button>
-        ) : (
-          <span className="truncate">{valueText}</span>
-        )}
-        <span className="shrink-0">{trailingComma ? "," : ""}</span>
-      </span>
-    );
+    expandable && expanded
+      ? (
+        <div
+          className="min-w-max flex-1 cursor-pointer whitespace-pre"
+          onClick={onToggle}
+        >
+          {"  "}
+          <span className="text-foreground">{argumentKey}</span>
+          <span className="text-muted-foreground">: </span>
+          {valueText}
+          {trailingComma ? "," : ""}
+        </div>
+      )
+      : (
+        <span
+          className={cn(
+            "flex min-w-0 flex-1 items-baseline whitespace-pre",
+            expandable && "cursor-pointer"
+          )}
+          onClick={expandable ? onToggle : undefined}
+        >
+          <span className="shrink-0">{"  "}</span>
+          <span className="text-foreground shrink-0">{argumentKey}</span>
+          <span className="text-muted-foreground shrink-0">: </span>
+          {onActivate
+            ? (
+              <button
+                className="hover:text-primary min-w-0 cursor-pointer truncate underline-offset-2 hover:underline"
+                onClick={event => {
+                  event.stopPropagation();
+                  onActivate();
+                }}
+                title={activateTitle}
+                type="button"
+              >
+                {valueText}
+              </button>
+            )
+            : (
+              <span className="truncate">{valueText}</span>
+            )}
+          <span className="shrink-0">{trailingComma ? "," : ""}</span>
+        </span>
+      );
 
   if (!expandable) {
     return line;

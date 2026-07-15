@@ -12,20 +12,19 @@ export function useFullScreen(): boolean {
 
   useEffect(() => {
     const rpc = electrobun.rpc;
-    if (!rpc) return;
+    if (!rpc) { return; }
     let cancelled = false;
 
     void rpc.request
       .isFullScreen({})
-      .then((res) => {
-        if (!cancelled) setFullScreen(res.fullScreen);
+      .then(res => {
+        if (!cancelled) { setFullScreen(res.fullScreen); }
       })
       .catch(() => {
         // Ignore: fall back to the default (not fullscreen).
       });
 
-    const onChange = ({ fullScreen }: { fullScreen: boolean }) =>
-      setFullScreen(fullScreen);
+    const onChange = ({ fullScreen }: { fullScreen: boolean; }) => { setFullScreen(fullScreen); };
     rpc.addMessageListener("fullScreenChanged", onChange);
     return () => {
       cancelled = true;

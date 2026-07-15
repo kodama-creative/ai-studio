@@ -1,12 +1,12 @@
 import type { ModelUsage, ModelUsageCost } from "@llm-space/core";
 
 const INTEGER_FORMATTER = new Intl.NumberFormat("en", {
-  maximumFractionDigits: 0,
+  maximumFractionDigits: 0
 });
 
 const COMPACT_FORMATTER = new Intl.NumberFormat("en", {
   notation: "compact",
-  maximumFractionDigits: 1,
+  maximumFractionDigits: 1
 });
 
 export interface UsageBreakdownRow {
@@ -20,7 +20,7 @@ export function formatCompactUsage(usage: ModelUsage): string {
   const parts = [
     `${COMPACT_FORMATTER.format(usage.input)} in`,
     `${COMPACT_FORMATTER.format(usage.output)} out`,
-    ..._cacheSummaryParts(usage, (tokens) => COMPACT_FORMATTER.format(tokens)),
+    ..._cacheSummaryParts(usage, tokens => COMPACT_FORMATTER.format(tokens))
   ];
   if (cost) {
     parts.push(cost);
@@ -36,7 +36,7 @@ export function formatUsageSummary(usage: ModelUsage): string {
     `${formatTokens(usage.input)} input`,
     `${formatTokens(usage.output)} output`,
     ..._reasoningSummaryParts(usage, formatTokens),
-    ..._cacheSummaryParts(usage, formatTokens),
+    ..._cacheSummaryParts(usage, formatTokens)
   ];
   if (cost) {
     parts.push(cost);
@@ -67,24 +67,24 @@ export function formatCost(cost: number | undefined): string | null {
 export function usageBreakdownRows(usage: ModelUsage): UsageBreakdownRow[] {
   const rows: UsageBreakdownRow[] = [
     { label: "Input", value: `${formatTokens(usage.input)} tokens` },
-    { label: "Output", value: `${formatTokens(usage.output)} tokens` },
+    { label: "Output", value: `${formatTokens(usage.output)} tokens` }
   ];
   if (usage.cacheRead > 0) {
     rows.push({
       label: "Cache Read",
-      value: `${formatTokens(usage.cacheRead)} tokens`,
+      value: `${formatTokens(usage.cacheRead)} tokens`
     });
   }
   if (usage.cacheWrite > 0) {
     rows.push({
       label: "Cache Write",
-      value: `${formatTokens(usage.cacheWrite)} tokens`,
+      value: `${formatTokens(usage.cacheWrite)} tokens`
     });
   }
   if ((usage.reasoning ?? 0) > 0) {
     rows.push({
       label: "Reasoning",
-      value: `${formatTokens(usage.reasoning ?? 0)} tokens`,
+      value: `${formatTokens(usage.reasoning ?? 0)} tokens`
     });
   }
   const costRows = _costBreakdownRows(usage.cost);
@@ -93,7 +93,7 @@ export function usageBreakdownRows(usage: ModelUsage): UsageBreakdownRow[] {
   }
   rows.push({
     label: "Total",
-    value: `${formatTokens(_totalTokens(usage))} tokens`,
+    value: `${formatTokens(_totalTokens(usage))} tokens`
   });
   return rows;
 }
@@ -103,8 +103,8 @@ function _totalTokens(usage: ModelUsage): number {
   // and only provide components. Prefer the provider total when present so
   // OpenAI-style totals keep their provider-defined accounting.
   return (
-    usage.totalTokens ||
-    usage.input + usage.output + usage.cacheRead + usage.cacheWrite
+    usage.totalTokens
+    || usage.input + usage.output + usage.cacheRead + usage.cacheWrite
   );
 }
 

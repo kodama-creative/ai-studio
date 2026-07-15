@@ -1,7 +1,7 @@
 import {
   createProvider,
   envApiKeyAuth,
-  type Provider,
+  type Provider
 } from "@earendil-works/pi-ai";
 import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
 
@@ -15,10 +15,10 @@ export function arkCodingPlanProvider(): Provider<"openai-completions"> {
     auth: {
       apiKey: envApiKeyAuth("ARK_API_KEY", [
         "ARK_CODING_PLAN_API_KEY",
-        "ARK_API_KEY",
-      ]),
+        "ARK_API_KEY"
+      ])
     },
     models: Object.values(ARK_CODING_PLAN_MODELS),
-    api: openAICompletionsApi(),
+    api: openAICompletionsApi()
   });
 }

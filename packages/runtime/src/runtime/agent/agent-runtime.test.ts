@@ -1,18 +1,20 @@
-import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
 import {
-  createAssistantMessageEventStream,
-  createModels,
-  createProvider,
   type Api,
   type AssistantMessage,
   type Context,
+  createAssistantMessageEventStream,
+  createModels,
+  createProvider,
   type Model,
-  type Models,
+  type Models
 } from "@earendil-works/pi-ai";
 import { describe, expect, test } from "bun:test";
 
-import type { AgentProjectSnapshot } from "./agent-project-snapshot";
+import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
+
 import { AgentRuntime } from "./agent-runtime";
+
+import type { AgentProjectSnapshot } from "./agent-project-snapshot";
 
 describe("AgentRuntime", () => {
   test("owns an immutable project and its definition default", () => {
@@ -22,12 +24,12 @@ describe("AgentRuntime", () => {
     const runtime = new AgentRuntime({ models: _models(), project });
 
     expect(runtime.project).not.toBe(project);
-    (project.definition!.model as { id: string }).id = "mutated-model";
-    (project.tools[0] as { name: string }).name = "mutated-tool";
+    (project.definition!.model as { id: string; }).id = "mutated-model";
+    (project.tools[0] as { name: string; }).name = "mutated-tool";
     (project.tools as AgentTool[]).push(_tool("late-tool"));
     expect(runtime.project.definition?.model.id).toBe("fake-model");
-    expect(runtime.project.tools.map((tool) => tool.name)).toEqual([
-      "original-tool",
+    expect(runtime.project.tools.map(tool => tool.name)).toEqual([
+      "original-tool"
     ]);
     expect(Object.isFrozen(runtime.project)).toBe(true);
     expect(Object.isFrozen(runtime.project.definition?.model)).toBe(true);
@@ -35,7 +37,7 @@ describe("AgentRuntime", () => {
     expect(Object.isFrozen(runtime.project.tools[0])).toBe(true);
     expect(runtime.defaultModel).toEqual({
       selector: { provider: "fake", id: "fake-model" },
-      available: true,
+      available: true
     });
   });
 
@@ -49,25 +51,25 @@ describe("AgentRuntime", () => {
         type: "object",
         properties: { text: { type: "string" } },
         required: ["text"],
-        additionalProperties: false,
+        additionalProperties: false
       },
-      execute(_toolCallId, input) {
+      async execute(_toolCallId, input) {
         executions += 1;
         return Promise.resolve({
           content: [
             {
               type: "text",
-              text: `echo:${(input as { text: string }).text}`,
-            },
+              text: `echo:${(input as { text: string; }).text}`
+            }
           ],
-          details: undefined,
+          details: undefined
         });
-      },
+      }
     };
     const persisted: AgentMessage[][] = [];
     const runtime = new AgentRuntime({
       models: _reactModels(),
-      project: { ..._project(), tools: [tool] },
+      project: { ..._project(), tools: [tool] }
     });
 
     const session = await runtime.createSession({
@@ -76,17 +78,17 @@ describe("AgentRuntime", () => {
       persistence: {
         replaceMessages(messages) {
           persisted.push(messages);
-        },
-      },
+        }
+      }
     });
     await session.prompt("hello");
 
     expect(executions).toBe(1);
-    expect(persisted.at(-1)?.map((message) => message.role)).toEqual([
+    expect(persisted.at(-1)?.map(message => message.role)).toEqual([
       "user",
       "assistant",
       "toolResult",
-      "assistant",
+      "assistant"
     ]);
     expect(session.model).toEqual({ provider: "fake", id: "fake-model" });
   });
@@ -101,19 +103,19 @@ describe("AgentRuntime", () => {
         type: "object",
         properties: { text: { type: "string" } },
         required: ["text"],
-        additionalProperties: false,
+        additionalProperties: false
       },
-      execute() {
+      async execute() {
         executions += 1;
         return Promise.resolve({
           content: [{ type: "text", text: "should not execute" }],
-          details: undefined,
+          details: undefined
         });
-      },
+      }
     };
     const runtime = new AgentRuntime({
       models: _reactModels(),
-      project: { ..._project(), tools: [tool] },
+      project: { ..._project(), tools: [tool] }
     });
     const persisted: AgentMessage[][] = [];
     const session = await runtime.createSession({
@@ -121,13 +123,13 @@ describe("AgentRuntime", () => {
       persistence: {
         replaceMessages(messages) {
           persisted.push(messages);
-        },
-      },
+        }
+      }
     });
     const deferred: string[] = [];
-    session.subscribe((event) => {
+    session.subscribe(event => {
       if (event.type === "tool_calls_deferred") {
-        deferred.push(...event.calls.map((call) => call.id));
+        deferred.push(...event.calls.map(call => call.id));
       }
     });
 
@@ -135,9 +137,9 @@ describe("AgentRuntime", () => {
 
     expect(executions).toBe(0);
     expect(deferred).toEqual(["call-one"]);
-    expect(session.messages.map((message) => message.role)).toEqual([
+    expect(session.messages.map(message => message.role)).toEqual([
       "user",
-      "assistant",
+      "assistant"
     ]);
 
     await session.resolveToolResults([
@@ -147,21 +149,21 @@ describe("AgentRuntime", () => {
         toolName: "echo",
         content: [{ type: "text", text: "echo:hello" }],
         isError: false,
-        timestamp: Date.now(),
-      },
+        timestamp: Date.now()
+      }
     ]);
-    expect(persisted.at(-1)?.map((message) => message.role)).toEqual([
+    expect(persisted.at(-1)?.map(message => message.role)).toEqual([
       "user",
       "assistant",
-      "toolResult",
+      "toolResult"
     ]);
     await session.continue();
 
-    expect(session.messages.map((message) => message.role)).toEqual([
+    expect(session.messages.map(message => message.role)).toEqual([
       "user",
       "assistant",
       "toolResult",
-      "assistant",
+      "assistant"
     ]);
   });
 
@@ -175,36 +177,36 @@ describe("AgentRuntime", () => {
         type: "object",
         properties: { text: { type: "string" } },
         required: ["text"],
-        additionalProperties: false,
+        additionalProperties: false
       },
-      execute() {
+      async execute() {
         executions += 1;
         return Promise.resolve({
           content: [{ type: "text", text: "echo:hello" }],
-          details: undefined,
+          details: undefined
         });
-      },
+      }
     };
     const runtime = new AgentRuntime({
       models: _reactModels(),
-      project: { ..._project(), tools: [tool] },
+      project: { ..._project(), tools: [tool] }
     });
     const session = await runtime.createSession({ executionMode: "autoOnce" });
 
     await session.prompt("hello");
 
     expect(executions).toBe(1);
-    expect(session.messages.map((message) => message.role)).toEqual([
+    expect(session.messages.map(message => message.role)).toEqual([
       "user",
       "assistant",
-      "toolResult",
+      "toolResult"
     ]);
   });
 
   test("keeps a host-deferred prepared tool pending during ReAct", async () => {
     const runtime = new AgentRuntime({
       models: _reactModels(),
-      project: _project(),
+      project: _project()
     });
     const session = await runtime.createSession({
       executionMode: "react",
@@ -219,25 +221,25 @@ describe("AgentRuntime", () => {
               type: "object",
               properties: { text: { type: "string" } },
               required: ["text"],
-              additionalProperties: false,
-            },
-          },
-        },
-      ],
+              additionalProperties: false
+            }
+          }
+        }
+      ]
     });
     const deferred: string[] = [];
-    session.subscribe((event) => {
+    session.subscribe(event => {
       if (event.type === "tool_calls_deferred") {
-        deferred.push(...event.calls.map((call) => call.id));
+        deferred.push(...event.calls.map(call => call.id));
       }
     });
 
     await session.prompt("hello");
 
     expect(deferred).toEqual(["call-one"]);
-    expect(session.messages.map((message) => message.role)).toEqual([
+    expect(session.messages.map(message => message.role)).toEqual([
       "user",
-      "assistant",
+      "assistant"
     ]);
   });
 
@@ -246,14 +248,14 @@ describe("AgentRuntime", () => {
       ..._project(),
       definition: {
         model: { provider: "missing", id: "missing-model" },
-        reasoning: "high" as const,
-      },
+        reasoning: "high" as const
+      }
     };
     const runtime = new AgentRuntime({ models: _reactModels(), project });
 
     expect(runtime.defaultModel).toEqual({
       selector: { provider: "missing", id: "missing-model" },
-      available: false,
+      available: false
     });
     try {
       await runtime.createSession();
@@ -261,11 +263,11 @@ describe("AgentRuntime", () => {
     } catch (error) {
       expect(error).toMatchObject({
         name: "AgentRuntimeModelUnavailableError",
-        selector: { provider: "missing", id: "missing-model" },
+        selector: { provider: "missing", id: "missing-model" }
       });
     }
     const session = await runtime.createSession({
-      model: { provider: "fake", id: "fake-model" },
+      model: { provider: "fake", id: "fake-model" }
     });
     expect(session.model).toEqual({ provider: "fake", id: "fake-model" });
   });
@@ -273,12 +275,12 @@ describe("AgentRuntime", () => {
   test("distinguishes an omitted reasoning override from provider default", async () => {
     const runtime = new AgentRuntime({
       models: _reactModels(),
-      project: _project(),
+      project: _project()
     });
 
     const inherited = await runtime.createSession();
     const providerDefault = await runtime.createSession({
-      reasoning: undefined,
+      reasoning: undefined
     });
 
     expect(inherited.reasoning).toBe("high");
@@ -292,10 +294,10 @@ describe("AgentRuntime", () => {
       description = "Stateful class tool.";
       parameters = { type: "object" as const, properties: {} };
 
-      execute() {
+      async execute() {
         return Promise.resolve({
           content: [{ type: "text" as const, text: "done" }],
-          details: {},
+          details: {}
         });
       }
     }
@@ -304,7 +306,7 @@ describe("AgentRuntime", () => {
       () =>
         new AgentRuntime({
           models: _models(),
-          project: { ..._project(), tools: [new StatefulTool()] },
+          project: { ..._project(), tools: [new StatefulTool()] }
         })
     ).toThrow("plain data objects");
   });
@@ -315,14 +317,14 @@ function _project(): AgentProjectSnapshot {
     root: "/agent",
     definition: {
       model: { provider: "fake", id: "fake-model" },
-      reasoning: "high",
+      reasoning: "high"
     },
     instructions: "Test agent.",
     tools: [],
     connections: [],
     resources: { skills: [] },
     diagnostics: [],
-    fingerprint: "snapshot-one",
+    fingerprint: "snapshot-one"
   };
 }
 
@@ -332,8 +334,8 @@ function _tool(name: string): AgentTool {
     label: name,
     description: name,
     parameters: { type: "object", properties: {} },
-    execute: () =>
-      Promise.resolve({ content: [{ type: "text", text: "" }], details: {} }),
+    execute: async () =>
+      Promise.resolve({ content: [{ type: "text", text: "" }], details: {} })
   };
 }
 
@@ -343,7 +345,7 @@ function _models(): Models {
       return provider === "fake" && id === "fake-model"
         ? { provider, id }
         : undefined;
-    },
+    }
   } as unknown as Models;
 }
 
@@ -358,22 +360,22 @@ function _reactModels(): Models {
     input: ["text"],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: 128_000,
-    maxTokens: 4_096,
+    maxTokens: 4_096
   };
   const api = {
     stream: (_model: Model<Api>, context: Context) => _stream(context),
-    streamSimple: (_model: Model<Api>, context: Context) => _stream(context),
+    streamSimple: (_model: Model<Api>, context: Context) => _stream(context)
   };
   const provider = createProvider({
     id: "fake",
     auth: {
       apiKey: {
         name: "Fake",
-        resolve: () => Promise.resolve({ auth: {} }),
-      },
+        resolve: async () => Promise.resolve({ auth: {} })
+      }
     },
     models: [model],
-    api,
+    api
   });
   const models = createModels();
   models.setProvider(provider);
@@ -388,13 +390,13 @@ function _stream(context: Context) {
     content: hasToolResult
       ? [{ type: "text", text: "done" }]
       : [
-          {
-            type: "toolCall",
-            id: "call-one",
-            name: "echo",
-            arguments: { text: "hello" },
-          },
-        ],
+        {
+          type: "toolCall",
+          id: "call-one",
+          name: "echo",
+          arguments: { text: "hello" }
+        }
+      ],
     api: "fake",
     provider: "fake",
     model: "fake-model",
@@ -404,17 +406,17 @@ function _stream(context: Context) {
       cacheRead: 0,
       cacheWrite: 0,
       totalTokens: 2,
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
     },
     stopReason: hasToolResult ? "stop" : "toolUse",
-    timestamp: Date.now(),
+    timestamp: Date.now()
   };
   queueMicrotask(() => {
     stream.push({ type: "start", partial: message });
     stream.push({
       type: "done",
       reason: hasToolResult ? "stop" : "toolUse",
-      message,
+      message
     });
   });
   return stream;

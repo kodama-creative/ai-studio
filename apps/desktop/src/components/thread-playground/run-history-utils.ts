@@ -1,8 +1,8 @@
 import {
-  getMessageText,
   type AssistantMessage,
+  getMessageText,
   type Message,
-  type ThreadSnapshot,
+  type ThreadSnapshot
 } from "@llm-space/core";
 
 /**
@@ -16,10 +16,10 @@ export function summarizeRun(thread: ThreadSnapshot): string {
   }
   if (last.role === "assistant" && last.toolCalls?.length) {
     return last.toolCalls
-      .map((toolCall) => `${toolCall.input.name}()`)
+      .map(toolCall => `${toolCall.input.name}()`)
       .join(", ");
   }
-  const imageCount = last.content.filter((c) => c.type === "image_data").length;
+  const imageCount = last.content.filter(c => c.type === "image_data").length;
   if (imageCount > 0) {
     return `[${imageCount} image${imageCount > 1 ? "s" : ""}]`;
   }
@@ -29,7 +29,7 @@ export function summarizeRun(thread: ThreadSnapshot): string {
 
 /** The model label for a run snapshot, separated so it can truncate safely. */
 export function runModelLabel(thread: ThreadSnapshot): string {
-  if (!thread.model) return "No model";
+  if (!thread.model) { return "No model"; }
   const reasoning = thread.model.params?.reasoning;
   return `${thread.model.provider}/${thread.model.id}${reasoning ? ` · reasoning: ${reasoning}` : ""}`;
 }
@@ -44,12 +44,12 @@ export function runMessageCountLabel(thread: ThreadSnapshot): string {
 function _lastMessageByRole<T extends Message["role"]>(
   thread: ThreadSnapshot,
   role: T
-): Extract<Message, { role: T }> | null {
+): Extract<Message, { role: T; }> | null {
   const messages = thread.context?.messages ?? [];
   for (let index = messages.length - 1; index >= 0; index--) {
     const message = messages[index];
     if (message?.role === role) {
-      return message as Extract<Message, { role: T }>;
+      return message as Extract<Message, { role: T; }>;
     }
   }
   return null;
@@ -63,7 +63,7 @@ export function runLastUserText(thread: ThreadSnapshot): string {
   }
   const text = getMessageText(message).trim();
   const imageCount = message.content.filter(
-    (c) => c.type === "image_data"
+    c => c.type === "image_data"
   ).length;
   if (text && imageCount > 0) {
     return `${text}\n[${imageCount} image${imageCount > 1 ? "s" : ""}]`;
@@ -95,9 +95,9 @@ function _toolResultText(message: AssistantMessage): string {
     return "";
   }
   return message.toolCalls
-    .map((toolCall) => {
+    .map(toolCall => {
       const output = toolCall.output?.content
-        ?.map((content) => content.text)
+        ?.map(content => content.text)
         .join("\n")
         .trim();
       const args = JSON.stringify(toolCall.input.arguments);

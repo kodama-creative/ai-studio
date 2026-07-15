@@ -11,8 +11,8 @@ import type {
   ThreadSkillsVariable,
   ThreadSkillsVariableFormat,
   ThreadVariable,
-  ThreadVariableVariants,
   ThreadVariables,
+  ThreadVariableVariants
 } from "../types";
 
 export interface PromptSkill {
@@ -155,7 +155,7 @@ export function removePromptVariableSnapshotPlaces(
   const variables = _normalizeSnapshotVariables(snapshot.variables);
   let changed = false;
   for (const placeKey of remove) {
-    if (Object.prototype.hasOwnProperty.call(variables, placeKey)) {
+    if (Object.hasOwn(variables, placeKey)) {
       delete variables[placeKey];
       changed = true;
     }
@@ -183,14 +183,14 @@ export function createDefaultThreadVariables(): ThreadVariables {
   return {
     [DEFAULT_CURRENT_DATE_NAME]: {
       type: "currentDate",
-      format: "readable-date",
+      format: "readable-date"
     },
     [DEFAULT_SKILLS_NAME]: {
       type: "skills",
       skillNames: [],
       format: "markdown-list",
-      indent: 0,
-    },
+      indent: 0
+    }
   };
 }
 
@@ -198,7 +198,7 @@ export function createDefaultThreadVariables(): ThreadVariables {
 export function createDefaultThreadVariableVariants(): ThreadVariableVariants {
   return {
     active: DEFAULT_VARIABLE_VARIANT_NAME,
-    variants: { [DEFAULT_VARIABLE_VARIANT_NAME]: {} },
+    variants: { [DEFAULT_VARIABLE_VARIANT_NAME]: {} }
   };
 }
 
@@ -207,8 +207,8 @@ export function ensureThreadVariableState(thread: Thread): Thread {
   const context = thread.context ?? {};
   const state = normalizePromptVariableState(context);
   if (
-    context.variables === state.variables &&
-    context.variableVariants === state.variableVariants
+    context.variables === state.variables
+    && context.variableVariants === state.variableVariants
   ) {
     return thread;
   }
@@ -217,8 +217,8 @@ export function ensureThreadVariableState(thread: Thread): Thread {
     context: {
       ...context,
       variables: state.variables,
-      variableVariants: state.variableVariants,
-    },
+      variableVariants: state.variableVariants
+    }
   };
 }
 
@@ -231,7 +231,7 @@ export function normalizePromptVariableState(
     variables,
     variableVariants: _normalizeThreadVariableVariants(
       context?.variableVariants
-    ),
+    )
   };
 }
 
@@ -272,17 +272,17 @@ export async function renderSystemPromptVariables({
   systemPrompt,
   context,
   loadSkills,
-  now,
+  now
 }: {
-  systemPrompt: string;
   context?: ThreadContext;
+  systemPrompt: string;
 } & PromptVariableRenderOptions): Promise<RenderedSystemPrompt> {
   const state = normalizePromptVariableState(context);
   _assertValidVariableState(state);
 
   const renderState = _createPromptVariableRenderState(state, {
     loadSkills,
-    now,
+    now
   });
   const rendered: RenderedPromptVariable[] = [];
   const snapshotVariables: SnapshotVariables = {};
@@ -292,7 +292,7 @@ export async function renderSystemPromptVariables({
     snapshotVariables: {},
     nextSnapshotVariables: snapshotVariables,
     renderState,
-    rendered,
+    rendered
   });
   return { systemPrompt: output, variables: rendered };
 }
@@ -305,7 +305,7 @@ export async function renderSystemPromptVariables({
 export async function renderThreadPromptVariables({
   context,
   loadSkills,
-  now,
+  now
 }: {
   context: ThreadContext;
 } & PromptVariableRenderOptions): Promise<RenderedThreadPromptVariables> {
@@ -314,7 +314,7 @@ export async function renderThreadPromptVariables({
 
   const renderState = _createPromptVariableRenderState(state, {
     loadSkills,
-    now,
+    now
   });
   const rendered: RenderedPromptVariable[] = [];
   const snapshotVariables = _normalizeSnapshotVariables(
@@ -326,22 +326,22 @@ export async function renderThreadPromptVariables({
     context.systemPrompt === undefined
       ? undefined
       : await _renderTextPromptVariables({
-          text: context.systemPrompt,
-          placeKey: SYSTEM_PROMPT_PLACE_KEY,
-          snapshotVariables,
-          nextSnapshotVariables,
-          renderState,
-          rendered,
-        });
-
-  const messages = context.messages
-    ? await _renderMessagesPromptVariables({
-        messages: context.messages,
+        text: context.systemPrompt,
+        placeKey: SYSTEM_PROMPT_PLACE_KEY,
         snapshotVariables,
         nextSnapshotVariables,
         renderState,
-        rendered,
-      })
+        rendered
+      });
+
+  const messages = context.messages
+    ? await _renderMessagesPromptVariables({
+      messages: context.messages,
+      snapshotVariables,
+      nextSnapshotVariables,
+      renderState,
+      rendered
+    })
     : undefined;
 
   const snapshot = _buildSnapshot(context.snapshot, nextSnapshotVariables);
@@ -350,10 +350,10 @@ export async function renderThreadPromptVariables({
       ...context,
       ...(systemPrompt === undefined ? {} : { systemPrompt }),
       ...(messages === undefined ? {} : { messages }),
-      ...(snapshot === undefined ? { snapshot: undefined } : { snapshot }),
+      ...(snapshot === undefined ? { snapshot: undefined } : { snapshot })
     },
     snapshot,
-    variables: rendered,
+    variables: rendered
   };
 }
 
@@ -381,7 +381,7 @@ function _replaceMessagesPromptVariableReferences(
   newName: string
 ): Message[] {
   let changed = false;
-  const next = messages.map((message) => {
+  const next = messages.map(message => {
     const replacedContent = _replaceMessageContentPromptVariableReferences(
       message.content,
       oldName,
@@ -390,15 +390,15 @@ function _replaceMessagesPromptVariableReferences(
     const replacedToolCalls =
       message.role === "assistant"
         ? _replaceToolCallOutputPromptVariableReferences(
-            message.toolCalls,
-            oldName,
-            newName
-          )
+          message.toolCalls,
+          oldName,
+          newName
+        )
         : undefined;
 
     if (
-      replacedContent === message.content &&
-      (message.role !== "assistant" || replacedToolCalls === message.toolCalls)
+      replacedContent === message.content
+      && (message.role !== "assistant" || replacedToolCalls === message.toolCalls)
     ) {
       return message;
     }
@@ -407,7 +407,7 @@ function _replaceMessagesPromptVariableReferences(
     return {
       ...message,
       content: replacedContent,
-      ...(message.role === "assistant" ? { toolCalls: replacedToolCalls } : {}),
+      ...(message.role === "assistant" ? { toolCalls: replacedToolCalls } : {})
     } as Message;
   });
 
@@ -420,7 +420,7 @@ function _replaceMessageContentPromptVariableReferences(
   newName: string
 ): Message["content"] {
   let changed = false;
-  const next = content.map((item) => {
+  const next = content.map(item => {
     if (item.type !== "text") {
       return item;
     }
@@ -444,14 +444,14 @@ function _replaceToolCallOutputPromptVariableReferences(
   }
 
   let changed = false;
-  const next = toolCalls.map((toolCall) => {
+  const next = toolCalls.map(toolCall => {
     const output = toolCall.output;
     if (!output?.content.length) {
       return toolCall;
     }
 
     let outputChanged = false;
-    const content = output.content.map((item) => {
+    const content = output.content.map(item => {
       const text = replacePromptVariableReferences(item.text, oldName, newName);
       if (text === item.text) {
         return item;
@@ -483,7 +483,7 @@ function _renamePromptVariableSnapshotReference(
   const variables = _normalizeSnapshotVariables(snapshot.variables);
   let changed = false;
   for (const placeValues of Object.values(variables)) {
-    if (!Object.prototype.hasOwnProperty.call(placeValues, oldName)) {
+    if (!Object.hasOwn(placeValues, oldName)) {
       continue;
     }
     placeValues[newName] = placeValues[oldName]!;
@@ -501,8 +501,8 @@ function _createPromptVariableRenderState(
   const skills = new Map<string, PromptSkill>();
   let loadedSkills: Promise<void> | null = null;
   const loadSkills = async () => {
-    loadedSkills ??= (options.loadSkills?.() ?? Promise.resolve([])).then(
-      (items) => {
+    loadedSkills = loadedSkills ?? (options.loadSkills?.() ?? Promise.resolve([])).then(
+      items => {
         for (const item of items) {
           skills.set(item.name, item);
         }
@@ -518,13 +518,13 @@ async function _renderMessagesPromptVariables({
   snapshotVariables,
   nextSnapshotVariables,
   renderState,
-  rendered,
+  rendered
 }: {
   messages: Message[];
-  snapshotVariables: SnapshotVariables;
   nextSnapshotVariables: SnapshotVariables;
-  renderState: PromptVariableRenderState;
   rendered: RenderedPromptVariable[];
+  renderState: PromptVariableRenderState;
+  snapshotVariables: SnapshotVariables;
 }): Promise<Message[]> {
   const next: Message[] = [];
   for (const message of messages) {
@@ -542,9 +542,9 @@ async function _renderMessagesPromptVariables({
         snapshotVariables,
         nextSnapshotVariables,
         renderState,
-        rendered,
+        rendered
       });
-      changed ||= text !== item.text;
+      changed = changed || text !== item.text;
       content.push(text === item.text ? item : { ...item, text });
     }
 
@@ -555,7 +555,7 @@ async function _renderMessagesPromptVariables({
         snapshotVariables,
         nextSnapshotVariables,
         renderState,
-        rendered,
+        rendered
       });
     }
     next.push(nextMessage);
@@ -568,13 +568,13 @@ async function _renderAssistantToolResultsPromptVariables({
   snapshotVariables,
   nextSnapshotVariables,
   renderState,
-  rendered,
+  rendered
 }: {
   message: AssistantMessage;
-  snapshotVariables: SnapshotVariables;
   nextSnapshotVariables: SnapshotVariables;
-  renderState: PromptVariableRenderState;
   rendered: RenderedPromptVariable[];
+  renderState: PromptVariableRenderState;
+  snapshotVariables: SnapshotVariables;
 }): Promise<AssistantMessage> {
   if (!message.toolCalls?.length) {
     return message;
@@ -602,12 +602,12 @@ async function _renderAssistantToolResultsPromptVariables({
         snapshotVariables,
         nextSnapshotVariables,
         renderState,
-        rendered,
+        rendered
       });
-      outputChanged ||= text !== item.text;
+      outputChanged = outputChanged || text !== item.text;
       content.push(text === item.text ? item : { ...item, text });
     }
-    changed ||= outputChanged;
+    changed = changed || outputChanged;
     toolCalls.push(
       outputChanged ? { ...toolCall, output: { ...output, content } } : toolCall
     );
@@ -622,7 +622,7 @@ async function _renderTextPromptVariables({
   snapshotVariables,
   nextSnapshotVariables,
   renderState,
-  rendered,
+  rendered
 }: RenderTextPromptVariablesInput): Promise<string> {
   const matches = [...text.matchAll(SIMPLE_PROMPT_VARIABLE_RE)];
   if (matches.length === 0) {
@@ -660,7 +660,7 @@ async function _renderTextPromptVariables({
       value = await _renderVariableValue(name, renderState.state, {
         loadSkills: renderState.loadSkills,
         now: renderState.now,
-        skills: renderState.skills,
+        skills: renderState.skills
       });
       // Unknown variable name — keep the original placeholder text as-is.
       if (value === undefined) {
@@ -735,8 +735,8 @@ function _normalizeThreadVariables(
         : _normalizeSkillsVariable(value);
     variables[name] = normalized;
     used.add(name);
-    hasCurrentDate ||= normalized.type === "currentDate";
-    hasSkills ||= normalized.type === "skills";
+    hasCurrentDate = hasCurrentDate || normalized.type === "currentDate";
+    hasSkills = hasSkills || normalized.type === "skills";
   }
 
   if (!hasCurrentDate) {
@@ -763,7 +763,7 @@ function _normalizeThreadVariableVariants(
   const sourceValues = _defaultCustomValues(input);
   return {
     active: DEFAULT_VARIABLE_VARIANT_NAME,
-    variants: { [DEFAULT_VARIABLE_VARIANT_NAME]: sourceValues },
+    variants: { [DEFAULT_VARIABLE_VARIANT_NAME]: sourceValues }
   };
 }
 
@@ -774,10 +774,10 @@ function _defaultCustomValues(
   const selectedValues =
     typeof input?.active === "string" ? variants[input.active] : undefined;
   const source =
-    variants[DEFAULT_VARIABLE_VARIANT_NAME] ??
-    selectedValues ??
-    Object.values(variants)[0] ??
-    {};
+    variants[DEFAULT_VARIABLE_VARIANT_NAME]
+    ?? selectedValues
+    ?? Object.values(variants)[0]
+    ?? {};
   if (!source || typeof source !== "object") {
     return {};
   }
@@ -795,7 +795,7 @@ function _normalizeCurrentDateVariable(
 ): ThreadCurrentDateVariable {
   return {
     type: "currentDate",
-    format: _isDateFormat(value.format) ? value.format : "readable-date",
+    format: _isDateFormat(value.format) ? value.format : "readable-date"
   };
 }
 
@@ -805,10 +805,10 @@ function _normalizeSkillsVariable(
   return {
     type: "skills",
     skillNames: Array.isArray(value.skillNames)
-      ? value.skillNames.filter((name) => typeof name === "string")
+      ? value.skillNames.filter(name => typeof name === "string")
       : [],
     format: _isSkillsFormat(value.format) ? value.format : "xml",
-    indent: _normalizeIndent(value.indent),
+    indent: _normalizeIndent(value.indent)
   };
 }
 
@@ -842,7 +842,7 @@ async function _renderVariableValue(
   {
     loadSkills,
     now,
-    skills,
+    skills
   }: {
     loadSkills: () => Promise<void>;
     now: () => Date;
@@ -860,15 +860,15 @@ async function _renderVariableValue(
     const selected =
       builtIn.skillNames.length === 0
         ? [...skills.values()]
-        : builtIn.skillNames.map((skillName) => {
-            const skill = skills.get(skillName);
-            if (!skill) {
-              throw new PromptVariableError(
-                `Skill "${skillName}" in variable "${name}" is not enabled or cannot be found.`
-              );
-            }
-            return skill;
-          });
+        : builtIn.skillNames.map(skillName => {
+          const skill = skills.get(skillName);
+          if (!skill) {
+            throw new PromptVariableError(
+              `Skill "${skillName}" in variable "${name}" is not enabled or cannot be found.`
+            );
+          }
+          return skill;
+        });
     return formatSkillsVariable(selected, builtIn);
   }
 
@@ -894,19 +894,19 @@ function _assertVariableName(name: string, message: string): void {
 function _formatSkillsXml(skills: PromptSkill[]): string {
   return [
     "<available-skills>",
-    ...skills.flatMap((skill) => [
+    ...skills.flatMap(skill => [
       `<skill name="${_escapeXml(skill.name)}" path="${_escapeXml(skill.path)}">`,
-      `${_escapeXml(_singleLine(skill.description))}`,
-      "</skill>",
+      _escapeXml(_singleLine(skill.description)),
+      "</skill>"
     ]),
-    "</available-skills>",
+    "</available-skills>"
   ].join("\n");
 }
 
 function _formatSkillsMarkdownList(skills: PromptSkill[]): string {
   return skills
     .map(
-      (skill) =>
+      skill =>
         `- **${_escapeMarkdownCode(skill.name)}**: ${_singleLine(skill.description)}`
     )
     .join("\n\n");
@@ -920,7 +920,7 @@ function _indentLines(value: string, indent: number): string {
   const prefix = " ".repeat(normalized);
   return value
     .split("\n")
-    .map((line) => `${prefix}${line}`)
+    .map(line => `${prefix}${line}`)
     .join("\n");
 }
 
@@ -928,15 +928,15 @@ function _isThreadVariable(value: unknown): value is ThreadVariable {
   if (!value || typeof value !== "object") {
     return false;
   }
-  const type = (value as { type?: unknown }).type;
+  const type = (value as { type?: unknown; }).type;
   return type === "currentDate" || type === "skills";
 }
 
 function _isDateFormat(value: unknown): value is PromptDateVariableFormat {
   return (
-    value === "readable-date" ||
-    value === "iso-date" ||
-    value === "local-date-time"
+    value === "readable-date"
+    || value === "iso-date"
+    || value === "local-date-time"
   );
 }
 
@@ -948,7 +948,7 @@ function _normalizeIndent(value: unknown): 0 | 2 | 4 {
   return value === 2 || value === 4 ? value : 0;
 }
 
-function _localDateParts(date: Date): { dateText: string; timeText: string } {
+function _localDateParts(date: Date): { dateText: string; timeText: string; } {
   const year = date.getFullYear();
   const month = _pad(date.getMonth() + 1);
   const day = _pad(date.getDate());
@@ -957,7 +957,7 @@ function _localDateParts(date: Date): { dateText: string; timeText: string } {
   const seconds = _pad(date.getSeconds());
   return {
     dateText: `${year}-${month}-${day}`,
-    timeText: `${hours}:${minutes}:${seconds}`,
+    timeText: `${hours}:${minutes}:${seconds}`
   };
 }
 

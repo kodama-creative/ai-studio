@@ -1,6 +1,7 @@
-import { type ToolCallInput } from "@llm-space/core";
 import { GlobeIcon } from "lucide-react";
 import { memo } from "react";
+
+import type { ToolCallInput } from "@llm-space/core";
 
 import { Link } from "@/components/link";
 
@@ -47,7 +48,7 @@ export function parseWebSearchOutput(
       title: r.title,
       url: r.url,
       snippet: typeof r.snippet === "string" ? r.snippet : undefined,
-      content: typeof r.content === "string" ? r.content : undefined,
+      content: typeof r.content === "string" ? r.content : undefined
     });
   }
   return results;
@@ -69,7 +70,7 @@ function _prettyUrl(url: string): string {
  * A read-only, Google-style rendering of `web_search` results. Height is capped
  * to match the code editor it replaces, scrolling internally past that.
  */
-function _WebSearchResultsView({ results }: { results: WebSearchResult[] }) {
+function _WebSearchResultsView({ results }: { readonly results: WebSearchResult[]; }) {
   return (
     <div className="flex max-h-96 w-full flex-col gap-4 overflow-y-auto rounded-lg bg-(--textarea) px-3 py-2.5 select-auto">
       {results.map((result, index) => (
@@ -80,28 +81,30 @@ function _WebSearchResultsView({ results }: { results: WebSearchResult[] }) {
 }
 export const WebSearchResultsView = memo(_WebSearchResultsView);
 
-function _WebSearchResultRow({ result }: { result: WebSearchResult }) {
+function _WebSearchResultRow({ result }: { readonly result: WebSearchResult; }) {
   const description = result.snippet ?? result.content;
   return (
     <div className="flex min-w-0 flex-col gap-0.5">
       <Link
-        href={result.url}
         className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-xs hover:underline"
+        href={result.url}
       >
         <GlobeIcon className="size-3 shrink-0" />
         <span className="truncate">{_prettyUrl(result.url)}</span>
       </Link>
       <Link
-        href={result.url}
         className="text-primary line-clamp-2 text-sm font-medium hover:underline"
+        href={result.url}
       >
         {result.title}
       </Link>
-      {description ? (
-        <p className="text-muted-foreground line-clamp-2 text-xs leading-5">
-          {description}
-        </p>
-      ) : null}
+      {description
+        ? (
+          <p className="text-muted-foreground line-clamp-2 text-xs leading-5">
+            {description}
+          </p>
+        )
+        : null}
     </div>
   );
 }

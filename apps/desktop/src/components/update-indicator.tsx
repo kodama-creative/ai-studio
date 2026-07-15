@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import {
   Popover,
   PopoverContent,
-  PopoverTrigger,
+  PopoverTrigger
 } from "@/components/ui/popover";
 import { useUpdateStatus } from "@/components/update-status-provider";
 
@@ -23,17 +23,17 @@ import { useUpdateStatus } from "@/components/update-status-provider";
 export function UpdateIndicator() {
   const { readyVersion } = useUpdateStatus();
   const { executeCommand } = useCommands();
-  if (!readyVersion) return null;
+  if (!readyVersion) { return null; }
 
   return (
     <Popover>
       <Tooltip content="Update ready — restart to install">
         <PopoverTrigger asChild>
           <Button
-            size="icon-sm"
-            variant="ghost"
             aria-label="Update ready"
             className="relative"
+            size="icon-sm"
+            variant="ghost"
           >
             <ArrowDownToLineIcon />
             <span className="bg-primary absolute top-1 right-1 size-1.5 rounded-full" />
@@ -46,11 +46,9 @@ export function UpdateIndicator() {
           v{readyVersion} has been downloaded. Restart to install.
         </span>
         <Button
-          size="sm"
           className="mt-1 w-full"
-          onClick={() =>
-            executeCommand({ type: "applyUpdateAndRestart", args: {} })
-          }
+          onClick={() => { executeCommand({ type: "applyUpdateAndRestart", args: {} }); }}
+          size="sm"
         >
           Restart Now
         </Button>

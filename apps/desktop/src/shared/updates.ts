@@ -5,11 +5,11 @@
  * up-to-date / errors) that automatic background checks keep silent.
  */
 export type UpdateStatus =
-  | { state: "checking" }
-  | { state: "up-to-date"; version: string }
-  | { state: "downloading"; version: string }
-  | { state: "ready"; version: string }
-  | { state: "error"; message: string };
+  | { message: string; state: "error"; }
+  | { state: "checking"; }
+  | { state: "downloading"; version: string; }
+  | { state: "ready"; version: string; }
+  | { state: "up-to-date"; version: string; };
 
 export interface UpdateStatusChangedPayload {
   status: UpdateStatus;

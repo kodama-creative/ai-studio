@@ -4,9 +4,9 @@ import path from "node:path";
 import {
   AGENT_PROJECT_MANIFEST_FILE,
   AGENT_PROJECT_MANIFEST_VERSION,
-  AgentProjectManifestError,
-  parseAgentProjectManifest,
   type AgentProjectManifest,
+  AgentProjectManifestError,
+  parseAgentProjectManifest
 } from "../../shared/agent-project-manifest";
 
 export interface ResolvedAgentProjectManifest {
@@ -34,7 +34,7 @@ export async function loadAgentProjectManifest(
     if (_hasCode(error, "ENOENT")) {
       manifest = {
         schemaVersion: AGENT_PROJECT_MANIFEST_VERSION,
-        agent: "agent",
+        agent: "agent"
       };
     } else if (error instanceof SyntaxError) {
       throw new AgentProjectManifestError(
@@ -74,7 +74,7 @@ export async function loadAgentProjectManifest(
     }
     agentRoot = await realpath(candidate);
   } catch (error) {
-    if (error instanceof AgentProjectManifestError) throw error;
+    if (error instanceof AgentProjectManifestError) { throw error; }
     if (_hasCode(error, "ENOENT")) {
       throw new AgentProjectManifestError(
         `The configured Agent source directory does not exist: ${manifest.agent}`
@@ -106,7 +106,7 @@ async function _canonicalDirectory(input: string, label: string) {
     }
     return await realpath(resolved);
   } catch (error) {
-    if (error instanceof AgentProjectManifestError) throw error;
+    if (error instanceof AgentProjectManifestError) { throw error; }
     throw new AgentProjectManifestError(
       `Unable to open ${label.toLowerCase()} root: ${_message(error)}`
     );

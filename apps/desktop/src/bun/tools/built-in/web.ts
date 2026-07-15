@@ -41,8 +41,8 @@ interface SearchProvider {
 interface FirecrawlScrapeResponse {
   success?: boolean;
   data?: {
-    markdown?: string;
     html?: string;
+    markdown?: string;
     metadata?: Record<string, unknown>;
   };
   error?: string;
@@ -51,43 +51,43 @@ interface FirecrawlScrapeResponse {
 interface FirecrawlSearchResponse {
   success?: boolean;
   data?: {
-    web?: {
+    web?: Array<{
+      description?: string;
+      html?: string;
+      markdown?: string;
+      metadata?: Record<string, unknown>;
       title?: string;
       url?: string;
-      description?: string;
-      markdown?: string;
-      html?: string;
-      metadata?: Record<string, unknown>;
-    }[];
+    }>;
   };
   error?: string;
 }
 
 interface TavilySearchResponse {
-  results?: {
-    title?: string;
-    url?: string;
+  results?: Array<{
     content?: string;
     raw_content?: string;
-  }[];
+    title?: string;
+    url?: string;
+  }>;
 }
 
 interface TavilyExtractResponse {
-  results?: {
-    url?: string;
+  results?: Array<{
     raw_content?: string;
-  }[];
-  failed_results?: {
     url?: string;
+  }>;
+  failed_results?: Array<{
     error?: string;
-  }[];
+    url?: string;
+  }>;
 }
 
 function _truncateText(text: string, maxChars: number): string {
   if (text.length <= maxChars) {
     return text;
   }
-  return text.slice(0, maxChars) + "\n\n[Content truncated]";
+  return `${text.slice(0, maxChars)}\n\n[Content truncated]`;
 }
 
 /** Resolve a `$VAR` reference from the environment; pass literals through. */
@@ -112,7 +112,7 @@ class FirecrawlSearchProvider implements SearchProvider {
 
   private _headers(): Record<string, string> {
     const headers: Record<string, string> = {
-      "Content-Type": "application/json",
+      "Content-Type": "application/json"
     };
     if (this._apiKey) {
       headers.Authorization = `Bearer ${this._apiKey}`;
@@ -127,8 +127,8 @@ class FirecrawlSearchProvider implements SearchProvider {
       body: JSON.stringify({
         url,
         formats: ["markdown"],
-        onlyMainContent: true,
-      }),
+        onlyMainContent: true
+      })
     });
 
     const json = (await res.json()) as FirecrawlScrapeResponse;
@@ -144,7 +144,7 @@ class FirecrawlSearchProvider implements SearchProvider {
       url,
       title: typeof metadata.title === "string" ? metadata.title : undefined,
       content: _truncateText(data.markdown ?? data.html ?? "", 20_000),
-      metadata,
+      metadata
     };
   }
 
@@ -161,9 +161,9 @@ class FirecrawlSearchProvider implements SearchProvider {
         limit,
         scrapeOptions: {
           formats: ["markdown"],
-          onlyMainContent: true,
-        },
-      }),
+          onlyMainContent: true
+        }
+      })
     });
 
     const json = (await res.json()) as FirecrawlSearchResponse;
@@ -172,14 +172,14 @@ class FirecrawlSearchProvider implements SearchProvider {
       throw new Error(json.error ?? `web_search failed: ${res.status}`);
     }
 
-    return (json.data?.web ?? []).map((item) => ({
+    return (json.data?.web ?? []).map(item => ({
       title: item.title ?? "Untitled",
       url: item.url ?? "",
       snippet: item.description,
       content:
         includeContent && item.markdown
           ? _truncateText(item.markdown, 2_000)
-          : undefined,
+          : undefined
     }));
   }
 }
@@ -197,7 +197,7 @@ class TavilySearchProvider implements SearchProvider {
   private _headers(): Record<string, string> {
     return {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${this._apiKey}`,
+      Authorization: `Bearer ${this._apiKey}`
     };
   }
 
@@ -205,7 +205,7 @@ class TavilySearchProvider implements SearchProvider {
     const res = await fetch(`${TAVILY_BASE_URL}/extract`, {
       method: "POST",
       headers: this._headers(),
-      body: JSON.stringify({ urls: url, format: "markdown" }),
+      body: JSON.stringify({ urls: url, format: "markdown" })
     });
 
     const json = (await res.json()) as TavilyExtractResponse;
@@ -224,7 +224,7 @@ class TavilySearchProvider implements SearchProvider {
 
     return {
       url: result.url ?? url,
-      content: _truncateText(result.raw_content, 20_000),
+      content: _truncateText(result.raw_content, 20_000)
     };
   }
 
@@ -239,8 +239,8 @@ class TavilySearchProvider implements SearchProvider {
       body: JSON.stringify({
         query,
         max_results: limit,
-        include_raw_content: includeContent ? "markdown" : false,
-      }),
+        include_raw_content: includeContent ? "markdown" : false
+      })
     });
 
     const json = (await res.json()) as TavilySearchResponse;
@@ -249,14 +249,14 @@ class TavilySearchProvider implements SearchProvider {
       throw new Error(`web_search failed: ${res.status}`);
     }
 
-    return (json.results ?? []).map((item) => ({
+    return (json.results ?? []).map(item => ({
       title: item.title ?? "Untitled",
       url: item.url ?? "",
       snippet: item.content,
       content:
         includeContent && item.raw_content
           ? _truncateText(item.raw_content, 2_000)
-          : undefined,
+          : undefined
     }));
   }
 }
@@ -264,7 +264,7 @@ class TavilySearchProvider implements SearchProvider {
 /** Build the provider selected in `settings/search.json` with its resolved key. */
 function _getSearchProvider({
   env,
-  getSearchSettings,
+  getSearchSettings
 }: WebBuiltInToolsDependencies): SearchProvider {
   const settings = getSearchSettings();
   if (settings.provider === "tavily") {
@@ -289,11 +289,11 @@ export const webFetchTool: BuiltinTool = {
       url: {
         type: "string",
         description:
-          "The URL to fetch. Must be a fully qualified URL starting with http:// or https://.",
-      },
+          "The URL to fetch. Must be a fully qualified URL starting with http:// or https://."
+      }
     },
-    additionalProperties: false,
-  },
+    additionalProperties: false
+  }
 };
 
 export const webSearchTool: BuiltinTool = {
@@ -308,21 +308,21 @@ export const webSearchTool: BuiltinTool = {
     properties: {
       query: {
         type: "string",
-        description: "The search query string to look up on the web.",
+        description: "The search query string to look up on the web."
       },
       limit: {
         type: "number",
         description:
-          "Maximum number of search results to return. Defaults to 5.",
+          "Maximum number of search results to return. Defaults to 5."
       },
       includeContent: {
         type: "boolean",
         description:
-          "Whether to include short markdown content snippets for each result. Defaults to false.",
-      },
+          "Whether to include short markdown content snippets for each result. Defaults to false."
+      }
     },
-    additionalProperties: false,
-  },
+    additionalProperties: false
+  }
 };
 
 // -- weather_report -----------------------------------------------------------
@@ -332,25 +332,25 @@ interface WeatherReport {
   date: string;
   weather: string;
   temperature: {
-    unit: "celsius";
     max: number;
     min: number;
+    unit: "celsius";
   };
 }
 
 interface WttrResponse {
-  current_condition?: {
-    weatherDesc?: { value?: string }[];
-  }[];
-  weather?: {
+  current_condition?: Array<{
+    weatherDesc?: Array<{ value?: string; }>;
+  }>;
+  weather?: Array<{
     date?: string;
+    hourly?: Array<{
+      time?: string;
+      weatherDesc?: Array<{ value?: string; }>;
+    }>;
     maxtempC?: string;
     mintempC?: string;
-    hourly?: {
-      time?: string;
-      weatherDesc?: { value?: string }[];
-    }[];
-  }[];
+  }>;
 }
 
 export const weatherReportTool: BuiltinTool = {
@@ -365,21 +365,22 @@ export const weatherReportTool: BuiltinTool = {
     properties: {
       location: {
         type: "string",
-        description: "The location to get today's weather report for.",
-      },
+        description: "The location to get today's weather report for."
+      }
     },
-    additionalProperties: false,
-  },
+    additionalProperties: false
+  }
 };
 
 function _encodeWttrCity(city: string): string {
-  return city.trim().split(/\s+/).map(encodeURIComponent).join("+");
+  return city.trim().split(/\s+/).map(encodeURIComponent)
+    .join("+");
 }
 
 function _getWeatherDescription(data: WttrResponse): string {
   const today = data.weather?.[0];
 
-  const noon = today?.hourly?.find((item) => item.time === "1200");
+  const noon = today?.hourly?.find(item => item.time === "1200");
   const noonDesc = noon?.weatherDesc?.[0]?.value;
   if (noonDesc) {
     return noonDesc;
@@ -406,8 +407,8 @@ export async function weather_report(location: string): Promise<WeatherReport> {
       headers: {
         Accept: "application/json",
         "Accept-Language": "en",
-        "User-Agent": "llm-space-weather-tool/1.0",
-      },
+        "User-Agent": "llm-space-weather-tool/1.0"
+      }
     }
   );
 
@@ -429,8 +430,8 @@ export async function weather_report(location: string): Promise<WeatherReport> {
     temperature: {
       unit: "celsius",
       max: Number(today.maxtempC),
-      min: Number(today.mintempC),
-    },
+      min: Number(today.mintempC)
+    }
   };
 }
 
@@ -444,7 +445,7 @@ export function createWebBuiltInTools(
         return _getSearchProvider(dependencies).fetch(
           _requireString(args, "url")
         );
-      },
+      }
     },
     {
       tool: webSearchTool,
@@ -454,14 +455,14 @@ export function createWebBuiltInTools(
           _optionalNumber(args, "limit") ?? 5,
           _optionalBoolean(args, "includeContent") ?? false
         );
-      },
+      }
     },
     {
       tool: weatherReportTool,
       async execute(args: Record<string, unknown>) {
         return weather_report(_requireString(args, "location"));
-      },
-    },
+      }
+    }
   ];
 }
 

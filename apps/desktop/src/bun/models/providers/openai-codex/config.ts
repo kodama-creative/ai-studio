@@ -2,9 +2,8 @@ import { existsSync, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import type { CodexCredentials } from "./CodexCredentials";
 import type { CustomProviderApi } from "../../types";
-
-import { CodexCredentials } from './CodexCredentials';
 
 const CODEX_DIR = path.join(os.homedir(), ".codex");
 const AUTH_PATH = path.join(CODEX_DIR, "auth.json");
@@ -13,7 +12,7 @@ const CONFIG_PATH = path.join(CODEX_DIR, "config.toml");
 const WIRE_API_MAP: Record<string, CustomProviderApi> = {
   responses: "openai-responses",
   completions: "openai-completions",
-  messages: "anthropic-messages",
+  messages: "anthropic-messages"
 };
 
 /**
@@ -41,7 +40,7 @@ export function getCodexCredentials(): CodexCredentials | undefined {
   return;
 }
 
-function _readAuthJSON(): { oauthToken?: string; apiKey?: string; } | undefined {
+function _readAuthJSON(): { apiKey?: string; oauthToken?: string; } | undefined {
   if (!existsSync(AUTH_PATH)) {
     return;
   }
@@ -56,7 +55,7 @@ function _readAuthJSON(): { oauthToken?: string; apiKey?: string; } | undefined 
 
     // { "tokens": { "access_token": "..." } }
     const tokens = parsed.tokens as
-      | { access_token?: unknown }
+      | { access_token?: unknown; }
       | undefined;
     if (typeof tokens?.access_token === "string") {
       oauthToken = tokens.access_token;
@@ -79,7 +78,7 @@ function _readAuthJSON(): { oauthToken?: string; apiKey?: string; } | undefined 
 /**
  * Parse the active provider section from `~/.codex/config.toml`.
  */
-function _readConfigToml(): { baseUrl: string; api: CustomProviderApi; } | undefined {
+function _readConfigToml(): { api: CustomProviderApi; baseUrl: string; } | undefined {
   if (!existsSync(CONFIG_PATH)) {
     return;
   }

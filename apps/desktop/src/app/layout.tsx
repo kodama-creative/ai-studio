@@ -1,6 +1,4 @@
-import "@fontsource-variable/geist/index.css";
-import "@fontsource-variable/geist-mono/index.css";
-import { ModelProviderGroup } from "@llm-space/core";
+import type { ModelProviderGroup } from "@llm-space/core";
 
 import { ExperimentalProvider } from "@/components/experimental-provider";
 import { ModelProvider } from "@/components/model-provider";
@@ -8,11 +6,13 @@ import { ThemeProvider, useTheme } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { electrobun } from "@/lib/electrobun";
-import "@/styles/globals.css";
-
 import { QueryProvider } from "./query-provider";
 
-export function Layout({ children }: { children: React.ReactNode }) {
+import "@fontsource-variable/geist/index.css";
+import "@fontsource-variable/geist-mono/index.css";
+import "@/styles/globals.css";
+
+export function Layout({ children }: { readonly children: React.ReactNode; }) {
   return (
     <ThemeProvider>
       <ExperimentalProvider>
@@ -36,15 +36,15 @@ function ThemedToaster() {
   const { resolvedTheme } = useTheme();
   return (
     <Toaster
-      theme={resolvedTheme}
-      position="top-center"
-      offset={28}
       closeButton
+      offset={28}
+      position="top-center"
+      theme={resolvedTheme}
       toastOptions={{
         classNames: {
           toast: "cn-toast",
-          description: "text-muted-foreground!",
-        },
+          description: "text-muted-foreground!"
+        }
       }}
     />
   );

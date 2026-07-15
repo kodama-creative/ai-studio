@@ -1,8 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
-import { DesktopHost } from "../../host/desktop-host";
-
 import { createBuiltInToolsModule } from "./built-in-tools-module";
+import { DesktopHost } from "../../host/desktop-host";
 
 describe("built-in tools module", () => {
   test("contributes the existing tools in their RPC list order", async () => {
@@ -10,27 +9,27 @@ describe("built-in tools module", () => {
       modules: [
         createBuiltInToolsModule({
           env: {},
-          findSkill: (name) =>
-            name === "fixture"
+          findSkill: name =>
+            (name === "fixture"
               ? {
-                  frontmatters: {},
-                  content: "Fixture instructions.",
-                  path: "/tmp/skills/fixture",
-                }
-              : null,
+                frontmatters: {},
+                content: "Fixture instructions.",
+                path: "/tmp/skills/fixture"
+              }
+              : null),
           getSearchSettings: () => ({
             provider: "firecrawl",
             firecrawlApiKey: "",
-            tavilyApiKey: "",
+            tavilyApiKey: ""
           }),
-          workspaceRoot: "/tmp/workspace",
-        }),
-      ],
+          workspaceRoot: "/tmp/workspace"
+        })
+      ]
     });
 
     await host.start();
 
-    expect(host.tools.listTools().map((tool) => tool.name)).toEqual([
+    expect(host.tools.listTools().map(tool => tool.name)).toEqual([
       "web_fetch",
       "web_search",
       "weather_report",
@@ -46,16 +45,16 @@ describe("built-in tools module", () => {
       "present_files",
       "todo_write",
       "sleep",
-      "ask_user_question",
+      "ask_user_question"
     ]);
     expect(
       await host.tools.call({
         name: "skill",
-        arguments: { name: "fixture" },
+        arguments: { name: "fixture" }
       })
     ).toEqual({
       contentText:
-        "Base directory for this skill: /tmp/skills/fixture\n\nFixture instructions.",
+        "Base directory for this skill: /tmp/skills/fixture\n\nFixture instructions."
     });
   });
 
@@ -68,11 +67,11 @@ describe("built-in tools module", () => {
           getSearchSettings: () => ({
             provider: "firecrawl",
             firecrawlApiKey: "",
-            tavilyApiKey: "",
+            tavilyApiKey: ""
           }),
-          workspaceRoot: "/tmp/workspace",
-        } as never),
-      ],
+          workspaceRoot: "/tmp/workspace"
+        } as never)
+      ]
     });
 
     let rejection: unknown;

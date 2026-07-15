@@ -1,9 +1,10 @@
 "use client";
 
-import type { Thread } from "@llm-space/core";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+
+import type { Thread } from "@llm-space/core";
 
 import { createRpcTransport, localFs } from "@/client";
 import { ThreadPlayground } from "@/components/thread-playground";
@@ -15,16 +16,18 @@ import { cn } from "@/lib/utils";
 const rpcTransport = createRpcTransport();
 
 interface ThreadTabPaneProps {
-  path: string;
-  active: boolean;
+  readonly path: string;
+  readonly active: boolean;
+
   /**
    * Bumped by the tab "Refresh" action to reload this thread from disk,
    * discarding any un-saved in-memory edits.
    */
-  refreshNonce?: number;
-  onMove?: (from: string, to: string) => void;
+  readonly refreshNonce?: number;
+  readonly onMove?: (from: string, to: string) => void;
+
   /** Close this pane's tab, e.g. after its thread fails to load. */
-  onClose?: (path: string) => void;
+  readonly onClose?: (path: string) => void;
 }
 
 /**
@@ -37,33 +40,33 @@ export function ThreadTabPane({
   active,
   refreshNonce = 0,
   onMove,
-  onClose,
+  onClose
 }: ThreadTabPaneProps) {
   const qc = useQueryClient();
   const {
     data: thread,
     isLoading,
     isError,
-    error,
+    error
   } = useQuery({
     queryKey: ["thread", path],
-    queryFn: () => localFs.read(path),
+    queryFn: async () => localFs.read(path),
     // A workspace file can change on disk outside the app, so never serve a
     // cached copy: read fresh on every open, and drop the entry the moment its
     // tab closes. (The global 30s staleTime still covers models / directory ls.)
     staleTime: 0,
     gcTime: 0,
-    retry: false,
+    retry: false
   });
 
   // The tab is opened optimistically (see `useThreadTabs.open`) without
   // pre-checking the file exists, so a since-deleted (or otherwise unreadable)
   // file surfaces here instead: report it and close the tab it was given.
   useEffect(() => {
-    if (!isError) return;
+    if (!isError) { return; }
     toast.error("Error", {
       description:
-        error instanceof Error ? error.message : `File not found: ${path}`,
+        error instanceof Error ? error.message : `File not found: ${path}`
     });
     onClose?.(path);
   }, [isError, error, path, onClose]);
@@ -90,7 +93,7 @@ export function ThreadTabPane({
   const handleChange = useCallback(
     (next: Thread) => {
       pending.current = next;
-      if (writeTimer.current) clearTimeout(writeTimer.current);
+      if (writeTimer.current) { clearTimeout(writeTimer.current); }
       writeTimer.current = setTimeout(() => {
         void flushPending();
       }, 500);
@@ -126,13 +129,13 @@ export function ThreadTabPane({
       try {
         await qc.refetchQueries({
           queryKey: ["thread", pathRef.current],
-          exact: true,
+          exact: true
         });
-        setReloadKey((key) => key + 1);
+        setReloadKey(key => key + 1);
       } catch (error) {
         toast.error("Error", {
           description:
-            error instanceof Error ? error.message : "Failed to refresh",
+            error instanceof Error ? error.message : "Failed to refresh"
         });
       }
     })();
@@ -155,7 +158,7 @@ export function ThreadTabPane({
       void qc.invalidateQueries({ queryKey: ["thread", from] });
       if (parentOf(from) !== parentOf(to)) {
         void qc.invalidateQueries({
-          queryKey: ["fs", "local", "ls", parentOf(from)],
+          queryKey: ["fs", "local", "ls", parentOf(from)]
         });
       }
       onMove?.(from, to);
@@ -167,15 +170,15 @@ export function ThreadTabPane({
   return (
     <div className={cn("size-full", !active && "hidden")}>
       <ThreadPlayground
-        key={reloadKey}
-        className="bg-background size-full shadow-lg"
-        loading={isLoading}
-        path={path}
-        initialValue={thread}
         active={active}
-        transport={rpcTransport}
+        className="bg-background size-full shadow-lg"
+        initialValue={thread}
+        key={reloadKey}
+        loading={isLoading}
         onChange={handleChange}
         onRenameTitle={handleRenameTitle}
+        path={path}
+        transport={rpcTransport}
       />
     </div>
   );

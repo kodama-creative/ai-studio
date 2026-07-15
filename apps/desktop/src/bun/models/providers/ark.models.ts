@@ -15,14 +15,14 @@ export const ARK_MODELS = {
     maxTokens: 262144,
     compat: {
       supportsDeveloperRole: false,
-      thinkingFormat: "deepseek",
+      thinkingFormat: "deepseek"
     },
     cost: {
       input: 0,
       output: 0,
       cacheRead: 0,
-      cacheWrite: 0,
-    },
+      cacheWrite: 0
+    }
   } satisfies Model<"openai-completions">,
   "doubao-seed-2-1-turbo-260628": {
     id: "doubao-seed-2-1-turbo-260628",
@@ -36,14 +36,14 @@ export const ARK_MODELS = {
     maxTokens: 262144,
     compat: {
       supportsDeveloperRole: false,
-      thinkingFormat: "deepseek",
+      thinkingFormat: "deepseek"
     },
     cost: {
       input: 0,
       output: 0,
       cacheRead: 0,
-      cacheWrite: 0,
-    },
+      cacheWrite: 0
+    }
   } satisfies Model<"openai-completions">,
   "doubao-seed-2-1-evolving": {
     id: "doubao-seed-2-1-evolving",
@@ -57,14 +57,14 @@ export const ARK_MODELS = {
     maxTokens: 262144,
     compat: {
       supportsDeveloperRole: false,
-      thinkingFormat: "deepseek",
+      thinkingFormat: "deepseek"
     },
     cost: {
       input: 0,
       output: 0,
       cacheRead: 0,
-      cacheWrite: 0,
-    },
+      cacheWrite: 0
+    }
   } satisfies Model<"openai-completions">,
   "doubao-seed-2.0-pro": {
     id: "doubao-seed-2.0-pro",
@@ -78,14 +78,14 @@ export const ARK_MODELS = {
     maxTokens: 131072,
     compat: {
       supportsDeveloperRole: false,
-      thinkingFormat: "deepseek",
+      thinkingFormat: "deepseek"
     },
     cost: {
       input: 0,
       output: 0,
       cacheRead: 0,
-      cacheWrite: 0,
-    },
+      cacheWrite: 0
+    }
   } satisfies Model<"openai-completions">,
   "doubao-seed-2.0-code": {
     id: "doubao-seed-2.0-code",
@@ -99,13 +99,13 @@ export const ARK_MODELS = {
     maxTokens: 131072,
     compat: {
       supportsDeveloperRole: false,
-      thinkingFormat: "deepseek",
+      thinkingFormat: "deepseek"
     },
     cost: {
       input: 0,
       output: 0,
       cacheRead: 0,
-      cacheWrite: 0,
-    },
-  } satisfies Model<"openai-completions">,
+      cacheWrite: 0
+    }
+  } satisfies Model<"openai-completions">
 };

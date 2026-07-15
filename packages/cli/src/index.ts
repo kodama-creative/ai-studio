@@ -22,10 +22,10 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     process.stderr.write(command ? `Unknown command: ${command}\n\n` : HELP);
     return command ? 1 : 0;
   }
-  const positional = argv.slice(1).filter((arg) => !arg.startsWith("-"));
+  const positional = argv.slice(1).filter(arg => !arg.startsWith("-"));
   const unknown = argv
     .slice(1)
-    .filter((arg) => arg.startsWith("-") && arg !== "--blank");
+    .filter(arg => arg.startsWith("-") && arg !== "--blank");
   if (positional.length > 1 || unknown.length > 0) {
     process.stderr.write(`Invalid arguments.\n\n${HELP}`);
     return 1;
@@ -33,7 +33,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   try {
     const root = await scaffoldAgentProject({
       directory: positional[0] ?? process.cwd(),
-      template: argv.includes("--blank") ? "blank" : "starter",
+      template: argv.includes("--blank") ? "blank" : "starter"
     });
     process.stdout.write(`Created LLM Space Agent Project at ${root}\n`);
     return 0;

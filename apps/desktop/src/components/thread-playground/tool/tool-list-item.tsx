@@ -1,34 +1,33 @@
 "use client";
 
-import { type Tool } from "@llm-space/core";
 import {
   CableIcon,
   FunctionSquareIcon,
   PackageIcon,
-  XIcon,
+  XIcon
 } from "lucide-react";
 import React, { memo, useCallback, useMemo } from "react";
 
+import type { Tool } from "@llm-space/core";
+
 import { cn } from "@/lib/utils";
-
-import { Tooltip } from "../../tooltip";
-
 import { getBuiltInToolIcon } from "./built-in-tool-icon";
+import { Tooltip } from "../../tooltip";
 
 function _ToolListItem({
   tool,
   readonly,
   onEdit,
   onRemove,
-  projectSourceNavigable = false,
+  projectSourceNavigable = false
 }: {
-  tool: Tool;
-  readonly?: boolean;
+  readonly readonly?: boolean;
+  readonly tool: Tool;
 
-  onEdit: (tool: Tool) => void;
+  readonly onEdit: (tool: Tool) => void;
 
-  onRemove: (tool: Tool) => void;
-  projectSourceNavigable?: boolean;
+  readonly onRemove: (tool: Tool) => void;
+  readonly projectSourceNavigable?: boolean;
 }) {
   const keys = useMemo(
     () =>
@@ -38,7 +37,7 @@ function _ToolListItem({
     [tool.parameters]
   );
   const required = useMemo(
-    () => (tool.parameters as { required: string[] }).required ?? [],
+    () => (tool.parameters as { required: string[]; }).required ?? [],
     [tool.parameters]
   );
   const handleRemove = useCallback(
@@ -69,29 +68,28 @@ function _ToolListItem({
               <span>(</span>
               <span className="whitespace-pre-wrap">
                 {keys.length > 0
-                  ? "{\n" +
+                  ? `{\n${
                     keys
-                      .map((key) =>
-                        required.includes(key) ? `  ${key}` : `  [${key}]`
-                      )
-                      .join(", \n") +
-                    "\n}"
+                      .map(key =>
+                        (required.includes(key) ? `  ${key}` : `  [${key}]`))
+                      .join(", \n")
+                  }\n}`
                   : ""}
               </span>
               <span>)</span>
             </div>
-            {tool.description && (
-              <div className="pt-2 text-xs whitespace-pre-wrap opacity-60">
-                {tool.description}
-              </div>
-            )}
+            {tool.description
+              ? (
+                <div className="pt-2 text-xs whitespace-pre-wrap opacity-60">
+                  {tool.description}
+                </div>
+              )
+              : null}
           </div>
         }
       >
         <span className="inline-flex h-full">
           <button
-            type="button"
-            className="focus-visible:ring-ring/30 text-muted-foreground group-hover/tool:text-foreground inline-flex h-full items-center gap-1 rounded-l-md pl-2 outline-none focus-visible:ring-2 disabled:pointer-events-none disabled:opacity-50"
             aria-label={
               tool.type === "project"
                 ? `Open source for ${tool.name} project tool`
@@ -99,8 +97,10 @@ function _ToolListItem({
                   ? `Edit ${tool.name} tool`
                   : `Manage ${tool.name} ${tool.type === "mcp" ? "MCP" : "built-in"} tool`
             }
+            className="focus-visible:ring-ring/30 text-muted-foreground group-hover/tool:text-foreground inline-flex h-full items-center gap-1 rounded-l-md pl-2 outline-none focus-visible:ring-2 disabled:pointer-events-none disabled:opacity-50"
             disabled={editDisabled}
-            onClick={() => onEdit(tool)}
+            onClick={() => { onEdit(tool); }}
+            type="button"
           >
             <ToolIcon className="size-3.5 shrink-0 opacity-70" />
             <span className="font-mono">{tool.name}</span>
@@ -109,14 +109,14 @@ function _ToolListItem({
       </Tooltip>
       <Tooltip content="Remove tool">
         <button
-          type="button"
-          disabled={readonly}
           aria-label={`Remove ${tool.name} tool`}
           className={cn(
             "text-muted-foreground hover:text-accent-foreground focus-visible:ring-ring/30 inline-flex h-full items-center rounded-r-md pr-1 pl-1 outline-none hover:opacity-100 focus-visible:ring-2",
             readonly ? "opacity-0!" : "opacity-0 group-hover/tool:opacity-100"
           )}
+          disabled={readonly}
           onClick={handleRemove}
+          type="button"
         >
           <XIcon className="size-3" />
         </button>

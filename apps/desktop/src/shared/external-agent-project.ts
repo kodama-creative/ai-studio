@@ -1,12 +1,12 @@
 import type { ProjectTool, Thread } from "@llm-space/core";
 import type {
   AgentProjectDiagnostic,
-  CompiledAgentDefinition,
+  CompiledAgentDefinition
 } from "@llm-space/runtime";
 
 import type { SkillInfo } from "./skills";
 
-export type ExternalAgentProjectStatus = "ready" | "invalid" | "missing";
+export type ExternalAgentProjectStatus = "invalid" | "missing" | "ready";
 
 export interface ExternalAgentProjectPreview {
   id: string;
@@ -47,7 +47,7 @@ export interface ExternalAgentProjectConnectionStatus {
   connectionName: string;
   description: string;
   sourcePath: string;
-  state: "ready" | "unavailable" | "drift";
+  state: "drift" | "ready" | "unavailable";
   message?: string;
   missingTools?: readonly string[];
   toolNames?: readonly string[];
@@ -67,8 +67,8 @@ export interface RemoteToolCallAttempt {
 }
 
 export type ExternalAgentProjectToolCallResponse =
-  | { contentText: string; isError: boolean }
-  | { rejected: true; message: string };
+  | { contentText: string; isError: boolean; }
+  | { message: string; rejected: true; };
 
 export interface ExternalAgentProjectThreadRecord {
   thread: Thread;
@@ -83,7 +83,7 @@ export interface ExternalAgentProjectChangedPayload {
 }
 
 export type ExternalAgentProjectRunBlockReason =
-  "sourceUnavailable" | "pendingToolResult" | "staleToolSnapshot";
+  "pendingToolResult" | "sourceUnavailable" | "staleToolSnapshot";
 
 /** A frozen tool step can remain earlier in an edited or reordered Thread. */
 export function hasPendingExternalAgentProjectToolResult(
@@ -91,9 +91,9 @@ export function hasPendingExternalAgentProjectToolResult(
 ): boolean {
   return Boolean(
     record.thread.context?.messages?.some(
-      (message) =>
-        message.role === "assistant" &&
-        message.toolCalls?.some((toolCall) => toolCall.output === undefined)
+      message =>
+        message.role === "assistant"
+        && message.toolCalls?.some(toolCall => toolCall.output === undefined)
     )
   );
 }
@@ -107,14 +107,14 @@ export function getExternalAgentProjectRunBlockReason(
   project: ExternalAgentProjectView,
   record: ExternalAgentProjectThreadRecord
 ): ExternalAgentProjectRunBlockReason | null {
-  if (project.status !== "ready") return "sourceUnavailable";
+  if (project.status !== "ready") { return "sourceUnavailable"; }
   if (hasPendingExternalAgentProjectToolResult(record)) {
     return "pendingToolResult";
   }
   const projectTools = (record.thread.context?.tools ?? []).filter(
     (tool): tool is ProjectTool => tool.type === "project"
   );
-  if (projectTools.some((tool) => tool.snapshot !== project.snapshot)) {
+  if (projectTools.some(tool => tool.snapshot !== project.snapshot)) {
     return "staleToolSnapshot";
   }
   return null;

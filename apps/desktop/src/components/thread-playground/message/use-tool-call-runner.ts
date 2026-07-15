@@ -3,7 +3,6 @@ import { useCallback, useMemo } from "react";
 
 import { ProjectToolCallRejectedError } from "@/client/project-tool-call-rejected-error";
 import { isFirecrawlLimitError } from "@/lib/firecrawl";
-
 import { useThreadStore, useThreadStoreActions } from "../stores";
 import { useToolExecutor } from "../tool-execution-context";
 
@@ -19,16 +18,16 @@ export interface ToolCallOutcome {
  * stays at the call site — only detection and plumbing are shared here.
  */
 export function useToolCallRunner(messageId: string) {
-  const tools = useThreadStore((state) => state.thread.context?.tools);
+  const tools = useThreadStore(state => state.thread.context?.tools);
   const {
     continueAfterProjectToolResult,
     markToolCallAttempt,
-    updateToolCallOutputText,
+    updateToolCallOutputText
   } = useThreadStoreActions();
   const executeTool = useToolExecutor();
 
   const toolsByName = useMemo(
-    () => new Map((tools ?? []).map((tool) => [tool.name, tool])),
+    () => new Map((tools ?? []).map(tool => [tool.name, tool])),
     [tools]
   );
   const resolveTool = useCallback(
@@ -47,10 +46,10 @@ export function useToolCallRunner(messageId: string) {
       try {
         const attempt = isRemoteProjectTool
           ? {
-              messageId,
-              toolCallId: toolCall.id,
-              at: new Date().toISOString(),
-            }
+            messageId,
+            toolCallId: toolCall.id,
+            at: new Date().toISOString()
+          }
           : undefined;
         if (attempt) {
           markToolCallAttempt(attempt.messageId, attempt.toolCallId, attempt.at);
@@ -66,19 +65,19 @@ export function useToolCallRunner(messageId: string) {
         }
         return {
           isError,
-          isFirecrawlLimit: isError && isFirecrawlLimitError(contentText),
+          isFirecrawlLimit: isError && isFirecrawlLimitError(contentText)
         };
       } catch (error) {
         const text = error instanceof Error ? error.message : "Tool call failed";
         if (
-          isRemoteProjectTool &&
-          error instanceof ProjectToolCallRejectedError
+          isRemoteProjectTool
+          && error instanceof ProjectToolCallRejectedError
         ) {
           updateToolCallOutputText(messageId, toolCall.id, text, true);
           await continueAfterProjectToolResult(messageId);
           return {
             isError: true,
-            isFirecrawlLimit: isFirecrawlLimitError(text),
+            isFirecrawlLimit: isFirecrawlLimitError(text)
           };
         }
         if (isRemoteProjectTool) {
@@ -87,7 +86,7 @@ export function useToolCallRunner(messageId: string) {
           // unknown and never advances the ReAct loop automatically.
           return {
             isError: true,
-            isFirecrawlLimit: isFirecrawlLimitError(text),
+            isFirecrawlLimit: isFirecrawlLimitError(text)
           };
         }
         updateToolCallOutputText(messageId, toolCall.id, text, true);
@@ -100,7 +99,7 @@ export function useToolCallRunner(messageId: string) {
       markToolCallAttempt,
       messageId,
       resolveTool,
-      updateToolCallOutputText,
+      updateToolCallOutputText
     ]
   );
 

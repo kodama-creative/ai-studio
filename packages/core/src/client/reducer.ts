@@ -1,33 +1,34 @@
 import type { AgentEvent } from "@earendil-works/pi-agent-core";
 import type {
-  TextContent,
-  ToolCall,
-  ThinkingContent,
   Usage as PiUsage,
+  TextContent,
+  ThinkingContent,
+  ToolCall
 } from "@earendil-works/pi-ai";
+
+import { parseJSON, uuid } from "../utils";
 
 import type {
   AssistantMessage,
   ModelUsage,
-  ToolCallOutput,
+  ToolCallOutput
 } from "../types/messages";
-import { parseJSON, uuid } from "../utils";
 
-export type ToolCallContent = Omit<ToolCall, "arguments"> & {
+export type ToolCallContent = {
   arguments: string;
-};
+} & Omit<ToolCall, "arguments">;
 export type ReducedMessageContent =
-  ThinkingContent | TextContent | ToolCallContent;
+  TextContent | ThinkingContent | ToolCallContent;
 
 interface ReduceResult {
-  type: "message_start" | "message_update" | "message_end";
+  type: "message_end" | "message_start" | "message_update";
   message: AssistantMessage;
   content: ReducedMessageContent[];
 }
 
 type AssistantMessageEvent = Extract<
   AgentEvent,
-  { type: "message_update" }
+  { type: "message_update"; }
 >["assistantMessageEvent"];
 
 type AssistantToolCall = NonNullable<AssistantMessage["toolCalls"]>[number];
@@ -36,10 +37,10 @@ export function reduceMessages(
   event: AgentEvent,
   {
     streamingMessage = null,
-    content = [],
+    content = []
   }: {
-    streamingMessage?: AssistantMessage | null;
     content?: ReducedMessageContent[];
+    streamingMessage?: AssistantMessage | null;
   }
 ): ReduceResult | null {
   switch (event.type) {
@@ -50,7 +51,7 @@ export function reduceMessages(
       return {
         type: "message_start",
         message: { id: uuid(), role: "assistant", content: [] },
-        content: [],
+        content: []
       };
     case "message_update":
       return _reduceAssistantMessageEvent(
@@ -70,14 +71,14 @@ export function reduceMessages(
       return {
         type: "message_end",
         message: usage ? { ...finalMessage, usage } : finalMessage,
-        content: [],
+        content: []
       };
     }
     case "tool_execution_end":
       return _createUpdateMessageEvent(
-        _replaceToolCall(streamingMessage!, event.toolCallId, (toolCall) => ({
+        _replaceToolCall(streamingMessage!, event.toolCallId, toolCall => ({
           ...toolCall,
-          output: event.result as ToolCallOutput,
+          output: event.result as ToolCallOutput
         })),
         []
       );
@@ -120,21 +121,21 @@ function _normalizeUsage(usage: PiUsage | undefined): ModelUsage | undefined {
     output: _finiteUsageNumber(usage.cost?.output),
     cacheRead: _finiteUsageNumber(usage.cost?.cacheRead),
     cacheWrite: _finiteUsageNumber(usage.cost?.cacheWrite),
-    total: _finiteUsageNumber(usage.cost?.total),
+    total: _finiteUsageNumber(usage.cost?.total)
   };
   const hasTokenUsage =
-    totalTokens > 0 ||
-    input > 0 ||
-    output > 0 ||
-    cacheRead > 0 ||
-    cacheWrite > 0 ||
-    (reasoning ?? 0) > 0;
+    totalTokens > 0
+    || input > 0
+    || output > 0
+    || cacheRead > 0
+    || cacheWrite > 0
+    || (reasoning ?? 0) > 0;
   const hasCostUsage =
-    cost.input > 0 ||
-    cost.output > 0 ||
-    cost.cacheRead > 0 ||
-    cost.cacheWrite > 0 ||
-    cost.total > 0;
+    cost.input > 0
+    || cost.output > 0
+    || cost.cacheRead > 0
+    || cost.cacheWrite > 0
+    || cost.total > 0;
   if (!hasTokenUsage && !hasCostUsage) {
     return undefined;
   }
@@ -145,7 +146,7 @@ function _normalizeUsage(usage: PiUsage | undefined): ModelUsage | undefined {
     cacheWrite,
     ...(reasoning === undefined ? {} : { reasoning }),
     totalTokens,
-    cost,
+    cost
   };
 }
 
@@ -177,9 +178,8 @@ function _replaceToolCall(
 ): AssistantMessage {
   return {
     ...message,
-    toolCalls: message.toolCalls?.map((toolCall) =>
-      toolCall.id === toolCallId ? updater(toolCall) : toolCall
-    ),
+    toolCalls: message.toolCalls?.map(toolCall =>
+      (toolCall.id === toolCallId ? updater(toolCall) : toolCall))
   };
 }
 
@@ -216,9 +216,8 @@ function _reduceAssistantMessageEvent(
       return _createUpdateMessageEvent(
         {
           ...message,
-          content: message.content.map((c) =>
-            c.type === "text" ? { ...textContent } : c
-          ),
+          content: message.content.map(c =>
+            (c.type === "text" ? { ...textContent } : c))
         },
         content
       );
@@ -228,7 +227,7 @@ function _reduceAssistantMessageEvent(
         ...(event.partial.content[
           event.contentIndex
         ] as unknown as ToolCallContent),
-        arguments: "",
+        arguments: ""
       };
       content[event.contentIndex] = toolCallContent;
       return _createUpdateMessageEvent(
@@ -241,10 +240,10 @@ function _reduceAssistantMessageEvent(
               input: {
                 name: toolCallContent.name,
                 arguments: {},
-                partialArguments: "",
-              },
-            },
-          ],
+                partialArguments: ""
+              }
+            }
+          ]
         },
         content
       );
@@ -259,25 +258,25 @@ function _reduceAssistantMessageEvent(
         return _createUpdateMessageEvent(message, content);
       }
       return _createUpdateMessageEvent(
-        _replaceToolCall(message, toolCallContent.id, (toolCall) => ({
+        _replaceToolCall(message, toolCallContent.id, toolCall => ({
           ...toolCall,
           input: {
             ...toolCall.input,
             arguments: args,
-            partialArguments: undefined,
-          },
+            partialArguments: undefined
+          }
         })),
         content
       );
     }
     case "toolcall_end": {
       return _createUpdateMessageEvent(
-        _replaceToolCall(message, event.toolCall.id, (toolCall) => ({
+        _replaceToolCall(message, event.toolCall.id, toolCall => ({
           ...toolCall,
           input: {
             name: event.toolCall.name,
-            arguments: event.toolCall.arguments,
-          },
+            arguments: event.toolCall.arguments
+          }
         })),
         content
       );

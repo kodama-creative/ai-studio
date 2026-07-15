@@ -1,19 +1,19 @@
 export type AgentProjectDiagnosticSeverity = "error" | "warning";
 
 export type AgentProjectDiagnosticCode =
-  | "definition_missing"
-  | "definition_import_failed"
-  | "definition_export_invalid"
-  | "instructions_missing"
-  | "instructions_read_failed"
-  | "tool_import_failed"
-  | "tool_export_invalid"
-  | "tool_name_duplicate"
-  | "connection_import_failed"
   | "connection_export_invalid"
+  | "connection_import_failed"
   | "connection_name_duplicate"
   | "connection_name_invalid"
-  | "skill_invalid";
+  | "definition_export_invalid"
+  | "definition_import_failed"
+  | "definition_missing"
+  | "instructions_missing"
+  | "instructions_read_failed"
+  | "skill_invalid"
+  | "tool_export_invalid"
+  | "tool_import_failed"
+  | "tool_name_duplicate";
 
 export interface AgentProjectDiagnostic {
   readonly severity: AgentProjectDiagnosticSeverity;

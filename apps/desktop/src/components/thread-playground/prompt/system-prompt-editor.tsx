@@ -1,34 +1,33 @@
-import { uuid, type Message } from "@llm-space/core";
+import { type Message, uuid } from "@llm-space/core";
 import { SYSTEM_PROMPT_PLACE_KEY } from "@llm-space/core/thread";
 import { memo, useCallback, useEffect } from "react";
 
 import { cn } from "@/lib/utils";
-
 import { CodeEditor } from "../../code-editor";
+import { ExamplesMenu } from "../examples-menu";
 import metaPrompt from "../examples/meta-prompt.md?raw";
 import { PROMPT_EXAMPLES, resolveSeed } from "../examples/prompts";
-import { ExamplesMenu } from "../examples-menu";
 import { GeneratePopoverButton } from "../generate-popover-button";
 import { useThreadStore, useThreadStoreActions } from "../stores";
 import { useStreamText } from "../use-stream-text";
 import { usePromptVariableExtension } from "../variable/use-prompt-variable-extension";
 
 interface SystemPromptEditorProps {
-  className?: string;
-  readonly?: boolean;
-  onStreamingChange?: (streaming: boolean) => void;
+  readonly className?: string;
+  readonly readonly?: boolean;
+  readonly onStreamingChange?: (streaming: boolean) => void;
 }
 
 function _SystemPromptEditor({
   className,
   readonly,
-  onStreamingChange,
+  onStreamingChange
 }: SystemPromptEditorProps) {
   const systemPrompt = useThreadStore(
-    (s) => s.thread.context?.systemPrompt ?? ""
+    s => s.thread.context?.systemPrompt ?? ""
   );
-  const tools = useThreadStore((s) => s.thread.context?.tools);
-  const threadModel = useThreadStore((s) => s.thread.model);
+  const tools = useThreadStore(s => s.thread.context?.tools);
+  const threadModel = useThreadStore(s => s.thread.model);
   const { updateSystemPrompt } = useThreadStoreActions();
   const variableExtension = usePromptVariableExtension(SYSTEM_PROMPT_PLACE_KEY);
   const handleChange = useCallback(
@@ -41,14 +40,14 @@ function _SystemPromptEditor({
   const {
     text: generated,
     streaming,
-    run: generate,
+    run: generate
   } = useStreamText({
     systemPrompt: metaPrompt,
     reasoning: "off",
     // Use the thread's own model (id/provider only) when it has one.
     model: threadModel
       ? { id: threadModel.id, provider: threadModel.provider }
-      : undefined,
+      : undefined
   });
 
   // Stream the generated prompt straight into the editor.
@@ -87,21 +86,21 @@ function _SystemPromptEditor({
       }
       const messages: Message[] = parts.length
         ? [
-            {
-              id: uuid(),
-              role: "assistant",
-              content: [
-                {
-                  type: "text",
-                  text: `<original>\n${parts.join("\n")}\n</original>`,
-                },
-              ],
-            },
-          ]
+          {
+            id: uuid(),
+            role: "assistant",
+            content: [
+              {
+                type: "text",
+                text: `<original>\n${parts.join("\n")}\n</original>`
+              }
+            ]
+          }
+        ]
         : [];
       void generate({
         messages,
-        userPrompt: `<user-input>\n${prompt}\n</user-input>`,
+        userPrompt: `<user-input>\n${prompt}\n</user-input>`
       });
     },
     [generate, systemPrompt, tools]
@@ -113,27 +112,26 @@ function _SystemPromptEditor({
         <div className="text-muted-foreground text-sm">System prompt</div>
         <div className="flex items-center gap-2">
           <GeneratePopoverButton
-            placeholder="Describe the assistant you want (its role, tone, and rules), and we'll generate a system prompt."
             onGenerate={handleGenerate}
+            placeholder="Describe the assistant you want (its role, tone, and rules), and we'll generate a system prompt."
           />
           <ExamplesMenu
             items={PROMPT_EXAMPLES}
-            onSelect={(example) =>
-              void resolveSeed(example.content).then((content) => {
-                if (content !== undefined) handleExampleSelect(content);
-              })
-            }
+            onSelect={example =>
+              void resolveSeed(example.content).then(content => {
+                if (content !== undefined) { handleExampleSelect(content); }
+              })}
           />
         </div>
       </div>
       <CodeEditor
         className="hover:border-accent-foreground/20 grow transition-[border-color]"
-        value={systemPrompt ?? ""}
-        language="markdown"
-        readonly={readonly || streaming}
-        placeholder="Enter system prompt here"
         extraExtensions={variableExtension}
+        language="markdown"
         onChange={handleChange}
+        placeholder="Enter system prompt here"
+        readonly={readonly || streaming}
+        value={systemPrompt ?? ""}
       />
     </div>
   );

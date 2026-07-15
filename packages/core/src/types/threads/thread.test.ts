@@ -9,7 +9,7 @@ const LEGACY_THREAD = {
   title: "Legacy comparison",
   runHistory: [
     { id: "run-a", thread: {}, timestamp: 1 },
-    { id: "run-b", thread: {}, timestamp: 2 },
+    { id: "run-b", thread: {}, timestamp: 2 }
   ],
   evaluations: [
     {
@@ -19,9 +19,9 @@ const LEGACY_THREAD = {
       verdict: "rightBetter",
       note: "Better answer",
       createdAt: 3,
-      updatedAt: 3,
-    },
-  ],
+      updatedAt: 3
+    }
+  ]
 } as const;
 
 describe("Thread evaluation schema", () => {
@@ -41,8 +41,8 @@ describe("Thread evaluation schema", () => {
             criteria: [criterion, { id: "criterion-2", name: "Clarity" }],
             revision: 1,
             createdAt: 4,
-            updatedAt: 4,
-          },
+            updatedAt: 4
+          }
         ],
         evaluations: [
           {
@@ -51,26 +51,26 @@ describe("Thread evaluation schema", () => {
               id: "rubric-1",
               name: "Answer quality",
               criteria: [criterion, { id: "criterion-2", name: "Clarity" }],
-              revision: 1,
+              revision: 1
             },
             runScores: [
               {
                 runId: "run-a",
                 scores: [
                   { criterionId: "criterion-1", score: 3 },
-                  { criterionId: "criterion-2", score: 4 },
-                ],
+                  { criterionId: "criterion-2", score: 4 }
+                ]
               },
               {
                 runId: "run-b",
                 scores: [
                   { criterionId: "criterion-1", score: 5 },
-                  { criterionId: "criterion-2", score: 4 },
-                ],
-              },
-            ],
-          },
-        ],
+                  { criterionId: "criterion-2", score: 4 }
+                ]
+              }
+            ]
+          }
+        ]
       })
     ).toBe(true);
   });
@@ -86,28 +86,28 @@ describe("Thread evaluation schema", () => {
             name: "Answer quality",
             criteria: [
               { id: "criterion-1", name: "Correctness" },
-              { id: "criterion-2", name: "Clarity" },
+              { id: "criterion-2", name: "Clarity" }
             ],
-            revision: 1,
+            revision: 1
           },
           runScores: [
             {
               runId: "run-a",
               scores: [
                 { criterionId: "criterion-1", score: 0 },
-                { criterionId: "criterion-2", score: 4 },
-              ],
+                { criterionId: "criterion-2", score: 4 }
+              ]
             },
             {
               runId: "run-b",
               scores: [
                 { criterionId: "criterion-1", score: 5 },
-                { criterionId: "criterion-2", score: 4.5 },
-              ],
-            },
-          ],
-        },
-      ],
+                { criterionId: "criterion-2", score: 4.5 }
+              ]
+            }
+          ]
+        }
+      ]
     };
     expect(validator.Check(structured)).toBe(false);
   });
@@ -118,52 +118,52 @@ describe("Thread evaluation schema", () => {
       name: "Answer quality",
       criteria: [
         { id: "criterion-1", name: "Correctness" },
-        { id: "criterion-2", name: "Clarity" },
+        { id: "criterion-2", name: "Clarity" }
       ],
-      revision: 1,
+      revision: 1
     };
     const runScores = [
       {
         runId: "run-a",
         scores: [
           { criterionId: "criterion-1", score: 3 },
-          { criterionId: "criterion-2", score: 4 },
-        ],
+          { criterionId: "criterion-2", score: 4 }
+        ]
       },
       {
         runId: "run-b",
         scores: [
           { criterionId: "criterion-1", score: 5 },
-          { criterionId: "criterion-2", score: 4 },
-        ],
-      },
+          { criterionId: "criterion-2", score: 4 }
+        ]
+      }
     ];
     const base = LEGACY_THREAD.evaluations[0];
 
     expect(
       validator.Check({
         ...LEGACY_THREAD,
-        evaluations: [{ ...base, rubric }],
+        evaluations: [{ ...base, rubric }]
       })
     ).toBe(false);
     expect(
       validator.Check({
         ...LEGACY_THREAD,
-        evaluations: [{ ...base, runScores }],
+        evaluations: [{ ...base, runScores }]
       })
     ).toBe(false);
     expect(
       validator.Check({
         ...LEGACY_THREAD,
-        evaluations: [{ ...base, rubric, runScores: runScores.slice(0, 1) }],
+        evaluations: [{ ...base, rubric, runScores: runScores.slice(0, 1) }]
       })
     ).toBe(false);
     expect(
       validator.Check({
         ...LEGACY_THREAD,
         evaluations: [
-          { ...base, rubric: { ...rubric, criteria: [] }, runScores },
-        ],
+          { ...base, rubric: { ...rubric, criteria: [] }, runScores }
+        ]
       })
     ).toBe(false);
   });

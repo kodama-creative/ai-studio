@@ -4,7 +4,7 @@ const MCP_CONNECTION_DEFINITION_BRAND = Symbol.for(
   "llm-space.mcp-connection-definition"
 );
 
-export type McpRemoteTransport = "streamableHttp" | "sse";
+export type McpRemoteTransport = "sse" | "streamableHttp";
 
 export interface ConnectionContext {
   readonly abortSignal: AbortSignal;
@@ -20,29 +20,29 @@ export type ConnectionAuthResolver = (
   context: ConnectionContext
 ) =>
   | ConnectionToken
-  | undefined
-  | Promise<ConnectionToken | undefined>;
+  | Promise<ConnectionToken | undefined>
+  | undefined;
 
 export type ConnectionHeadersResolver = (
   context: ConnectionContext
-) => Record<string, string> | Promise<Record<string, string>>;
+) => Promise<Record<string, string>> | Record<string, string>;
 
 export interface McpClientConnectionDefinition {
   readonly url: string;
   readonly description: string;
   readonly transport: McpRemoteTransport;
   readonly auth?: ConnectionAuthResolver;
-  readonly headers?: Record<string, string> | ConnectionHeadersResolver;
-  readonly tools: { readonly allow: readonly string[] };
+  readonly headers?: ConnectionHeadersResolver | Record<string, string>;
+  readonly tools: { readonly allow: readonly string[]; };
   readonly [MCP_CONNECTION_DEFINITION_BRAND]: true;
 }
 
-type McpClientConnectionDefinitionInput = Omit<
+type McpClientConnectionDefinitionInput = {
+  readonly transport?: McpRemoteTransport;
+} & Omit<
   McpClientConnectionDefinition,
   "transport" | typeof MCP_CONNECTION_DEFINITION_BRAND
-> & {
-  readonly transport?: McpRemoteTransport;
-};
+>;
 
 export function defineMcpClientConnection(
   input: McpClientConnectionDefinitionInput
@@ -56,10 +56,10 @@ export function isMcpClientConnectionDefinition(
   value: unknown
 ): value is McpClientConnectionDefinition {
   return Boolean(
-    value &&
-      typeof value === "object" &&
-      (value as Partial<McpClientConnectionDefinition>)[
-        MCP_CONNECTION_DEFINITION_BRAND
-      ] === true
+    value
+    && typeof value === "object"
+    && (value as Partial<McpClientConnectionDefinition>)[
+      MCP_CONNECTION_DEFINITION_BRAND
+    ] === true
   );
 }

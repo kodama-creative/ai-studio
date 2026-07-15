@@ -1,23 +1,24 @@
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { expect, test } from "bun:test";
 
-import type { Message } from "../types/messages";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 
 import { convertFromPiMessages } from "./from-pi-messages";
+
+import type { Message } from "../types/messages";
 
 test("projects Pi tool results into the owning durable assistant message", () => {
   const existing: Message[] = [
     {
       id: "user-one",
       role: "user",
-      content: [{ type: "text", text: "hello" }],
-    },
+      content: [{ type: "text", text: "hello" }]
+    }
   ];
   const messages: AgentMessage[] = [
     {
       role: "user",
       content: [{ type: "text", text: "hello" }],
-      timestamp: 1,
+      timestamp: 1
     },
     {
       role: "assistant",
@@ -26,15 +27,15 @@ test("projects Pi tool results into the owning durable assistant message", () =>
           type: "toolCall",
           id: "call-one",
           name: "echo",
-          arguments: { text: "hello" },
-        },
+          arguments: { text: "hello" }
+        }
       ],
       api: "fake",
       provider: "fake",
       model: "fake",
       stopReason: "toolUse",
       usage: _usage(),
-      timestamp: 2,
+      timestamp: 2
     },
     {
       role: "toolResult",
@@ -42,8 +43,8 @@ test("projects Pi tool results into the owning durable assistant message", () =>
       toolName: "echo",
       content: [{ type: "text", text: "echo:hello" }],
       isError: false,
-      timestamp: 3,
-    },
+      timestamp: 3
+    }
   ];
 
   const converted = convertFromPiMessages(messages, existing);
@@ -55,9 +56,9 @@ test("projects Pi tool results into the owning durable assistant message", () =>
       {
         id: "call-one",
         input: { name: "echo", arguments: { text: "hello" } },
-        output: { content: [{ type: "text", text: "echo:hello" }] },
-      },
-    ],
+        output: { content: [{ type: "text", text: "echo:hello" }] }
+      }
+    ]
   });
 });
 
@@ -73,7 +74,7 @@ function _usage() {
       output: 0,
       cacheRead: 0,
       cacheWrite: 0,
-      total: 0,
-    },
+      total: 0
+    }
   };
 }

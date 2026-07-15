@@ -1,5 +1,6 @@
-import type { AgentEvent } from "@earendil-works/pi-agent-core";
 import { parseServerSentEvents, type ServerSentEvent } from "parse-sse";
+
+import type { AgentEvent } from "@earendil-works/pi-agent-core";
 
 import type { AgentStreamRequest } from "../types/agent";
 
@@ -12,7 +13,7 @@ import type { AgentStreamRequest } from "../types/agent";
  */
 export type AgentTransport = (
   request: AgentStreamRequest,
-  options: { signal?: AbortSignal }
+  options: { signal?: AbortSignal; }
 ) => AsyncIterable<AgentEvent>;
 
 /**
@@ -26,10 +27,10 @@ export function createHttpTransport(
     const res = await fetch(endpoint, {
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
+        "Content-Type": "application/json"
       },
       body: JSON.stringify(request),
-      signal,
+      signal
     });
     if (!res.ok) {
       throw new Error(`Failed to stream thread: ${res.statusText}`);

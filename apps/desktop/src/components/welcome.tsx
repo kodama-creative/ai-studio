@@ -5,14 +5,13 @@ import {
   FolderOpenIcon,
   PlusIcon,
   SettingsIcon,
-  SparklesIcon,
+  SparklesIcon
 } from "lucide-react";
-import { useCallback, type MouseEvent } from "react";
+import { type MouseEvent, useCallback } from "react";
 
 import { useCommands } from "@/commands";
 import { electrobun } from "@/lib/electrobun";
 import { cn } from "@/lib/utils";
-
 import { Button } from "./ui/button";
 import {
   Empty,
@@ -20,21 +19,21 @@ import {
   EmptyDescription,
   EmptyHeader,
   EmptyMedia,
-  EmptyTitle,
+  EmptyTitle
 } from "./ui/empty";
 
 interface WelcomeProps {
-  className?: string;
-  onNewStarter?: () => void;
-  onNewFile?: () => void;
-  onModels?: () => void;
+  readonly className?: string;
+  readonly onNewStarter?: () => void;
+  readonly onNewFile?: () => void;
+  readonly onModels?: () => void;
 }
 
 export function Welcome({
   className,
   onNewStarter,
   onNewFile,
-  onModels,
+  onModels
 }: WelcomeProps) {
   const { executeCommand } = useCommands();
 
@@ -60,7 +59,7 @@ export function Welcome({
       <div
         className="electrobun-webkit-app-region-drag absolute top-0 right-0 left-0 h-11.5"
         onDoubleClick={handleHeaderDoubleClick}
-      ></div>
+      />
       <Empty>
         <EmptyHeader>
           <EmptyMedia variant="icon">
@@ -77,29 +76,27 @@ export function Welcome({
             <SparklesIcon />
             Start from examples
           </Button>
-          <Button variant="outline" onClick={onNewFile}>
+          <Button onClick={onNewFile} variant="outline">
             <PlusIcon />
             Blank thread
           </Button>
-          <Button variant="outline" onClick={onModels}>
+          <Button onClick={onModels} variant="outline">
             <SettingsIcon />
             Configure models
           </Button>
           <Button
+            onClick={() => { executeCommand({ type: "openExternalAgentProject", args: {} }); }}
             variant="outline"
-            onClick={() =>
-              executeCommand({ type: "openExternalAgentProject", args: {} })
-            }
           >
             <FolderOpenIcon />
             Open Agent Project
           </Button>
         </EmptyContent>
         <Button
-          variant="link"
           asChild
           className="text-muted-foreground"
           size="sm"
+          variant="link"
         >
           <a href="#" onClick={handleLearnMore}>
             Learn more <ArrowUpRightIcon />

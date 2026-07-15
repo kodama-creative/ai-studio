@@ -1,12 +1,17 @@
 import {
-  MAX_EVALUATION_RUBRICS,
-  snapshotEvaluationRubric,
   type EvaluationRubricRecord,
   type EvaluationRubricSnapshot,
+  MAX_EVALUATION_RUBRICS,
+  snapshotEvaluationRubric
 } from "@llm-space/core/thread";
 import { Edit3Icon, PlusIcon } from "lucide-react";
-import { useMemo, type KeyboardEvent } from "react";
+import { type KeyboardEvent, useMemo } from "react";
 
+import {
+  averageScoreForRun,
+  completeRunScores,
+  type EvaluationScoreDraft
+} from "./run-evaluation-utils";
 import { Tooltip } from "../tooltip";
 import { Button } from "../ui/button";
 import { ButtonGroup } from "../ui/button-group";
@@ -15,14 +20,8 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
+  SelectValue
 } from "../ui/select";
-
-import {
-  averageScoreForRun,
-  completeRunScores,
-  type EvaluationScoreDraft,
-} from "./run-evaluation-utils";
 
 const NO_RUBRIC = "none";
 const SAVED_RUBRIC = "saved";
@@ -38,31 +37,31 @@ export function RunEvaluationScorecard({
   onRubricChange,
   onScoreChange,
   onCreateRubric,
-  onEditRubric,
+  onEditRubric
 }: {
-  rubrics: EvaluationRubricRecord[];
-  savedRubric: EvaluationRubricSnapshot | null;
-  rubric: EvaluationRubricSnapshot | null;
-  leftRunId: string;
-  rightRunId: string;
-  scoreDraft: EvaluationScoreDraft;
-  onRubricChange: (rubric: EvaluationRubricSnapshot | null) => void;
-  onScoreChange: (runId: string, criterionId: string, score: number) => void;
-  onCreateRubric: () => void;
-  onEditRubric: (rubric: EvaluationRubricRecord) => void;
+  readonly leftRunId: string;
+  readonly onCreateRubric: () => void;
+  readonly onEditRubric: (rubric: EvaluationRubricRecord) => void;
+  readonly onRubricChange: (rubric: EvaluationRubricSnapshot | null) => void;
+  readonly onScoreChange: (runId: string, criterionId: string, score: number) => void;
+  readonly rightRunId: string;
+  readonly rubric: EvaluationRubricSnapshot | null;
+  readonly rubrics: EvaluationRubricRecord[];
+  readonly savedRubric: EvaluationRubricSnapshot | null;
+  readonly scoreDraft: EvaluationScoreDraft;
 }) {
   const currentDefinition = rubric
-    ? (rubrics.find((value) => value.id === rubric.id) ?? null)
+    ? (rubrics.find(value => value.id === rubric.id) ?? null)
     : null;
   const usingCurrentDefinition = Boolean(
     currentDefinition && rubric?.revision === currentDefinition.revision
   );
   const savedDefinition = savedRubric
     ? rubrics.find(
-        (definition) =>
-          definition.id === savedRubric.id &&
-          definition.revision === savedRubric.revision
-      )
+      definition =>
+        definition.id === savedRubric.id
+        && definition.revision === savedRubric.revision
+    )
     : null;
   const showSavedRubric = Boolean(savedRubric && !savedDefinition);
   const selectValue = !rubric
@@ -72,9 +71,9 @@ export function RunEvaluationScorecard({
       : SAVED_RUBRIC;
   const completeScores = useMemo(
     () =>
-      rubric
+      (rubric
         ? completeRunScores(rubric, scoreDraft, [leftRunId, rightRunId])
-        : null,
+        : null),
     [leftRunId, rightRunId, rubric, scoreDraft]
   );
   const leftAverage = averageScoreForRun(
@@ -93,12 +92,12 @@ export function RunEvaluationScorecard({
       : rightAverage - leftAverage;
   const missingCount = rubric
     ? rubric.criteria.reduce((count, criterion) => {
-        return (
-          count +
-          (scoreDraft[leftRunId]?.[criterion.id] ? 0 : 1) +
-          (scoreDraft[rightRunId]?.[criterion.id] ? 0 : 1)
-        );
-      }, 0)
+      return (
+        count
+        + (scoreDraft[leftRunId]?.[criterion.id] ? 0 : 1)
+        + (scoreDraft[rightRunId]?.[criterion.id] ? 0 : 1)
+      );
+    }, 0)
     : 0;
 
   return (
@@ -112,8 +111,7 @@ export function RunEvaluationScorecard({
         </div>
         <div className="flex flex-wrap items-center justify-end gap-1.5">
           <Select
-            value={selectValue}
-            onValueChange={(value) => {
+            onValueChange={value => {
               if (value === NO_RUBRIC) {
                 onRubricChange(null);
                 return;
@@ -123,26 +121,29 @@ export function RunEvaluationScorecard({
                 return;
               }
               const id = value.slice(DEFINITION_PREFIX.length);
-              const definition = rubrics.find((item) => item.id === id);
+              const definition = rubrics.find(item => item.id === id);
               onRubricChange(
                 definition ? snapshotEvaluationRubric(definition) : null
               );
             }}
+            value={selectValue}
           >
-            <SelectTrigger className="w-52" aria-label="Evaluation rubric">
+            <SelectTrigger aria-label="Evaluation rubric" className="w-52">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value={NO_RUBRIC}>No rubric</SelectItem>
-              {showSavedRubric && savedRubric && (
-                <SelectItem value={SAVED_RUBRIC}>
-                  {savedRubric.name} (saved v{savedRubric.revision})
-                </SelectItem>
-              )}
+              {showSavedRubric && savedRubric
+                ? (
+                  <SelectItem value={SAVED_RUBRIC}>
+                    {savedRubric.name} (saved v{savedRubric.revision})
+                  </SelectItem>
+                )
+                : null}
               {rubrics
                 .slice()
                 .reverse()
-                .map((definition) => (
+                .map(definition => (
                   <SelectItem
                     key={definition.id}
                     value={`${DEFINITION_PREFIX}${definition.id}`}
@@ -152,29 +153,31 @@ export function RunEvaluationScorecard({
                 ))}
             </SelectContent>
           </Select>
-          {currentDefinition && !usingCurrentDefinition && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() =>
-                onRubricChange(snapshotEvaluationRubric(currentDefinition))
-              }
-            >
-              Use current v{currentDefinition.revision}
-            </Button>
-          )}
-          {currentDefinition && (
-            <Tooltip content="Edit rubric">
+          {currentDefinition && !usingCurrentDefinition
+            ? (
               <Button
-                size="icon-sm"
-                variant="ghost"
-                aria-label={`Edit rubric ${currentDefinition.name}`}
-                onClick={() => onEditRubric(currentDefinition)}
+                onClick={() => { onRubricChange(snapshotEvaluationRubric(currentDefinition)); }}
+                size="sm"
+                variant="outline"
               >
-                <Edit3Icon className="size-3" />
+                Use current v{currentDefinition.revision}
               </Button>
-            </Tooltip>
-          )}
+            )
+            : null}
+          {currentDefinition
+            ? (
+              <Tooltip content="Edit rubric">
+                <Button
+                  aria-label={`Edit rubric ${currentDefinition.name}`}
+                  onClick={() => { onEditRubric(currentDefinition); }}
+                  size="icon-sm"
+                  variant="ghost"
+                >
+                  <Edit3Icon className="size-3" />
+                </Button>
+              </Tooltip>
+            )
+            : null}
           <Tooltip
             content={
               rubrics.length >= MAX_EVALUATION_RUBRICS
@@ -183,22 +186,22 @@ export function RunEvaluationScorecard({
             }
           >
             <span
-              className="inline-flex"
-              tabIndex={
-                rubrics.length >= MAX_EVALUATION_RUBRICS ? 0 : undefined
-              }
               aria-label={
                 rubrics.length >= MAX_EVALUATION_RUBRICS
                   ? `Maximum ${MAX_EVALUATION_RUBRICS} rubrics per thread`
                   : undefined
               }
+              className="inline-flex"
+              tabIndex={
+                rubrics.length >= MAX_EVALUATION_RUBRICS ? 0 : undefined
+              }
             >
               <Button
-                size="icon-sm"
-                variant="ghost"
                 aria-label="Create rubric"
                 disabled={rubrics.length >= MAX_EVALUATION_RUBRICS}
                 onClick={onCreateRubric}
+                size="icon-sm"
+                variant="ghost"
               >
                 <PlusIcon className="size-3" />
               </Button>
@@ -207,66 +210,68 @@ export function RunEvaluationScorecard({
         </div>
       </div>
 
-      {rubric && (
-        <>
-          <div className="bg-muted/20 hidden grid-cols-[minmax(12rem,1fr)_minmax(13rem,auto)_minmax(13rem,auto)] items-center gap-3 rounded-md px-3 py-2 text-[0.625rem] font-medium md:grid">
-            <span>Criterion</span>
-            <span className="text-center">Run A</span>
-            <span className="text-center">Run B</span>
-          </div>
-          <div className="flex flex-col gap-2">
-            {rubric.criteria.map((criterion) => (
-              <div
-                key={criterion.id}
-                className="bg-muted/10 grid gap-3 rounded-md border px-3 py-2 md:grid-cols-[minmax(12rem,1fr)_minmax(13rem,auto)_minmax(13rem,auto)] md:items-center"
-              >
-                <div className="min-w-0">
-                  <div className="text-xs font-medium break-words">
-                    {criterion.name}
-                  </div>
-                  {criterion.description && (
-                    <div className="text-muted-foreground mt-0.5 text-[0.625rem] break-words">
-                      {criterion.description}
+      {rubric
+        ? (
+          <>
+            <div className="bg-muted/20 hidden grid-cols-[minmax(12rem,1fr)_minmax(13rem,auto)_minmax(13rem,auto)] items-center gap-3 rounded-md px-3 py-2 text-[0.625rem] font-medium md:grid">
+              <span>Criterion</span>
+              <span className="text-center">Run A</span>
+              <span className="text-center">Run B</span>
+            </div>
+            <div className="flex flex-col gap-2">
+              {rubric.criteria.map(criterion => (
+                <div
+                  className="bg-muted/10 grid gap-3 rounded-md border px-3 py-2 md:grid-cols-[minmax(12rem,1fr)_minmax(13rem,auto)_minmax(13rem,auto)] md:items-center"
+                  key={criterion.id}
+                >
+                  <div className="min-w-0">
+                    <div className="text-xs font-medium break-words">
+                      {criterion.name}
                     </div>
-                  )}
+                    {criterion.description
+                      ? (
+                        <div className="text-muted-foreground mt-0.5 text-[0.625rem] break-words">
+                          {criterion.description}
+                        </div>
+                      )
+                      : null}
+                  </div>
+                  <_ScoreButtons
+                    criterionName={criterion.name}
+                    label="Run A"
+                    onChange={score => { onScoreChange(leftRunId, criterion.id, score); }}
+                    value={scoreDraft[leftRunId]?.[criterion.id]}
+                  />
+                  <_ScoreButtons
+                    criterionName={criterion.name}
+                    label="Run B"
+                    onChange={score => { onScoreChange(rightRunId, criterion.id, score); }}
+                    value={scoreDraft[rightRunId]?.[criterion.id]}
+                  />
                 </div>
-                <_ScoreButtons
-                  label="Run A"
-                  criterionName={criterion.name}
-                  value={scoreDraft[leftRunId]?.[criterion.id]}
-                  onChange={(score) =>
-                    onScoreChange(leftRunId, criterion.id, score)
-                  }
-                />
-                <_ScoreButtons
-                  label="Run B"
-                  criterionName={criterion.name}
-                  value={scoreDraft[rightRunId]?.[criterion.id]}
-                  onChange={(score) =>
-                    onScoreChange(rightRunId, criterion.id, score)
-                  }
-                />
-              </div>
-            ))}
-          </div>
-          <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3 text-xs">
-            <span className="text-muted-foreground">
-              1 = poor · 5 = excellent
-            </span>
-            {delta === null ? (
+              ))}
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3 text-xs">
               <span className="text-muted-foreground">
-                {missingCount} score{missingCount === 1 ? "" : "s"} remaining
+                1 = poor · 5 = excellent
               </span>
-            ) : (
-              <span className="font-mono tabular-nums">
-                A {leftAverage!.toFixed(1)} · B {rightAverage!.toFixed(1)} · B −
-                A {delta >= 0 ? "+" : ""}
-                {delta.toFixed(1)}
-              </span>
-            )}
-          </div>
-        </>
-      )}
+              {delta === null
+                ? (
+                  <span className="text-muted-foreground">
+                    {missingCount} score{missingCount === 1 ? "" : "s"} remaining
+                  </span>
+                )
+                : (
+                  <span className="font-mono tabular-nums">
+                    A {leftAverage!.toFixed(1)} · B {rightAverage!.toFixed(1)} · B −
+                    A {delta >= 0 ? "+" : ""}
+                    {delta.toFixed(1)}
+                  </span>
+                )}
+            </div>
+          </>
+        )
+        : null}
     </section>
   );
 }
@@ -275,32 +280,32 @@ function _ScoreButtons({
   label,
   criterionName,
   value,
-  onChange,
+  onChange
 }: {
-  label: string;
-  criterionName: string;
-  value: number | undefined;
-  onChange: (score: number) => void;
+  readonly criterionName: string;
+  readonly label: string;
+  readonly onChange: (score: number) => void;
+  readonly value: number | undefined;
 }) {
   return (
     <div className="flex items-center justify-between gap-2">
       <span className="text-muted-foreground text-[0.625rem]">{label}</span>
-      <ButtonGroup role="radiogroup" aria-label={`${label}, ${criterionName}`}>
-        {[1, 2, 3, 4, 5].map((score) => (
+      <ButtonGroup aria-label={`${label}, ${criterionName}`} role="radiogroup">
+        {[1, 2, 3, 4, 5].map(score => (
           <Button
-            key={score}
-            type="button"
-            size="icon-sm"
-            variant={value === score ? "default" : "outline"}
-            role="radio"
-            aria-label={`${label}, ${criterionName}, score ${score} of 5`}
             aria-checked={value === score}
+            aria-label={`${label}, ${criterionName}, score ${score} of 5`}
             data-score={score}
+            key={score}
+            onClick={() => { onChange(score); }}
+            onKeyDown={event => { _handleScoreKeyDown(event, score, onChange); }}
+            role="radio"
+            size="icon-sm"
             tabIndex={
               value === score || (value === undefined && score === 1) ? 0 : -1
             }
-            onClick={() => onChange(score)}
-            onKeyDown={(event) => _handleScoreKeyDown(event, score, onChange)}
+            type="button"
+            variant={value === score ? "default" : "outline"}
           >
             {score}
           </Button>

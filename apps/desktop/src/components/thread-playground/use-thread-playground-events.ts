@@ -1,5 +1,6 @@
-import type { Thread } from "@llm-space/core";
 import { useEffect, useRef } from "react";
+
+import type { Thread } from "@llm-space/core";
 
 import type { ThreadStore } from "./stores";
 

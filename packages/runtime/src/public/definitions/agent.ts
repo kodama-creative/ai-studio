@@ -1,10 +1,9 @@
+import type { ExactDefinition } from "./exact-definition";
 import type {
   AgentDefinition,
   AgentModelDefinition,
-  AgentReasoningDefinition,
+  AgentReasoningDefinition
 } from "../../shared/agent-definition";
-
-import type { ExactDefinition } from "./exact-definition";
 
 export type { AgentDefinition, AgentModelDefinition, AgentReasoningDefinition };
 

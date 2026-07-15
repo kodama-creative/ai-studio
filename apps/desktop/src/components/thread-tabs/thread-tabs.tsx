@@ -1,25 +1,26 @@
 "use client";
 
 import { Tabs } from "@sinm/react-chrome-tabs";
-import "@sinm/react-chrome-tabs/css/chrome-tabs-dark-theme.css";
-import "@sinm/react-chrome-tabs/css/chrome-tabs.css";
 import { PlusIcon, SidebarCloseIcon, SidebarOpenIcon } from "lucide-react";
 import {
   lazy,
+  type MouseEvent,
+  type ReactNode,
   Suspense,
   useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
-  useState,
-  type MouseEvent,
-  type ReactNode,
+  useState
 } from "react";
 
 import { useTheme } from "@/components/theme-provider";
 import { electrobun } from "@/lib/electrobun";
 import { cn } from "@/lib/utils";
-
+import { SourceTabPane } from "./source-tab-pane";
+import { ThreadTabPane } from "./thread-tab-pane";
+import { TraceTabPane } from "./trace-tab-pane";
+import { type AppTab, tabLabel } from "./use-thread-tabs";
 import { Tooltip } from "../tooltip";
 import { Button } from "../ui/button";
 import {
@@ -28,14 +29,12 @@ import {
   ContextMenuGroup,
   ContextMenuItem,
   ContextMenuSeparator,
-  ContextMenuTrigger,
+  ContextMenuTrigger
 } from "../ui/context-menu";
 import { Kbd, KbdGroup } from "../ui/kbd";
 
-import { SourceTabPane } from "./source-tab-pane";
-import { ThreadTabPane } from "./thread-tab-pane";
-import { TraceTabPane } from "./trace-tab-pane";
-import { tabLabel, type AppTab } from "./use-thread-tabs";
+import "@sinm/react-chrome-tabs/css/chrome-tabs-dark-theme.css";
+import "@sinm/react-chrome-tabs/css/chrome-tabs.css";
 
 const _isWindows =
   typeof navigator !== "undefined" && /Win/i.test(navigator.userAgent);
@@ -45,18 +44,17 @@ const MOVE_TO_TRASH_LABEL = _isWindows
   ? "Move to Recycle Bin"
   : "Move to Trash";
 
-const ExternalProjectTabPane = lazy(() =>
-  import("./external-project-tab-pane").then((module) => ({
-    default: module.ExternalProjectTabPane,
-  }))
-);
+const ExternalProjectTabPane = lazy(async () =>
+  import("./external-project-tab-pane").then(module => ({
+    default: module.ExternalProjectTabPane
+  })));
 
 // Suppress focus on mouse-down so a click doesn't leave these toolbar icons
 // with the focus-visible ring stuck; keyboard focus (Tab) still rings them.
-const _preventFocusSteal = (e: MouseEvent) => e.preventDefault();
+const _preventFocusSteal = (e: MouseEvent) => { e.preventDefault(); };
 
 function _tabIdFromEventTarget(target: EventTarget | null): string | null {
-  if (!(target instanceof HTMLElement)) return null;
+  if (!(target instanceof HTMLElement)) { return null; }
   return (
     target
       .closest<HTMLElement>(".chrome-tab[data-tab-id]")
@@ -65,30 +63,32 @@ function _tabIdFromEventTarget(target: EventTarget | null): string | null {
 }
 
 interface ThreadTabsProps {
-  className?: string;
-  tabs: AppTab[];
-  activeId: string | null;
-  sidebarOpen?: boolean;
-  fullScreen?: boolean;
-  activate: (id: string) => void;
-  refresh: (id: string) => void;
-  close: (id: string) => void;
-  closeOthers: (id: string) => void;
-  closeAll: () => void;
-  reveal: (path: string) => void;
-  moveToTrash: (path: string) => void;
-  reorder: (from: number, to: number) => void;
+  readonly className?: string;
+  readonly tabs: AppTab[];
+  readonly activeId: string | null;
+  readonly sidebarOpen?: boolean;
+  readonly fullScreen?: boolean;
+  readonly activate: (id: string) => void;
+  readonly refresh: (id: string) => void;
+  readonly close: (id: string) => void;
+  readonly closeOthers: (id: string) => void;
+  readonly closeAll: () => void;
+  readonly reveal: (path: string) => void;
+  readonly moveToTrash: (path: string) => void;
+  readonly reorder: (from: number, to: number) => void;
+
   /** Create a new thread at the workspace root (auto-named, opened, selected). */
-  onNewFile?: () => void;
-  onMove?: (from: string, to: string) => void;
-  onTraceTitleChange?: (
+  readonly onNewFile?: () => void;
+  readonly onMove?: (from: string, to: string) => void;
+  readonly onTraceTitleChange?: (
     projectId: string,
     traceKey: string,
     title: string
   ) => void;
-  onToggleSidebar?: () => void;
+  readonly onToggleSidebar?: () => void;
+
   /** Extra content pinned at the right end of the tab strip, before "+". */
-  toolbarSlot?: ReactNode;
+  readonly toolbarSlot?: ReactNode;
 }
 
 export function ThreadTabs({
@@ -109,7 +109,7 @@ export function ThreadTabs({
   onMove,
   onTraceTitleChange,
   onToggleSidebar,
-  toolbarSlot,
+  toolbarSlot
 }: ThreadTabsProps) {
   const { resolvedTheme } = useTheme();
   // The chrome-tabs lib renders tab DOM imperatively and exposes no tooltip prop,
@@ -119,17 +119,17 @@ export function ThreadTabs({
   // updates; we re-apply whenever the tab set changes (covers adds/reorders).
   const containerRef = useRef<HTMLDivElement>(null);
   const [contextMenuId, setContextMenuId] = useState<string | null>(null);
-  const contextMenuTab = tabs.find((tab) => tab.id === contextMenuId) ?? null;
+  const contextMenuTab = tabs.find(tab => tab.id === contextMenuId) ?? null;
   useEffect(() => {
     const root = containerRef.current;
-    if (!root) return;
+    if (!root) { return; }
     root
       .querySelectorAll<HTMLElement>(".chrome-tab[data-tab-id]")
-      .forEach((el) => {
+      .forEach(el => {
         const id = el.getAttribute("data-tab-id");
-        if (!id) return;
-        const tab = tabs.find((tab) => tab.id === id);
-        if (!tab) return;
+        if (!id) { return; }
+        const tab = tabs.find(tab => tab.id === id);
+        if (!tab) { return; }
         const label = tabLabel(tab);
         el.title = id;
         el.tabIndex = 0;
@@ -148,8 +148,8 @@ export function ThreadTabs({
       return;
     }
     if (
-      e.target instanceof HTMLElement &&
-      e.target.classList.contains("chrome-tabs")
+      e.target instanceof HTMLElement
+      && e.target.classList.contains("chrome-tabs")
     ) {
       void electrobun.rpc.request.toggleMaximized({});
     }
@@ -157,9 +157,9 @@ export function ThreadTabs({
 
   useLayoutEffect(() => {
     const root = containerRef.current;
-    if (!root) return;
+    if (!root) { return; }
     const tabsContainer = root.querySelector(".chrome-tabs");
-    if (!tabsContainer) return;
+    if (!tabsContainer) { return; }
 
     if (
       !tabsContainer.classList.contains("electrobun-webkit-app-region-drag")
@@ -190,7 +190,7 @@ export function ThreadTabs({
   }, []);
 
   const hasOtherTabs =
-    contextMenuId !== null && tabs.some((tab) => tab.id !== contextMenuId);
+    contextMenuId !== null && tabs.some(tab => tab.id !== contextMenuId);
 
   // The chrome-tabs lib activates a tab on ANY mousedown, so a middle-click
   // close would flash the tab active before closing it. Stop the middle-button
@@ -207,11 +207,11 @@ export function ThreadTabs({
   const middlePressedTabIdRef = useRef<string | null>(null);
   const handleMouseDownCapture = useCallback(
     (event: MouseEvent<HTMLDivElement>) => {
-      if (event.button !== 1) return;
+      if (event.button !== 1) { return; }
       middlePressedTabIdRef.current = null;
-      if ((event.buttons & 1) !== 0) return;
+      if ((event.buttons & 1) !== 0) { return; }
       const id = _tabIdFromEventTarget(event.target);
-      if (id === null) return;
+      if (id === null) { return; }
       middlePressedTabIdRef.current = id;
       event.preventDefault();
       event.stopPropagation();
@@ -221,20 +221,20 @@ export function ThreadTabs({
 
   const handleMouseUp = useCallback(
     (event: MouseEvent<HTMLDivElement>) => {
-      if (event.button !== 1) return;
+      if (event.button !== 1) { return; }
       const pressed = middlePressedTabIdRef.current;
       middlePressedTabIdRef.current = null;
-      if ((event.buttons & 1) !== 0) return;
+      if ((event.buttons & 1) !== 0) { return; }
       const id = _tabIdFromEventTarget(event.target);
-      if (id !== null && id === pressed) close(id);
+      if (id !== null && id === pressed) { close(id); }
     },
     [close]
   );
 
   return (
     <div
-      ref={containerRef}
       className={cn("flex size-full flex-col", className)}
+      ref={containerRef}
     >
       <ContextMenu>
         <ContextMenuTrigger asChild>
@@ -268,140 +268,146 @@ export function ThreadTabs({
                 }
               >
                 <Button
+                  aria-label={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
+                  onClick={onToggleSidebar}
+                  onMouseDown={_preventFocusSteal}
                   size="icon-sm"
                   variant="ghost"
-                  aria-label={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
-                  onMouseDown={_preventFocusSteal}
-                  onClick={onToggleSidebar}
                 >
-                  {sidebarOpen ? (
-                    <SidebarCloseIcon className="size-4" />
-                  ) : (
-                    <SidebarOpenIcon className="size-4" />
-                  )}
+                  {sidebarOpen
+                    ? (
+                      <SidebarCloseIcon className="size-4" />
+                    )
+                    : (
+                      <SidebarOpenIcon className="size-4" />
+                    )}
                 </Button>
               </Tooltip>
             </div>
             <Tabs
               className="grow"
               darkMode={resolvedTheme === "dark"}
-              tabs={tabs.map((tab) => ({
-                id: tab.id,
-                title: tabLabel(tab),
-                favicon: false,
-                active: tab.id === activeId,
-              }))}
+              onTabActive={activate}
+              onTabClose={close}
+              onTabReorder={(_id, from, to) => { reorder(from, to); }}
               pinnedRight={
                 <div className="flex h-full items-center gap-0.5 pt-0.5 pl-1.5">
                   {toolbarSlot}
                   <Tooltip content="New blank thread">
                     <Button
+                      aria-label="New blank thread"
                       className="hover:bg-primary! rounded-full"
+                      onClick={onNewFile}
+                      onMouseDown={_preventFocusSteal}
                       size="icon-sm"
                       variant="ghost"
-                      aria-label="New blank thread"
-                      onMouseDown={_preventFocusSteal}
-                      onClick={onNewFile}
                     >
                       <PlusIcon className="size-3.5" />
                     </Button>
                   </Tooltip>
                 </div>
               }
-              onTabActive={activate}
-              onTabClose={close}
-              onTabReorder={(_id, from, to) => reorder(from, to)}
+              tabs={tabs.map(tab => ({
+                id: tab.id,
+                title: tabLabel(tab),
+                favicon: false,
+                active: tab.id === activeId
+              }))}
             />
           </div>
         </ContextMenuTrigger>
-        {contextMenuId !== null ? (
-          <ContextMenuContent className="w-44">
-            <ContextMenuGroup>
-              <ContextMenuItem onSelect={() => refresh(contextMenuId)}>
-                Refresh
-              </ContextMenuItem>
-            </ContextMenuGroup>
-            <ContextMenuSeparator />
-            <ContextMenuGroup>
-              <ContextMenuItem onSelect={() => close(contextMenuId)}>
-                Close
-              </ContextMenuItem>
-              <ContextMenuItem
-                disabled={!hasOtherTabs}
-                onSelect={() => closeOthers(contextMenuId)}
-              >
-                Close Others
-              </ContextMenuItem>
-              <ContextMenuItem onSelect={closeAll}>Close All</ContextMenuItem>
-            </ContextMenuGroup>
-            {contextMenuTab &&
-              contextMenuTab.type !== "trace" &&
-              contextMenuTab.type !== "externalProject" && (
-                <>
-                  <ContextMenuSeparator />
-                  <ContextMenuGroup>
-                    <ContextMenuItem
-                      onSelect={() => reveal(contextMenuTab.path)}
-                    >
-                      {REVEAL_LABEL}
-                    </ContextMenuItem>
-                    <ContextMenuItem
-                      variant="destructive"
-                      onSelect={() => moveToTrash(contextMenuTab.path)}
-                    >
-                      {MOVE_TO_TRASH_LABEL}
-                    </ContextMenuItem>
-                  </ContextMenuGroup>
-                </>
-              )}
-          </ContextMenuContent>
-        ) : null}
+        {contextMenuId !== null
+          ? (
+            <ContextMenuContent className="w-44">
+              <ContextMenuGroup>
+                <ContextMenuItem onSelect={() => { refresh(contextMenuId); }}>
+                  Refresh
+                </ContextMenuItem>
+              </ContextMenuGroup>
+              <ContextMenuSeparator />
+              <ContextMenuGroup>
+                <ContextMenuItem onSelect={() => { close(contextMenuId); }}>
+                  Close
+                </ContextMenuItem>
+                <ContextMenuItem
+                  disabled={!hasOtherTabs}
+                  onSelect={() => { closeOthers(contextMenuId); }}
+                >
+                  Close Others
+                </ContextMenuItem>
+                <ContextMenuItem onSelect={closeAll}>Close All</ContextMenuItem>
+              </ContextMenuGroup>
+              {contextMenuTab
+                && contextMenuTab.type !== "trace"
+                && contextMenuTab.type !== "externalProject"
+                ? (
+                  <>
+                    <ContextMenuSeparator />
+                    <ContextMenuGroup>
+                      <ContextMenuItem
+                        onSelect={() => { reveal(contextMenuTab.path); }}
+                      >
+                        {REVEAL_LABEL}
+                      </ContextMenuItem>
+                      <ContextMenuItem
+                        onSelect={() => { moveToTrash(contextMenuTab.path); }}
+                        variant="destructive"
+                      >
+                        {MOVE_TO_TRASH_LABEL}
+                      </ContextMenuItem>
+                    </ContextMenuGroup>
+                  </>
+                )
+                : null}
+            </ContextMenuContent>
+          )
+          : null}
       </ContextMenu>
       <div className="relative min-h-0 flex-1">
-        {tabs.map((tab) => {
+        {tabs.map(tab => {
           if (tab.type === "thread") {
             return (
               <ThreadTabPane
-                key={tab.id}
-                path={tab.path}
                 active={tab.id === activeId}
-                refreshNonce={tab.refreshNonce ?? 0}
+                key={tab.id}
+                onClose={path => { close(`thread:${path}`); }}
                 onMove={onMove}
-                onClose={(path) => close(`thread:${path}`)}
+                path={tab.path}
+                refreshNonce={tab.refreshNonce ?? 0}
               />
             );
           }
           if (tab.type === "trace") {
             return (
               <TraceTabPane
-                key={tab.id}
-                projectId={tab.projectId}
-                traceKey={tab.traceKey}
                 active={tab.id === activeId}
-                refreshNonce={tab.refreshNonce ?? 0}
+                key={tab.id}
                 onClose={close}
                 onRenameTitle={onTraceTitleChange}
+                projectId={tab.projectId}
+                refreshNonce={tab.refreshNonce ?? 0}
+                traceKey={tab.traceKey}
               />
             );
           }
           if (tab.type === "source") {
             return (
               <SourceTabPane
+                active={tab.id === activeId}
                 key={tab.id}
                 path={tab.path}
-                active={tab.id === activeId}
                 refreshNonce={tab.refreshNonce ?? 0}
               />
             );
           }
           return (
-            <Suspense key={tab.id} fallback={null}>
+            <Suspense fallback={null} key={tab.id}>
               <ExternalProjectTabPane
-                tabId={tab.id}
-                projectId={tab.projectId}
-                threadId={tab.threadId}
                 active={tab.id === activeId}
+                projectId={tab.projectId}
                 refreshNonce={tab.refreshNonce ?? 0}
+                tabId={tab.id}
+                threadId={tab.threadId}
               />
             </Suspense>
           );

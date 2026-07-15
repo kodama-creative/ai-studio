@@ -16,5 +16,5 @@ export interface SearchSettings {
 export const DEFAULT_SEARCH_SETTINGS: SearchSettings = {
   provider: "firecrawl",
   firecrawlApiKey: "$FIRECRAWL_API_KEY",
-  tavilyApiKey: "$TAVILY_API_KEY",
+  tavilyApiKey: "$TAVILY_API_KEY"
 };

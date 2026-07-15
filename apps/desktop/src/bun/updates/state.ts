@@ -1,6 +1,5 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-
 import { getSettingsDir } from "@llm-space/core/server";
 
 import { DEFAULT_UPDATE_MODE, type UpdateMode } from "../../shared/updates";
@@ -22,7 +21,7 @@ async function _load(): Promise<UpdatesState> {
   try {
     return JSON.parse(await readFile(STATE_PATH, "utf8")) as UpdatesState;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") { return {}; }
     throw error;
   }
 }

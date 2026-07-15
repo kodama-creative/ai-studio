@@ -1,7 +1,6 @@
 import { mkdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-
 import { afterEach, describe, expect, test } from "bun:test";
 
 import { loadAgentProjectManifest } from "./manifest";
@@ -10,7 +9,7 @@ const ROOTS: string[] = [];
 
 afterEach(async () => {
   await Promise.all(
-    ROOTS.splice(0).map((root) => rm(root, { recursive: true }))
+    ROOTS.splice(0).map(async root => rm(root, { recursive: true }))
   );
 });
 

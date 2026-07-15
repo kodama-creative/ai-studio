@@ -3,37 +3,36 @@
 import { memo } from "react";
 
 import {
+  type PromptVariableSelection,
+  PromptVariablesPanel
+} from "./prompt-variables-panel";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
-  DialogTitle,
+  DialogTitle
 } from "../../ui/dialog";
 
-import {
-  PromptVariablesPanel,
-  type PromptVariableSelection,
-} from "./prompt-variables-panel";
-
 interface PromptVariablesDialogProps {
-  open: boolean;
-  disabled?: boolean;
-  initialSelection?: PromptVariableSelection | null;
-  onOpenChange: (open: boolean) => void;
+  readonly open: boolean;
+  readonly disabled?: boolean;
+  readonly initialSelection?: PromptVariableSelection | null;
+  readonly onOpenChange: (open: boolean) => void;
 }
 
 function _PromptVariablesDialog({
   open,
   disabled,
   initialSelection,
-  onOpenChange,
+  onOpenChange
 }: PromptVariablesDialogProps) {
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent
         className="flex h-[620px] max-h-[calc(100vh-4rem)] w-[min(920px,calc(100vw-2rem))] max-w-none! flex-col gap-0 overflow-hidden p-0"
-        onInteractOutside={(e) => e.preventDefault()}
-        onPointerDownOutside={(e) => e.preventDefault()}
+        onInteractOutside={e => { e.preventDefault(); }}
+        onPointerDownOutside={e => { e.preventDefault(); }}
       >
         <DialogHeader className="border-border/70 shrink-0 border-b px-4 py-3 pr-10">
           <DialogTitle>Variables</DialogTitle>

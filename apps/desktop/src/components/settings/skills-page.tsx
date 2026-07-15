@@ -7,7 +7,7 @@ import {
   Loader2,
   MoreHorizontal,
   Plus,
-  Trash2,
+  Trash2
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -19,7 +19,7 @@ import {
   listSkills,
   removeSkillsPath,
   setAllSkillsHidden,
-  setSkillHidden,
+  setSkillHidden
 } from "@/client/skills";
 import { Button } from "@/components/ui/button";
 import {
@@ -27,21 +27,20 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
-  DropdownMenuTrigger,
+  DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
 import { useAutoAnimation } from "@/lib/use-auto-animation";
 import { cn } from "@/lib/utils";
-import type { SkillInfo, SkillsSettings } from "@/shared/skills";
-
+import { SettingsPage } from "./settings-page";
 import { ConfirmDialog } from "../confirm-dialog";
 import { SkillListItem } from "../skill-list-item";
 import { ScrollArea } from "../ui/scroll-area";
 
-import { SettingsPage } from "./settings-page";
+import type { SkillInfo, SkillsSettings } from "@/shared/skills";
 
 export function SkillsPage() {
   const [settings, setSettings] = useState<SkillsSettings>({
-    discoveryPaths: [],
+    discoveryPaths: []
   });
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   // Bumped after a bulk enable/disable so the skills pane refetches.
@@ -50,7 +49,7 @@ export function SkillsPage() {
   useEffect(() => {
     let cancelled = false;
     void getSkillsSettings()
-      .then((loaded) => {
+      .then(loaded => {
         if (!cancelled) {
           setSettings(loaded);
         }
@@ -68,7 +67,7 @@ export function SkillsPage() {
 
   // Keep a valid selection as paths are added/removed.
   useEffect(() => {
-    if (!selectedPath || !paths.some((entry) => entry.path === selectedPath)) {
+    if (!selectedPath || !paths.some(entry => entry.path === selectedPath)) {
       setSelectedPath(firstPath);
     }
   }, [firstPath, paths, selectedPath]);
@@ -85,7 +84,7 @@ export function SkillsPage() {
     } catch (error) {
       toast.error("Failed to add folder", {
         description:
-          error instanceof Error ? error.message : "Please try again.",
+          error instanceof Error ? error.message : "Please try again."
       });
     }
   }, []);
@@ -96,7 +95,7 @@ export function SkillsPage() {
     } catch (error) {
       toast.error("Failed to remove folder", {
         description:
-          error instanceof Error ? error.message : "Please try again.",
+          error instanceof Error ? error.message : "Please try again."
       });
     }
   }, []);
@@ -105,13 +104,13 @@ export function SkillsPage() {
     try {
       setSettings(await setAllSkillsHidden(path, hidden));
       // Refetch the skills pane so its switches reflect the bulk change.
-      setReloadToken((token) => token + 1);
+      setReloadToken(token => token + 1);
     } catch (error) {
       toast.error(
         hidden ? "Failed to disable skills" : "Failed to enable skills",
         {
           description:
-            error instanceof Error ? error.message : "Please try again.",
+            error instanceof Error ? error.message : "Please try again."
         }
       );
     }
@@ -120,21 +119,21 @@ export function SkillsPage() {
   return (
     <SettingsPage
       className="flex size-full min-h-0"
-      title="Skills"
       description={
         <>
           These settings only apply to the built-in <code>skill()</code> tool.
         </>
       }
+      title="Skills"
     >
       <PathList
+        onAdd={() => void handleAdd()}
+        onDisableAll={path => void handleSetAll(path, true)}
+        onEnableAll={path => void handleSetAll(path, false)}
+        onRemove={path => void handleRemove(path)}
+        onSelect={setSelectedPath}
         paths={paths}
         selectedPath={selectedPath}
-        onSelect={setSelectedPath}
-        onAdd={() => void handleAdd()}
-        onRemove={(path) => void handleRemove(path)}
-        onEnableAll={(path) => void handleSetAll(path, false)}
-        onDisableAll={(path) => void handleSetAll(path, true)}
       />
       <PathSkills key={`${selectedPath}:${reloadToken}`} path={selectedPath} />
     </SettingsPage>
@@ -148,44 +147,46 @@ function PathList({
   onAdd,
   onRemove,
   onEnableAll,
-  onDisableAll,
+  onDisableAll
 }: {
-  paths: SkillsSettings["discoveryPaths"];
-  selectedPath: string | null;
-  onSelect: (path: string) => void;
-  onAdd: () => void;
-  onRemove: (path: string) => void;
-  onEnableAll: (path: string) => void;
-  onDisableAll: (path: string) => void;
+  readonly onAdd: () => void;
+  readonly onDisableAll: (path: string) => void;
+  readonly onEnableAll: (path: string) => void;
+  readonly onRemove: (path: string) => void;
+  readonly onSelect: (path: string) => void;
+  readonly paths: SkillsSettings["discoveryPaths"];
+  readonly selectedPath: string | null;
 }) {
   const [listRef] = useAutoAnimation<HTMLDivElement>();
 
   return (
     <div className="flex w-64 shrink-0 flex-col gap-3 border-r pr-4">
       <ScrollArea className="min-h-0 grow">
-        {paths.length === 0 ? (
-          <div className="text-muted-foreground px-2 py-6 text-center text-xs text-balance">
-            No folders yet. Click the &quot;Add folder&quot; button below to get
-            started.
-          </div>
-        ) : (
-          <div ref={listRef} className="flex flex-col gap-1 pr-2">
-            {paths.map((entry) => (
-              <PathListItem
-                key={entry.path}
-                path={entry.path}
-                selected={entry.path === selectedPath}
-                onSelect={() => onSelect(entry.path)}
-                onRemove={() => onRemove(entry.path)}
-                onEnableAll={() => onEnableAll(entry.path)}
-                onDisableAll={() => onDisableAll(entry.path)}
-              />
-            ))}
-          </div>
-        )}
+        {paths.length === 0
+          ? (
+            <div className="text-muted-foreground px-2 py-6 text-center text-xs text-balance">
+              No folders yet. Click the &quot;Add folder&quot; button below to get
+              started.
+            </div>
+          )
+          : (
+            <div className="flex flex-col gap-1 pr-2" ref={listRef}>
+              {paths.map(entry => (
+                <PathListItem
+                  key={entry.path}
+                  onDisableAll={() => { onDisableAll(entry.path); }}
+                  onEnableAll={() => { onEnableAll(entry.path); }}
+                  onRemove={() => { onRemove(entry.path); }}
+                  onSelect={() => { onSelect(entry.path); }}
+                  path={entry.path}
+                  selected={entry.path === selectedPath}
+                />
+              ))}
+            </div>
+          )}
       </ScrollArea>
 
-      <Button variant="outline" className="w-full" onClick={onAdd}>
+      <Button className="w-full" onClick={onAdd} variant="outline">
         <Plus />
         Add folder
       </Button>
@@ -199,71 +200,71 @@ function PathListItem({
   onSelect,
   onRemove,
   onEnableAll,
-  onDisableAll,
+  onDisableAll
 }: {
-  path: string;
-  selected: boolean;
-  onSelect: () => void;
-  onRemove: () => void;
-  onEnableAll: () => void;
-  onDisableAll: () => void;
+  readonly onDisableAll: () => void;
+  readonly onEnableAll: () => void;
+  readonly onRemove: () => void;
+  readonly onSelect: () => void;
+  readonly path: string;
+  readonly selected: boolean;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   return (
     <div
-      role="button"
-      tabIndex={0}
       aria-label={`Select ${path}`}
+      className={cn(
+        "group flex cursor-pointer items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs transition-colors",
+        selected ? "bg-muted font-medium" : "hover:bg-muted/50"
+      )}
       onClick={onSelect}
-      onKeyDown={(e) => {
+      onKeyDown={e => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           onSelect();
         }
       }}
-      className={cn(
-        "group flex cursor-pointer items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs transition-colors",
-        selected ? "bg-muted font-medium" : "hover:bg-muted/50"
-      )}
+      role="button"
+      tabIndex={0}
     >
       <Folder className="text-muted-foreground size-4 shrink-0" />
       <span className="line-clamp-1 grow break-all" title={path}>
         {path}
       </span>
 
-      <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+      <DropdownMenu onOpenChange={setMenuOpen} open={menuOpen}>
         <DropdownMenuTrigger asChild>
           <span
-            role="button"
-            tabIndex={0}
             aria-label={`${path} folder actions`}
-            title={`${path} folder actions`}
             className={cn(
               "text-muted-foreground hover:bg-accent hover:text-foreground inline-flex size-5 shrink-0 items-center justify-center rounded",
               menuOpen
                 ? "opacity-100"
                 : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
             )}
-            onClick={(e) => e.stopPropagation()}
+            onClick={e => { e.stopPropagation(); }}
+            role="button"
+            tabIndex={0}
+            title={`${path} folder actions`}
           >
             <MoreHorizontal className="size-4" />
           </span>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
-          <DropdownMenuItem onSelect={() => onEnableAll()}>
+        <DropdownMenuContent align="end" onClick={e => { e.stopPropagation(); }}>
+          <DropdownMenuItem onSelect={() => { onEnableAll(); }}>
             <CheckCheck />
             Enable all skills
           </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => onDisableAll()}>
+          <DropdownMenuItem onSelect={() => { onDisableAll(); }}>
             <Ban />
             Disable all skills
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
+            onSelect={() => { setConfirmOpen(true); }}
             variant="destructive"
-            onSelect={() => setConfirmOpen(true)}
           >
             <Trash2 />
             Remove {path}
@@ -272,22 +273,22 @@ function PathListItem({
       </DropdownMenu>
 
       <ConfirmDialog
-        open={confirmOpen}
-        onOpenChange={setConfirmOpen}
-        title="Remove folder?"
-        description={`This removes "${path}" from your skill discovery folders. You can add it back later.`}
         confirmLabel="Remove"
+        description={`This removes "${path}" from your skill discovery folders. You can add it back later.`}
         dimBackground={false}
         onConfirm={() => {
           setConfirmOpen(false);
           onRemove();
         }}
+        onOpenChange={setConfirmOpen}
+        open={confirmOpen}
+        title="Remove folder?"
       />
     </div>
   );
 }
 
-function PathSkills({ path }: { path: string | null }) {
+function PathSkills({ path }: { readonly path: string | null; }) {
   const [skills, setSkills] = useState<SkillInfo[] | null>(null);
   const [listRef] = useAutoAnimation<HTMLDivElement>();
 
@@ -299,7 +300,7 @@ function PathSkills({ path }: { path: string | null }) {
     let cancelled = false;
     setSkills(null);
     void listSkills(path)
-      .then((loaded) => {
+      .then(loaded => {
         if (!cancelled) {
           setSkills(loaded);
         }
@@ -320,23 +321,20 @@ function PathSkills({ path }: { path: string | null }) {
         return;
       }
       // Optimistically reflect the toggle.
-      setSkills((prev) =>
-        prev ? prev.map((s) => (s.name === name ? { ...s, enabled } : s)) : prev
-      );
+      setSkills(prev =>
+        (prev ? prev.map(s => (s.name === name ? { ...s, enabled } : s)) : prev));
       try {
         await setSkillHidden(path, name, !enabled);
       } catch (error) {
         // Roll back on failure.
-        setSkills((prev) =>
-          prev
-            ? prev.map((s) =>
-                s.name === name ? { ...s, enabled: !enabled } : s
-              )
-            : prev
-        );
+        setSkills(prev =>
+          (prev
+            ? prev.map(s =>
+              (s.name === name ? { ...s, enabled: !enabled } : s))
+            : prev));
         toast.error("Failed to update skill", {
           description:
-            error instanceof Error ? error.message : "Please try again.",
+            error instanceof Error ? error.message : "Please try again."
         });
       }
     },
@@ -367,14 +365,14 @@ function PathSkills({ path }: { path: string | null }) {
       );
     }
     return (
-      <div ref={listRef} className="flex flex-col gap-1.5">
-        {skills.map((skill) => (
+      <div className="flex flex-col gap-1.5" ref={listRef}>
+        {skills.map(skill => (
           <SkillListItem
+            checked={skill.enabled}
+            description={skill.description}
             key={skill.name}
             name={skill.name}
-            description={skill.description}
-            checked={skill.enabled}
-            onCheckedChange={(enabled) => void handleToggle(skill.name, enabled)}
+            onCheckedChange={enabled => void handleToggle(skill.name, enabled)}
           />
         ))}
       </div>

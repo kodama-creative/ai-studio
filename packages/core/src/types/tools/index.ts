@@ -1,4 +1,4 @@
-import { Type, type Static } from "typebox";
+import { type Static, Type } from "typebox";
 
 import { JSONSchema } from "../shared";
 
@@ -18,7 +18,7 @@ const ToolBase = Type.Object({
    */
   parameters: JSONSchema,
 
-  strict: Type.Optional(Type.Boolean()),
+  strict: Type.Optional(Type.Boolean())
 });
 
 /**
@@ -27,8 +27,8 @@ const ToolBase = Type.Object({
 const FunctionTool = Type.Intersect([
   ToolBase,
   Type.Object({
-    type: Type.Literal("function"),
-  }),
+    type: Type.Literal("function")
+  })
 ]);
 export type FunctionTool = Static<typeof FunctionTool>;
 
@@ -39,19 +39,22 @@ const McpTool = Type.Intersect([
   ToolBase,
   Type.Object({
     type: Type.Literal("mcp"),
+
     /**
      * The configured MCP server id that owns the raw MCP tool.
      */
     serverId: Type.String(),
+
     /**
      * The normalized server segment used in `mcp__{serverName}__{toolName}`.
      */
     serverName: Type.String(),
+
     /**
      * The raw MCP tool name sent back to the server during `tools/call`.
      */
-    toolName: Type.String(),
-  }),
+    toolName: Type.String()
+  })
 ]);
 export type McpTool = Static<typeof McpTool>;
 
@@ -62,20 +65,22 @@ const BuiltinTool = Type.Intersect([
   ToolBase,
   Type.Object({
     type: Type.Literal("builtin"),
+
     /**
      * Stable icon key resolved to a Lucide icon on the renderer. Keeps the
      * built-in tool's icon defined alongside the tool itself (single source of
      * truth) instead of a name→icon lookup that drifts per UI surface.
      */
     icon: Type.Optional(Type.String()),
+
     /**
      * When `true`, the tool always ends the run and can never be auto-executed —
      * its result must be supplied by a human (e.g. `ask_user_question`). It is
      * excluded from {@link isExecutableTool} so neither the "auto run tools"
      * nor the ReAct-loop path will ever call it automatically.
      */
-    terminate: Type.Optional(Type.Boolean()),
-  }),
+    terminate: Type.Optional(Type.Boolean())
+  })
 ]);
 export type BuiltinTool = Static<typeof BuiltinTool>;
 
@@ -90,15 +95,19 @@ const ProjectTool = Type.Intersect([
     type: Type.Literal("project"),
     projectId: Type.String(),
     snapshot: Type.String(),
+
     /** Agent-root-relative authored source that owns this action. */
     sourcePath: Type.Optional(Type.String()),
+
     /** Present only for a project-scoped remote MCP action. */
     connectionName: Type.Optional(Type.String()),
+
     /** Raw MCP tool name used for tools/call. */
     remoteToolName: Type.Optional(Type.String()),
+
     /** Fingerprint of the remote tool's name, description, and input schema. */
-    schemaFingerprint: Type.Optional(Type.String()),
-  }),
+    schemaFingerprint: Type.Optional(Type.String())
+  })
 ]);
 export type ProjectTool = Static<typeof ProjectTool>;
 
@@ -108,10 +117,12 @@ export interface LegacyMcpToolSource {
    */
   type: "mcp";
   serverId: string;
+
   /**
    * The normalized server segment used in `mcp__{serverName}__{toolName}`.
    */
   serverName: string;
+
   /**
    * The raw MCP tool name sent back to the server during `tools/call`.
    */
@@ -125,20 +136,20 @@ export const Tool = Type.Union([
   FunctionTool,
   McpTool,
   BuiltinTool,
-  ProjectTool,
+  ProjectTool
 ]);
-export type Tool = FunctionTool | McpTool | BuiltinTool | ProjectTool;
+export type Tool = BuiltinTool | FunctionTool | McpTool | ProjectTool;
 
-export type LegacyTool = Omit<FunctionTool, "type"> & {
-  type?: "function";
+export type LegacyTool = {
   source?: LegacyMcpToolSource;
-};
+  type?: "function";
+} & Omit<FunctionTool, "type">;
 
-export function normalizeTool(tool: Tool | LegacyTool): Tool {
+export function normalizeTool(tool: LegacyTool | Tool): Tool {
   if (
-    tool.type === "mcp" ||
-    tool.type === "builtin" ||
-    tool.type === "project"
+    tool.type === "mcp"
+    || tool.type === "builtin"
+    || tool.type === "project"
   ) {
     return tool;
   }
@@ -152,7 +163,7 @@ export function normalizeTool(tool: Tool | LegacyTool): Tool {
       ...(tool.strict === undefined ? {} : { strict: tool.strict }),
       serverId: legacySource.serverId,
       serverName: legacySource.serverName,
-      toolName: legacySource.toolName,
+      toolName: legacySource.toolName
     };
   }
   if (tool.type === "function" && !("source" in tool)) {
@@ -163,11 +174,11 @@ export function normalizeTool(tool: Tool | LegacyTool): Tool {
     name: tool.name,
     description: tool.description,
     parameters: tool.parameters,
-    ...(tool.strict === undefined ? {} : { strict: tool.strict }),
+    ...(tool.strict === undefined ? {} : { strict: tool.strict })
   };
 }
 
-export function normalizeTools(tools: readonly (Tool | LegacyTool)[]): Tool[] {
+export function normalizeTools(tools: ReadonlyArray<LegacyTool | Tool>): Tool[] {
   return tools.map(normalizeTool);
 }
 
@@ -181,7 +192,7 @@ export function normalizeTools(tools: readonly (Tool | LegacyTool)[]): Tool[] {
  */
 export function isExecutableTool(
   tool: Tool
-): tool is McpTool | BuiltinTool | ProjectTool {
+): tool is BuiltinTool | McpTool | ProjectTool {
   if (tool.type === "mcp" || tool.type === "project") {
     return true;
   }
@@ -206,7 +217,7 @@ const DANGEROUS_BASH_PATTERNS: RegExp[] = [
   /\bchown\s+-R\b/i,
   />\s*\/dev\/(sd|nvme|disk)/i, // overwrite a raw disk
   /\bsudo\b/i,
-  /\b(curl|wget)\b[^|]*\|\s*(sudo\s+)?(sh|bash|zsh)\b/i, // pipe-to-shell
+  /\b(curl|wget)\b[^|]*\|\s*(sudo\s+)?(sh|bash|zsh)\b/i // pipe-to-shell
 ];
 
 /**
@@ -216,11 +227,11 @@ const DANGEROUS_BASH_PATTERNS: RegExp[] = [
  * execute it deliberately by hand.
  */
 export function isDangerousBashCommand(command: string): boolean {
-  return DANGEROUS_BASH_PATTERNS.some((pattern) => pattern.test(command));
+  return DANGEROUS_BASH_PATTERNS.some(pattern => pattern.test(command));
 }
 
 function _getLegacyMcpSource(
-  tool: Tool | LegacyTool
+  tool: LegacyTool | Tool
 ): LegacyMcpToolSource | undefined {
   if (!("source" in tool) || tool.source?.type !== "mcp") {
     return undefined;

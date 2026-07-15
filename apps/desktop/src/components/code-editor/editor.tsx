@@ -1,26 +1,26 @@
-import { type Extension } from "@codemirror/state";
 import CodeMirror, {
-  ExternalChange,
   type BasicSetupOptions,
-  type ReactCodeMirrorRef,
+  ExternalChange,
+  type ReactCodeMirrorRef
 } from "@uiw/react-codemirror";
 import {
+  type ClipboardEvent,
   forwardRef,
+  type KeyboardEvent,
   memo,
+  type MouseEvent,
   useCallback,
   useEffect,
   useImperativeHandle,
   useMemo,
   useRef,
-  useState,
-  type ClipboardEvent,
-  type KeyboardEvent,
-  type MouseEvent,
+  useState
 } from "react";
+
+import type { Extension } from "@codemirror/state";
 
 import { useTheme } from "@/components/theme-provider";
 import { cn } from "@/lib/utils";
-
 import { createExtensions } from "./extensions";
 import * as themes from "./themes";
 
@@ -28,7 +28,7 @@ const BASIC_SETUP: BasicSetupOptions = {
   foldGutter: false,
   highlightActiveLine: false,
   highlightActiveLineGutter: false,
-  lineNumbers: false,
+  lineNumbers: false
 };
 
 export interface CodeEditorHandle {
@@ -41,46 +41,51 @@ export type CodeEditorLanguage =
   "javascript" | "json" | "markdown" | "typescript";
 
 export interface CodeEditorProps {
-  className?: string;
-  autoFocus?: boolean;
-  placeholder?: string;
-  hideBorder?: boolean;
-  hideFocusRing?: boolean;
+  readonly className?: string;
+  readonly autoFocus?: boolean;
+  readonly placeholder?: string;
+  readonly hideBorder?: boolean;
+  readonly hideFocusRing?: boolean;
+
   /**
    * Clip overflowing content at rest and only scroll (and show a scrollbar)
    * once the editor is focused. Suits dense, stacked list items (message list);
    * standalone editors should stay always-scrollable and leave this off.
    */
-  scrollOnFocus?: boolean;
+  readonly scrollOnFocus?: boolean;
+
   /**
    * Render the lightweight plain-text editor (a `<textarea>`) instead of
    * mounting CodeMirror. Used by the message list under "Lite" rendering
    * fidelity so a large thread mounts zero CodeMirror editors and scroll cost
    * no longer scales with message count.
    */
-  plain?: boolean;
-  language?: CodeEditorLanguage;
+  readonly plain?: boolean;
+  readonly language?: CodeEditorLanguage;
+
   /**
    * The value is a live streaming preview: syntax highlighting is skipped
    * (restored by whatever renders the settled value — the streamed message
    * commits into a fresh editor) and content sniffing is pinned so mid-stream
    * chunks can't reconfigure the editor.
    */
-  streaming?: boolean;
-  value: string;
-  readonly?: boolean;
+  readonly streaming?: boolean;
+  readonly value: string;
+  readonly readonly?: boolean;
+
   /**
    * Extra CodeMirror extensions merged in after the base setup. Lets a caller
    * layer editor-agnostic behavior (e.g. `{{variable}}` highlighting) without
    * this component knowing anything domain-specific. Ignored by the plain-text
    * (Lite) fallback. Pass a stable reference to avoid reconfiguring the editor.
    */
-  extraExtensions?: Extension[];
+  readonly extraExtensions?: Extension[];
+
   /** Reports the live document without making the editor controlled. */
-  onDraftChange?: (value: string) => void;
-  onChange?: (value: string) => void;
-  onKeyDown?: (e: KeyboardEvent) => void;
-  onPaste?: (e: ClipboardEvent) => void;
+  readonly onDraftChange?: (value: string) => void;
+  readonly onChange?: (value: string) => void;
+  readonly onKeyDown?: (e: KeyboardEvent) => void;
+  readonly onPaste?: (e: ClipboardEvent) => void;
 }
 
 function _CodeEditor(
@@ -99,7 +104,7 @@ function _CodeEditor(
     onDraftChange,
     onChange,
     onKeyDown,
-    onPaste,
+    onPaste
   }: CodeEditorProps,
   ref: React.ForwardedRef<CodeEditorHandle>
 ) {
@@ -133,11 +138,10 @@ function _CodeEditor(
   // changes — an unchanged return value makes React bail the re-render, so
   // typing stays render-free until the language genuinely switches.
   const [detectedLanguage, setDetectedLanguage] = useState(() =>
-    detectLanguage(value)
-  );
+    detectLanguage(value));
   const refreshLanguage = useCallback(
     (text: string) => {
-      setDetectedLanguage((prev) => {
+      setDetectedLanguage(prev => {
         const next = detectLanguage(text);
         return next === prev ? prev : next;
       });
@@ -157,9 +161,9 @@ function _CodeEditor(
 
   useEffect(() => {
     if (
-      isFocusedRef.current &&
-      !readonly &&
-      draftRef.current !== committedRef.current
+      isFocusedRef.current
+      && !readonly
+      && draftRef.current !== committedRef.current
     ) {
       return;
     }
@@ -180,7 +184,7 @@ function _CodeEditor(
           docLength === previous.length && value.startsWith(previous)
             ? { from: docLength, insert: value.slice(previous.length) }
             : { from: 0, to: docLength, insert: value },
-        annotations: ExternalChange.of(true),
+        annotations: ExternalChange.of(true)
       });
       setDraftValue(value);
     }
@@ -207,7 +211,7 @@ function _CodeEditor(
         view.dispatch({
           changes: { from, to, insert: text },
           selection: { anchor },
-          scrollIntoView: true,
+          scrollIntoView: true
         });
         view.focus();
       }
@@ -225,7 +229,7 @@ function _CodeEditor(
     () => ({
       commit,
       getValue: () => draftRef.current,
-      insertText,
+      insertText
     }),
     [commit, insertText]
   );
@@ -281,7 +285,7 @@ function _CodeEditor(
   const extensions = useMemo(
     () => [
       ...createExtensions(streaming ? "none" : detectedLanguage),
-      ...(extraExtensions ?? []),
+      ...(extraExtensions ?? [])
     ],
     [detectedLanguage, extraExtensions, streaming]
   );
@@ -298,7 +302,8 @@ function _CodeEditor(
       onMouseDown={handleContainerMouseDown}
     >
       <CodeMirror
-        ref={cmRef}
+        autoFocus={autoFocus}
+        basicSetup={BASIC_SETUP}
         className={cn(
           "h-full font-mono [&_.cm-editor]:h-full [&_.cm-focused]:outline-none!",
           // scrollOnFocus: clip at rest, scroll only once focused. Gate overflow
@@ -314,18 +319,17 @@ function _CodeEditor(
           // the caret at column 0 is not clipped by the scroller's overflow.
           "p-0 py-1 [&_.cm-content]:px-2! [&_.cm-line]:p-0!"
         )}
-        theme={resolvedTheme === "dark" ? themes.dark : themes.light}
-        autoFocus={autoFocus}
-        basicSetup={BASIC_SETUP}
-        placeholder={placeholder}
         extensions={extensions}
-        readOnly={readonly}
-        value={syncedValue}
-        onChange={handleChange}
         onBlur={handleBlur}
+        onChange={handleChange}
         onFocus={handleFocus}
         onKeyDownCapture={handleKeyDownCapture}
         onPaste={onPaste}
+        placeholder={placeholder}
+        readOnly={readonly}
+        ref={cmRef}
+        theme={resolvedTheme === "dark" ? themes.dark : themes.light}
+        value={syncedValue}
       />
     </div>
   );

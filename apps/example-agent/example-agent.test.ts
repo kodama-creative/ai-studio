@@ -1,6 +1,6 @@
 import {
   loadAgentProject,
-  loadAgentProjectManifest,
+  loadAgentProjectManifest
 } from "@llm-space/runtime/node";
 import { describe, expect, test } from "bun:test";
 
@@ -11,38 +11,38 @@ describe("example Agent Project", () => {
 
     expect(resolved.manifest).toEqual({
       schemaVersion: 1,
-      agent: "./agent",
+      agent: "./agent"
     });
     expect(snapshot.diagnostics).toEqual([]);
     expect(snapshot.definition).toEqual({
       model: { provider: "openai", id: "gpt-5.3-codex" },
-      reasoning: "high",
+      reasoning: "high"
     });
     expect(snapshot.instructions).toContain("concise weather assistant");
-    expect(snapshot.tools.map((tool) => tool.name)).toEqual(["get-weather"]);
+    expect(snapshot.tools.map(tool => tool.name)).toEqual(["get-weather"]);
     expect(
-      snapshot.connections.map((connection) => ({
+      snapshot.connections.map(connection => ({
         name: connection.name,
-        allow: connection.definition.tools.allow,
+        allow: connection.definition.tools.allow
       }))
     ).toEqual([{ name: "fixture", allow: ["remote_echo"] }]);
-    expect(snapshot.resources.skills?.map((skill) => skill.name)).toEqual([
-      "weather-brief",
+    expect(snapshot.resources.skills?.map(skill => skill.name)).toEqual([
+      "weather-brief"
     ]);
 
     const result = await snapshot.tools[0]!.execute("example-test", {
-      city: "Shanghai",
+      city: "Shanghai"
     });
     expect(result.content).toEqual([
       {
         type: "text",
-        text: '{"city":"Shanghai","mocked":true,"weather":"Shanghai: Sunny, 22°C"}',
-      },
+        text: '{"city":"Shanghai","mocked":true,"weather":"Shanghai: Sunny, 22°C"}'
+      }
     ]);
     expect(result.details).toEqual({
       city: "Shanghai",
       mocked: true,
-      weather: "Shanghai: Sunny, 22°C",
+      weather: "Shanghai: Sunny, 22°C"
     });
   });
 });

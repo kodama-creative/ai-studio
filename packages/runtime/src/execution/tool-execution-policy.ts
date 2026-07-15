@@ -20,21 +20,21 @@ export class ToolExecutionPolicy {
 
   constructor({
     tools,
-    activeToolNames,
+    activeToolNames
   }: {
-    tools: PreparedAgentTool[];
     activeToolNames?: string[];
+    tools: PreparedAgentTool[];
   }) {
     _assertUniqueToolNames(tools);
     const activeNames = activeToolNames ? new Set(activeToolNames) : null;
     this._tools = activeNames
-      ? tools.filter((tool) => activeNames.has(tool.definition.name))
+      ? tools.filter(tool => activeNames.has(tool.definition.name))
       : tools;
-    this._toolNames = new Set(this._tools.map((tool) => tool.definition.name));
+    this._toolNames = new Set(this._tools.map(tool => tool.definition.name));
     this._staticallyDeferredToolNames = new Set(
       this._tools
-        .filter((tool) => tool.kind === "deferred")
-        .map((tool) => tool.definition.name)
+        .filter(tool => tool.kind === "deferred")
+        .map(tool => tool.definition.name)
     );
   }
 
@@ -51,7 +51,7 @@ export class ToolExecutionPolicy {
   }
 
   toolsForMode(mode: RuntimeExecutionMode): AgentTool[] {
-    return this._tools.map((tool) => ({
+    return this._tools.map(tool => ({
       ...tool.definition,
       execute: async (
         ...args: Parameters<AgentTool["execute"]>
@@ -68,37 +68,37 @@ export class ToolExecutionPolicy {
         }
         return mode === "autoOnce"
           ? ({ ...outcome.result, terminate: true } as Awaited<
-              ReturnType<AgentTool["execute"]>
-            >)
+            ReturnType<AgentTool["execute"]>
+          >)
           : outcome.result;
-      },
+      }
     })) as AgentTool[];
   }
 
   publicMessages(messages: AgentMessage[]): AgentMessage[] {
-    return messages.filter((message) => !this.isDeferredResultMessage(message));
+    return messages.filter(message => !this.isDeferredResultMessage(message));
   }
 
   restoreDeferredPlaceholders(
     messages: AgentMessage[],
     mode: RuntimeExecutionMode
   ): AgentMessage[] {
-    if (mode !== "manual") return messages;
+    if (mode !== "manual") { return messages; }
     const last = messages.at(-1);
-    if (last?.role !== "assistant") return messages;
-    const calls = last.content.filter((content) => content.type === "toolCall");
-    if (calls.length === 0) return messages;
+    if (last?.role !== "assistant") { return messages; }
+    const calls = last.content.filter(content => content.type === "toolCall");
+    if (calls.length === 0) { return messages; }
     return [
       ...messages,
-      ...calls.map((call): ToolResultMessage<{ marker: string }> => ({
+      ...calls.map((call): ToolResultMessage<{ marker: string; }> => ({
         role: "toolResult",
         toolCallId: call.id,
         toolName: call.name,
         content: [{ type: "text", text: "" }],
         details: { marker: DEFERRED_TOOL_RESULT_MARKER },
         isError: false,
-        timestamp: Date.now(),
-      })),
+        timestamp: Date.now()
+      }))
     ];
   }
 
@@ -107,46 +107,44 @@ export class ToolExecutionPolicy {
     results: ToolResultMessage[]
   ): AgentMessage[] {
     const replacements = new Map(
-      results.map((result) => [result.toolCallId, result])
+      results.map(result => [result.toolCallId, result])
     );
-    const pending = messages.filter((message) =>
-      this.isDeferredResultMessage(message)
-    );
+    const pending = messages.filter(message =>
+      this.isDeferredResultMessage(message));
     if (
-      pending.length === 0 ||
-      pending.some((message) => !replacements.has(message.toolCallId)) ||
-      replacements.size !== pending.length
+      pending.length === 0
+      || pending.some(message => !replacements.has(message.toolCallId))
+      || replacements.size !== pending.length
     ) {
       throw new Error(
         "Resolved tool results must match every pending tool call"
       );
     }
-    const replaced = messages.map((message) =>
-      this.isDeferredResultMessage(message)
+    const replaced = messages.map(message =>
+      (this.isDeferredResultMessage(message)
         ? replacements.get(message.toolCallId)!
-        : message
-    );
+        : message));
     this._deferredCalls.clear();
     return replaced;
   }
 
   isDeferredResultMessage(
     message: AgentMessage
-  ): message is ToolResultMessage<{ marker: string }> {
+  ): message is ToolResultMessage<{ marker: string; }> {
     return (
-      message.role === "toolResult" &&
-      (message.details as { marker?: unknown } | undefined)?.marker ===
-        DEFERRED_TOOL_RESULT_MARKER
+      message.role === "toolResult"
+      && (message.details as { marker?: unknown; } | undefined)?.marker
+      === DEFERRED_TOOL_RESULT_MARKER
     );
   }
 
   isDeferredToolResult(result: unknown): boolean {
     return Boolean(
-      result &&
-      typeof result === "object" &&
-      "details" in result &&
-      (result as { details?: { marker?: unknown } }).details?.marker ===
-        DEFERRED_TOOL_RESULT_MARKER
+      result
+      && typeof result === "object"
+      && "details" in result
+      && (result as { details?: { marker?: unknown; }; }).details?.marker
+      === DEFERRED_TOOL_RESULT_MARKER
     );
   }
 
@@ -169,6 +167,6 @@ function _deferredResult(): Awaited<ReturnType<AgentTool["execute"]>> {
   return {
     content: [{ type: "text", text: "" }],
     details: { marker: DEFERRED_TOOL_RESULT_MARKER },
-    terminate: true,
+    terminate: true
   } as Awaited<ReturnType<AgentTool["execute"]>>;
 }

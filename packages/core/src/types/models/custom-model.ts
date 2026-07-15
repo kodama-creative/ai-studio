@@ -1,4 +1,4 @@
-import * as pi from "@earendil-works/pi-ai";
+import type * as pi from "@earendil-works/pi-ai";
 
 /**
  * A user-defined model. It is a full pi model minus the two fields the desktop
@@ -6,12 +6,13 @@ import * as pi from "@earendil-works/pi-ai";
  * and `baseUrl` (defaults to the provider's base URL so it reuses the same
  * endpoint / `getBaseUrl`).
  */
-export type CustomModel = Omit<pi.Model<pi.Api>, "provider" | "baseUrl"> & {
-  provider?: string;
+export type CustomModel = {
   baseUrl?: string;
+
   /**
    * A `@lobehub/icons` keyword overriding the brand icon shown for this model.
    * Absent ⇒ the icon is auto-resolved from the model id/name.
    */
   icon?: string;
-};
+  provider?: string;
+} & Omit<pi.Model<pi.Api>, "baseUrl" | "provider">;

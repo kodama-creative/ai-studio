@@ -1,12 +1,14 @@
 import {
-  agentLoopContinue,
   type AgentEvent,
+  agentLoopContinue,
   type AgentMessage,
-  type AgentTool,
+  type AgentTool
 } from "@earendil-works/pi-agent-core";
+
 import type { Api, Message, Model, Models, Tool } from "@earendil-works/pi-ai";
 
 import { RUN_LAST_MESSAGE_ERROR } from "../../client/run-eligibility";
+
 import type { AgentStreamRequest } from "../../types/agent";
 
 /**
@@ -20,8 +22,6 @@ import type { AgentStreamRequest } from "../../types/agent";
 export async function* streamAgent(
   request: AgentStreamRequest,
   options: {
-    models: Models;
-    signal: AbortSignal;
     /**
      * Resolve a provider's API key (e.g. from user config). Returns `undefined`
      * to fall back to the provider's own `auth` resolution.
@@ -29,6 +29,7 @@ export async function* streamAgent(
     getApiKey?: (
       provider: string
     ) => Promise<string | undefined> | string | undefined;
+
     /**
      * Resolve a provider's custom base URL (e.g. from user config). Returns
      * `undefined`/empty to keep the provider's default endpoint.
@@ -36,6 +37,7 @@ export async function* streamAgent(
     getBaseUrl?: (
       provider: string
     ) => Promise<string | undefined> | string | undefined;
+
     /**
      * Resolve a provider's extra HTTP headers (e.g. from user config). Returns
      * `undefined`/empty to send no extra headers.
@@ -46,6 +48,8 @@ export async function* streamAgent(
       | Promise<Record<string, string> | undefined>
       | Record<string, string>
       | undefined;
+    models: Models;
+    signal: AbortSignal;
   }
 ): AsyncGenerator<AgentEvent> {
   const { models, signal, getApiKey, getBaseUrl, getHeaders } = options;
@@ -90,7 +94,7 @@ export async function* streamAgent(
     {
       ...request.context,
       systemPrompt: request.context.systemPrompt ?? "",
-      tools: _convertToAgentTools(request.context.tools, { stepByStep: true }),
+      tools: _convertToAgentTools(request.context.tools, { stepByStep: true })
     },
     {
       model,
@@ -101,7 +105,7 @@ export async function* streamAgent(
       reasoning:
         request.config?.model?.reasoning === "off"
           ? undefined
-          : (request.config?.model?.reasoning ?? undefined),
+          : (request.config?.model?.reasoning ?? undefined)
     },
     signal,
     // Stream through the `Models` collection so auth is resolved by each
@@ -114,9 +118,9 @@ export async function* streamAgent(
         streamContext,
         hasConfiguredHeaders
           ? {
-              ...streamOptions,
-              headers: { ...configuredHeaders, ...streamOptions?.headers },
-            }
+            ...streamOptions,
+            headers: { ...configuredHeaders, ...streamOptions?.headers }
+          }
           : streamOptions
       )
   );
@@ -133,19 +137,19 @@ export async function* streamAgent(
 
 function _convertToLlm(messages: AgentMessage[]): Message[] {
   return messages.filter(
-    (message) =>
-      message.role === "user" ||
-      message.role === "assistant" ||
-      message.role === "toolResult"
+    message =>
+      message.role === "user"
+      || message.role === "assistant"
+      || message.role === "toolResult"
   );
 }
 
 function _convertToAgentTools(
   tools: Tool[],
-  { stepByStep = true }: { stepByStep?: boolean } = {}
+  { stepByStep = true }: { stepByStep?: boolean; } = {}
 ): AgentTool[] {
   return tools.map(
-    (tool) =>
+    tool =>
       ({
         name: tool.name,
         label: tool.name,
@@ -158,22 +162,22 @@ function _convertToAgentTools(
               content: [
                 {
                   type: "text",
-                  text: "",
-                },
+                  text: ""
+                }
               ],
-              details: undefined,
+              details: undefined
             });
           }
           return Promise.resolve({
             content: [
               {
                 type: "text",
-                text: "",
-              },
+                text: ""
+              }
             ],
-            details: undefined,
+            details: undefined
           });
-        },
+        }
       }) as AgentTool
   );
 }

@@ -24,20 +24,20 @@ export const todoWriteTool: BuiltinTool = {
           properties: {
             content: {
               type: "string",
-              description: "Short description of the work item.",
+              description: "Short description of the work item."
             },
             status: {
               type: "string",
               enum: ["pending", "in_progress", "completed", "cancelled"],
-              description: "Current state of the todo item.",
-            },
+              description: "Current state of the todo item."
+            }
           },
-          additionalProperties: false,
-        },
-      },
+          additionalProperties: false
+        }
+      }
     },
-    additionalProperties: false,
-  },
+    additionalProperties: false
+  }
 };
 
 export async function todo_write(): Promise<"OK"> {
@@ -60,22 +60,22 @@ export const sleepTool: BuiltinTool = {
       description: {
         type: "string",
         description:
-          "Must be the first parameter in the tool call. A short human-readable summary explaining why the sleep is being performed",
+          "Must be the first parameter in the tool call. A short human-readable summary explaining why the sleep is being performed"
       },
       duration_ms: {
         type: "number",
-        description: "How long to sleep, in milliseconds.",
-      },
+        description: "How long to sleep, in milliseconds."
+      }
     },
-    additionalProperties: false,
-  },
+    additionalProperties: false
+  }
 };
 
 export async function sleep(durationMs: number): Promise<"OK"> {
   if (!Number.isFinite(durationMs) || durationMs < 0) {
     throw new Error("duration_ms must be a non-negative number.");
   }
-  await new Promise((resolve) => setTimeout(resolve, durationMs));
+  await new Promise(resolve => setTimeout(resolve, durationMs));
   return "OK";
 }
 
@@ -106,12 +106,12 @@ export const askUserQuestionTool: BuiltinTool = {
             question: {
               type: "string",
               description:
-                "Full question text. Be specific and end with a question mark where appropriate.",
+                "Full question text. Be specific and end with a question mark where appropriate."
             },
             header: {
               type: "string",
               description:
-                "Very short tab or tag label for the question, maximum 12 characters, for example Auth or Library.",
+                "Very short tab or tag label for the question, maximum 12 characters, for example Auth or Library."
             },
             options: {
               type: "array",
@@ -124,34 +124,34 @@ export const askUserQuestionTool: BuiltinTool = {
                   label: {
                     type: "string",
                     description:
-                      "Short display label for this choice, ideally 1–5 words.",
+                      "Short display label for this choice, ideally 1–5 words."
                   },
                   description: {
                     type: "string",
                     description:
-                      "Explanation of what this choice means or implies.",
+                      "Explanation of what this choice means or implies."
                   },
                   preview: {
                     type: "string",
                     description:
-                      "Optional markdown preview shown when this option is focused. Intended for single-select questions only.",
-                  },
+                      "Optional markdown preview shown when this option is focused. Intended for single-select questions only."
+                  }
                 },
-                additionalProperties: false,
-              },
+                additionalProperties: false
+              }
             },
             multi_select: {
               type: "boolean",
               description:
-                "If true, the user may select multiple options. If false, the user must select exactly one option.",
-            },
+                "If true, the user may select multiple options. If false, the user must select exactly one option."
+            }
           },
-          additionalProperties: false,
-        },
-      },
+          additionalProperties: false
+        }
+      }
     },
-    additionalProperties: false,
-  },
+    additionalProperties: false
+  }
 };
 
 // -- registry -----------------------------------------------------------------
@@ -161,7 +161,7 @@ export const miscBuiltInTools: ToolEntry[] = [
     tool: todoWriteTool,
     async execute() {
       return todo_write();
-    },
+    }
   },
   {
     tool: sleepTool,
@@ -171,18 +171,18 @@ export const miscBuiltInTools: ToolEntry[] = [
         throw new Error("duration_ms must be a number.");
       }
       return sleep(durationMs);
-    },
+    }
   },
   {
     tool: askUserQuestionTool,
     // Never auto-executed: `terminate` keeps it out of every auto-run path. This
     // guard only fires if it is somehow invoked directly.
-    execute() {
+    async execute() {
       return Promise.reject(
         new Error(
           "ask_user_question needs a human answer and cannot be executed automatically."
         )
       );
-    },
-  },
+    }
+  }
 ];

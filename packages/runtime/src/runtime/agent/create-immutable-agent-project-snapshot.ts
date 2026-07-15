@@ -15,12 +15,12 @@ function _immutablePlainDataCopy<T>(
   path: string,
   ancestors: WeakSet<object>
 ): T {
-  if (value === null || typeof value !== "object") return value;
+  if (value === null || typeof value !== "object") { return value; }
   const prototype = Object.getPrototypeOf(value) as object | null;
   if (
-    !Array.isArray(value) &&
-    prototype !== Object.prototype &&
-    prototype !== null
+    !Array.isArray(value)
+    && prototype !== Object.prototype
+    && prototype !== null
   ) {
     throw new TypeError(
       `${path} must contain only plain data objects, arrays, primitives, and functions`
@@ -33,7 +33,7 @@ function _immutablePlainDataCopy<T>(
 
   const copy: object = Array.isArray(value) ? [] : {};
   for (const key of Reflect.ownKeys(value)) {
-    if (Array.isArray(value) && key === "length") continue;
+    if (Array.isArray(value) && key === "length") { continue; }
     const childPath = `${path}.${typeof key === "symbol" ? (key.description ?? key.toString()) : key}`;
     Object.defineProperty(copy, key, {
       value: _immutablePlainDataCopy(
@@ -43,7 +43,7 @@ function _immutablePlainDataCopy<T>(
       ),
       enumerable: Object.prototype.propertyIsEnumerable.call(value, key),
       configurable: false,
-      writable: false,
+      writable: false
     });
   }
   ancestors.delete(value);

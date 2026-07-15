@@ -8,6 +8,7 @@
 export interface DiscoveryPathConfig {
   /** As typed; may start with `~` (expanded to the home directory at read). */
   path: string;
+
   /** Skill names hidden for this folder. */
   hiddenSkills: string[];
 }
@@ -21,8 +22,10 @@ export interface SkillsSettings {
 export interface SkillInfo {
   name: string;
   description: string;
+
   /** Absolute path to the skill directory. */
   path: string;
+
   /** `false` when the skill is in its folder's `hiddenSkills`. */
   enabled: boolean;
 }
@@ -31,6 +34,7 @@ export interface SkillInfo {
 export interface SkillContent {
   frontmatters: Record<string, unknown>;
   content: string;
+
   /** Absolute path to the skill directory. */
   path: string;
 }
@@ -45,6 +49,6 @@ export const DEFAULT_SKILLS_SETTINGS: SkillsSettings = {
   discoveryPaths: [
     { path: "~/.claude/skills", hiddenSkills: [] },
     { path: "~/.codex/skills", hiddenSkills: [] },
-    { path: "~/.agents/skills", hiddenSkills: [] },
-  ],
+    { path: "~/.agents/skills", hiddenSkills: [] }
+  ]
 };

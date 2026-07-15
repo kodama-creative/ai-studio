@@ -8,7 +8,7 @@
 export default function extractInitials(name: string): string {
   name = name.replace(/-/, " ");
   const number = /\d+(?:\.\d+)?/.exec(name);
-  if (number) return number[0];
+  if (number) { return number[0]; }
 
   const words = name.trim().split(/\s+/).filter(Boolean);
   if (words.length >= 2) {

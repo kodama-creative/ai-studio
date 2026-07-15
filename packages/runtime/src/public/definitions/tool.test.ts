@@ -10,8 +10,8 @@ describe("defineTool", () => {
       inputSchema: Type.Object({ city: Type.String() }),
       outputSchema: Type.Object({ city: Type.String() }),
       execute: ({ city }, context) => ({
-        city: `${city}:${context.toolName}:${context.callId}`,
-      }),
+        city: `${city}:${context.toolName}:${context.callId}`
+      })
     });
 
     expect(isToolDefinition(definition)).toBe(true);
@@ -21,7 +21,7 @@ describe("defineTool", () => {
         {
           abortSignal: new AbortController().signal,
           callId: "call-1",
-          toolName: "weather",
+          toolName: "weather"
         }
       )
     ).toEqual({ city: "Shanghai:weather:call-1" });
@@ -34,7 +34,7 @@ describe("defineTool", () => {
         inputSchema: Type.Object({}),
         execute: () => null,
         // @ts-expect-error tool identity is derived from its source path
-        name: "author_owned",
+        name: "author_owned"
       });
     };
     expect(typecheck).toBeFunction();

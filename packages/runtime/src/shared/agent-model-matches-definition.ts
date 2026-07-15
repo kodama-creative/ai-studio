@@ -1,21 +1,21 @@
 import type {
   AgentModelSelector,
-  CompiledAgentDefinition,
+  CompiledAgentDefinition
 } from "./agent-definition";
 
 export function agentModelMatchesDefinition({
   model,
   reasoning,
-  definition,
+  definition
 }: {
+  definition: CompiledAgentDefinition | null | undefined;
   model: AgentModelSelector | undefined;
   reasoning: CompiledAgentDefinition["reasoning"];
-  definition: CompiledAgentDefinition | null | undefined;
 }): boolean {
   return Boolean(
-    definition &&
-    model?.provider === definition.model.provider &&
-    model.id === definition.model.id &&
-    reasoning === definition.reasoning
+    definition
+    && model?.provider === definition.model.provider
+    && model.id === definition.model.id
+    && reasoning === definition.reasoning
   );
 }

@@ -3,16 +3,16 @@
 import { SparklesIcon } from "lucide-react";
 
 import {
-  PROMPT_EXAMPLES,
   isPromptExample,
-  type PromptExample,
+  PROMPT_EXAMPLES,
+  type PromptExample
 } from "@/components/thread-playground/examples/prompts";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
-  DialogTitle,
+  DialogTitle
 } from "@/components/ui/dialog";
 import {
   Item,
@@ -21,20 +21,19 @@ import {
   ItemGroup,
   ItemMedia,
   ItemSeparator,
-  ItemTitle,
+  ItemTitle
 } from "@/components/ui/item";
 import { ScrollArea } from "@/components/ui/scroll-area";
-
 import { Markdown } from "./markdown";
 
 export function StartFromExampleDialog({
   open,
   onOpenChange,
-  onSelectExample,
+  onSelectExample
 }: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onSelectExample: (example: PromptExample) => void;
+  readonly onOpenChange: (open: boolean) => void;
+  readonly onSelectExample: (example: PromptExample) => void;
+  readonly open: boolean;
 }) {
   const selectExample = (example: PromptExample) => {
     onOpenChange(false);
@@ -42,11 +41,11 @@ export function StartFromExampleDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent
         className="max-w-xl! overflow-hidden"
-        onPointerDownOutside={(e) => e.preventDefault()}
-        onInteractOutside={(e) => e.preventDefault()}
+        onInteractOutside={e => { e.preventDefault(); }}
+        onPointerDownOutside={e => { e.preventDefault(); }}
       >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
@@ -60,17 +59,17 @@ export function StartFromExampleDialog({
           <ItemGroup className="gap-1 pr-3">
             {PROMPT_EXAMPLES.map((item, index) => {
               if (!isPromptExample(item)) {
-                return <ItemSeparator key={`sep-${index}`} className="my-1" />;
+                return <ItemSeparator className="my-1" key={`sep-${index}`} />;
               }
               const Icon = item.icon;
               return (
                 <Item
-                  key={item.id}
                   asChild
-                  variant="default"
                   className="hover:bg-accent hover:text-accent-foreground cursor-pointer"
+                  key={item.id}
+                  variant="default"
                 >
-                  <button type="button" onClick={() => selectExample(item)}>
+                  <button onClick={() => { selectExample(item); }} type="button">
                     <ItemMedia variant="icon">
                       <Icon />
                     </ItemMedia>

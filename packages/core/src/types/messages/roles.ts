@@ -1,4 +1,4 @@
-import { Type, type Static } from "typebox";
+import { type Static, Type } from "typebox";
 
 /**
  * The role of a message in a conversation.
@@ -11,6 +11,6 @@ import { Type, type Static } from "typebox";
  */
 export const MessageRole = Type.Union([
   Type.Literal("user"),
-  Type.Literal("assistant"),
+  Type.Literal("assistant")
 ]);
 export type MessageRole = Static<typeof MessageRole>;

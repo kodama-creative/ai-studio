@@ -1,4 +1,4 @@
-import { Type, type Static } from "typebox";
+import { type Static, Type } from "typebox";
 
 import { ImageDataContent, TextContent } from "./contents";
 import { ToolCall } from "./tools";
@@ -8,7 +8,7 @@ import { ModelUsage } from "./usage";
  * The allowed content types of a user message.
  */
 export const UserMessageContent = Type.Union([TextContent, ImageDataContent]);
-export type UserMessageContent = TextContent | ImageDataContent;
+export type UserMessageContent = ImageDataContent | TextContent;
 
 /**
  * A message sent from user.
@@ -27,7 +27,7 @@ export const UserMessage = Type.Object({
   /**
    * The content of the message.
    */
-  content: Type.Array(UserMessageContent),
+  content: Type.Array(UserMessageContent)
 });
 export type UserMessage = Static<typeof UserMessage>;
 
@@ -68,7 +68,7 @@ export const AssistantMessage = Type.Object({
   /**
    * Provider-reported token usage for this completed assistant/model step.
    */
-  usage: Type.Optional(ModelUsage),
+  usage: Type.Optional(ModelUsage)
 });
 export type AssistantMessage = Static<typeof AssistantMessage>;
 
@@ -76,7 +76,7 @@ export type AssistantMessage = Static<typeof AssistantMessage>;
  * The union type of the message.
  */
 export const Message = Type.Union([UserMessage, AssistantMessage]);
-export type Message = UserMessage | AssistantMessage;
+export type Message = AssistantMessage | UserMessage;
 
 /**
  * The plain text of a message: its text content parts joined by newlines.

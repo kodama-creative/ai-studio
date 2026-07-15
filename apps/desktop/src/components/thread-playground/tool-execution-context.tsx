@@ -1,18 +1,18 @@
-import { createContext, useContext, type ReactNode } from "react";
+import { createContext, type ReactNode, useContext } from "react";
 
 import {
   executeTool,
-  type ToolExecutor,
+  type ToolExecutor
 } from "@/client/tool-execution";
 
 const TOOL_EXECUTION_CONTEXT = createContext<ToolExecutor>(executeTool);
 
 export function ToolExecutionProvider({
   children,
-  execute,
+  execute
 }: {
-  children: ReactNode;
-  execute: ToolExecutor;
+  readonly children: ReactNode;
+  readonly execute: ToolExecutor;
 }) {
   return (
     <TOOL_EXECUTION_CONTEXT.Provider value={execute}>

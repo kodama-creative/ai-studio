@@ -1,7 +1,7 @@
 import {
   saveWindowFrame,
   saveWindowMaximized,
-  saveWindowZoom,
+  saveWindowZoom
 } from "@llm-space/core/server";
 import { app, type BrowserWindow } from "electrobun/bun";
 
@@ -17,7 +17,7 @@ function persistWindowState(win: BrowserWindow) {
 
 function attachWindowStatePersistence(
   win: BrowserWindow,
-  options?: { isMaximized?: boolean },
+  options?: { isMaximized?: boolean; }
 ) {
   if (options?.isMaximized) {
     win.maximize();
@@ -51,7 +51,7 @@ function attachWindowStatePersistence(
  */
 function attachFullScreenSync(
   win: BrowserWindow,
-  onChange: (fullScreen: boolean) => void,
+  onChange: (fullScreen: boolean) => void
 ) {
   let last = win.isFullScreen();
   onChange(last);
@@ -90,9 +90,9 @@ export function attachWindowStates(
   win: BrowserWindow,
   options: {
     isMaximized?: boolean;
-    zoom?: number;
     onFullScreenChange: (fullScreen: boolean) => void;
-  },
+    zoom?: number;
+  }
 ) {
   attachWindowStatePersistence(win, { isMaximized: options.isMaximized });
   attachZoomPersistence(win, options.zoom ?? 1);

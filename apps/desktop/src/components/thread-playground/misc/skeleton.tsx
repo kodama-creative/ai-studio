@@ -1,17 +1,16 @@
 import { cn } from "@/lib/utils";
-
 import { Skeleton } from "../../ui/skeleton";
 
 export function ThreadPlaygroundSkeleton({
-  className,
+  className
 }: {
-  className?: string;
+  readonly className?: string;
 }) {
   return (
     <div
-      className={cn("flex flex-col overflow-hidden", className)}
       aria-busy
       aria-label="Loading thread playground"
+      className={cn("flex flex-col overflow-hidden", className)}
     >
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <header className="flex h-12 w-full shrink-0 items-center border-b">
@@ -76,7 +75,7 @@ export function ThreadPlaygroundSkeleton({
   );
 }
 
-function MessageSkeleton({ contentLines }: { contentLines: number }) {
+function MessageSkeleton({ contentLines }: { readonly contentLines: number; }) {
   return (
     <div className="flex flex-col rounded-lg border bg-(--textarea)">
       <div className="flex items-center gap-2 px-3 pt-2">
@@ -90,11 +89,11 @@ function MessageSkeleton({ contentLines }: { contentLines: number }) {
       <div className="flex flex-col gap-2 px-3 py-3">
         {Array.from({ length: contentLines }, (_, index) => (
           <Skeleton
-            key={index}
             className={cn(
               "h-4 rounded",
               index === contentLines - 1 ? "w-[72%]" : "w-full"
             )}
+            key={index}
           />
         ))}
       </div>

@@ -1,8 +1,8 @@
 import { mkdir, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-
 import { afterEach, describe, expect, test } from "bun:test";
+
 import type { ProjectTool } from "@llm-space/core";
 import type { ProjectMcpConnector } from "@llm-space/runtime/node";
 
@@ -12,13 +12,13 @@ const roots: string[] = [];
 const managers: ExternalAgentProjectManager[] = [];
 
 afterEach(async () => {
-  await Promise.all(managers.splice(0).map((manager) => manager.shutdown()));
+  await Promise.all(managers.splice(0).map(async manager => manager.shutdown()));
   await Promise.all(
-    roots.splice(0).map((root) => rm(root, { recursive: true }))
+    roots.splice(0).map(async root => rm(root, { recursive: true }))
   );
 });
 
-async function _fixture(options: { connector?: ProjectMcpConnector } = {}) {
+async function _fixture(options: { connector?: ProjectMcpConnector; } = {}) {
   const root = path.join(tmpdir(), `llm-space-external-${crypto.randomUUID()}`);
   const home = path.join(root, "home");
   const workspace = path.join(home, "workspace");
@@ -59,7 +59,7 @@ export default defineTool({
   const manager = new ExternalAgentProjectManager({
     homePath: home,
     workspaceRoot: workspace,
-    projectMcpConnector: options.connector,
+    projectMcpConnector: options.connector
   });
   managers.push(manager);
   return { home, manager, marker, project, workspace };
@@ -82,13 +82,13 @@ describe("ExternalAgentProjectManager", () => {
     expect(record.thread.model).toEqual({
       provider: "openai",
       id: "gpt-5.3-codex",
-      params: { reasoning: "high" },
+      params: { reasoning: "high" }
     });
     expect(record.thread.agentRuntime).toMatchObject({
       projectId: opened.id,
       snapshot: opened.snapshot,
       definitionFingerprint: opened.definitionFingerprint,
-      modelSource: "agent",
+      modelSource: "agent"
     });
     expect(record.thread.context?.systemPrompt).toContain("Use echo");
     expect(record.thread.context?.tools?.[0]?.type).toBe("project");
@@ -100,7 +100,7 @@ describe("ExternalAgentProjectManager", () => {
         snapshot: tool.snapshot,
         name: tool.name,
         callId: "call-hello",
-        arguments: { text: "hello" },
+        arguments: { text: "hello" }
       })
     ).toEqual({ contentText: '{"text":"hello"}', isError: false });
 
@@ -118,7 +118,7 @@ describe("ExternalAgentProjectManager", () => {
         snapshot: tool.snapshot,
         name: tool.name,
         callId: "call-frozen",
-        arguments: { text: "frozen" },
+        arguments: { text: "frozen" }
       })
     ).toEqual({ contentText: '{"text":"frozen"}', isError: false });
 
@@ -154,7 +154,7 @@ export default defineTool({
         snapshot: tool.snapshot,
         name: tool.name,
         callId: "model-tool-call-1",
-        arguments: {},
+        arguments: {}
       })
     ).toEqual({ contentText: "model-tool-call-1", isError: false });
   });
@@ -166,7 +166,7 @@ export default defineTool({
     const before = await manager.readThread(opened.id, threadId);
     expect(before.syncedPrompt).toBe("Use echo for every request.\n");
     const skills = before.thread.context?.variables?.available_skills;
-    if (skills?.type !== "skills") throw new Error("Missing skills variable");
+    if (skills?.type !== "skills") { throw new Error("Missing skills variable"); }
     await manager.writeThread(opened.id, threadId, {
       ...before,
       thread: {
@@ -175,10 +175,10 @@ export default defineTool({
           ...before.thread.context,
           variables: {
             ...before.thread.context?.variables,
-            available_skills: { ...skills, skillNames: ["missing-skill"] },
-          },
-        },
-      },
+            available_skills: { ...skills, skillNames: ["missing-skill"] }
+          }
+        }
+      }
     });
     expect(
       (await manager.readThread(opened.id, threadId)).thread.context?.variables
@@ -209,7 +209,7 @@ export default defineTool({
     expect(synced.thread.model).toEqual({
       provider: "openai",
       id: "gpt-5.3",
-      params: { reasoning: "medium" },
+      params: { reasoning: "medium" }
     });
     expect(synced.definitionFingerprint).toBe(refreshed.definitionFingerprint);
   });
@@ -239,24 +239,24 @@ export default defineTool({
 
     const restarted = new ExternalAgentProjectManager({
       homePath: home,
-      workspaceRoot: path.join(home, "workspace"),
+      workspaceRoot: path.join(home, "workspace")
     });
     managers.push(restarted);
     const [restored] = await restarted.list();
     expect(restored.status).toBe("ready");
-    expect(restored.threads.map((thread) => thread.id)).toContain(threadId);
+    expect(restored.threads.map(thread => thread.id)).toContain(threadId);
 
     await rm(project, { recursive: true });
     await restarted.refresh(opened.id);
     const [missing] = await restarted.list();
     expect(missing.status).toBe("missing");
-    expect(missing.threads.map((thread) => thread.id)).toContain(threadId);
+    expect(missing.threads.map(thread => thread.id)).toContain(threadId);
   });
 
   test("migrates matching legacy model values as an explicit Thread override", async () => {
     const { home, manager, project } = await _fixture();
     const opened = await manager.trustAndOpen(project);
-    if (!opened.definition) throw new Error("Missing Agent definition");
+    if (!opened.definition) { throw new Error("Missing Agent definition"); }
     const threadId = opened.threads[0].id;
     const threadFile = path.join(
       home,
@@ -265,10 +265,10 @@ export default defineTool({
       "threads",
       `${threadId}.json`
     );
-    const legacy = (await Bun.file(threadFile).json()) as Record<
+    const legacy = (await Bun.file(threadFile).json()) as { thread: Record<string, unknown>; } & Record<
       string,
       unknown
-    > & { thread: Record<string, unknown> };
+    >;
     delete legacy.definitionFingerprint;
     delete legacy.syncedDefinition;
     delete legacy.modelSource;
@@ -276,7 +276,7 @@ export default defineTool({
     legacy.thread.model = {
       provider: "openai",
       id: "gpt-5.3-codex",
-      params: { reasoning: "high" },
+      params: { reasoning: "high" }
     };
     await writeFile(threadFile, JSON.stringify(legacy), "utf8");
 
@@ -285,7 +285,7 @@ export default defineTool({
     expect(migrated.thread.model).toEqual({
       provider: "openai",
       id: "gpt-5.3-codex",
-      params: { reasoning: "high" },
+      params: { reasoning: "high" }
     });
     expect(migrated.syncedDefinition).toEqual(opened.definition);
     expect(migrated.thread.agentRuntime?.modelSource).toBe("threadOverride");
@@ -293,7 +293,7 @@ export default defineTool({
       (await Bun.file(threadFile).json()) as Record<string, unknown>
     ).toMatchObject({
       definitionFingerprint: opened.definitionFingerprint,
-      syncedDefinition: opened.definition,
+      syncedDefinition: opened.definition
     });
   });
 
@@ -308,10 +308,10 @@ export default defineTool({
       "threads",
       `${threadId}.json`
     );
-    const legacy = (await Bun.file(threadFile).json()) as Record<
+    const legacy = (await Bun.file(threadFile).json()) as { thread: Record<string, unknown>; } & Record<
       string,
       unknown
-    > & { thread: Record<string, unknown> };
+    >;
     delete legacy.definitionFingerprint;
     delete legacy.syncedDefinition;
     delete legacy.modelSource;
@@ -324,7 +324,7 @@ export default defineTool({
     await rename(project, parked);
     const restarted = new ExternalAgentProjectManager({
       homePath: home,
-      workspaceRoot: path.join(home, "workspace"),
+      workspaceRoot: path.join(home, "workspace")
     });
     managers.push(restarted);
     const missing = await restarted.readThread(opened.id, threadId);
@@ -370,7 +370,7 @@ export default defineTool({
 
   test("deactivation cancels an in-flight Project MCP call", async () => {
     let resolveStarted!: (signal: AbortSignal) => void;
-    const started = new Promise<AbortSignal>((resolve) => {
+    const started = new Promise<AbortSignal>(resolve => {
       resolveStarted = resolve;
     });
     const { manager, project } = await _fixture({
@@ -380,24 +380,24 @@ export default defineTool({
             {
               name: "forecast",
               description: "Read a forecast",
-              inputSchema: { type: "object" },
-            },
+              inputSchema: { type: "object" }
+            }
           ];
         },
-        callTool(_name, _input, signal) {
-          if (!signal) throw new Error("Missing Project MCP abort signal");
+        async callTool(_name, _input, signal) {
+          if (!signal) { throw new Error("Missing Project MCP abort signal"); }
           resolveStarted(signal);
           return new Promise((_resolve, reject) => {
-            signal.addEventListener("abort", () => reject(signal.reason), {
-              once: true,
+            signal.addEventListener("abort", () => { reject(signal.reason); }, {
+              once: true
             });
           });
         },
-        async close() {},
-      }),
+        async close() {}
+      })
     });
     await mkdir(path.join(project, "agent", "connections"), {
-      recursive: true,
+      recursive: true
     });
     await writeFile(
       path.join(project, "agent", "connections", "weather.ts"),
@@ -427,13 +427,13 @@ export default defineMcpClientConnection({
               toolCalls: [
                 {
                   id: "call-one",
-                  input: { name: "weather__forecast", arguments: {} },
-                },
-              ],
-            },
-          ],
-        },
-      },
+                  input: { name: "weather__forecast", arguments: {} }
+                }
+              ]
+            }
+          ]
+        }
+      }
     });
 
     const call = manager.callTool({
@@ -446,8 +446,8 @@ export default defineMcpClientConnection({
       attempt: {
         messageId: "assistant-one",
         toolCallId: "call-one",
-        at: "2026-07-15T00:00:00.000Z",
-      },
+        at: "2026-07-15T00:00:00.000Z"
+      }
     });
     const signal = await started;
     await manager.deactivateConnections(opened.id, threadId);
@@ -458,11 +458,11 @@ export default defineMcpClientConnection({
 
   test("deactivation disposes a connection that finishes activating late", async () => {
     let signalListStarted!: () => void;
-    const listStarted = new Promise<void>((resolve) => {
+    const listStarted = new Promise<void>(resolve => {
       signalListStarted = resolve;
     });
     let releaseList!: () => void;
-    const listReleased = new Promise<void>((resolve) => {
+    const listReleased = new Promise<void>(resolve => {
       releaseList = resolve;
     });
     let closeCount = 0;
@@ -475,8 +475,8 @@ export default defineMcpClientConnection({
             {
               name: "forecast",
               description: "Read a forecast",
-              inputSchema: { type: "object" },
-            },
+              inputSchema: { type: "object" }
+            }
           ];
         },
         async callTool() {
@@ -484,8 +484,8 @@ export default defineMcpClientConnection({
         },
         async close() {
           closeCount += 1;
-        },
-      }),
+        }
+      })
     });
     await _writeWeatherConnection(project);
     const opened = await manager.trustAndOpen(project);
@@ -506,11 +506,11 @@ export default defineMcpClientConnection({
   test("source reload blocks activation until old clients are disposed", async () => {
     let clientCount = 0;
     let signalFirstCloseStarted!: () => void;
-    const firstCloseStarted = new Promise<void>((resolve) => {
+    const firstCloseStarted = new Promise<void>(resolve => {
       signalFirstCloseStarted = resolve;
     });
     let releaseFirstClose!: () => void;
-    const firstCloseReleased = new Promise<void>((resolve) => {
+    const firstCloseReleased = new Promise<void>(resolve => {
       releaseFirstClose = resolve;
     });
     const { manager, project } = await _fixture({
@@ -523,20 +523,20 @@ export default defineMcpClientConnection({
               {
                 name: "forecast",
                 description: "Read a forecast",
-                inputSchema: { type: "object" },
-              },
+                inputSchema: { type: "object" }
+              }
             ];
           },
           async callTool() {
             return { contentText: "sunny", isError: false };
           },
           async close() {
-            if (clientNumber !== 1) return;
+            if (clientNumber !== 1) { return; }
             signalFirstCloseStarted();
             await firstCloseReleased;
-          },
+          }
         };
-      },
+      }
     });
     await _writeWeatherConnection(project);
     const opened = await manager.trustAndOpen(project);
@@ -559,7 +559,7 @@ export default defineMcpClientConnection({
     releaseFirstClose();
     const [, blockedActivation] = await Promise.all([
       refresh,
-      activationDuringReload,
+      activationDuringReload
     ]);
 
     expect(blockedActivation.tools).toEqual([]);
@@ -574,11 +574,11 @@ export default defineMcpClientConnection({
 
   test("shutdown waits for Project MCP client disposal", async () => {
     let signalCloseStarted!: () => void;
-    const closeStarted = new Promise<void>((resolve) => {
+    const closeStarted = new Promise<void>(resolve => {
       signalCloseStarted = resolve;
     });
     let releaseClose!: () => void;
-    const closeReleased = new Promise<void>((resolve) => {
+    const closeReleased = new Promise<void>(resolve => {
       releaseClose = resolve;
     });
     const { manager, project } = await _fixture({
@@ -588,8 +588,8 @@ export default defineMcpClientConnection({
             {
               name: "forecast",
               description: "Read a forecast",
-              inputSchema: { type: "object" },
-            },
+              inputSchema: { type: "object" }
+            }
           ];
         },
         async callTool() {
@@ -598,11 +598,11 @@ export default defineMcpClientConnection({
         async close() {
           signalCloseStarted();
           await closeReleased;
-        },
-      }),
+        }
+      })
     });
     await mkdir(path.join(project, "agent", "connections"), {
-      recursive: true,
+      recursive: true
     });
     await writeFile(
       path.join(project, "agent", "connections", "weather.ts"),
@@ -636,16 +636,16 @@ export default defineMcpClientConnection({
     let closeCount = 0;
     const connector: ProjectMcpConnector = async () => ({
       async listTools() {
-        if (!connectionAvailable) return [];
+        if (!connectionAvailable) { return []; }
         return [
           {
             name: "forecast",
             description: "Read a forecast",
             inputSchema: {
               type: "object",
-              properties: { version: { const: schemaVersion } },
-            },
-          },
+              properties: { version: { const: schemaVersion } }
+            }
+          }
         ];
       },
       async callTool() {
@@ -653,12 +653,12 @@ export default defineMcpClientConnection({
       },
       async close() {
         closeCount += 1;
-      },
+      }
     });
     const { home, manager, project } = await _fixture({ connector });
     const callbackMarker = path.join(path.dirname(home), "auth-resolved.txt");
     await mkdir(path.join(project, "agent", "connections"), {
-      recursive: true,
+      recursive: true
     });
     await writeFile(
       path.join(project, "agent", "connections", "weather.ts"),
@@ -683,11 +683,11 @@ export default defineMcpClientConnection({
 
     expect(await Bun.file(callbackMarker).exists()).toBe(true);
     expect(activation.hasSchemaDrift).toBe(false);
-    expect(activation.tools.map((tool) => tool.name)).toEqual([
-      "weather__forecast",
+    expect(activation.tools.map(tool => tool.name)).toEqual([
+      "weather__forecast"
     ]);
     const record = await manager.readThread(opened.id, threadId);
-    expect(record.thread.context?.tools?.map((tool) => tool.name)).toContain(
+    expect(record.thread.context?.tools?.map(tool => tool.name)).toContain(
       "weather__forecast"
     );
     const callRecord = {
@@ -704,13 +704,13 @@ export default defineMcpClientConnection({
               toolCalls: [
                 {
                   id: "call-one",
-                  input: { name: "weather__forecast", arguments: {} },
-                },
-              ],
-            },
-          ],
-        },
-      },
+                  input: { name: "weather__forecast", arguments: {} }
+                }
+              ]
+            }
+          ]
+        }
+      }
     };
     await manager.writeThread(opened.id, threadId, callRecord);
     expect(
@@ -724,13 +724,13 @@ export default defineMcpClientConnection({
         attempt: {
           messageId: "assistant-one",
           toolCallId: "call-one",
-          at: "2026-07-15T00:00:00.000Z",
-        },
+          at: "2026-07-15T00:00:00.000Z"
+        }
       })
     ).toEqual({ contentText: "sunny", isError: false });
     const attempted = await manager.readThread(opened.id, threadId);
     const attemptedMessage = attempted.thread.context?.messages?.find(
-      (message) => message.role === "assistant"
+      message => message.role === "assistant"
     );
     expect(
       attemptedMessage?.role === "assistant"
@@ -757,12 +757,12 @@ export default defineMcpClientConnection({
         attempt: {
           messageId: "assistant-one",
           toolCallId: "call-one",
-          at: "2026-07-15T00:01:00.000Z",
-        },
+          at: "2026-07-15T00:01:00.000Z"
+        }
       })
     ).toEqual({
       rejected: true,
-      message: "Remote action schema changed. Sync from Agent before calling it.",
+      message: "Remote action schema changed. Sync from Agent before calling it."
     });
     expect(
       (await manager.readThread(opened.id, threadId)).thread.context?.tools?.find(
@@ -792,17 +792,17 @@ export default defineMcpClientConnection({
     const removed = await manager.activateConnections(opened.id, threadId);
     expect(removed.hasSchemaDrift).toBe(true);
     expect(removed.statuses).toEqual([
-      expect.objectContaining({ connectionName: "weather", state: "drift" }),
+      expect.objectContaining({ connectionName: "weather", state: "drift" })
     ]);
     expect(
       (await manager.readThread(opened.id, threadId)).thread.context?.tools?.map(
-        (tool) => tool.name
+        tool => tool.name
       )
     ).toContain("weather__forecast");
     expect(
       (
         await manager.syncThreadFromAgent(opened.id, threadId)
-      ).thread.context?.tools?.map((tool) => tool.name)
+      ).thread.context?.tools?.map(tool => tool.name)
     ).not.toContain("weather__forecast");
 
     const persisted = await Bun.file(
@@ -817,7 +817,7 @@ export default defineMcpClientConnection({
 
 async function _writeWeatherConnection(project: string): Promise<void> {
   await mkdir(path.join(project, "agent", "connections"), {
-    recursive: true,
+    recursive: true
   });
   await writeFile(
     path.join(project, "agent", "connections", "weather.ts"),

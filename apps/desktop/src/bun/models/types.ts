@@ -19,35 +19,44 @@ export type CustomModelConfig = CustomModel;
 /** One provider entry in `settings/models.json`. */
 export interface ProviderConfig {
   id: string;
+
   /** User-facing name for a custom provider. Builtins use the shipped name. */
   name?: string;
+
   /** Whether this is a builtin provider shipped with the app. */
   builtin?: boolean;
   apiKey?: string;
+
   /** Custom base URL override for this provider. Absent means the default. */
   baseUrl?: string;
+
   /**
    * Extra HTTP headers sent with every request to this provider. Merged into
    * the stream options at request time (per-run values win on collision).
    */
   headers?: Record<string, string>;
+
   /** API compatibility mode for a custom provider. */
   api?: CustomProviderApi;
+
   /**
    * A `@lobehub/icons` keyword overriding the brand icon shown for this
    * provider. Absent means the icon is auto-resolved from the provider id/name.
    */
   icon?: string;
+
   /**
    * Model ids the user has disabled for this provider. Absent/empty means every
    * model is enabled (the default).
    */
   disabledModels?: string[];
+
   /**
    * User-defined models added on top of a builtin provider's catalog. Their
    * `provider`/`baseUrl` are filled in from the owning provider at build time.
    */
   models?: CustomModelConfig[];
+
   /**
    * Ids of the user-added models (mirrors `models`). Kept as an explicit list
    * so these models can later be singled out for deletion.
@@ -58,6 +67,7 @@ export interface ProviderConfig {
 /** Shape of `settings/models.json`. */
 export interface ModelsConfig {
   providers: ProviderConfig[];
+
   /**
    * The user's chosen default model. Used to resolve threads with no saved
    * model (or a stale reference to a removed model). Absent means "automatic" —

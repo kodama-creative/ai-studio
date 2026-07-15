@@ -2,7 +2,6 @@ import type { ModelConfig } from "@llm-space/core";
 import type { ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
-
 import { useModel, useModels } from "../../model-provider";
 
 function formatTokenCount(value: number) {
@@ -16,11 +15,11 @@ function formatCostPerMillion(value: number) {
 function ModelCardField({
   label,
   value,
-  className,
+  className
 }: {
-  label: string;
-  value: ReactNode;
-  className?: string;
+  readonly className?: string;
+  readonly label: string;
+  readonly value: ReactNode;
 }) {
   return (
     <div
@@ -35,7 +34,7 @@ function ModelCardField({
   );
 }
 
-function BoolValue({ value }: { value: boolean }) {
+function BoolValue({ value }: { readonly value: boolean; }) {
   return (
     <span className={value ? "" : "text-muted-foreground"}>
       {value ? "Supported" : "Not supported"}
@@ -45,22 +44,22 @@ function BoolValue({ value }: { value: boolean }) {
 
 export function ModelCard({
   model,
-  className,
+  className
 }: {
-  model: ModelConfig | null;
-  className?: string;
+  readonly className?: string;
+  readonly model: ModelConfig | null;
 }) {
   const providers = useModels();
   const resolvedModel = useModel({
     id: model?.id ?? "",
-    provider: model?.provider ?? "",
+    provider: model?.provider ?? ""
   });
   if (!resolvedModel) {
     return null;
   }
   const providerName =
-    providers.find((group) => group.id === resolvedModel.provider)?.name ??
-    resolvedModel.provider;
+    providers.find(group => group.id === resolvedModel.provider)?.name
+    ?? resolvedModel.provider;
   const supportsImageInput = resolvedModel.input.includes("image");
   return (
     <div className={cn("flex flex-col gap-1.5", className)}>

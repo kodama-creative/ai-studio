@@ -8,17 +8,17 @@ export function defineToolRuntime<TDefinition extends object>(
       value: true,
       enumerable: false,
       configurable: false,
-      writable: false,
+      writable: false
     }
   );
 }
 
 export function defineMcpClientConnectionRuntime<
   TDefinition extends {
-    readonly tools: { readonly allow: readonly string[] };
-    readonly transport?: "streamableHttp" | "sse";
-  },
->(input: TDefinition): TDefinition & { readonly transport: "streamableHttp" | "sse" } {
+    readonly tools: { readonly allow: readonly string[]; };
+    readonly transport?: "sse" | "streamableHttp";
+  }
+>(input: TDefinition): { readonly transport: "sse" | "streamableHttp"; } & TDefinition {
   if (input.tools.allow.length === 0) {
     throw new TypeError("tools.allow must contain at least one tool name");
   }
@@ -29,14 +29,14 @@ export function defineMcpClientConnectionRuntime<
       value: true,
       enumerable: false,
       configurable: false,
-      writable: false,
+      writable: false
     }
-  ) as TDefinition & { readonly transport: "streamableHttp" | "sse" };
+  );
 }
 
 export function createAuthoredDefinitionVirtualModule(
   exportName: string,
-  definition: { toString(): string }
+  definition: { toString(): string; }
 ): string {
   return `export const ${exportName} = ${definition.toString()};`;
 }

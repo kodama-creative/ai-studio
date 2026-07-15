@@ -1,6 +1,6 @@
-import type { AnalyticsEvent } from "@/shared/analytics";
-
 import { electrobun } from "./electrobun";
+
+import type { AnalyticsEvent } from "@/shared/analytics";
 
 /**
  * Record an anonymous, behaviour-only analytics event from the renderer.

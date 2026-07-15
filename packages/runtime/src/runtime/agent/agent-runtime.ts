@@ -2,22 +2,22 @@ import type {
   AgentMessage,
   AgentTool,
   StreamFn,
-  ThinkingLevel,
+  ThinkingLevel
 } from "@earendil-works/pi-agent-core";
 import type { Models } from "@earendil-works/pi-ai";
 
-import type { AgentModelSelector } from "../../shared/agent-definition";
-import type { RuntimeExecutionMode } from "../../shared/runtime-execution-mode";
-import {
-  AgentSession,
-  type AgentSessionPersistence,
-} from "../sessions/agent-session";
-
-import { type AgentProjectSnapshot } from "./agent-project-snapshot";
 import { assertValidAgentProject } from "./assert-valid-agent-project";
 import { createImmutableAgentProjectSnapshot } from "./create-immutable-agent-project-snapshot";
-import type { PreparedAgentTool } from "./prepared-agent-tool";
 import { resolveAgentRuntimeModel } from "./resolve-model";
+import {
+  AgentSession,
+  type AgentSessionPersistence
+} from "../sessions/agent-session";
+
+import type { AgentProjectSnapshot } from "./agent-project-snapshot";
+import type { PreparedAgentTool } from "./prepared-agent-tool";
+import type { AgentModelSelector } from "../../shared/agent-definition";
+import type { RuntimeExecutionMode } from "../../shared/runtime-execution-mode";
 
 export interface AgentRuntimeOptions {
   models: Models;
@@ -57,17 +57,17 @@ export class AgentRuntime {
   }
 
   get defaultModel(): {
-    selector: AgentModelSelector;
     available: boolean;
+    selector: AgentModelSelector;
   } {
     const selector = this._project.definition!.model;
     return {
       selector,
-      available: Boolean(this._models.getModel(selector.provider, selector.id)),
+      available: Boolean(this._models.getModel(selector.provider, selector.id))
     };
   }
 
-  createSession(
+  async createSession(
     options: CreateAgentSessionOptions = {}
   ): Promise<AgentSession> {
     const selector = options.model ?? this._project.definition!.model;
@@ -85,14 +85,14 @@ export class AgentRuntime {
         initialMessages: options.initialMessages ?? [],
         tools: [
           ...this._project.tools.map(_prepareProjectTool),
-          ...(options.extraTools ?? []),
+          ...(options.extraTools ?? [])
         ],
         activeToolNames: options.activeToolNames,
         instructionsPrefix: options.instructionsPrefix ?? "",
         systemPrompt: options.systemPrompt,
         executionMode: options.executionMode ?? "react",
         persistence: options.persistence,
-        streamFn: options.streamFn,
+        streamFn: options.streamFn
       })
     );
   }
@@ -105,6 +105,6 @@ function _prepareProjectTool(tool: AgentTool): PreparedAgentTool {
     definition,
     async execute(...args) {
       return { type: "completed", result: await execute(...args) };
-    },
+    }
   };
 }

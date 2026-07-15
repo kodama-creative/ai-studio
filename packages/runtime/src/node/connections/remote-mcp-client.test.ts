@@ -6,7 +6,7 @@ const PROCESSES: Bun.Subprocess[] = [];
 
 afterEach(async () => {
   await Promise.all(
-    PROCESSES.splice(0).map(async (process) => {
+    PROCESSES.splice(0).map(async process => {
       process.kill();
       await process.exited;
     })
@@ -22,7 +22,7 @@ describe("RemoteMcpClient", () => {
         cwd: new URL("../../../../../", import.meta.url).pathname,
         env: { ..._processEnv(), PORT: String(port) },
         stdout: "pipe",
-        stderr: "pipe",
+        stderr: "pipe"
       }
     );
     PROCESSES.push(process);
@@ -31,15 +31,15 @@ describe("RemoteMcpClient", () => {
     const client = await RemoteMcpClient.connect({
       transport: "streamableHttp",
       url: `http://127.0.0.1:${port}/mcp`,
-      headers: {},
+      headers: {}
     });
     try {
       const tools = await client.listTools();
-      expect(tools.map((tool) => tool.name)).toEqual(["remote_echo"]);
+      expect(tools.map(tool => tool.name)).toEqual(["remote_echo"]);
       const result = await client.callTool("remote_echo", {});
       expect(result).toEqual({
         contentText: "remote fixture ok",
-        isError: false,
+        isError: false
       });
     } finally {
       await client.close();
@@ -55,10 +55,10 @@ describe("RemoteMcpClient", () => {
         env: {
           ..._processEnv(),
           PORT: String(port),
-          CALL_DELAY_MS: "5000",
+          CALL_DELAY_MS: "5000"
         },
         stdout: "pipe",
-        stderr: "pipe",
+        stderr: "pipe"
       }
     );
     PROCESSES.push(process);
@@ -67,7 +67,7 @@ describe("RemoteMcpClient", () => {
     const client = await RemoteMcpClient.connect({
       transport: "streamableHttp",
       url: `http://127.0.0.1:${port}/mcp`,
-      headers: {},
+      headers: {}
     });
     try {
       const controller = new AbortController();
@@ -92,12 +92,12 @@ function _processEnv(): Record<string, string> {
 
 async function _waitUntilReady(process: Bun.Subprocess): Promise<void> {
   const reader = (process.stdout as ReadableStream<Uint8Array>).getReader();
-  const timeout = setTimeout(() => process.kill(), 5_000);
+  const timeout = setTimeout(() => { process.kill(); }, 5_000);
   try {
     while (true) {
       const chunk = await reader.read();
-      if (chunk.done) throw new Error("MCP fixture exited before startup");
-      if (new TextDecoder().decode(chunk.value).includes("listening")) return;
+      if (chunk.done) { throw new Error("MCP fixture exited before startup"); }
+      if (new TextDecoder().decode(chunk.value).includes("listening")) { return; }
     }
   } finally {
     clearTimeout(timeout);

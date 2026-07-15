@@ -19,7 +19,7 @@ import { lstat, stat } from "node:fs/promises";
  * caller can surface the error.
  */
 export async function moveToTrash(abs: string): Promise<void> {
-  if (!(await _exists(abs))) return;
+  if (!(await _exists(abs))) { return; }
   if (process.platform === "darwin") {
     // AppleScript string literals quote/escape like JSON, which is safe for the
     // paths we handle (under the workspace root).
@@ -35,15 +35,15 @@ export async function moveToTrash(abs: string): Promise<void> {
       : "DeleteFile";
     const path = abs.replace(/'/g, "''"); // escape single quotes for PowerShell
     const script =
-      "Add-Type -AssemblyName Microsoft.VisualBasic; " +
-      `[Microsoft.VisualBasic.FileIO.FileSystem]::${method}` +
-      `('${path}','OnlyErrorDialogs','SendToRecycleBin')`;
+      "Add-Type -AssemblyName Microsoft.VisualBasic; "
+      + `[Microsoft.VisualBasic.FileIO.FileSystem]::${method}`
+      + `('${path}','OnlyErrorDialogs','SendToRecycleBin')`;
     await _run([
       "powershell.exe",
       "-NoProfile",
       "-NonInteractive",
       "-Command",
-      script,
+      script
     ]);
     return;
   }
@@ -64,7 +64,7 @@ async function _run(cmd: string[]): Promise<void> {
   const proc = Bun.spawn(cmd, {
     stdin: "ignore",
     stdout: "ignore",
-    stderr: "pipe",
+    stderr: "pipe"
   });
   const code = await proc.exited;
   if (code !== 0) {

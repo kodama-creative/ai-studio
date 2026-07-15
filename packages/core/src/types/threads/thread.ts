@@ -1,4 +1,4 @@
-import { Type, type Static } from "typebox";
+import { type Static, Type } from "typebox";
 
 import { Message, ModelUsage } from "../messages";
 import { ModelConfig } from "../models";
@@ -7,7 +7,7 @@ import { normalizeTools, Tool } from "../tools";
 export const ThreadCurrentDateVariableFormat = Type.Union([
   Type.Literal("readable-date"),
   Type.Literal("iso-date"),
-  Type.Literal("local-date-time"),
+  Type.Literal("local-date-time")
 ]);
 export type ThreadCurrentDateVariableFormat = Static<
   typeof ThreadCurrentDateVariableFormat
@@ -15,7 +15,7 @@ export type ThreadCurrentDateVariableFormat = Static<
 
 export const ThreadSkillsVariableFormat = Type.Union([
   Type.Literal("xml"),
-  Type.Literal("markdown-list"),
+  Type.Literal("markdown-list")
 ]);
 export type ThreadSkillsVariableFormat = Static<
   typeof ThreadSkillsVariableFormat
@@ -23,7 +23,7 @@ export type ThreadSkillsVariableFormat = Static<
 
 export const ThreadCurrentDateVariable = Type.Object({
   type: Type.Literal("currentDate"),
-  format: ThreadCurrentDateVariableFormat,
+  format: ThreadCurrentDateVariableFormat
 });
 export type ThreadCurrentDateVariable = Static<
   typeof ThreadCurrentDateVariable
@@ -33,13 +33,13 @@ export const ThreadSkillsVariable = Type.Object({
   type: Type.Literal("skills"),
   skillNames: Type.Array(Type.String()),
   format: ThreadSkillsVariableFormat,
-  indent: Type.Number(),
+  indent: Type.Number()
 });
 export type ThreadSkillsVariable = Static<typeof ThreadSkillsVariable>;
 
 export const ThreadVariable = Type.Union([
   ThreadCurrentDateVariable,
-  ThreadSkillsVariable,
+  ThreadSkillsVariable
 ]);
 export type ThreadVariable = Static<typeof ThreadVariable>;
 
@@ -54,7 +54,7 @@ export const ThreadVariableVariants = Type.Object({
   variants: Type.Record(
     Type.String(),
     Type.Record(Type.String(), Type.String())
-  ),
+  )
 });
 export type ThreadVariableVariants = Static<typeof ThreadVariableVariants>;
 
@@ -67,7 +67,7 @@ export type ThreadVariableVariants = Static<typeof ThreadVariableVariants>;
 export const ThreadContextSnapshot = Type.Object({
   variables: Type.Optional(
     Type.Record(Type.String(), Type.Record(Type.String(), Type.String()))
-  ),
+  )
 });
 export type ThreadContextSnapshot = Static<typeof ThreadContextSnapshot>;
 
@@ -103,7 +103,7 @@ export const ThreadContext = Type.Object({
   /**
    * The messages of the thread.
    */
-  messages: Type.Optional(Type.Array(Message)),
+  messages: Type.Optional(Type.Array(Message))
 });
 export type ThreadContext = Static<typeof ThreadContext>;
 
@@ -113,8 +113,8 @@ export const ThreadAgentRuntimeProvenance = Type.Object({
   definitionFingerprint: Type.String(),
   modelSource: Type.Union([
     Type.Literal("agent"),
-    Type.Literal("threadOverride"),
-  ]),
+    Type.Literal("threadOverride")
+  ])
 });
 export type ThreadAgentRuntimeProvenance = Static<
   typeof ThreadAgentRuntimeProvenance
@@ -139,7 +139,7 @@ const THREAD_FIELDS = {
   /**
    * The context of the thread, including the system prompt, messages, and tools.
    */
-  context: Type.Optional(ThreadContext),
+  context: Type.Optional(ThreadContext)
 };
 
 /**
@@ -176,7 +176,7 @@ export const ThreadRunSnapshot = Type.Object({
   /**
    * Epoch milliseconds (`Date.now()`) when the run completed.
    */
-  timestamp: Type.Number(),
+  timestamp: Type.Number()
 });
 export type ThreadRunSnapshot = Static<typeof ThreadRunSnapshot>;
 
@@ -184,7 +184,7 @@ export type ThreadRunSnapshot = Static<typeof ThreadRunSnapshot>;
 export const ThreadEvaluationCriterion = Type.Object({
   id: Type.String(),
   name: Type.String(),
-  description: Type.Optional(Type.String()),
+  description: Type.Optional(Type.String())
 });
 export type ThreadEvaluationCriterion = Static<
   typeof ThreadEvaluationCriterion
@@ -196,11 +196,11 @@ export const ThreadEvaluationRubric = Type.Object({
   name: Type.String(),
   criteria: Type.Array(ThreadEvaluationCriterion, {
     minItems: 2,
-    maxItems: 6,
+    maxItems: 6
   }),
   revision: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
   createdAt: Type.Number(),
-  updatedAt: Type.Number(),
+  updatedAt: Type.Number()
 });
 export type ThreadEvaluationRubric = Static<typeof ThreadEvaluationRubric>;
 
@@ -210,9 +210,9 @@ export const ThreadEvaluationRubricSnapshot = Type.Object({
   name: Type.String(),
   criteria: Type.Array(ThreadEvaluationCriterion, {
     minItems: 2,
-    maxItems: 6,
+    maxItems: 6
   }),
-  revision: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+  revision: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER })
 });
 export type ThreadEvaluationRubricSnapshot = Static<
   typeof ThreadEvaluationRubricSnapshot
@@ -221,7 +221,7 @@ export type ThreadEvaluationRubricSnapshot = Static<
 /** A single criterion score for one run. Higher is better. */
 export const ThreadEvaluationCriterionScore = Type.Object({
   criterionId: Type.String(),
-  score: Type.Integer({ minimum: 1, maximum: 5 }),
+  score: Type.Integer({ minimum: 1, maximum: 5 })
 });
 export type ThreadEvaluationCriterionScore = Static<
   typeof ThreadEvaluationCriterionScore
@@ -232,8 +232,8 @@ export const ThreadEvaluationRunScores = Type.Object({
   runId: Type.String(),
   scores: Type.Array(ThreadEvaluationCriterionScore, {
     minItems: 2,
-    maxItems: 6,
-  }),
+    maxItems: 6
+  })
 });
 export type ThreadEvaluationRunScores = Static<
   typeof ThreadEvaluationRunScores
@@ -244,7 +244,7 @@ export const ThreadEvaluationVerdict = Type.Union([
   Type.Literal("rightBetter"),
   Type.Literal("tie"),
   Type.Literal("pass"),
-  Type.Literal("fail"),
+  Type.Literal("fail")
 ]);
 export type ThreadEvaluationVerdict = Static<typeof ThreadEvaluationVerdict>;
 
@@ -285,13 +285,13 @@ const THREAD_EVALUATION_FIELDS = {
   /**
    * Epoch milliseconds when the evaluation was last updated.
    */
-  updatedAt: Type.Number(),
+  updatedAt: Type.Number()
 };
 
 const ThreadLegacyEvaluation = Type.Object({
   ...THREAD_EVALUATION_FIELDS,
   rubric: Type.Optional(Type.Never()),
-  runScores: Type.Optional(Type.Never()),
+  runScores: Type.Optional(Type.Never())
 });
 
 const ThreadStructuredEvaluation = Type.Object({
@@ -303,14 +303,14 @@ const ThreadStructuredEvaluation = Type.Object({
   /** Complete per-run criterion scores for `rubric`, keyed by stable run ID. */
   runScores: Type.Array(ThreadEvaluationRunScores, {
     minItems: 2,
-    maxItems: 2,
-  }),
+    maxItems: 2
+  })
 });
 
 /** A legacy overall verdict or a complete structured manual evaluation. */
 export const ThreadEvaluation = Type.Union([
   ThreadLegacyEvaluation,
-  ThreadStructuredEvaluation,
+  ThreadStructuredEvaluation
 ]);
 export type ThreadEvaluation = Static<typeof ThreadEvaluation>;
 
@@ -332,7 +332,7 @@ export const Thread = Type.Object({
   evaluations: Type.Optional(Type.Array(ThreadEvaluation)),
 
   /** Reusable manual evaluation rubrics owned by this thread. */
-  evaluationRubrics: Type.Optional(Type.Array(ThreadEvaluationRubric)),
+  evaluationRubrics: Type.Optional(Type.Array(ThreadEvaluationRubric))
 });
 export type Thread = Static<typeof Thread>;
 
@@ -347,14 +347,14 @@ export function normalizeThread(thread: Thread): Thread {
     if (!_sameTools(tools, normalizedTools)) {
       next = {
         ...next,
-        context: { ...context, tools: normalizedTools },
+        context: { ...context, tools: normalizedTools }
       };
     }
   }
 
   if (runHistory) {
     let changed = false;
-    const normalizedRunHistory = runHistory.map((run) => {
+    const normalizedRunHistory = runHistory.map(run => {
       const normalizedThread = normalizeThread(run.thread);
       if (normalizedThread !== run.thread) {
         changed = true;

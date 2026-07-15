@@ -2,20 +2,21 @@
 
 import {
   createContext,
+  type ReactNode,
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
-  useRef,
-  type ReactNode,
+  useRef
 } from "react";
 
 import { electrobun } from "@/lib/electrobun";
 import {
-  COMMAND_META,
   type Command,
+  COMMAND_META,
   type CommandArgs,
-  type CommandType,
+  type CommandType
 } from "@/shared/commands";
 
 /**
@@ -24,10 +25,10 @@ import {
  * target.
  */
 export type CommandHandlers = {
-  [T in CommandType]?: (args: CommandArgs<T>) => void | Promise<void>;
+  [T in CommandType]?: (args: CommandArgs<T>) => Promise<void> | void;
 };
 
-type StoredHandler = (args: unknown) => void | Promise<void>;
+type StoredHandler = (args: unknown) => unknown;
 
 interface CommandContextValue {
   /**
@@ -36,6 +37,7 @@ interface CommandContextValue {
    * process over RPC.
    */
   executeCommand: (command: Command) => void;
+
   /**
    * Register handlers for some commands; returns a teardown that removes exactly
    * the handlers it added. Prefer {@link useRegisterCommands}.
@@ -50,7 +52,7 @@ const CommandContext = createContext<CommandContextValue | null>(null);
  * command type, so components that own the relevant state (tabs, file tree,
  * sidebar) register their handlers where that state lives.
  */
-export function CommandProvider({ children }: { children: ReactNode }) {
+export function CommandProvider({ children }: { readonly children: ReactNode; }) {
   const handlersRef = useRef<Map<CommandType, StoredHandler>>(new Map());
 
   const executeCommand = useCallback((command: Command) => {
@@ -63,17 +65,21 @@ export function CommandProvider({ children }: { children: ReactNode }) {
       console.warn(`No handler registered for command: ${command.type}`);
       return;
     }
-    void handler(command.args);
+    handler(command.args);
   }, []);
 
   const registerCommandHandlers = useCallback((handlers: CommandHandlers) => {
     const map = handlersRef.current;
-    const entries = Object.entries(handlers) as [CommandType, StoredHandler][];
-    for (const [type, handler] of entries) map.set(type, handler);
+    const entries = Object.entries(handlers) as Array<[CommandType, StoredHandler]>;
+    for (const [type, handler] of entries) {
+      map.set(type, handler);
+    }
     return () => {
       for (const [type, handler] of entries) {
         // Only remove our own handler (a later registrant may have replaced it).
-        if (map.get(type) === handler) map.delete(type);
+        if (map.get(type) === handler) {
+          map.delete(type);
+        }
       }
     };
   }, []);
@@ -109,19 +115,25 @@ export function useCommands(): CommandContextValue {
 export function useRegisterCommands(handlers: CommandHandlers, enabled = true) {
   const { registerCommandHandlers } = useCommands();
   const latest = useRef(handlers);
-  latest.current = handlers;
+
+  useLayoutEffect(() => {
+    latest.current = handlers;
+  }, [handlers]);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled) {
+      return;
+    }
     const keys = Object.keys(latest.current) as CommandType[];
     const trampolines: CommandHandlers = {};
     for (const key of keys) {
       // `key` and the registry are both type-erased here; the public
       // `CommandHandlers` shape keeps callers honest at the registration site.
-      (trampolines as Record<CommandType, StoredHandler>)[key] = (args) =>
+      (trampolines as Record<CommandType, StoredHandler>)[key] = args => {
         (latest.current as Record<CommandType, StoredHandler | undefined>)[
           key
         ]?.(args);
+      };
     }
     return registerCommandHandlers(trampolines);
   }, [registerCommandHandlers, enabled]);

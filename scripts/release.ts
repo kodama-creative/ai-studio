@@ -20,27 +20,31 @@ function fail(message: string): never {
 }
 
 const branch = (await $`git rev-parse --abbrev-ref HEAD`.text()).trim();
-if (branch !== "main") fail(`releases are cut from main (current: ${branch})`);
+if (branch !== "main") {
+  fail(`releases are cut from main (current: ${branch})`);
+}
 
 const dirty = (await $`git status --porcelain`.text()).trim();
-if (dirty) fail("working tree is dirty — commit or stash first");
+if (dirty) {
+  fail("working tree is dirty — commit or stash first");
+}
 
 await $`git fetch origin main --tags`;
 const local = (await $`git rev-parse HEAD`.text()).trim();
 const remote = (await $`git rev-parse origin/main`.text()).trim();
-if (local !== remote) fail("main is not in sync with origin/main — pull first");
+if (local !== remote) {
+  fail("main is not in sync with origin/main — pull first");
+}
 
 await $`bunx commit-and-tag-version ${args}`;
 
-if (isDryRun) process.exit(0);
+if (isDryRun) {
+  process.exit(0);
+}
 
 // --atomic: all-or-nothing — if main is rejected (e.g. someone pushed in the
 // meantime), the tag must not land alone and trigger a release off an orphan.
 await $`git push --atomic --follow-tags origin main`;
 
-const { version } = (await Bun.file("apps/desktop/package.json").json()) as {
-  version: string;
-};
-console.info(
-  `\n✔ v${version} pushed — release CI: https://github.com/deer-flow/llm-space/actions`
-);
+const { version } = (await Bun.file("apps/desktop/package.json").json()) as { version: string; };
+console.info(`\n✔ v${version} pushed — release CI: https://github.com/deer-flow/llm-space/actions`);

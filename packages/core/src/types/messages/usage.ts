@@ -1,4 +1,4 @@
-import { Type, type Static } from "typebox";
+import { type Static, Type } from "typebox";
 
 /**
  * Provider-reported monetary cost for a completed model call. Values are copied
@@ -9,7 +9,7 @@ export const ModelUsageCost = Type.Object({
   output: Type.Number(),
   cacheRead: Type.Number(),
   cacheWrite: Type.Number(),
-  total: Type.Number(),
+  total: Type.Number()
 });
 export type ModelUsageCost = Static<typeof ModelUsageCost>;
 
@@ -26,6 +26,6 @@ export const ModelUsage = Type.Object({
   cacheWrite: Type.Number(),
   reasoning: Type.Optional(Type.Number()),
   totalTokens: Type.Number(),
-  cost: ModelUsageCost,
+  cost: ModelUsageCost
 });
 export type ModelUsage = Static<typeof ModelUsage>;

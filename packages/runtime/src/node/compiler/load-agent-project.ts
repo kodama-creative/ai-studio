@@ -1,33 +1,32 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-
 import {
   loadSkills,
-  NodeExecutionEnv,
+  NodeExecutionEnv
 } from "@earendil-works/pi-agent-core/node";
 import { Compile } from "typebox/compile";
 
-import { normalizeAgentDefinition } from "../../internal/authored-definition/normalize-agent-definition";
-import { qualifyProjectMcpToolName } from "../../internal/project-mcp-tool-name";
-import {
-  type AgentProjectSnapshot,
-  type CompiledMcpConnection,
-  type CompiledProjectTool,
-} from "../../runtime/agent/agent-project-snapshot";
-import { createImmutableAgentProjectSnapshot } from "../../runtime/agent/create-immutable-agent-project-snapshot";
-import { isMcpClientConnectionDefinition } from "../../public/definitions/connections/mcp";
-import { isToolDefinition } from "../../public/definitions/tool";
-import type { CompiledAgentDefinition } from "../../shared/agent-definition";
-import type { AgentProjectDiagnostic } from "../../shared/agent-project";
-import {
-  discoverAgentProject,
-  type AgentProjectSourceRef,
-  type DiscoveredAgentProject,
-} from "../discover/discover-agent-project";
-
 import { compileAgentDefinition } from "./compile-agent-definition";
 import { loadAuthoredModule } from "./load-authored-module";
+import { normalizeAgentDefinition } from "../../internal/authored-definition/normalize-agent-definition";
+import { qualifyProjectMcpToolName } from "../../internal/project-mcp-tool-name";
+import { isMcpClientConnectionDefinition } from "../../public/definitions/connections/mcp";
+import { isToolDefinition } from "../../public/definitions/tool";
+import { createImmutableAgentProjectSnapshot } from "../../runtime/agent/create-immutable-agent-project-snapshot";
+import {
+  type AgentProjectSourceRef,
+  discoverAgentProject,
+  type DiscoveredAgentProject
+} from "../discover/discover-agent-project";
+
+import type {
+  AgentProjectSnapshot,
+  CompiledMcpConnection,
+  CompiledProjectTool
+} from "../../runtime/agent/agent-project-snapshot";
+import type { CompiledAgentDefinition } from "../../shared/agent-definition";
+import type { AgentProjectDiagnostic } from "../../shared/agent-project";
 
 export async function loadAgentProject(
   agentRoot: string
@@ -56,9 +55,9 @@ async function _compileAgentProject(
     diagnostics,
     hash,
     new Map(
-      tools.map((tool) => [
+      tools.map(tool => [
         tool.name,
-        tool.sourcePath ?? `tools/${tool.name}.ts`,
+        tool.sourcePath ?? `tools/${tool.name}.ts`
       ])
     )
   );
@@ -71,7 +70,7 @@ async function _compileAgentProject(
     connections,
     resources: { skills },
     diagnostics,
-    fingerprint: hash.digest("hex"),
+    fingerprint: hash.digest("hex")
   });
 }
 
@@ -80,12 +79,12 @@ async function _compileDefinition(
   diagnostics: AgentProjectDiagnostic[],
   hash: ReturnType<typeof createHash>
 ): Promise<CompiledAgentDefinition | undefined> {
-  if (!sourceRef) return undefined;
+  if (!sourceRef) { return undefined; }
   let authored: unknown;
   try {
     const loaded = await loadAuthoredModule({
       sourcePath: sourceRef.absolutePath,
-      authoredSdk: true,
+      authoredSdk: true
     });
     hash.update(sourceRef.absolutePath);
     hash.update(loaded.fingerprint);
@@ -95,7 +94,7 @@ async function _compileDefinition(
       severity: "error",
       code: "definition_import_failed",
       message: `Unable to import agent.ts: ${_errorMessage(error)}`,
-      path: sourceRef.absolutePath,
+      path: sourceRef.absolutePath
     });
     return undefined;
   }
@@ -111,7 +110,7 @@ async function _compileDefinition(
       severity: "error",
       code: "definition_export_invalid",
       message: _errorMessage(error),
-      path: sourceRef.absolutePath,
+      path: sourceRef.absolutePath
     });
     return undefined;
   }
@@ -122,7 +121,7 @@ async function _compileInstructions(
   diagnostics: AgentProjectDiagnostic[],
   hash: ReturnType<typeof createHash>
 ): Promise<string> {
-  if (!sourceRef) return "";
+  if (!sourceRef) { return ""; }
   try {
     const instructions = await readFile(sourceRef.absolutePath, "utf8");
     hash.update(sourceRef.absolutePath);
@@ -133,7 +132,7 @@ async function _compileInstructions(
       severity: "error",
       code: "instructions_read_failed",
       message: `Unable to read instructions.md: ${_errorMessage(error)}`,
-      path: sourceRef.absolutePath,
+      path: sourceRef.absolutePath
     });
     return "";
   }
@@ -150,7 +149,7 @@ async function _compileTools(
     try {
       const loaded = await loadAuthoredModule({
         sourcePath: sourceRef.absolutePath,
-        authoredSdk: true,
+        authoredSdk: true
       });
       hash.update(sourceRef.absolutePath);
       hash.update(loaded.fingerprint);
@@ -160,7 +159,7 @@ async function _compileTools(
           severity: "error",
           code: "tool_export_invalid",
           message: `${path.basename(sourceRef.absolutePath)} must default-export defineTool({ description, inputSchema, execute })`,
-          path: sourceRef.absolutePath,
+          path: sourceRef.absolutePath
         });
         continue;
       }
@@ -169,7 +168,7 @@ async function _compileTools(
           severity: "error",
           code: "tool_export_invalid",
           message: `${path.basename(sourceRef.absolutePath)}: Remove authored name/label fields; tool identity comes from the filename.`,
-          path: sourceRef.absolutePath,
+          path: sourceRef.absolutePath
         });
         continue;
       }
@@ -179,7 +178,7 @@ async function _compileTools(
           severity: "error",
           code: "tool_export_invalid",
           message: `Tool filename must match ${MODEL_NAME_PATTERN.source}: ${name}`,
-          path: sourceRef.absolutePath,
+          path: sourceRef.absolutePath
         });
         continue;
       }
@@ -189,7 +188,7 @@ async function _compileTools(
           severity: "error",
           code: "tool_name_duplicate",
           message: `Tool name "${name}" is also exported by ${path.basename(previous)}`,
-          path: sourceRef.absolutePath,
+          path: sourceRef.absolutePath
         });
         continue;
       }
@@ -211,7 +210,7 @@ async function _compileTools(
           const output = await definition.execute(input, {
             abortSignal: signal ?? new AbortController().signal,
             callId: toolCallId,
-            toolName: name,
+            toolName: name
           });
           if (outputValidator && !outputValidator.Check(output)) {
             throw new TypeError(`Invalid output from tool "${name}"`);
@@ -219,16 +218,16 @@ async function _compileTools(
           const text = _serializeToolOutput(output, name);
           return {
             content: [{ type: "text", text }],
-            details: output,
+            details: output
           };
-        },
+        }
       });
     } catch (error) {
       diagnostics.push({
         severity: "error",
         code: "tool_import_failed",
         message: `Unable to import ${path.basename(sourceRef.absolutePath)}: ${_errorMessage(error)}`,
-        path: sourceRef.absolutePath,
+        path: sourceRef.absolutePath
       });
     }
   }
@@ -253,7 +252,7 @@ async function _compileConnections(
         severity: "error",
         code: "connection_name_invalid",
         message: `Connection filename must match ${MODEL_NAME_PATTERN.source}: ${name}`,
-        path: sourceRef.absolutePath,
+        path: sourceRef.absolutePath
       });
       continue;
     }
@@ -263,7 +262,7 @@ async function _compileConnections(
         severity: "error",
         code: "connection_name_duplicate",
         message: `Connection name "${name}" is also exported by ${path.basename(previousConnection)}`,
-        path: sourceRef.absolutePath,
+        path: sourceRef.absolutePath
       });
       continue;
     }
@@ -271,7 +270,7 @@ async function _compileConnections(
     try {
       const loaded = await loadAuthoredModule({
         sourcePath: sourceRef.absolutePath,
-        authoredSdk: true,
+        authoredSdk: true
       });
       hash.update(sourceRef.absolutePath);
       hash.update(loaded.fingerprint);
@@ -281,7 +280,7 @@ async function _compileConnections(
           severity: "error",
           code: "connection_export_invalid",
           message: `${path.basename(sourceRef.absolutePath)} must default-export defineMcpClientConnection({ ... })`,
-          path: sourceRef.absolutePath,
+          path: sourceRef.absolutePath
         });
         continue;
       }
@@ -298,8 +297,8 @@ async function _compileConnections(
           );
         }
         const previous =
-          occupiedToolNames.get(qualifiedName) ??
-          (qualifiedNames.includes(qualifiedName)
+          occupiedToolNames.get(qualifiedName)
+          ?? (qualifiedNames.includes(qualifiedName)
             ? sourceRef.logicalPath
             : undefined);
         if (previous) {
@@ -307,14 +306,14 @@ async function _compileConnections(
             severity: "error",
             code: "tool_name_duplicate",
             message: `Tool name "${qualifiedName}" is also exported by ${path.basename(previous)}`,
-            path: sourceRef.absolutePath,
+            path: sourceRef.absolutePath
           });
           collision = true;
           break;
         }
         qualifiedNames.push(qualifiedName);
       }
-      if (collision) continue;
+      if (collision) { continue; }
       for (const qualifiedName of qualifiedNames) {
         occupiedToolNames.set(qualifiedName, sourceRef.logicalPath);
       }
@@ -324,7 +323,7 @@ async function _compileConnections(
         severity: "error",
         code: "connection_import_failed",
         message: `Unable to import ${path.basename(sourceRef.absolutePath)}: ${_errorMessage(error)}`,
-        path: sourceRef.absolutePath,
+        path: sourceRef.absolutePath
       });
     }
   }
@@ -336,7 +335,7 @@ async function _compileSkills(
   diagnostics: AgentProjectDiagnostic[],
   hash: ReturnType<typeof createHash>
 ) {
-  if (!discovered.skillsRoot) return [];
+  if (!discovered.skillsRoot) { return []; }
   const env = new NodeExecutionEnv({ cwd: discovered.root });
   try {
     const loaded = await loadSkills(env, discovered.skillsRoot);
@@ -345,7 +344,7 @@ async function _compileSkills(
         severity: "error",
         code: "skill_invalid",
         message: diagnostic.message,
-        path: diagnostic.path,
+        path: diagnostic.path
       });
     }
     for (const skill of loaded.skills) {
@@ -358,7 +357,7 @@ async function _compileSkills(
       severity: "error",
       code: "skill_invalid",
       message: `Unable to load skills: ${_errorMessage(error)}`,
-      path: discovered.skillsRoot,
+      path: discovered.skillsRoot
     });
     return [];
   } finally {
@@ -374,7 +373,7 @@ function _isModelName(value: string): boolean {
 
 function _serializeToolOutput(output: unknown, name: string): string {
   _assertJsonValue(output, name, new WeakSet());
-  if (typeof output === "string") return output;
+  if (typeof output === "string") { return output; }
   const text = JSON.stringify(output);
   if (text === undefined) {
     throw new TypeError(`Tool "${name}" returned a non-JSON value`);
@@ -388,14 +387,14 @@ function _assertJsonValue(
   ancestors: WeakSet<object>
 ): void {
   if (
-    value === null ||
-    typeof value === "string" ||
-    typeof value === "boolean"
+    value === null
+    || typeof value === "string"
+    || typeof value === "boolean"
   ) {
     return;
   }
   if (typeof value === "number") {
-    if (Number.isFinite(value)) return;
+    if (Number.isFinite(value)) { return; }
     throw new TypeError(`Tool "${name}" returned a non-JSON number`);
   }
   if (typeof value !== "object") {

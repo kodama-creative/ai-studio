@@ -1,4 +1,4 @@
-import { Type, type Static } from "typebox";
+import { type Static, Type } from "typebox";
 
 import { ReasoningLevel } from "./reasoning-level";
 import { ResponseType } from "./response-type";
@@ -11,7 +11,7 @@ export const ModelConfigParams = Type.Object({
   responseType: Type.Optional(ResponseType),
 
   // Model specific parameters
-  extra: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+  extra: Type.Optional(Type.Record(Type.String(), Type.Unknown()))
 });
 export type ModelConfigParams = Static<typeof ModelConfigParams>;
 
@@ -32,6 +32,6 @@ export const ModelConfig = Type.Object({
   /**
    * The runtime parameters of the model.
    */
-  params: Type.Optional(ModelConfigParams),
+  params: Type.Optional(ModelConfigParams)
 });
 export type ModelConfig = Static<typeof ModelConfig>;

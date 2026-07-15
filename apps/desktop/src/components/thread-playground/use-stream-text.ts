@@ -1,21 +1,19 @@
 import {
-  reduceMessages,
-  streamThread,
-  uuid,
   type AssistantMessage,
   type Message,
   type ModelConfig,
   type ReasoningLevel,
   type ReducedMessageContent,
+  reduceMessages,
+  streamThread,
+  uuid
 } from "@llm-space/core";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { createRpcTransport } from "@/client/rpc-transport";
 import { createFrameThrottle } from "@/lib/frame-throttle";
-
-import { useDefaultTextGenerationModel } from "../model-provider";
-
 import { PREVIEW_THROTTLE_MS } from "./streaming-preview";
+import { useDefaultTextGenerationModel } from "../model-provider";
 
 // One transport for the app: stream agent runs over Electrobun RPC to the bun
 // process. It multiplexes concurrent runs by internal `streamId`, so a single
@@ -26,12 +24,16 @@ const MAX_TOKENS = 10240;
 
 export interface UseStreamTextArgs {
   systemPrompt: string;
+
   /** Base conversation. Defaults to an empty array. */
   messages?: Message[];
+
   /** When set, a user message with this text is appended to `messages`. */
   userPrompt?: string;
+
   /** Reasoning effort for the model. Omitted from params when undefined. */
   reasoning?: ReasoningLevel;
+
   /**
    * Model to run with. Overrides `useDefaultTextGenerationModel()` when set.
    * Its `params` are ignored — `temperature`/`maxTokens`/`reasoning` are applied
@@ -43,10 +45,13 @@ export interface UseStreamTextArgs {
 export interface UseStreamTextResult {
   /** Latest full generated text (the last text block of the assistant message). */
   text: string;
+
   /** Error message from the last run, or `null`. */
   error: string | null;
+
   /** `true` while a run is in flight. */
   streaming: boolean;
+
   /**
    * Start streaming. By default uses the hook's current
    * `systemPrompt`/`userPrompt`; pass `overrides` to run with different values
@@ -65,7 +70,7 @@ export function useStreamText({
   messages,
   userPrompt,
   reasoning,
-  model,
+  model
 }: UseStreamTextArgs): UseStreamTextResult {
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -80,7 +85,7 @@ export function useStreamText({
     messages,
     userPrompt,
     reasoning,
-    model,
+    model
   });
   argsRef.current = { systemPrompt, messages, userPrompt, reasoning, model };
   const defaultModelRef = useRef(defaultModel);
@@ -94,7 +99,7 @@ export function useStreamText({
   const run = useCallback(async (overrides?: Partial<UseStreamTextArgs>) => {
     const { systemPrompt, messages, userPrompt, reasoning, model } = {
       ...argsRef.current,
-      ...overrides,
+      ...overrides
     };
     // An explicit `model` overrides the default text-generation model.
     const base = model ?? defaultModelRef.current;
@@ -134,21 +139,21 @@ export function useStreamText({
         ...(userPrompt === undefined
           ? []
           : [
-              {
-                id: uuid(),
-                role: "user" as const,
-                content: [{ type: "text" as const, text: userPrompt }],
-              },
-            ]),
-      ],
+            {
+              id: uuid(),
+              role: "user" as const,
+              content: [{ type: "text" as const, text: userPrompt }]
+            }
+          ])
+      ]
     };
     const runModel = {
       ...base,
       params: {
         ...base.params,
         maxTokens: MAX_TOKENS,
-        ...(reasoning === undefined ? {} : { reasoning }),
-      },
+        ...(reasoning === undefined ? {} : { reasoning })
+      }
     };
 
     try {

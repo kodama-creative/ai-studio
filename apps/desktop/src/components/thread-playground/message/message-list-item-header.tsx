@@ -1,4 +1,3 @@
-import type { DraggableProvidedDragHandleProps } from "@hello-pangea/dnd";
 import { getMessageText, type Message } from "@llm-space/core";
 import {
   BotIcon,
@@ -7,20 +6,20 @@ import {
   GripHorizontalIcon,
   MinusCircle,
   PlayCircleIcon,
-  UserIcon,
+  UserIcon
 } from "lucide-react";
 import { memo, useCallback, useMemo, useState } from "react";
 
+import type { DraggableProvidedDragHandleProps } from "@hello-pangea/dnd";
+
 import { PreviewDialog } from "@/components/preview-dialog-lazy";
 import { cn } from "@/lib/utils";
-
-import { Tooltip } from "../../tooltip";
-import { Button } from "../../ui/button";
-import { useThreadStoreActions } from "../stores";
-
 import { AddImagesMenu } from "./add-images-menu";
 import { TokenUsageSummary } from "./token-usage-summary";
 import { summarizeToolCalls } from "./tool-call-status";
+import { Tooltip } from "../../tooltip";
+import { Button } from "../../ui/button";
+import { useThreadStoreActions } from "../stores";
 
 function _MessageListItemHeader({
   className,
@@ -28,14 +27,14 @@ function _MessageListItemHeader({
   readonly = false,
   runDisabled = false,
   collapsed,
-  dragHandleProps,
+  dragHandleProps
 }: {
-  className?: string;
-  message: Message;
-  readonly?: boolean;
-  runDisabled?: boolean;
-  collapsed?: boolean;
-  dragHandleProps?: DraggableProvidedDragHandleProps | null;
+  readonly className?: string;
+  readonly collapsed?: boolean;
+  readonly dragHandleProps?: DraggableProvidedDragHandleProps | null;
+  readonly message: Message;
+  readonly readonly?: boolean;
+  readonly runDisabled?: boolean;
 }) {
   const { run, removeMessage, toggleMessageRole, toggleMessageCollapsed } =
     useThreadStoreActions();
@@ -47,9 +46,9 @@ function _MessageListItemHeader({
   // Run, which is also gated on `canContinue`.
   const toolResultsReady = useMemo(
     () =>
-      message.role === "assistant" && message.toolCalls?.length
+      (message.role === "assistant" && message.toolCalls?.length
         ? summarizeToolCalls(message.toolCalls).canContinue
-        : false,
+        : false),
     [message]
   );
   const runnable = message.role === "user" || toolResultsReady;
@@ -58,8 +57,8 @@ function _MessageListItemHeader({
   // still shows (disabled) for an assistant message whose tool results aren't
   // ready yet, since that can become runnable.
   const showRun =
-    message.role === "user" ||
-    (message.role === "assistant" && !!message.toolCalls?.length);
+    message.role === "user"
+    || (message.role === "assistant" && !!message.toolCalls?.length);
   const runTooltip = runnable ? "Run from this message" : "No runnable content";
   const runAriaLabel = runnable
     ? "Run from this message"
@@ -76,12 +75,12 @@ function _MessageListItemHeader({
       return text;
     }
     if (message.role === "assistant" && message.toolCalls?.length) {
-      return message.toolCalls.map((tc) => `${tc.input.name}()`).join(", ");
+      return message.toolCalls.map(tc => `${tc.input.name}()`).join(", ");
     }
     return "";
   }, [collapsed, message, textContent]);
   const handleRun = useCallback(async () => {
-    if (runDisabled) return;
+    if (runDisabled) { return; }
     await run(message.id);
   }, [run, message.id, runDisabled]);
   const handleRemove = useCallback(() => {
@@ -128,47 +127,45 @@ function _MessageListItemHeader({
         <div className="shrink-0">
           <Tooltip content="Toggle role">
             <Button
-              className="px-2"
-              variant="outline"
-              size="sm"
               aria-label={`Change message role from ${message.role}`}
+              className="px-2"
               disabled={readonly}
               onClick={handleToggleMessageRole}
+              size="sm"
+              variant="outline"
             >
               <div className="text-muted-foreground hover:text-foreground flex shrink-0 items-center gap-1">
-                {message.role === "user" ? (
-                  <>
-                    <UserIcon className="size-3" />
-                    <div>User</div>
-                  </>
-                ) : (
-                  <>
-                    <BotIcon className="size-3" />
-                    <div>Assistant</div>
-                  </>
-                )}
+                {message.role === "user"
+                  ? (
+                    <>
+                      <UserIcon className="size-3" />
+                      <div>User</div>
+                    </>
+                  )
+                  : (
+                    <>
+                      <BotIcon className="size-3" />
+                      <div>Assistant</div>
+                    </>
+                  )}
               </div>
             </Button>
           </Tooltip>
         </div>
-        {message.role === "assistant" && message.usage && (
-          <TokenUsageSummary usage={message.usage} variant="header" />
-        )}
+        {message.role === "assistant" && message.usage ? <TokenUsageSummary usage={message.usage} variant="header" /> : null}
       </div>
       <div
         className="relative h-full min-h-full min-w-0 grow"
         onClick={readonly ? undefined : handleToggleMessageCollapse}
       >
         &nbsp;
-        {collapsed && preview && (
-          // Absolutely positioned so the (nowrap) preview never contributes to
-          // the intrinsic width of the surrounding ScrollArea's `display:table`
-          // viewport — otherwise it would grow the whole list instead of
-          // truncating. Its width is bounded by this in-flow grow cell.
-          <span className="text-muted-foreground absolute top-1/2 right-0 left-2 -translate-y-1/2 truncate text-sm">
-            {preview}
-          </span>
-        )}
+        {collapsed && preview
+          ? (
+            <span className="text-muted-foreground absolute top-1/2 right-0 left-2 -translate-y-1/2 truncate text-sm">
+              {preview}
+            </span>
+          )
+          : null}
       </div>
       <div
         className={cn(
@@ -180,49 +177,51 @@ function _MessageListItemHeader({
           content={hasTextContent ? "Preview text content" : "No text content"}
         >
           <Button
-            variant="ghost"
-            size="icon-sm"
             aria-label="Preview text content"
             disabled={!hasTextContent}
             onClick={handleOpenPreview}
+            size="icon-sm"
+            variant="ghost"
           >
             <EyeIcon className="size-4" />
           </Button>
         </Tooltip>
         {message.role === "user" && (
-          <AddImagesMenu messageId={message.id} disabled={readonly} />
+          <AddImagesMenu disabled={readonly} messageId={message.id} />
         )}
-        {showRun && (
-          <Tooltip content={runTooltip}>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label={runAriaLabel}
-              disabled={readonly || runDisabled || !runnable}
-              onClick={handleRun}
-            >
-              <PlayCircleIcon className="size-4" />
-            </Button>
-          </Tooltip>
-        )}
+        {showRun
+          ? (
+            <Tooltip content={runTooltip}>
+              <Button
+                aria-label={runAriaLabel}
+                disabled={readonly || runDisabled || !runnable}
+                onClick={handleRun}
+                size="icon-sm"
+                variant="ghost"
+              >
+                <PlayCircleIcon className="size-4" />
+              </Button>
+            </Tooltip>
+          )
+          : null}
         <Tooltip content="Remove message">
           <Button
-            variant="ghost"
-            size="icon-sm"
             aria-label="Remove message"
             disabled={readonly}
             onClick={handleRemove}
+            size="icon-sm"
+            variant="ghost"
           >
             <MinusCircle className="size-4" />
           </Button>
         </Tooltip>
         <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label={collapsed ? "Expand message" : "Collapse message"}
           aria-expanded={!collapsed}
+          aria-label={collapsed ? "Expand message" : "Collapse message"}
           disabled={readonly}
           onClick={handleToggleMessageCollapse}
+          size="icon-sm"
+          variant="ghost"
         >
           <ChevronDownIcon
             className={cn(
@@ -233,10 +232,10 @@ function _MessageListItemHeader({
         </Button>
       </div>
       <PreviewDialog
+        onOpenChange={setPreviewOpen}
         open={previewOpen}
         title={`${message.role === "user" ? "User" : "Assistant"} message text`}
         value={textContent}
-        onOpenChange={setPreviewOpen}
       />
     </header>
   );

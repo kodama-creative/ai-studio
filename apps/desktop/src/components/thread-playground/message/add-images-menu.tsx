@@ -9,7 +9,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuTrigger,
+  DropdownMenuTrigger
 } from "../../ui/dropdown-menu";
 import { useThreadStoreActions } from "../stores/thread-store";
 
@@ -32,10 +32,10 @@ function readImageFile(
 
 export function AddImagesMenu({
   messageId,
-  disabled,
+  disabled
 }: {
-  messageId: string;
-  disabled?: boolean;
+  readonly disabled?: boolean;
+  readonly messageId: string;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { addMessageImageContent } = useThreadStoreActions();
@@ -88,21 +88,21 @@ export function AddImagesMenu({
   return (
     <>
       <input
-        ref={fileInputRef}
-        type="file"
         accept="image/*"
-        multiple
         aria-label="Image files"
         className="hidden"
+        multiple
         onChange={handleFilesSelected}
+        ref={fileInputRef}
+        type="file"
       />
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
-            variant="ghost"
-            size="icon-sm"
             aria-label="Add image to message"
             disabled={disabled}
+            size="icon-sm"
+            variant="ghost"
           >
             <ImagePlusIcon className="size-4" />
           </Button>

@@ -10,7 +10,7 @@ export function getOsLocale() {
     if (process.platform === "darwin") {
       // AppleLocale reflects the Region/Language chosen in System Settings.
       return execFileSync("defaults", ["read", "-g", "AppleLocale"], {
-        encoding: "utf8",
+        encoding: "utf8"
       })
         .trim()
         .toLowerCase();
@@ -26,10 +26,10 @@ export function getOsLocale() {
     }
     // Linux / other: fall back to the standard locale environment variables.
     return (
-      process.env.LC_ALL ||
-      process.env.LC_MESSAGES ||
-      process.env.LANG ||
-      ""
+      process.env.LC_ALL
+      || process.env.LC_MESSAGES
+      || process.env.LANG
+      || ""
     ).toLowerCase();
   } catch {
     return "";

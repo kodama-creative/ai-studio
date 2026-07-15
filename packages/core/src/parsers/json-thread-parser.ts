@@ -1,10 +1,11 @@
 import { Compile } from "typebox/compile";
 
-import { Message, Thread, type Tool, type ToolCall } from "../types";
+import { normalizeToThread } from "./normalize-thread";
+import { Thread, type Tool, type ToolCall } from "../types";
 import { parseJSON, uuid } from "../utils";
 
-import { normalizeToThread } from "./normalize-thread";
 import type { ThreadParseContext, ThreadParser } from "./thread-parser";
+import type { Message } from "../types";
 
 const _threadValidator = Compile(Thread);
 
@@ -16,7 +17,7 @@ const _threadValidator = Compile(Thread);
 export class JsonThreadParser implements ThreadParser {
   readonly extensions = [".json"] as const;
 
-  parse(
+  async parse(
     raw: string,
     context?: ThreadParseContext
   ): Promise<Thread | undefined> {
@@ -49,10 +50,10 @@ function _parse(raw: string, context?: ThreadParseContext): Thread | undefined {
 
 function _looksForeign(data: object): boolean {
   return (
-    Array.isArray(data) ||
-    Array.isArray((data as Record<string, unknown>).messages) ||
-    _looksAuroraThread(data) ||
-    _looksLangfuseObservationsPayload(data)
+    Array.isArray(data)
+    || Array.isArray((data as Record<string, unknown>).messages)
+    || _looksAuroraThread(data)
+    || _looksLangfuseObservationsPayload(data)
   );
 }
 
@@ -93,7 +94,7 @@ function _parseAuroraThread(data: object): Thread | undefined {
           messages.push({
             id: uuid(),
             role: "user",
-            content: [{ type: "text", text }],
+            content: [{ type: "text", text }]
           });
         }
         break;
@@ -108,7 +109,7 @@ function _parseAuroraThread(data: object): Thread | undefined {
             id: uuid(),
             role: "assistant",
             content: text ? [{ type: "text", text }] : [],
-            ...(toolCalls.length ? { toolCalls } : {}),
+            ...(toolCalls.length ? { toolCalls } : {})
           });
         }
         break;
@@ -141,9 +142,9 @@ function _parseAuroraThread(data: object): Thread | undefined {
   if (messages.length) {
     thread.context!.messages = messages;
   }
-  return thread.context!.systemPrompt ||
-    thread.context!.tools?.length ||
-    thread.context!.messages?.length
+  return thread.context!.systemPrompt
+    || thread.context!.tools?.length
+    || thread.context!.messages?.length
     ? thread
     : undefined;
 }
@@ -174,8 +175,8 @@ function _auroraToolCalls(raw: unknown): ToolCall[] {
       input: {
         name,
         arguments: args,
-        ...(partial === undefined ? {} : { partialArguments: partial }),
-      },
+        ...(partial === undefined ? {} : { partialArguments: partial })
+      }
     });
   }
   return result;
@@ -194,9 +195,9 @@ function _parseAuroraArguments(raw: unknown): {
   try {
     const parsed = parseJSON<unknown>(raw);
     if (
-      parsed !== null &&
-      typeof parsed === "object" &&
-      !Array.isArray(parsed)
+      parsed !== null
+      && typeof parsed === "object"
+      && !Array.isArray(parsed)
     ) {
       return { args: parsed as Record<string, unknown> };
     }
@@ -222,7 +223,7 @@ function _auroraTools(raw: unknown): Tool[] {
       name,
       description: typeof tool.Description === "string" ? tool.Description : "",
       parameters: _auroraParameters(tool.ToolParameters),
-      ...(typeof tool.Strict === "boolean" ? { strict: tool.Strict } : {}),
+      ...(typeof tool.Strict === "boolean" ? { strict: tool.Strict } : {})
     });
   }
   return result;
@@ -249,13 +250,13 @@ function _auroraParameters(raw: unknown): Record<string, unknown> {
   return {
     type: "object",
     properties,
-    ...(required.length ? { required } : {}),
+    ...(required.length ? { required } : {})
   };
 }
 
 function _auroraSchema(raw: Record<string, unknown>): Record<string, unknown> {
   const schema: Record<string, unknown> = {
-    type: _auroraJsonSchemaType(raw.Type),
+    type: _auroraJsonSchemaType(raw.Type)
   };
   _copyString(raw, schema, "Description", "description");
   _copyString(raw, schema, "Title", "title");

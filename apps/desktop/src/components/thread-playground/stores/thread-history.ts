@@ -28,8 +28,8 @@ export function canRedo(history: ChangeHistory): boolean {
   return history.index < history.snapshots.length - 1;
 }
 
-function _imageContents(thread: Thread): { data: string }[] {
-  const result: { data: string }[] = [];
+function _imageContents(thread: Thread): Array<{ data: string; }> {
+  const result: Array<{ data: string; }> = [];
   for (const message of thread.context?.messages ?? []) {
     if (message.role !== "user") {
       continue;
@@ -79,8 +79,8 @@ export function recordSnapshot(
     snapshots.splice(0, snapshots.length - MAX_HISTORY);
   }
   while (
-    snapshots.length > 2 &&
-    _retainedImageBytes(snapshots) > MAX_HISTORY_IMAGE_BYTES
+    snapshots.length > 2
+    && _retainedImageBytes(snapshots) > MAX_HISTORY_IMAGE_BYTES
   ) {
     snapshots.shift();
   }

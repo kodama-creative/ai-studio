@@ -1,12 +1,13 @@
-import type { ThreadContext, ThreadSkillsVariable } from "@llm-space/core";
 import {
   DEFAULT_VARIABLE_VARIANT_NAME,
   formatCurrentDateVariable,
   formatSkillsVariable,
   normalizePromptVariableState,
-  VARIABLE_NAME_RE,
   type PromptSkill,
+  VARIABLE_NAME_RE
 } from "@llm-space/core/thread";
+
+import type { ThreadContext, ThreadSkillsVariable } from "@llm-space/core";
 
 export interface PromptVariableCompletion {
   name: string;
@@ -14,17 +15,17 @@ export interface PromptVariableCompletion {
 }
 
 export type VariableResolution =
-  | { status: "ok"; value: string }
-  | { status: "empty"; name: string }
-  | { status: "unknown"; name: string }
-  | { status: "invalid"; name: string };
+  | { name: string; status: "empty"; }
+  | { name: string; status: "invalid"; }
+  | { name: string; status: "unknown"; }
+  | { status: "ok"; value: string; };
 
 export function resolvePromptVariableValueSync(
   name: string,
   context: ThreadContext | undefined
 ):
-  | VariableResolution
-  | { status: "needsSkills"; variable: ThreadSkillsVariable } {
+  | { status: "needsSkills"; variable: ThreadSkillsVariable; }
+  | VariableResolution {
   if (!VARIABLE_NAME_RE.test(name)) {
     return { status: "invalid", name };
   }
@@ -56,14 +57,14 @@ export async function resolvePromptVariableValue(
   }
   try {
     const all = await loadSkills();
-    const byName = new Map(all.map((skill) => [skill.name, skill]));
+    const byName = new Map(all.map(skill => [skill.name, skill]));
     const selected =
       fast.variable.skillNames.length === 0
         ? all
-        : fast.variable.skillNames.flatMap((skillName) => {
-            const skill = byName.get(skillName);
-            return skill ? [skill] : [];
-          });
+        : fast.variable.skillNames.flatMap(skillName => {
+          const skill = byName.get(skillName);
+          return skill ? [skill] : [];
+        });
     const value = formatSkillsVariable(selected, fast.variable);
     return value.trim() ? { status: "ok", value } : { status: "empty", name };
   } catch {
@@ -71,7 +72,7 @@ export async function resolvePromptVariableValue(
   }
 }
 
-export function resolvePromptVariableValueForPlace(
+export async function resolvePromptVariableValueForPlace(
   name: string,
   context: ThreadContext | undefined,
   placeKey: string | undefined,
@@ -102,8 +103,8 @@ export function listPromptVariableCompletions(
         : variable.skillNames.length === 0
           ? "All enabled skills"
           : `${variable.skillNames.length} selected skill${
-              variable.skillNames.length === 1 ? "" : "s"
-            }`;
+            variable.skillNames.length === 1 ? "" : "s"
+          }`;
     items.push({ name, hint });
   }
   const customValues =

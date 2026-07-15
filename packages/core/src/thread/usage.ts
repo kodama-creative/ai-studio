@@ -2,7 +2,7 @@ import type {
   Message,
   ModelUsage,
   ModelUsageCost,
-  ThreadSnapshot,
+  ThreadSnapshot
 } from "../types";
 
 /** Empty usage marker for new runs whose provider omitted usage. */
@@ -18,8 +18,8 @@ export function emptyModelUsage(): ModelUsage {
       output: 0,
       cacheRead: 0,
       cacheWrite: 0,
-      total: 0,
-    },
+      total: 0
+    }
   };
 }
 
@@ -30,14 +30,14 @@ export function isModelUsage(usage: unknown): usage is ModelUsage {
   }
   const candidate = usage as Partial<ModelUsage>;
   return (
-    _isUsageNumber(candidate.input) &&
-    _isUsageNumber(candidate.output) &&
-    _isUsageNumber(candidate.cacheRead) &&
-    _isUsageNumber(candidate.cacheWrite) &&
-    _isUsageNumber(candidate.totalTokens) &&
-    (candidate.reasoning === undefined ||
-      _isUsageNumber(candidate.reasoning)) &&
-    _isModelUsageCost(candidate.cost)
+    _isUsageNumber(candidate.input)
+    && _isUsageNumber(candidate.output)
+    && _isUsageNumber(candidate.cacheRead)
+    && _isUsageNumber(candidate.cacheWrite)
+    && _isUsageNumber(candidate.totalTokens)
+    && (candidate.reasoning === undefined
+      || _isUsageNumber(candidate.reasoning))
+    && _isModelUsageCost(candidate.cost)
   );
 }
 
@@ -49,13 +49,13 @@ export function hasModelUsage(
     return false;
   }
   return (
-    usage.totalTokens > 0 ||
-    usage.input > 0 ||
-    usage.output > 0 ||
-    usage.cacheRead > 0 ||
-    usage.cacheWrite > 0 ||
-    (usage.reasoning ?? 0) > 0 ||
-    _hasCost(usage.cost)
+    usage.totalTokens > 0
+    || usage.input > 0
+    || usage.output > 0
+    || usage.cacheRead > 0
+    || usage.cacheWrite > 0
+    || (usage.reasoning ?? 0) > 0
+    || _hasCost(usage.cost)
   );
 }
 
@@ -70,7 +70,7 @@ export function usageForRun(run: {
   thread: ThreadSnapshot;
   usage?: ModelUsage | null;
 }): ModelUsage | null {
-  if (Object.prototype.hasOwnProperty.call(run, "usage")) {
+  if (Object.hasOwn(run, "usage")) {
     return hasModelUsage(run.usage) ? run.usage : null;
   }
   return aggregateThreadUsage(run.thread);
@@ -114,15 +114,15 @@ export function addModelUsage(a: ModelUsage, b: ModelUsage): ModelUsage {
       output: a.cost.output + b.cost.output,
       cacheRead: a.cost.cacheRead + b.cost.cacheRead,
       cacheWrite: a.cost.cacheWrite + b.cost.cacheWrite,
-      total: a.cost.total + b.cost.total,
-    },
+      total: a.cost.total + b.cost.total
+    }
   };
 }
 
 function _totalTokens(usage: ModelUsage): number {
   return (
-    usage.totalTokens ||
-    usage.input + usage.output + usage.cacheRead + usage.cacheWrite
+    usage.totalTokens
+    || usage.input + usage.output + usage.cacheRead + usage.cacheWrite
   );
 }
 
@@ -136,11 +136,11 @@ function _optionalSum(
 
 function _hasCost(cost: ModelUsageCost): boolean {
   return (
-    cost.input > 0 ||
-    cost.output > 0 ||
-    cost.cacheRead > 0 ||
-    cost.cacheWrite > 0 ||
-    cost.total > 0
+    cost.input > 0
+    || cost.output > 0
+    || cost.cacheRead > 0
+    || cost.cacheWrite > 0
+    || cost.total > 0
   );
 }
 
@@ -154,10 +154,10 @@ function _isModelUsageCost(cost: unknown): cost is ModelUsageCost {
   }
   const candidate = cost as Partial<ModelUsageCost>;
   return (
-    _isUsageNumber(candidate.input) &&
-    _isUsageNumber(candidate.output) &&
-    _isUsageNumber(candidate.cacheRead) &&
-    _isUsageNumber(candidate.cacheWrite) &&
-    _isUsageNumber(candidate.total)
+    _isUsageNumber(candidate.input)
+    && _isUsageNumber(candidate.output)
+    && _isUsageNumber(candidate.cacheRead)
+    && _isUsageNumber(candidate.cacheWrite)
+    && _isUsageNumber(candidate.total)
   );
 }

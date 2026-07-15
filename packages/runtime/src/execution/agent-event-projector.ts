@@ -1,14 +1,13 @@
 import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
 
-import type { RuntimeExecutionMode } from "../shared/runtime-execution-mode";
-
 import type {
   DeferredToolCall,
-  ToolExecutionPolicy,
+  ToolExecutionPolicy
 } from "./tool-execution-policy";
+import type { RuntimeExecutionMode } from "../shared/runtime-execution-mode";
 
 export type AgentSessionEvent =
-  AgentEvent | { type: "tool_calls_deferred"; calls: DeferredToolCall[] };
+  { calls: DeferredToolCall[]; type: "tool_calls_deferred"; } | AgentEvent;
 
 export interface AgentSessionPersistence {
   replaceMessages(messages: AgentMessage[]): Promise<void> | void;
@@ -40,42 +39,42 @@ export class AgentEventProjector {
   async handle(event: AgentEvent): Promise<void> {
     if (this._executionMode() === "manual") {
       if (
-        event.type === "message_update" &&
-        event.assistantMessageEvent.type === "toolcall_end"
+        event.type === "message_update"
+        && event.assistantMessageEvent.type === "toolcall_end"
       ) {
         return;
       }
       if (
-        event.type === "tool_execution_start" ||
-        event.type === "tool_execution_update" ||
-        event.type === "tool_execution_end"
+        event.type === "tool_execution_start"
+        || event.type === "tool_execution_update"
+        || event.type === "tool_execution_end"
       ) {
         return;
       }
       if (
-        (event.type === "message_start" || event.type === "message_end") &&
-        this._toolPolicy.isDeferredResultMessage(event.message)
+        (event.type === "message_start" || event.type === "message_end")
+        && this._toolPolicy.isDeferredResultMessage(event.message)
       ) {
         return;
       }
     }
     if (
-      event.type === "message_update" &&
-      event.assistantMessageEvent.type === "toolcall_end" &&
-      this._toolPolicy.hasTool(event.assistantMessageEvent.toolCall.name)
+      event.type === "message_update"
+      && event.assistantMessageEvent.type === "toolcall_end"
+      && this._toolPolicy.hasTool(event.assistantMessageEvent.toolCall.name)
     ) {
       return;
     }
     if (
-      (event.type === "tool_execution_start" ||
-        event.type === "tool_execution_update") &&
-      this._toolPolicy.isStaticallyDeferred(event.toolName)
+      (event.type === "tool_execution_start"
+        || event.type === "tool_execution_update")
+      && this._toolPolicy.isStaticallyDeferred(event.toolName)
     ) {
       return;
     }
     if (
-      event.type === "tool_execution_end" &&
-      this._toolPolicy.isDeferredToolResult(event.result)
+      event.type === "tool_execution_end"
+      && this._toolPolicy.isDeferredToolResult(event.result)
     ) {
       return;
     }
@@ -83,8 +82,8 @@ export class AgentEventProjector {
       await this._emit({
         ...event,
         toolResults: event.toolResults.filter(
-          (message) => !this._toolPolicy.isDeferredResultMessage(message)
-        ),
+          message => !this._toolPolicy.isDeferredResultMessage(message)
+        )
       });
       return;
     }
@@ -94,7 +93,7 @@ export class AgentEventProjector {
       if (this._toolPolicy.pendingCalls.length > 0) {
         await this._emit({
           type: "tool_calls_deferred",
-          calls: this._toolPolicy.pendingCalls,
+          calls: this._toolPolicy.pendingCalls
         });
       }
       await this._emit({ ...event, messages });
@@ -104,7 +103,7 @@ export class AgentEventProjector {
   }
 
   private async _emit(event: AgentSessionEvent): Promise<void> {
-    for (const listener of this._listeners) await listener(event);
+    for (const listener of this._listeners) { await listener(event); }
   }
 
   private async _persist(): Promise<void> {

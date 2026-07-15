@@ -1,69 +1,69 @@
 import { createHash, randomUUID } from "node:crypto";
-import { realpathSync, watch, type FSWatcher } from "node:fs";
+import { type FSWatcher, realpathSync, watch } from "node:fs";
 import {
   lstat,
   mkdir,
-  readFile,
   readdir,
+  readFile,
   realpath,
   rename,
   rm,
-  writeFile,
+  writeFile
 } from "node:fs/promises";
 import path from "node:path";
-
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { Models } from "@earendil-works/pi-ai";
 import {
   convertFromPiMessages,
-  normalizeThread,
   type ModelConfig,
+  normalizeThread,
   type ProjectTool,
-  type Thread,
+  type Thread
 } from "@llm-space/core";
 import {
   createDefaultThreadVariables,
-  ensureThreadVariableState,
+  ensureThreadVariableState
 } from "@llm-space/core/thread";
 import {
   agentModelMatchesDefinition,
-  type CompiledAgentDefinition,
+  type CompiledAgentDefinition
 } from "@llm-space/runtime";
 import {
+  type AgentProjectSnapshot,
   AgentRuntime,
-  loadAgentProject,
-  loadAgentProjectManifest,
-  ProjectMcpToolCallRejectedError,
-  ProjectMcpSession,
   type AgentSession,
   type CreateAgentSessionOptions,
-  type AgentProjectSnapshot,
+  loadAgentProject,
+  loadAgentProjectManifest,
   type ProjectMcpConnectionStatus,
   type ProjectMcpConnector,
-  type ResolvedAgentProjectManifest,
+  ProjectMcpSession,
+  ProjectMcpToolCallRejectedError,
+  type ResolvedAgentProjectManifest
 } from "@llm-space/runtime/node";
 
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { Models } from "@earendil-works/pi-ai";
+
+import { agentDefinitionFingerprint } from "./agent-definition-fingerprint";
+
 import type {
-  ExternalAgentProjectPreview,
   ExternalAgentProjectConnectionActivation,
+  ExternalAgentProjectPreview,
   ExternalAgentProjectSummary,
   ExternalAgentProjectThreadRecord,
   ExternalAgentProjectThreadSummary,
   ExternalAgentProjectToolCallResponse,
   ExternalAgentProjectView,
-  RemoteToolCallAttempt,
+  RemoteToolCallAttempt
 } from "../../shared/external-agent-project";
-
-import { agentDefinitionFingerprint } from "./agent-definition-fingerprint";
 
 interface RegistryEntry {
   path: string;
   trusted: boolean;
-  origin: "workspace" | "registered";
+  origin: "registered" | "workspace";
 }
 
 interface RegistryFile {
-  projects: Pick<RegistryEntry, "path" | "trusted">[];
+  projects: Array<Pick<RegistryEntry, "path" | "trusted">>;
 }
 
 interface LoadedProject {
@@ -113,15 +113,15 @@ export class ExternalAgentProjectManager {
   private _onChange: ((projectId: string) => void) | null = null;
 
   constructor(options: {
-    homePath: string;
-    workspaceRoot: string;
     getModels?: () => Promise<Models>;
+    homePath: string;
     projectMcpConnector?: ProjectMcpConnector;
+    workspaceRoot: string;
   }) {
     const { homePath, workspaceRoot } = options;
     this._getModels =
-      options.getModels ??
-      (() =>
+      options.getModels
+      ?? (async () =>
         Promise.resolve({ getModel: () => undefined } as unknown as Models));
     this._projectMcpConnector = options.projectMcpConnector;
     this._settingsFile = path.join(
@@ -151,7 +151,7 @@ export class ExternalAgentProjectManager {
       id,
       name: path.basename(resolved.projectRoot),
       path: resolved.projectRoot,
-      trusted: this._registry.get(id)?.trusted === true,
+      trusted: this._registry.get(id)?.trusted === true
     };
   }
 
@@ -165,12 +165,12 @@ export class ExternalAgentProjectManager {
     this._registry.set(id, {
       path: resolved.projectRoot,
       trusted: true,
-      origin: inWorkspace ? "workspace" : "registered",
+      origin: inWorkspace ? "workspace" : "registered"
     });
-    if (!inWorkspace) await this._saveRegistry();
+    if (!inWorkspace) { await this._saveRegistry(); }
     await this._reload(id, { resolved });
     const view = await this.inspect(id);
-    if (view.status !== "ready") return view;
+    if (view.status !== "ready") { return view; }
     await this._ensureDefaultThread(id);
     return this.inspect(id);
   }
@@ -178,7 +178,7 @@ export class ExternalAgentProjectManager {
   async list(): Promise<ExternalAgentProjectSummary[]> {
     await this._ensureRegistry();
     return Promise.all(
-      [...this._registry.keys()].map(async (id) => {
+      [...this._registry.keys()].map(async id => {
         await this._ensureProject(id);
         return this._summary(id);
       })
@@ -212,17 +212,17 @@ export class ExternalAgentProjectManager {
       snapshot: snapshot?.fingerprint ?? "",
       tools: snapshot ? _projectTools(projectId, snapshot) : [],
       skills: snapshot
-        ? (snapshot.resources.skills ?? []).map((skill) => ({
-            name: skill.name,
-            description: skill.description,
-            path: `project:${projectId}/skills/${skill.name}`,
-            enabled: true,
-          }))
+        ? (snapshot.resources.skills ?? []).map(skill => ({
+          name: skill.name,
+          description: skill.description,
+          path: `project:${projectId}/skills/${skill.name}`,
+          enabled: true
+        }))
         : [],
       diagnostics: snapshot ? [...snapshot.diagnostics] : [],
       sourceFiles: loaded.resolved
         ? await _listSourceFiles(loaded.resolved.agentRoot)
-        : [],
+        : []
     };
   }
 
@@ -240,7 +240,7 @@ export class ExternalAgentProjectManager {
   async createThread(
     projectId: string,
     title = "untitled"
-  ): Promise<{ id: string; record: ExternalAgentProjectThreadRecord }> {
+  ): Promise<{ id: string; record: ExternalAgentProjectThreadRecord; }> {
     const view = await this.inspect(projectId);
     if (view.status !== "ready") {
       throw new Error(view.error ?? "Agent Project is invalid.");
@@ -254,7 +254,7 @@ export class ExternalAgentProjectManager {
     if (skillVariable?.type === "skills") {
       variables.available_skills = {
         ...skillVariable,
-        skillNames: view.skills.map((skill) => skill.name),
+        skillNames: view.skills.map(skill => skill.name)
       };
     }
     const thread: Thread = ensureThreadVariableState({
@@ -264,21 +264,21 @@ export class ExternalAgentProjectManager {
         projectId,
         snapshot: view.snapshot,
         definitionFingerprint: view.definitionFingerprint,
-        modelSource: "agent",
+        modelSource: "agent"
       },
       context: {
         systemPrompt: view.instructions,
         messages: [],
         tools: view.tools,
-        variables,
-      },
+        variables
+      }
     });
     const record = {
       thread,
       promptFingerprint: view.promptFingerprint,
       syncedPrompt: view.instructions,
       definitionFingerprint: view.definitionFingerprint,
-      syncedDefinition: view.definition,
+      syncedDefinition: view.definition
     };
     await this._writeThreadFile(projectId, id, record);
     this._notify(projectId);
@@ -300,9 +300,9 @@ export class ExternalAgentProjectManager {
         ...ensureThreadVariableState(normalizeThread(stored.thread)),
         context: {
           ...stored.thread.context,
-          tools: this._toolsForThread(projectId, threadId, stored.thread),
-        },
-      },
+          tools: this._toolsForThread(projectId, threadId, stored.thread)
+        }
+      }
     };
   }
 
@@ -317,7 +317,7 @@ export class ExternalAgentProjectManager {
       promptFingerprint: record.promptFingerprint,
       syncedPrompt: record.syncedPrompt,
       definitionFingerprint: record.definitionFingerprint,
-      syncedDefinition: record.syncedDefinition,
+      syncedDefinition: record.syncedDefinition
     });
     this._notify(projectId);
   }
@@ -325,15 +325,15 @@ export class ExternalAgentProjectManager {
   async duplicateThread(
     projectId: string,
     threadId: string
-  ): Promise<{ id: string; record: ExternalAgentProjectThreadRecord }> {
+  ): Promise<{ id: string; record: ExternalAgentProjectThreadRecord; }> {
     const source = await this.readThread(projectId, threadId);
     const id = randomUUID();
     const record = {
       ...source,
       thread: {
         ...source.thread,
-        title: `${source.thread.title ?? "untitled"} copy`,
-      },
+        title: `${source.thread.title ?? "untitled"} copy`
+      }
     };
     await this._writeThreadFile(projectId, id, record);
     this._notify(projectId);
@@ -371,14 +371,14 @@ export class ExternalAgentProjectManager {
           projectId,
           snapshot: project.snapshot,
           definitionFingerprint: project.definitionFingerprint,
-          modelSource: "agent" as const,
+          modelSource: "agent" as const
         },
         context: {
           ...record.thread.context,
           systemPrompt: project.instructions,
-          tools,
-        },
-      },
+          tools
+        }
+      }
     };
     await this.writeThread(projectId, threadId, next);
     return next;
@@ -401,13 +401,13 @@ export class ExternalAgentProjectManager {
 
   async callTool(
     input: {
-      projectId: string;
-      threadId?: string;
-      snapshot: string;
-      name: string;
-      callId: string;
       arguments: Record<string, unknown>;
       attempt?: RemoteToolCallAttempt;
+      callId: string;
+      name: string;
+      projectId: string;
+      snapshot: string;
+      threadId?: string;
     },
     abortSignal?: AbortSignal
   ): Promise<ExternalAgentProjectToolCallResponse> {
@@ -424,7 +424,7 @@ export class ExternalAgentProjectManager {
       );
     }
     const tool = snapshot.tools.find(
-      (candidate) => candidate.name === input.name
+      candidate => candidate.name === input.name
     );
     if (!tool) {
       if (!input.threadId) {
@@ -470,8 +470,8 @@ export class ExternalAgentProjectManager {
     }
     const result = await tool.execute(input.callId, input.arguments);
     const text = result.content
-      .filter((item) => item.type === "text")
-      .map((item) => item.text)
+      .filter(item => item.type === "text")
+      .map(item => item.text)
       .join("\n");
     return { contentText: text, isError: false };
   }
@@ -489,18 +489,18 @@ export class ExternalAgentProjectManager {
     loaded.connectionActivationEpochs.set(threadId, activationEpoch);
     const previousActivation = loaded.connectionActivationTails.get(threadId);
     let releaseActivation!: () => void;
-    const activationTurn = new Promise<void>((resolve) => {
+    const activationTurn = new Promise<void>(resolve => {
       releaseActivation = resolve;
     });
     const activationTail = (previousActivation ?? Promise.resolve())
       .catch(() => undefined)
-      .then(() => activationTurn);
+      .then(async () => activationTurn);
     loaded.connectionActivationTails.set(threadId, activationTail);
     await previousActivation?.catch(() => undefined);
     try {
       if (
-        this._loaded.get(projectId) !== loaded ||
-        loaded.connectionActivationEpochs.get(threadId) !== activationEpoch
+        this._loaded.get(projectId) !== loaded
+        || loaded.connectionActivationEpochs.get(threadId) !== activationEpoch
       ) {
         return _emptyConnectionActivation();
       }
@@ -532,12 +532,12 @@ export class ExternalAgentProjectManager {
     loaded.connectionSessions.delete(threadId);
     await previous?.session.close();
     const session = await ProjectMcpSession.activate(snapshot.connections, {
-      connector: this._projectMcpConnector,
+      connector: this._projectMcpConnector
     });
     const activationIsCurrent = () =>
-      this._loaded.get(projectId) === loaded &&
-      loaded.snapshot?.fingerprint === snapshot.fingerprint &&
-      loaded.connectionActivationEpochs.get(threadId) === activationEpoch;
+      this._loaded.get(projectId) === loaded
+      && loaded.snapshot?.fingerprint === snapshot.fingerprint
+      && loaded.connectionActivationEpochs.get(threadId) === activationEpoch;
     if (!activationIsCurrent()) {
       await session.close();
       return _emptyConnectionActivation();
@@ -554,16 +554,16 @@ export class ExternalAgentProjectManager {
     );
     const readyConnections = new Set(
       session.statuses
-        .filter((status) => status.state === "ready")
-        .map((status) => status.connectionName)
+        .filter(status => status.state === "ready")
+        .map(status => status.connectionName)
     );
     const connectionNames = new Set(
-      snapshot.connections.map((connection) => connection.name)
+      snapshot.connections.map(connection => connection.name)
     );
     const unavailableConnections = new Set(
       session.statuses
-        .filter((status) => status.state === "unavailable")
-        .map((status) => status.connectionName)
+        .filter(status => status.state === "unavailable")
+        .map(status => status.connectionName)
     );
     const driftConnections = _schemaDriftConnections(
       storedRemote,
@@ -575,11 +575,11 @@ export class ExternalAgentProjectManager {
     const blockedToolNames = new Set(
       storedRemote
         .filter(
-          (tool) =>
-            tool.connectionName &&
-            driftConnections.has(tool.connectionName)
+          tool =>
+            tool.connectionName
+            && driftConnections.has(tool.connectionName)
         )
-        .map((tool) => tool.name)
+        .map(tool => tool.name)
     );
     loaded.connectionSessions.set(threadId, {
       snapshot: snapshot.fingerprint,
@@ -588,30 +588,29 @@ export class ExternalAgentProjectManager {
       connectionNames,
       unavailableConnections,
       driftConnections,
-      blockedToolNames,
+      blockedToolNames
     });
     const reconciled = this._toolsForThread(projectId, threadId, stored.thread);
     if (
-      JSON.stringify(reconciled) !==
-      JSON.stringify(stored.thread.context?.tools ?? [])
+      JSON.stringify(reconciled)
+      !== JSON.stringify(stored.thread.context?.tools ?? [])
     ) {
       await this._writeThreadFile(projectId, threadId, {
         ...stored,
         thread: {
           ...stored.thread,
-          context: { ...stored.thread.context, tools: reconciled },
-        },
+          context: { ...stored.thread.context, tools: reconciled }
+        }
       });
     }
-    const statuses = session.statuses.map((status) =>
-      _connectionStatusWithDrift(status, driftConnections)
-    );
+    const statuses = session.statuses.map(status =>
+      _connectionStatusWithDrift(status, driftConnections));
     for (const connectionName of driftConnections) {
-      if (statuses.some((status) => status.connectionName === connectionName)) {
+      if (statuses.some(status => status.connectionName === connectionName)) {
         continue;
       }
       const previousTool = storedRemote.find(
-        (tool) => tool.connectionName === connectionName
+        tool => tool.connectionName === connectionName
       );
       statuses.push({
         connectionName,
@@ -619,13 +618,13 @@ export class ExternalAgentProjectManager {
         sourcePath:
           previousTool?.sourcePath ?? `connections/${connectionName}.ts`,
         state: "drift",
-        message: "Remote actions were removed. Sync from Agent before running.",
+        message: "Remote actions were removed. Sync from Agent before running."
       });
     }
     return {
       tools,
       statuses,
-      hasSchemaDrift: driftConnections.size > 0,
+      hasSchemaDrift: driftConnections.size > 0
     };
   }
 
@@ -652,15 +651,15 @@ export class ExternalAgentProjectManager {
     const active = this._loaded
       .get(projectId)
       ?.connectionSessions.get(threadId);
-    if (!active || active.snapshot !== snapshot) return new Set();
+    if (!active || active.snapshot !== snapshot) { return new Set(); }
     return new Set(
       active.tools
         .filter(
-          (tool) =>
-            tool.connectionName &&
-            !active.driftConnections.has(tool.connectionName)
+          tool =>
+            tool.connectionName
+            && !active.driftConnections.has(tool.connectionName)
         )
-        .map((tool) => tool.name)
+        .map(tool => tool.name)
     );
   }
 
@@ -683,18 +682,18 @@ export class ExternalAgentProjectManager {
       ...options,
       ...(options.id
         ? {
-            persistence: {
-              replaceMessages: async (messages: AgentMessage[]) => {
-                await this._replaceRuntimeMessages(
-                  projectId,
-                  options.id!,
-                  messages
-                );
-                await callerPersistence?.replaceMessages(messages);
-              },
-            },
+          persistence: {
+            replaceMessages: async (messages: AgentMessage[]) => {
+              await this._replaceRuntimeMessages(
+                projectId,
+                options.id!,
+                messages
+              );
+              await callerPersistence?.replaceMessages(messages);
+            }
           }
-        : {}),
+        }
+        : {})
     });
   }
 
@@ -705,7 +704,7 @@ export class ExternalAgentProjectManager {
 
   async shutdown(): Promise<void> {
     await Promise.all(
-      [...this._loaded.keys()].map((id) => this._closeLoaded(id))
+      [...this._loaded.keys()].map(async id => this._closeLoaded(id))
     );
   }
 
@@ -717,15 +716,19 @@ export class ExternalAgentProjectManager {
           await readFile(this._settingsFile, "utf8")
         ) as Partial<RegistryFile>;
         for (const entry of parsed.projects ?? []) {
-          if (typeof entry.path !== "string" || entry.trusted !== true)
+          if (
+            typeof entry.path !== "string"
+            || typeof entry.trusted !== "boolean"
+            || !entry.trusted
+          ) {
             continue;
+          }
           const canonical = await realpath(entry.path).catch(() =>
-            path.resolve(entry.path)
-          );
+            path.resolve(entry.path));
           this._registry.set(_projectId(canonical), {
             path: canonical,
             trusted: true,
-            origin: "registered",
+            origin: "registered"
           });
         }
       } catch (error) {
@@ -747,7 +750,7 @@ export class ExternalAgentProjectManager {
       this._registry.set(id, {
         path: projectRoot,
         trusted: true,
-        origin: "workspace",
+        origin: "workspace"
       });
     }
     for (const [id, entry] of this._registry) {
@@ -762,23 +765,23 @@ export class ExternalAgentProjectManager {
     await mkdir(path.dirname(this._settingsFile), { recursive: true });
     const file: RegistryFile = {
       projects: [...this._registry.values()]
-        .filter((entry) => entry.origin === "registered")
+        .filter(entry => entry.origin === "registered")
         .map(({ path: projectPath, trusted }) => ({
           path: projectPath,
-          trusted,
-        })),
+          trusted
+        }))
     };
     await _atomicJsonWrite(this._settingsFile, file);
   }
 
   private async _ensureProject(projectId: string): Promise<void> {
     this._entry(projectId);
-    if (!this._loaded.has(projectId)) await this._reload(projectId);
+    if (!this._loaded.has(projectId)) { await this._reload(projectId); }
   }
 
   private async _reload(
     projectId: string,
-    options: { resolved?: ResolvedAgentProjectManifest } = {}
+    options: { resolved?: ResolvedAgentProjectManifest; } = {}
   ): Promise<void> {
     const entry = this._entry(projectId);
     let state = this._loaded.get(projectId);
@@ -796,7 +799,7 @@ export class ExternalAgentProjectManager {
         connectionSessions: new Map(),
         connectionActivationEpochs: new Map(),
         connectionActivationTails: new Map(),
-        connectionReloadCount: 0,
+        connectionReloadCount: 0
       };
       this._loaded.set(projectId, state);
     }
@@ -813,19 +816,18 @@ export class ExternalAgentProjectManager {
         state.connectionReloadCount += 1;
         let released = false;
         releaseConnectionReload = () => {
-          if (released) return;
+          if (released) { return; }
           released = true;
-          state!.connectionReloadCount -= 1;
+          state.connectionReloadCount -= 1;
         };
         for (const [threadId, epoch] of state.connectionActivationEpochs) {
           state.connectionActivationEpochs.set(threadId, epoch + 1);
         }
         await Promise.allSettled(
           [
-            ...[...state.connectionSessions.values()].map((active) =>
-              active.session.close()
-            ),
-            ...state.connectionActivationTails.values(),
+            ...[...state.connectionSessions.values()].map(async active =>
+              active.session.close()),
+            ...state.connectionActivationTails.values()
           ]
         );
         state.connectionSessions.clear();
@@ -835,17 +837,17 @@ export class ExternalAgentProjectManager {
       releaseConnectionReload?.();
       state.missing = false;
       state.error = snapshot.diagnostics.some(
-        (diagnostic) => diagnostic.severity === "error"
+        diagnostic => diagnostic.severity === "error"
       )
         ? snapshot.diagnostics
-            .map((diagnostic) => diagnostic.message)
-            .join("\n")
+          .map(diagnostic => diagnostic.message)
+          .join("\n")
         : null;
       if (!state.error) {
         const models = await this._getModels();
         state.runtime = new AgentRuntime({
           models,
-          project: snapshot,
+          project: snapshot
         });
         state.models = models;
       }
@@ -870,15 +872,15 @@ export class ExternalAgentProjectManager {
     state: LoadedProject,
     projectRoot: string
   ): void {
-    if (state.watcher) return;
+    if (state.watcher) { return; }
     state.watcher = watch(projectRoot, { recursive: true }, () => {
-      if (state.reloadTimer) clearTimeout(state.reloadTimer);
+      if (state.reloadTimer) { clearTimeout(state.reloadTimer); }
       state.reloadTimer = setTimeout(() => {
         state.reloadTimer = null;
         void this._reload(projectId);
       }, 150);
     });
-    state.watcher.on("error", (error) => {
+    state.watcher.on("error", error => {
       state.error = `Project watch failed: ${error.message}`;
       this._notify(projectId);
     });
@@ -902,7 +904,7 @@ export class ExternalAgentProjectManager {
           ? "missing"
           : "invalid",
       ...(loaded.error ? { error: loaded.error } : {}),
-      threads: await this._listThreads(projectId),
+      threads: await this._listThreads(projectId)
     };
   }
 
@@ -914,13 +916,13 @@ export class ExternalAgentProjectManager {
     try {
       entries = await readdir(root);
     } catch (error) {
-      if (_hasCode(error, "ENOENT")) return [];
+      if (_hasCode(error, "ENOENT")) { return []; }
       throw error;
     }
     const summaries = await Promise.all(
       entries
-        .filter((entry) => entry.endsWith(".json"))
-        .map(async (entry) => {
+        .filter(entry => entry.endsWith(".json"))
+        .map(async entry => {
           const id = entry.slice(0, -5);
           try {
             const record = await this._readThreadFile(projectId, id);
@@ -956,9 +958,9 @@ export class ExternalAgentProjectManager {
     const thread = normalizeThread(parsed.thread);
     const current = this._state(projectId).snapshot;
     const syncedDefinition =
-      parsed.syncedDefinition ??
-      current?.definition ??
-      _definitionFromModel(thread.model);
+      parsed.syncedDefinition
+      ?? current?.definition
+      ?? _definitionFromModel(thread.model);
     if (!syncedDefinition) {
       throw new Error("Project Thread has no model definition to migrate.");
     }
@@ -969,33 +971,33 @@ export class ExternalAgentProjectManager {
           ? agentDefinitionFingerprint(current.definition)
           : agentDefinitionFingerprint(syncedDefinition);
     const legacyDefinitionState =
-      typeof parsed.definitionFingerprint !== "string" ||
-      !parsed.syncedDefinition;
+      typeof parsed.definitionFingerprint !== "string"
+      || !parsed.syncedDefinition;
     const modelSource =
-      parsed.modelSource ??
-      thread.agentRuntime?.modelSource ??
-      (legacyDefinitionState
+      parsed.modelSource
+      ?? thread.agentRuntime?.modelSource
+      ?? (legacyDefinitionState
         ? "threadOverride"
         : agentModelMatchesDefinition({
-              model: thread.model,
-              reasoning: thread.model?.params?.reasoning,
-              definition: syncedDefinition,
-            })
+          model: thread.model,
+          reasoning: thread.model?.params?.reasoning,
+          definition: syncedDefinition
+        })
           ? "agent"
           : "threadOverride");
     const migrated = {
       thread: {
         ...thread,
         agentRuntime:
-          thread.agentRuntime ??
-          (current
+          thread.agentRuntime
+          ?? (current
             ? {
-                projectId,
-                snapshot: current.fingerprint,
-                definitionFingerprint,
-                modelSource,
-              }
-            : undefined),
+              projectId,
+              snapshot: current.fingerprint,
+              definitionFingerprint,
+              modelSource
+            }
+            : undefined)
       },
       promptFingerprint: parsed.promptFingerprint,
       syncedPrompt:
@@ -1004,12 +1006,12 @@ export class ExternalAgentProjectManager {
           : (parsed.thread.context?.systemPrompt ?? ""),
       definitionFingerprint,
       syncedDefinition,
-      modelSource,
+      modelSource
     };
     if (
-      typeof parsed.definitionFingerprint !== "string" ||
-      !parsed.syncedDefinition ||
-      !parsed.thread.agentRuntime
+      typeof parsed.definitionFingerprint !== "string"
+      || !parsed.syncedDefinition
+      || !parsed.thread.agentRuntime
     ) {
       await _atomicJsonWrite(this._threadFile(projectId, threadId), migrated);
     }
@@ -1031,9 +1033,9 @@ export class ExternalAgentProjectManager {
           messages: convertFromPiMessages(
             messages,
             record.thread.context?.messages
-          ),
-        },
-      },
+          )
+        }
+      }
     });
   }
 
@@ -1044,16 +1046,16 @@ export class ExternalAgentProjectManager {
   ): Promise<void> {
     const record = await this._readThreadFile(projectId, threadId);
     let found = false;
-    const messages = (record.thread.context?.messages ?? []).map((message) => {
+    const messages = (record.thread.context?.messages ?? []).map(message => {
       if (message.id !== attempt.messageId || message.role !== "assistant") {
         return message;
       }
-      const toolCalls = message.toolCalls?.map((toolCall) => {
-        if (toolCall.id !== attempt.toolCallId) return toolCall;
+      const toolCalls = message.toolCalls?.map(toolCall => {
+        if (toolCall.id !== attempt.toolCallId) { return toolCall; }
         found = true;
         return {
           ...toolCall,
-          attempt: { status: "started" as const, at: attempt.at },
+          attempt: { status: "started" as const, at: attempt.at }
         };
       });
       return { ...message, toolCalls };
@@ -1065,8 +1067,8 @@ export class ExternalAgentProjectManager {
       ...record,
       thread: {
         ...record.thread,
-        context: { ...record.thread.context, messages },
-      },
+        context: { ...record.thread.context, messages }
+      }
     });
   }
 
@@ -1079,28 +1081,26 @@ export class ExternalAgentProjectManager {
     await _atomicJsonWrite(this._threadFile(projectId, threadId), {
       ...record,
       modelSource:
-        record.thread.agentRuntime?.modelSource ?? record.modelSource,
+        record.thread.agentRuntime?.modelSource ?? record.modelSource
     });
   }
 
   private async _agentRoot(projectId: string): Promise<string> {
     await this._ensureProject(projectId);
     const loaded = this._state(projectId);
-    if (!loaded.resolved)
-      throw new Error(loaded.error ?? "Project is missing.");
+    if (!loaded.resolved) { throw new Error(loaded.error ?? "Project is missing."); }
     return loaded.resolved.agentRoot;
   }
 
   private _entry(projectId: string): RegistryEntry {
     const entry = this._registry.get(projectId);
-    if (!entry?.trusted)
-      throw new Error("Agent Project is not trusted or open.");
+    if (!entry?.trusted) { throw new Error("Agent Project is not trusted or open."); }
     return entry;
   }
 
   private _state(projectId: string): LoadedProject {
     const state = this._loaded.get(projectId);
-    if (!state) throw new Error("Agent Project is not loaded.");
+    if (!state) { throw new Error("Agent Project is not loaded."); }
     return state;
   }
 
@@ -1128,18 +1128,18 @@ export class ExternalAgentProjectManager {
     const remote: ProjectTool[] = [];
     const connectionNames = new Set([
       ...active.connectionNames,
-      ...storedRemote.map((tool) => tool.connectionName!),
+      ...storedRemote.map(tool => tool.connectionName!)
     ]);
     for (const connectionName of connectionNames) {
       const current = active.tools.filter(
-        (tool) => tool.connectionName === connectionName
+        tool => tool.connectionName === connectionName
       );
       const stored = storedRemote.filter(
-        (tool) => tool.connectionName === connectionName
+        tool => tool.connectionName === connectionName
       );
       remote.push(
-        ...(active.driftConnections.has(connectionName) ||
-        active.unavailableConnections.has(connectionName)
+        ...(active.driftConnections.has(connectionName)
+          || active.unavailableConnections.has(connectionName)
           ? stored
           : current)
       );
@@ -1160,11 +1160,11 @@ export class ExternalAgentProjectManager {
 
   private async _closeLoaded(projectId: string): Promise<void> {
     const state = this._loaded.get(projectId);
-    if (!state) return;
-    if (state.reloadTimer) clearTimeout(state.reloadTimer);
+    if (!state) { return; }
+    if (state.reloadTimer) { clearTimeout(state.reloadTimer); }
     state.watcher?.close();
     const closeSessions = [...state.connectionSessions.values()].map(
-      (active) => active.session.close()
+      async active => active.session.close()
     );
     const pendingActivations = [...state.connectionActivationTails.values()];
     state.connectionSessions.clear();
@@ -1181,14 +1181,14 @@ function _projectTools(
   projectId: string,
   snapshot: AgentProjectSnapshot
 ): ProjectTool[] {
-  return snapshot.tools.map((tool) => ({
+  return snapshot.tools.map(tool => ({
     type: "project",
     projectId,
     snapshot: snapshot.fingerprint,
     name: tool.name,
     description: tool.description,
     parameters: tool.parameters,
-    sourcePath: tool.sourcePath ?? `tools/${tool.name}.ts`,
+    sourcePath: tool.sourcePath ?? `tools/${tool.name}.ts`
   }));
 }
 
@@ -1197,7 +1197,7 @@ function _remoteProjectTools(
   snapshot: AgentProjectSnapshot,
   tools: ProjectMcpSession["tools"]
 ): ProjectTool[] {
-  return tools.map((tool) => ({
+  return tools.map(tool => ({
     type: "project",
     projectId,
     snapshot: snapshot.fingerprint,
@@ -1207,7 +1207,7 @@ function _remoteProjectTools(
     sourcePath: tool.sourcePath,
     connectionName: tool.connectionName,
     remoteToolName: tool.remoteToolName,
-    schemaFingerprint: tool.schemaFingerprint,
+    schemaFingerprint: tool.schemaFingerprint
   }));
 }
 
@@ -1221,27 +1221,27 @@ function _schemaDriftConnections(
   const drift = new Set<string>();
   const storedConnections = new Set<string>();
   for (const tool of stored) {
-    if (tool.connectionName) storedConnections.add(tool.connectionName);
+    if (tool.connectionName) { storedConnections.add(tool.connectionName); }
   }
   const connectionNames = new Set([
     ...storedConnections,
-    ...currentConnections,
+    ...currentConnections
   ]);
   for (const connectionName of connectionNames) {
     if (!currentConnections.has(connectionName)) {
       drift.add(connectionName);
       continue;
     }
-    if (!readyConnections.has(connectionName)) continue;
+    if (!readyConnections.has(connectionName)) { continue; }
     const previous = stored
-      .filter((tool) => tool.connectionName === connectionName)
-      .map((tool) => `${tool.name}:${tool.schemaFingerprint ?? ""}`)
+      .filter(tool => tool.connectionName === connectionName)
+      .map(tool => `${tool.name}:${tool.schemaFingerprint ?? ""}`)
       .sort();
     const next = current
-      .filter((tool) => tool.connectionName === connectionName)
-      .map((tool) => `${tool.name}:${tool.schemaFingerprint ?? ""}`)
+      .filter(tool => tool.connectionName === connectionName)
+      .map(tool => `${tool.name}:${tool.schemaFingerprint ?? ""}`)
       .sort();
-    if (previous.length === 0 && threadMatchesSnapshot) continue;
+    if (previous.length === 0 && threadMatchesSnapshot) { continue; }
     if (JSON.stringify(previous) !== JSON.stringify(next)) {
       drift.add(connectionName);
     }
@@ -1253,13 +1253,13 @@ function _connectionStatusWithDrift(
   status: ProjectMcpConnectionStatus,
   driftConnections: ReadonlySet<string>
 ) {
-  if (!driftConnections.has(status.connectionName)) return status;
+  if (!driftConnections.has(status.connectionName)) { return status; }
   return {
     connectionName: status.connectionName,
     description: status.description,
     sourcePath: status.sourcePath,
     state: "drift" as const,
-    message: "Remote tool schemas changed. Sync from Agent before running.",
+    message: "Remote tool schemas changed. Sync from Agent before running."
   };
 }
 
@@ -1282,7 +1282,7 @@ async function _discoverAgentProjects(root: string): Promise<string[]> {
   }
   const projects: string[] = [];
   for (const entry of entries) {
-    if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+    if (!entry.isDirectory() || entry.name.startsWith(".")) { continue; }
     const candidate = path.join(root, entry.name);
     let children;
     try {
@@ -1291,9 +1291,9 @@ async function _discoverAgentProjects(root: string): Promise<string[]> {
       continue;
     }
     const isProject = children.some(
-      (child) =>
-        (child.name === "llm-space.json" && child.isFile()) ||
-        (child.name === "agent" && child.isDirectory())
+      child =>
+        (child.name === "llm-space.json" && child.isFile())
+        || (child.name === "agent" && child.isDirectory())
     );
     if (isProject) {
       try {
@@ -1317,12 +1317,9 @@ async function _listSourceFiles(root: string, prefix = ""): Promise<string[]> {
   }
   const files: string[] = [];
   for (const entry of entries.toSorted((a, b) =>
-    a.name.localeCompare(b.name)
-  )) {
+    a.name.localeCompare(b.name))) {
     const relative = path.posix.join(prefix, entry.name);
-    if (entry.isDirectory())
-      files.push(...(await _listSourceFiles(root, relative)));
-    else if (/\.(?:md|ts|js)$/.test(entry.name)) files.push(relative);
+    if (entry.isDirectory()) { files.push(...(await _listSourceFiles(root, relative))); } else if (/\.(?:md|ts|js)$/.test(entry.name)) { files.push(relative); }
   }
   return files;
 }
@@ -1351,12 +1348,13 @@ async function _safeExistingSource(
 
 async function _atomicJsonWrite(target: string, value: unknown): Promise<void> {
   const temporary = `${target}.${randomUUID()}.tmp`;
-  await writeFile(temporary, JSON.stringify(value, null, 2) + "\n", "utf8");
+  await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, "utf8");
   await rename(temporary, target);
 }
 
 function _projectId(root: string): string {
-  return createHash("sha256").update(root).digest("hex").slice(0, 24);
+  return createHash("sha256").update(root).digest("hex")
+    .slice(0, 24);
 }
 
 function _within(root: string, candidate: string): boolean {
@@ -1372,21 +1370,20 @@ function _modelFromDefinition(
   current?: ModelConfig
 ): ModelConfig {
   const params = { ...current?.params };
-  if (definition.reasoning === undefined) delete params.reasoning;
-  else params.reasoning = definition.reasoning;
+  if (definition.reasoning === undefined) { delete params.reasoning; } else { params.reasoning = definition.reasoning; }
   return {
     ...definition.model,
-    ...(Object.keys(params).length > 0 ? { params } : {}),
+    ...(Object.keys(params).length > 0 ? { params } : {})
   };
 }
 
 function _definitionFromModel(
   model: ModelConfig | undefined
 ): CompiledAgentDefinition | undefined {
-  if (!model) return undefined;
+  if (!model) { return undefined; }
   return {
     model: { provider: model.provider, id: model.id },
-    ...(model.params?.reasoning ? { reasoning: model.params.reasoning } : {}),
+    ...(model.params?.reasoning ? { reasoning: model.params.reasoning } : {})
   };
 }
 

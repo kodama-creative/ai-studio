@@ -3,12 +3,12 @@
 import { CheckIcon, Loader2Icon, XIcon } from "lucide-react";
 import {
   createContext,
+  type ReactNode,
   useCallback,
   useContext,
   useEffect,
   useRef,
-  useState,
-  type ReactNode,
+  useState
 } from "react";
 import { toast } from "sonner";
 
@@ -16,9 +16,10 @@ import { useCommands } from "@/commands";
 import { Button } from "@/components/ui/button";
 import { UpdateDialog } from "@/components/update-dialog";
 import { electrobun } from "@/lib/electrobun";
+
 import type {
   UpdateStatus,
-  UpdateStatusChangedPayload,
+  UpdateStatusChangedPayload
 } from "@/shared/updates";
 
 /** GitHub versioned-release page, opened from the "Updated to …" toast. */
@@ -46,11 +47,11 @@ interface UpdateStatusValue {
 function _UpdateReadyCard({
   version,
   onRestart,
-  onDismiss,
+  onDismiss
 }: {
-  version: string;
-  onRestart: () => void;
-  onDismiss: () => void;
+  readonly onDismiss: () => void;
+  readonly onRestart: () => void;
+  readonly version: string;
 }) {
   return (
     <div className="flex w-[356px] max-w-[calc(100vw-2rem)] items-center gap-3 rounded-2xl border border-white/15 bg-black/45 p-3.5 text-white shadow-2xl backdrop-blur-md">
@@ -64,14 +65,14 @@ function _UpdateReadyCard({
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-1">
-        <Button size="sm" onClick={onRestart}>
+        <Button onClick={onRestart} size="sm">
           Restart
         </Button>
         <button
-          type="button"
           aria-label="Dismiss"
-          onClick={onDismiss}
           className="flex size-6 items-center justify-center rounded-md text-white/50 transition-colors hover:bg-white/10 hover:text-white"
+          onClick={onDismiss}
+          type="button"
         >
           <XIcon className="size-4" />
         </button>
@@ -87,10 +88,10 @@ function _UpdateReadyCard({
  */
 function _UpdateDownloadingCard({
   version,
-  onDismiss,
+  onDismiss
 }: {
-  version: string;
-  onDismiss: () => void;
+  readonly onDismiss: () => void;
+  readonly version: string;
 }) {
   return (
     <div className="w-[356px] max-w-[calc(100vw-2rem)] rounded-2xl border border-white/15 bg-black/45 p-3.5 text-white shadow-2xl backdrop-blur-md">
@@ -105,10 +106,10 @@ function _UpdateDownloadingCard({
           </div>
         </div>
         <button
-          type="button"
           aria-label="Dismiss"
-          onClick={onDismiss}
           className="flex size-6 shrink-0 items-center justify-center rounded-md text-white/50 transition-colors hover:bg-white/10 hover:text-white"
+          onClick={onDismiss}
+          type="button"
         >
           <XIcon className="size-4" />
         </button>
@@ -137,7 +138,7 @@ const UpdateStatusContext = createContext<UpdateStatusValue | null>(null);
  * - "Continue in background" (closing the dialog mid-flow) routes later states of
  *   that same manual flow to the silent path instead of re-popping the dialog.
  */
-export function UpdateStatusProvider({ children }: { children: ReactNode }) {
+export function UpdateStatusProvider({ children }: { readonly children: ReactNode; }) {
   const { executeCommand } = useCommands();
   const [readyVersion, setReadyVersion] = useState<string | null>(null);
   const lastNotifiedVersion = useRef<string | null>(null);
@@ -149,21 +150,21 @@ export function UpdateStatusProvider({ children }: { children: ReactNode }) {
   const dismissedRef = useRef(false);
 
   const restart = useCallback(
-    () => executeCommand({ type: "applyUpdateAndRestart", args: {} }),
+    () => { executeCommand({ type: "applyUpdateAndRestart", args: {} }); },
     [executeCommand]
   );
   const recheck = useCallback(
-    () => executeCommand({ type: "checkForUpdates", args: {} }),
+    () => { executeCommand({ type: "checkForUpdates", args: {} }); },
     [executeCommand]
   );
   const handleDialogOpenChange = useCallback((open: boolean) => {
     setDialogOpen(open);
-    if (!open) dismissedRef.current = true;
+    if (!open) { dismissedRef.current = true; }
   }, []);
 
   useEffect(() => {
     const rpc = electrobun.rpc;
-    if (!rpc) return;
+    if (!rpc) { return; }
 
     const handle = ({ status, manual }: UpdateStatusChangedPayload) => {
       // Keep the persistent badge in sync no matter how the check started.
@@ -182,8 +183,8 @@ export function UpdateStatusProvider({ children }: { children: ReactNode }) {
         case "checking":
         case "up-to-date":
         case "error": {
-          if (status.state !== "checking") toast.dismiss(DOWNLOADING_TOAST_ID);
-          if (status.state === "checking") dismissedRef.current = false;
+          if (status.state !== "checking") { toast.dismiss(DOWNLOADING_TOAST_ID); }
+          if (status.state === "checking") { dismissedRef.current = false; }
           if (manual && !dismissedRef.current) {
             setManualStatus(status);
             setDialogOpen(true);
@@ -196,16 +197,16 @@ export function UpdateStatusProvider({ children }: { children: ReactNode }) {
           setDialogOpen(false);
           if (manual) {
             toast.custom(
-              (id) => (
+              id => (
                 <_UpdateDownloadingCard
-                  version={status.version}
                   onDismiss={() => toast.dismiss(id)}
+                  version={status.version}
                 />
               ),
               {
                 id: DOWNLOADING_TOAST_ID,
                 position: UPDATE_TOAST_POSITION,
-                duration: Infinity,
+                duration: Infinity
               }
             );
           }
@@ -218,20 +219,20 @@ export function UpdateStatusProvider({ children }: { children: ReactNode }) {
           toast.dismiss(DOWNLOADING_TOAST_ID);
           setDialogOpen(false);
           const alreadyAnnounced = lastNotifiedVersion.current === status.version;
-          if (!manual && alreadyAnnounced) return;
+          if (!manual && alreadyAnnounced) { return; }
           lastNotifiedVersion.current = status.version;
           toast.custom(
-            (id) => (
+            id => (
               <_UpdateReadyCard
-                version={status.version}
-                onRestart={restart}
                 onDismiss={() => toast.dismiss(id)}
+                onRestart={restart}
+                version={status.version}
               />
             ),
             {
               id: READY_TOAST_ID,
               position: UPDATE_TOAST_POSITION,
-              duration: READY_TOAST_DURATION_MS,
+              duration: READY_TOAST_DURATION_MS
             }
           );
           return;
@@ -240,26 +241,27 @@ export function UpdateStatusProvider({ children }: { children: ReactNode }) {
     };
 
     rpc.addMessageListener("updateStatusChanged", handle);
-    return () => rpc.removeMessageListener("updateStatusChanged", handle);
+    return () => { rpc.removeMessageListener("updateStatusChanged", handle); };
   }, [restart]);
 
   // "We just updated" — pulled once on mount, race-free vs. the fire-and-forget
   // status messages (the bun signal is computed at startup, before we listen).
   useEffect(() => {
     const rpc = electrobun.rpc;
-    if (!rpc) return;
+    if (!rpc) { return; }
     let cancelled = false;
-    void rpc.request.pendingInstalledVersion({}).then((version) => {
-      if (cancelled || !version) return;
+    void rpc.request.pendingInstalledVersion({}).then(version => {
+      if (cancelled || !version) { return; }
       toast.success(`Updated to v${version}`, {
         action: {
           label: "Release notes",
-          onClick: () =>
+          onClick: () => {
             executeCommand({
               type: "openLink",
-              args: { url: `${RELEASE_TAG_URL}/v${version}` },
-            }),
-        },
+              args: { url: `${RELEASE_TAG_URL}/v${version}` }
+            });
+          }
+        }
       });
     });
     return () => {
@@ -271,11 +273,11 @@ export function UpdateStatusProvider({ children }: { children: ReactNode }) {
     <UpdateStatusContext.Provider value={{ readyVersion }}>
       {children}
       <UpdateDialog
-        open={dialogOpen}
-        status={manualStatus}
         onOpenChange={handleDialogOpenChange}
         onRestart={restart}
         onRetry={recheck}
+        open={dialogOpen}
+        status={manualStatus}
       />
     </UpdateStatusContext.Provider>
   );

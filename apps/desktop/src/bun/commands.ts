@@ -1,16 +1,15 @@
 import { mkdirSync } from "node:fs";
-
 import { writeClipboardFilePaths } from "clip-filepaths";
-import { Utils, type BrowserWindow } from "electrobun/bun";
-
-import { COMMAND_META, type Command } from "../shared/commands";
+import { type BrowserWindow, Utils } from "electrobun/bun";
 
 import { isChineseLocale } from "./app/locales";
 import { saveZoom } from "./app/window-state";
 import {
   importFilesWithNativePicker,
-  importTextFromClipboard,
+  importTextFromClipboard
 } from "./import-files";
+import { type Command, COMMAND_META } from "../shared/commands";
+
 import type { UpdaterService } from "./updates";
 
 /** The documentation website opened by the `openDocument` command. */

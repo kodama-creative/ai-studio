@@ -1,10 +1,9 @@
-import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-
 import {
-  loadAgentProjectManifest,
   loadAgentProject,
+  loadAgentProjectManifest
 } from "@llm-space/runtime/node";
 import { afterEach, describe, expect, test } from "bun:test";
 
@@ -14,7 +13,7 @@ const roots: string[] = [];
 
 afterEach(async () => {
   await Promise.all(
-    roots.splice(0).map((root) => rm(root, { recursive: true }))
+    roots.splice(0).map(async root => rm(root, { recursive: true }))
   );
 });
 
@@ -36,11 +35,11 @@ describe("scaffoldAgentProject", () => {
     expect(snapshot.diagnostics).toEqual([]);
     expect(snapshot.definition).toEqual({
       model: { provider: "openai", id: "gpt-5.3-codex" },
-      reasoning: "high",
+      reasoning: "high"
     });
-    expect(snapshot.tools.map((tool) => tool.name)).toEqual(["get-weather"]);
-    expect(snapshot.resources.skills?.map((skill) => skill.name)).toEqual([
-      "weather-brief",
+    expect(snapshot.tools.map(tool => tool.name)).toEqual(["get-weather"]);
+    expect(snapshot.resources.skills?.map(skill => skill.name)).toEqual([
+      "weather-brief"
     ]);
     expect(await readFile(path.join(root, "README.md"), "utf8")).toBe("keep\n");
   });
@@ -53,7 +52,7 @@ describe("scaffoldAgentProject", () => {
     expect(snapshot.diagnostics).toEqual([]);
     expect(snapshot.definition).toEqual({
       model: { provider: "openai", id: "gpt-5.3-codex" },
-      reasoning: "high",
+      reasoning: "high"
     });
     expect(snapshot.tools).toEqual([]);
   });

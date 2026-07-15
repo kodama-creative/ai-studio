@@ -67,9 +67,9 @@ export function uniqueThreadFileName(
   stem: string
 ): string {
   const first = ensureJson(stem);
-  if (!existing.has(first)) return first;
+  if (!existing.has(first)) { return first; }
   let n = 1;
-  while (existing.has(`${stem}-${n}${THREAD_FILE_EXTENSION}`)) n++;
+  while (existing.has(`${stem}-${n}${THREAD_FILE_EXTENSION}`)) { n++; }
   return `${stem}-${n}${THREAD_FILE_EXTENSION}`;
 }
 
@@ -93,31 +93,31 @@ export function validateThreadFileStem(
     return {
       valid: false,
       value: trimmed,
-      error: "File name cannot be . or ..",
+      error: "File name cannot be . or .."
     };
   }
   if (
-    INVALID_FILE_STEM_CHARS.test(trimmed) ||
-    [...trimmed].some((char) => char.charCodeAt(0) < 32)
+    INVALID_FILE_STEM_CHARS.test(trimmed)
+    || [...trimmed].some(char => char.charCodeAt(0) < 32)
   ) {
     return {
       valid: false,
       value: trimmed,
-      error: "File name contains a reserved character.",
+      error: "File name contains a reserved character."
     };
   }
   if (RESERVED_WINDOWS_NAMES.test(trimmed)) {
     return {
       valid: false,
       value: trimmed,
-      error: "File name is reserved by Windows.",
+      error: "File name is reserved by Windows."
     };
   }
   if (trimmed.endsWith(".") || trimmed.endsWith(" ")) {
     return {
       valid: false,
       value: trimmed,
-      error: "File name cannot end with a period or space.",
+      error: "File name cannot end with a period or space."
     };
   }
   return { valid: true, value: trimmed };

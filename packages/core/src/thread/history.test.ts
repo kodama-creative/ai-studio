@@ -1,30 +1,30 @@
 import { describe, expect, test } from "bun:test";
 
-import type { Thread } from "../types";
-
 import {
+  type EvaluationRecord,
+  type EvaluationRubricRecord,
   MAX_RUN_HISTORY,
   normalizeEvaluationRubrics,
   normalizeEvaluations,
   normalizeRunHistory,
   recordRun,
+  type RunSnapshot,
   snapshotEvaluationRubric,
   upsertEvaluation,
   upsertEvaluationRubric,
-  withRunMetadata,
-  type EvaluationRecord,
-  type EvaluationRubricRecord,
-  type RunSnapshot,
+  withRunMetadata
 } from "./history";
+
+import type { Thread } from "../types";
 
 const RUNS: RunSnapshot[] = [
   { id: "run-a", thread: {}, timestamp: 1 },
-  { id: "run-b", thread: {}, timestamp: 2 },
+  { id: "run-b", thread: {}, timestamp: 2 }
 ];
 
 const CRITERIA = [
   { id: "criterion-correctness", name: "Correctness" },
-  { id: "criterion-clarity", name: "Clarity" },
+  { id: "criterion-clarity", name: "Clarity" }
 ];
 
 function _createRubric(): EvaluationRubricRecord {
@@ -33,7 +33,7 @@ function _createRubric(): EvaluationRubricRecord {
     { name: "Answer quality", criteria: CRITERIA },
     10
   );
-  if (!result) throw new Error("rubric fixture failed");
+  if (!result) { throw new Error("rubric fixture failed"); }
   return result.rubric;
 }
 
@@ -45,7 +45,7 @@ function _legacyEvaluation(): EvaluationRecord {
     verdict: "rightBetter",
     note: " Better answer ",
     createdAt: 3,
-    updatedAt: 3,
+    updatedAt: 3
   };
 }
 
@@ -60,7 +60,7 @@ describe("evaluation rubrics", () => {
       name: "Answer quality",
       revision: 1,
       createdAt: 10,
-      updatedAt: 10,
+      updatedAt: 10
     });
 
     const unchanged = upsertEvaluationRubric(
@@ -68,7 +68,7 @@ describe("evaluation rubrics", () => {
       {
         id: created!.rubric.id,
         name: created!.rubric.name,
-        criteria: created!.rubric.criteria,
+        criteria: created!.rubric.criteria
       },
       11
     );
@@ -80,7 +80,7 @@ describe("evaluation rubrics", () => {
       {
         id: created!.rubric.id,
         name: "Agent answer quality",
-        criteria: created!.rubric.criteria.slice().reverse(),
+        criteria: created!.rubric.criteria.slice().reverse()
       },
       12
     );
@@ -89,11 +89,11 @@ describe("evaluation rubrics", () => {
       name: "Agent answer quality",
       revision: 2,
       createdAt: 10,
-      updatedAt: 12,
+      updatedAt: 12
     });
-    expect(updated?.rubric.criteria.map((criterion) => criterion.id)).toEqual([
+    expect(updated?.rubric.criteria.map(criterion => criterion.id)).toEqual([
       "criterion-clarity",
-      "criterion-correctness",
+      "criterion-correctness"
     ]);
   });
 
@@ -108,8 +108,8 @@ describe("evaluation rubrics", () => {
         updatedAt: 1,
         criteria: [
           { id: "one", name: "Same" },
-          { id: "two", name: "same" },
-        ],
+          { id: "two", name: "same" }
+        ]
       },
       {
         id: "rubric-2",
@@ -117,11 +117,11 @@ describe("evaluation rubrics", () => {
         revision: 1,
         createdAt: 1,
         updatedAt: 1,
-        criteria: CRITERIA,
-      },
+        criteria: CRITERIA
+      }
     ] as unknown as Thread["evaluationRubrics"];
-    expect(normalizeEvaluationRubrics(raw).map((rubric) => rubric.id)).toEqual([
-      "rubric-2",
+    expect(normalizeEvaluationRubrics(raw).map(rubric => rubric.id)).toEqual([
+      "rubric-2"
     ]);
   });
 
@@ -131,8 +131,8 @@ describe("evaluation rubrics", () => {
         name: "Rubric",
         criteria: [
           { id: "one", name: "Correctness" },
-          { id: "two", name: "correctness" },
-        ],
+          { id: "two", name: "correctness" }
+        ]
       })
     ).toBeNull();
   });
@@ -143,7 +143,7 @@ describe("evaluation rubrics", () => {
       upsertEvaluationRubric([rubric], {
         id: rubric.id,
         name: "Updated",
-        criteria: rubric.criteria,
+        criteria: rubric.criteria
       })
     ).toBeNull();
   });
@@ -152,12 +152,12 @@ describe("evaluation rubrics", () => {
     const rubrics = Array.from({ length: 20 }, (_, index) => ({
       ..._createRubric(),
       id: `rubric-${index}`,
-      name: `Rubric ${index}`,
+      name: `Rubric ${index}`
     }));
     expect(
       upsertEvaluationRubric(rubrics, {
         name: "One too many",
-        criteria: CRITERIA,
+        criteria: CRITERIA
       })
     ).toBeNull();
   });
@@ -179,7 +179,7 @@ describe("run history persistence", () => {
   test("backfills stable ids and retains only the newest runs", () => {
     const raw = Array.from({ length: MAX_RUN_HISTORY + 2 }, (_, index) => ({
       thread: { title: `Run ${index}` },
-      timestamp: index + 0.9,
+      timestamp: index + 0.9
     }));
     const normalized = normalizeRunHistory(raw);
 
@@ -194,10 +194,10 @@ describe("run history persistence", () => {
     const runs = Array.from({ length: MAX_RUN_HISTORY }, (_, index) => ({
       id: `run-${index}`,
       thread: {},
-      timestamp: index,
+      timestamp: index
     }));
     const next = recordRun(runs, { title: "Latest" }, 100, {
-      id: "run-latest",
+      id: "run-latest"
     });
 
     expect(next).toHaveLength(MAX_RUN_HISTORY);
@@ -222,17 +222,17 @@ describe("structured evaluation persistence", () => {
             runId: "run-b",
             scores: [
               { criterionId: "criterion-clarity", score: 4 },
-              { criterionId: "criterion-correctness", score: 5 },
-            ],
+              { criterionId: "criterion-correctness", score: 5 }
+            ]
           },
           {
             runId: "run-a",
             scores: [
               { criterionId: "criterion-clarity", score: 3 },
-              { criterionId: "criterion-correctness", score: 2 },
-            ],
-          },
-        ],
+              { criterionId: "criterion-correctness", score: 2 }
+            ]
+          }
+        ]
       },
       20
     );
@@ -241,16 +241,16 @@ describe("structured evaluation persistence", () => {
         runId: "run-a",
         scores: [
           { criterionId: "criterion-correctness", score: 2 },
-          { criterionId: "criterion-clarity", score: 3 },
-        ],
+          { criterionId: "criterion-clarity", score: 3 }
+        ]
       },
       {
         runId: "run-b",
         scores: [
           { criterionId: "criterion-correctness", score: 5 },
-          { criterionId: "criterion-clarity", score: 4 },
-        ],
-      },
+          { criterionId: "criterion-clarity", score: 4 }
+        ]
+      }
     ]);
   });
 
@@ -258,13 +258,13 @@ describe("structured evaluation persistence", () => {
     const malformed = {
       ..._legacyEvaluation(),
       rubric: snapshotEvaluationRubric(_createRubric()),
-      runScores: [{ runId: "run-a", scores: [] }],
+      runScores: [{ runId: "run-a", scores: [] }]
     } as unknown as EvaluationRecord;
     expect(normalizeEvaluations([malformed], RUNS)).toEqual([
       {
         ..._legacyEvaluation(),
-        note: "Better answer",
-      },
+        note: "Better answer"
+      }
     ]);
   });
 
@@ -276,7 +276,7 @@ describe("structured evaluation persistence", () => {
       {
         leftRunId: "run-b",
         rightRunId: "run-a",
-        verdict: "leftBetter",
+        verdict: "leftBetter"
       },
       30
     );
@@ -287,7 +287,7 @@ describe("structured evaluation persistence", () => {
       rightRunId: "run-a",
       verdict: "leftBetter",
       createdAt: original.createdAt,
-      updatedAt: 30,
+      updatedAt: 30
     });
   });
 
@@ -302,7 +302,7 @@ describe("structured evaluation persistence", () => {
           id: existing.id,
           leftRunId: "run-a",
           rightRunId: "run-c",
-          verdict: "tie",
+          verdict: "tie"
         },
         40
       )
@@ -313,11 +313,11 @@ describe("structured evaluation persistence", () => {
     const runs = normalizeRunHistory([
       { id: "duplicate", thread: { title: "Old" }, timestamp: 1 },
       { id: "unique", thread: {}, timestamp: 2 },
-      { id: "duplicate", thread: { title: "New" }, timestamp: 3 },
+      { id: "duplicate", thread: { title: "New" }, timestamp: 3 }
     ]);
-    expect(runs.map((run) => [run.id, run.thread.title])).toEqual([
+    expect(runs.map(run => [run.id, run.thread.title])).toEqual([
       ["unique", undefined],
-      ["duplicate", "New"],
+      ["duplicate", "New"]
     ]);
 
     const duplicatePair = {
@@ -326,7 +326,7 @@ describe("structured evaluation persistence", () => {
       leftRunId: "run-b",
       rightRunId: "run-a",
       verdict: "leftBetter" as const,
-      updatedAt: 4,
+      updatedAt: 4
     };
     expect(
       normalizeEvaluations([_legacyEvaluation(), duplicatePair], RUNS)
@@ -342,7 +342,7 @@ describe("structured evaluation persistence", () => {
       {
         id: definition.id,
         name: "Updated rubric",
-        criteria: definition.criteria,
+        criteria: definition.criteria
       },
       40
     );

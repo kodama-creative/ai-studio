@@ -3,8 +3,6 @@
 import { SearchIcon } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 
-import type { SkillInfo } from "@/shared/skills";
-
 import { SkillListItem } from "../../skill-list-item";
 import { Button } from "../../ui/button";
 import {
@@ -13,20 +11,22 @@ import {
   DialogDescription,
   DialogFooter,
   DialogHeader,
-  DialogTitle,
+  DialogTitle
 } from "../../ui/dialog";
 import { Input } from "../../ui/input";
 import { ScrollArea } from "../../ui/scroll-area";
 
+import type { SkillInfo } from "@/shared/skills";
+
 interface SkillSelectionDialogProps {
-  open: boolean;
-  disabled?: boolean;
-  loading: boolean;
-  error: string | null;
-  skills: SkillInfo[];
-  selectedSkillNames: string[];
-  onOpenChange: (open: boolean) => void;
-  onApply: (skillNames: string[]) => void;
+  readonly open: boolean;
+  readonly disabled?: boolean;
+  readonly loading: boolean;
+  readonly error: string | null;
+  readonly skills: SkillInfo[];
+  readonly selectedSkillNames: string[];
+  readonly onOpenChange: (open: boolean) => void;
+  readonly onApply: (skillNames: string[]) => void;
 }
 
 function _SkillSelectionDialog({
@@ -37,7 +37,7 @@ function _SkillSelectionDialog({
   skills,
   selectedSkillNames,
   onOpenChange,
-  onApply,
+  onApply
 }: SkillSelectionDialogProps) {
   const [query, setQuery] = useState("");
   const [draftSkillNames, setDraftSkillNames] = useState(selectedSkillNames);
@@ -53,7 +53,7 @@ function _SkillSelectionDialog({
   // Empty selection means "all enabled skills", so every switch reads as on.
   const usingAllSkills = draftSkillNames.length === 0;
   const allSkillNames = useMemo(
-    () => skills.map((skill) => skill.name),
+    () => skills.map(skill => skill.name),
     [skills]
   );
   const filteredSkills = useMemo(() => {
@@ -62,28 +62,28 @@ function _SkillSelectionDialog({
       return skills;
     }
     return skills.filter(
-      (skill) =>
-        skill.name.toLowerCase().includes(trimmed) ||
-        skill.description.toLowerCase().includes(trimmed)
+      skill =>
+        skill.name.toLowerCase().includes(trimmed)
+        || skill.description.toLowerCase().includes(trimmed)
     );
   }, [query, skills]);
 
   const toggleSkill = useCallback(
     (skillName: string) => {
-      setDraftSkillNames((current) => {
+      setDraftSkillNames(current => {
         // Turning a switch off from the "all skills" default materializes the
         // full list minus that one skill.
         if (current.length === 0) {
-          return allSkillNames.filter((name) => name !== skillName);
+          return allSkillNames.filter(name => name !== skillName);
         }
         const next = current.includes(skillName)
-          ? current.filter((name) => name !== skillName)
+          ? current.filter(name => name !== skillName)
           : [...current, skillName];
         // Re-selecting every skill collapses back to the "all skills" default.
         if (
-          allSkillNames.length > 0 &&
-          next.length === allSkillNames.length &&
-          allSkillNames.every((name) => next.includes(name))
+          allSkillNames.length > 0
+          && next.length === allSkillNames.length
+          && allSkillNames.every(name => next.includes(name))
         ) {
           return [];
         }
@@ -99,7 +99,7 @@ function _SkillSelectionDialog({
   }, [draftSkillNames, onApply, onOpenChange]);
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent className="flex h-[560px] max-h-[calc(100vh-4rem)] w-[min(720px,calc(100vw-2rem))] max-w-none! flex-col gap-0 overflow-hidden p-0">
         <DialogHeader className="border-b px-4 py-3">
           <DialogTitle>Select skills</DialogTitle>
@@ -113,10 +113,10 @@ function _SkillSelectionDialog({
             <SearchIcon className="text-muted-foreground pointer-events-none absolute top-2 left-2 size-3.5" />
             <Input
               className="h-8 pl-7"
-              value={query}
               disabled={disabled}
+              onChange={event => { setQuery(event.currentTarget.value); }}
               placeholder="Search skills"
-              onChange={(event) => setQuery(event.currentTarget.value)}
+              value={query}
             />
           </div>
           <div className="flex items-center justify-between">
@@ -126,48 +126,54 @@ function _SkillSelectionDialog({
                 : `Selected ${draftSkillNames.length}`}
             </span>
             <Button
+              disabled={disabled || draftSkillNames.length === 0}
+              onClick={() => { setDraftSkillNames([]); }}
               size="xs"
               variant="ghost"
-              disabled={disabled || draftSkillNames.length === 0}
-              onClick={() => setDraftSkillNames([])}
             >
               Clear
             </Button>
           </div>
           <ScrollArea className="border-border/60 min-h-0 grow rounded-md border">
             <div className="flex flex-col gap-1.5 p-2">
-              {loading ? (
-                <div className="text-muted-foreground px-2 py-3 text-xs">
-                  Loading skills...
-                </div>
-              ) : error ? (
-                <div className="text-destructive px-2 py-3 text-xs">
-                  {error}
-                </div>
-              ) : filteredSkills.length === 0 ? (
-                <div className="text-muted-foreground px-2 py-3 text-xs">
-                  No matching skills.
-                </div>
-              ) : (
-                filteredSkills.map((skill) => (
-                  <SkillListItem
-                    key={skill.path}
-                    name={skill.name}
-                    description={skill.description}
-                    checked={usingAllSkills || selectedSet.has(skill.name)}
-                    disabled={disabled}
-                    onCheckedChange={() => toggleSkill(skill.name)}
-                  />
-                ))
-              )}
+              {loading
+                ? (
+                  <div className="text-muted-foreground px-2 py-3 text-xs">
+                    Loading skills...
+                  </div>
+                )
+                : error
+                  ? (
+                    <div className="text-destructive px-2 py-3 text-xs">
+                      {error}
+                    </div>
+                  )
+                  : filteredSkills.length === 0
+                    ? (
+                      <div className="text-muted-foreground px-2 py-3 text-xs">
+                        No matching skills.
+                      </div>
+                    )
+                    : (
+                      filteredSkills.map(skill => (
+                        <SkillListItem
+                          checked={usingAllSkills || selectedSet.has(skill.name)}
+                          description={skill.description}
+                          disabled={disabled}
+                          key={skill.path}
+                          name={skill.name}
+                          onCheckedChange={() => { toggleSkill(skill.name); }}
+                        />
+                      ))
+                    )}
             </div>
           </ScrollArea>
         </div>
         <DialogFooter className="border-t px-4 py-3">
           <Button
-            variant="outline"
             disabled={disabled}
-            onClick={() => onOpenChange(false)}
+            onClick={() => { onOpenChange(false); }}
+            variant="outline"
           >
             Cancel
           </Button>

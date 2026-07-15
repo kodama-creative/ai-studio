@@ -7,12 +7,12 @@ import {
   CommandEmpty,
   CommandInput,
   CommandItem,
-  CommandList,
+  CommandList
 } from "@/components/ui/command";
 import {
-  COMMAND_META,
   type Command as AppCommand,
-  type CommandType,
+  COMMAND_META,
+  type CommandType
 } from "@/shared/commands";
 
 /**
@@ -24,16 +24,16 @@ import {
 export function CommandPalette({
   open,
   onOpenChange,
-  blacklist = [],
+  blacklist = []
 }: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  blacklist?: string[];
+  readonly blacklist?: string[];
+  readonly onOpenChange: (open: boolean) => void;
+  readonly open: boolean;
 }) {
   const { executeCommand } = useCommands();
 
   const types = (Object.keys(COMMAND_META) as CommandType[]).filter(
-    (type) => !blacklist.includes(type)
+    type => !blacklist.includes(type)
   );
 
   const run = (type: CommandType) => {
@@ -44,13 +44,13 @@ export function CommandPalette({
   };
 
   return (
-    <CommandDialog open={open} onOpenChange={onOpenChange}>
+    <CommandDialog onOpenChange={onOpenChange} open={open}>
       <Command>
         <CommandInput placeholder="Search commands..." />
         <CommandList>
           <CommandEmpty>No commands found.</CommandEmpty>
-          {types.map((type) => (
-            <CommandItem key={type} onSelect={() => run(type)}>
+          {types.map(type => (
+            <CommandItem key={type} onSelect={() => { run(type); }}>
               {COMMAND_META[type].label}
             </CommandItem>
           ))}

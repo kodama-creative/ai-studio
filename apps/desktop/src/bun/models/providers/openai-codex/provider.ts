@@ -1,8 +1,8 @@
 import {
-  createProvider,
   type ApiKeyAuth,
   type AuthResult,
-  type Provider,
+  createProvider,
+  type Provider
 } from "@earendil-works/pi-ai";
 import { openAIResponsesApi } from "@earendil-works/pi-ai/api/openai-responses.lazy";
 import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
@@ -21,10 +21,10 @@ export function createOpenAICodexProvider(): Provider {
   // API Key mode.
   if (credentials?.mode === "apikey") {
     const codex = openaiCodexProvider();
-    const models = codex.getModels().map((model) => ({
+    const models = codex.getModels().map(model => ({
       ...model,
       api: credentials.api,
-      baseUrl: credentials.baseUrl,
+      baseUrl: credentials.baseUrl
     }));
     return createProvider({
       id: codex.id,
@@ -32,7 +32,7 @@ export function createOpenAICodexProvider(): Provider {
       baseUrl: credentials.baseUrl,
       auth: { apiKey: _getCodexApiKeyAuth() },
       models,
-      api: openAIResponsesApi(),
+      api: openAIResponsesApi()
     });
   }
 
@@ -43,19 +43,19 @@ export function createOpenAICodexProvider(): Provider {
     auth: {
       ...codex.auth,
       apiKey: _getCodexApiKeyAuth()
-    },
+    }
   };
 }
 
 function _getCodexApiKeyAuth(): ApiKeyAuth {
   return {
     name: "Codex CLI credentials",
-    resolve(): Promise<AuthResult | undefined> {
+    async resolve(): Promise<AuthResult | undefined> {
       const credentials = getCodexCredentials();
       if (!credentials) {
         return Promise.resolve(undefined);
       }
       return Promise.resolve({ auth: { apiKey: credentials.apiKey } });
-    },
+    }
   };
 }

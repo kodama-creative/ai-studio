@@ -1,34 +1,33 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-
 import {
-  createAssistantMessageEventStream,
-  createModels,
-  createProvider,
   type Api,
   type AssistantMessage,
   type Context,
-  type Model,
+  createAssistantMessageEventStream,
+  createModels,
+  createProvider,
+  type Model
 } from "@earendil-works/pi-ai";
+import { afterEach, describe, expect, test } from "bun:test";
+
 import type {
   BuiltinTool,
   McpTool,
-  ThreadAgentRuntimeProvenance,
+  ThreadAgentRuntimeProvenance
 } from "@llm-space/core";
-import { afterEach, describe, expect, test } from "bun:test";
-
-import { ExternalAgentProjectManager } from "../external-projects";
 
 import { StreamThreadController } from "./stream-thread";
+import { ExternalAgentProjectManager } from "../external-projects";
 
 const roots: string[] = [];
 const managers: ExternalAgentProjectManager[] = [];
 
 afterEach(async () => {
-  await Promise.all(managers.splice(0).map((manager) => manager.shutdown()));
+  await Promise.all(managers.splice(0).map(async manager => manager.shutdown()));
   await Promise.all(
-    roots.splice(0).map((root) => rm(root, { recursive: true }))
+    roots.splice(0).map(async root => rm(root, { recursive: true }))
   );
 });
 
@@ -36,7 +35,7 @@ describe("StreamThreadController Agent Project runtime", () => {
   test("streams a complete Pi Agent ReAct run from the immutable project runtime", async () => {
     const { models, manager, opened, threadId } = await _fixture({
       instructions: "Use echo.\n",
-      projectTool: true,
+      projectTool: true
     });
     const events: string[] = [];
     let runtimeProvenance: ThreadAgentRuntimeProvenance | undefined;
@@ -54,7 +53,7 @@ describe("StreamThreadController Agent Project runtime", () => {
           projectId: opened.id,
           threadId,
           executionMode: "react",
-          modelSource: "agent",
+          modelSource: "agent"
         },
         request: {
           model: { provider: "fake", id: "fake-model" },
@@ -65,15 +64,15 @@ describe("StreamThreadController Agent Project runtime", () => {
               {
                 role: "user",
                 content: [{ type: "text", text: "hello" }],
-                timestamp: Date.now(),
-              },
+                timestamp: Date.now()
+              }
             ],
             tools: opened.tools,
-            sourceTools: opened.tools,
-          },
-        },
+            sourceTools: opened.tools
+          }
+        }
       },
-      (message) => {
+      message => {
         if (message.type === "runtime") {
           runtimeProvenance = message.runtime;
         }
@@ -87,20 +86,20 @@ describe("StreamThreadController Agent Project runtime", () => {
       projectId: opened.id,
       snapshot: opened.snapshot,
       definitionFingerprint: opened.definitionFingerprint,
-      modelSource: "agent",
+      modelSource: "agent"
     });
     expect(events).toContain("tool_execution_end");
     expect(events.at(-1)).toBe("done");
     const persisted = await manager.readThread(opened.id, threadId);
     expect(
-      persisted.thread.context?.messages?.map((message) => message.role)
+      persisted.thread.context?.messages?.map(message => message.role)
     ).toEqual(["user", "assistant", "assistant"]);
     expect(
       persisted.thread.context?.messages?.[1]?.role === "assistant"
         ? persisted.thread.context.messages[1].toolCalls?.[0]?.output
         : undefined
     ).toMatchObject({
-      content: [{ type: "text", text: "hello" }],
+      content: [{ type: "text", text: "hello" }]
     });
   });
 
@@ -109,8 +108,8 @@ describe("StreamThreadController Agent Project runtime", () => {
       instructions: "Be careful.\n",
       toolCall: {
         name: "bash",
-        arguments: { command: "rm -rf /tmp/should-not-run" },
-      },
+        arguments: { command: "rm -rf /tmp/should-not-run" }
+      }
     });
     let executions = 0;
     const controller = new StreamThreadController(
@@ -119,10 +118,10 @@ describe("StreamThreadController Agent Project runtime", () => {
       manager,
       undefined,
       {
-        call: () => {
+        call: async () => {
           executions += 1;
           return Promise.resolve({ contentText: "executed", isError: false });
-        },
+        }
       } as never
     );
     const bashTool: BuiltinTool = {
@@ -132,8 +131,8 @@ describe("StreamThreadController Agent Project runtime", () => {
       parameters: {
         type: "object",
         properties: { command: { type: "string" } },
-        required: ["command"],
-      },
+        required: ["command"]
+      }
     };
 
     await controller.run(
@@ -144,7 +143,7 @@ describe("StreamThreadController Agent Project runtime", () => {
           projectId: opened.id,
           threadId,
           executionMode: "react",
-          modelSource: "agent",
+          modelSource: "agent"
         },
         request: {
           model: { provider: "fake", id: "fake-model" },
@@ -155,13 +154,13 @@ describe("StreamThreadController Agent Project runtime", () => {
               {
                 role: "user",
                 content: [{ type: "text", text: "clean up" }],
-                timestamp: Date.now(),
-              },
+                timestamp: Date.now()
+              }
             ],
             tools: [bashTool],
-            sourceTools: [bashTool],
-          },
-        },
+            sourceTools: [bashTool]
+          }
+        }
       },
       () => undefined
     );
@@ -180,7 +179,7 @@ describe("StreamThreadController Agent Project runtime", () => {
     const toolName = "mcp__server__fail";
     const { models, manager, opened, threadId } = await _fixture({
       instructions: "Use MCP.\n",
-      toolCall: { name: toolName, arguments: {} },
+      toolCall: { name: toolName, arguments: {} }
     });
     let toolResultIsError: boolean | undefined;
     const controller = new StreamThreadController(
@@ -188,8 +187,8 @@ describe("StreamThreadController Agent Project runtime", () => {
       { capture: () => undefined } as never,
       manager,
       {
-        callTool: () =>
-          Promise.resolve({ contentText: "MCP failed", isError: true }),
+        callTool: async () =>
+          Promise.resolve({ contentText: "MCP failed", isError: true })
       } as never
     );
     const mcpTool: McpTool = {
@@ -199,7 +198,7 @@ describe("StreamThreadController Agent Project runtime", () => {
       parameters: { type: "object", properties: {} },
       serverId: "server-id",
       serverName: "server",
-      toolName: "fail",
+      toolName: "fail"
     };
 
     await controller.run(
@@ -210,7 +209,7 @@ describe("StreamThreadController Agent Project runtime", () => {
           projectId: opened.id,
           threadId,
           executionMode: "react",
-          modelSource: "agent",
+          modelSource: "agent"
         },
         request: {
           model: { provider: "fake", id: "fake-model" },
@@ -221,18 +220,18 @@ describe("StreamThreadController Agent Project runtime", () => {
               {
                 role: "user",
                 content: [{ type: "text", text: "call MCP" }],
-                timestamp: Date.now(),
-              },
+                timestamp: Date.now()
+              }
             ],
             tools: [mcpTool],
-            sourceTools: [mcpTool],
-          },
-        },
+            sourceTools: [mcpTool]
+          }
+        }
       },
-      (message) => {
+      message => {
         if (
-          message.type === "event" &&
-          message.event.type === "tool_execution_end"
+          message.type === "event"
+          && message.event.type === "tool_execution_end"
         ) {
           toolResultIsError = message.event.isError;
         }
@@ -253,11 +252,11 @@ describe("StreamThreadController Agent Project runtime", () => {
 async function _fixture({
   instructions,
   toolCall,
-  projectTool = false,
+  projectTool = false
 }: {
   instructions: string;
-  toolCall?: { name: string; arguments: Record<string, unknown> };
   projectTool?: boolean;
+  toolCall?: { arguments: Record<string, unknown>; name: string; };
 }) {
   const root = await mkdtemp(path.join(tmpdir(), "llm-space-stream-runtime-"));
   roots.push(root);
@@ -266,7 +265,7 @@ async function _fixture({
   const project = path.join(root, "project");
   const agent = path.join(project, "agent");
   await mkdir(projectTool ? path.join(agent, "tools") : agent, {
-    recursive: true,
+    recursive: true
   });
   await mkdir(workspace, { recursive: true });
   await writeFile(
@@ -294,7 +293,7 @@ async function _fixture({
   const manager = new ExternalAgentProjectManager({
     homePath: home,
     workspaceRoot: workspace,
-    getModels: () => Promise.resolve(models),
+    getModels: async () => Promise.resolve(models)
   });
   managers.push(manager);
   const opened = await manager.trustAndOpen(project);
@@ -303,18 +302,18 @@ async function _fixture({
 
 function _modelManager(models: ReturnType<typeof _models>) {
   return {
-    getAvailableModels: () => Promise.resolve(models),
+    getAvailableModels: async () => Promise.resolve(models),
     getBaseUrl: () => undefined,
     getHeaders: () => undefined,
     isBuiltin: () => false,
-    isBuiltinCatalogModel: () => false,
+    isBuiltinCatalogModel: () => false
   } as never;
 }
 
 function _models(
-  toolCall: { name: string; arguments: Record<string, unknown> } = {
+  toolCall: { arguments: Record<string, unknown>; name: string; } = {
     name: "echo",
-    arguments: { text: "hello" },
+    arguments: { text: "hello" }
   }
 ) {
   const model: Model<"fake"> = {
@@ -327,24 +326,24 @@ function _models(
     input: ["text"],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: 128_000,
-    maxTokens: 4_096,
+    maxTokens: 4_096
   };
   const api = {
     stream: (_model: Model<Api>, context: Context) =>
       _stream(context, toolCall),
     streamSimple: (_model: Model<Api>, context: Context) =>
-      _stream(context, toolCall),
+      _stream(context, toolCall)
   };
   const provider = createProvider({
     id: "fake",
     auth: {
       apiKey: {
         name: "Fake",
-        resolve: () => Promise.resolve({ auth: {} }),
-      },
+        resolve: async () => Promise.resolve({ auth: {} })
+      }
     },
     models: [model],
-    api,
+    api
   });
   const models = createModels();
   models.setProvider(provider);
@@ -353,7 +352,7 @@ function _models(
 
 function _stream(
   context: Context,
-  toolCall: { name: string; arguments: Record<string, unknown> }
+  toolCall: { arguments: Record<string, unknown>; name: string; }
 ) {
   const stream = createAssistantMessageEventStream();
   const hasResult = context.messages.at(-1)?.role === "toolResult";
@@ -362,13 +361,13 @@ function _stream(
     content: hasResult
       ? [{ type: "text", text: "done" }]
       : [
-          {
-            type: "toolCall",
-            id: "call-one",
-            name: toolCall.name,
-            arguments: toolCall.arguments,
-          },
-        ],
+        {
+          type: "toolCall",
+          id: "call-one",
+          name: toolCall.name,
+          arguments: toolCall.arguments
+        }
+      ],
     api: "fake",
     provider: "fake",
     model: "fake-model",
@@ -378,17 +377,17 @@ function _stream(
       cacheRead: 0,
       cacheWrite: 0,
       totalTokens: 2,
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
     },
     stopReason: hasResult ? "stop" : "toolUse",
-    timestamp: Date.now(),
+    timestamp: Date.now()
   };
   queueMicrotask(() => {
     stream.push({ type: "start", partial: message });
     stream.push({
       type: "done",
       reason: hasResult ? "stop" : "toolUse",
-      message,
+      message
     });
   });
   return stream;

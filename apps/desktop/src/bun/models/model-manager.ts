@@ -1,32 +1,32 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { env } from "node:process";
-
 import {
-  createModels,
   type Api,
+  createModels,
   type Model,
   type Models,
-  type Provider,
+  type Provider
 } from "@earendil-works/pi-ai";
-import {
-  ModelProviderGroup,
-  type CustomModel,
-  type ModelConfig,
-} from "@llm-space/core";
 import { getSettingsDir } from "@llm-space/core/server";
+
+import type {
+  CustomModel,
+  ModelConfig
+} from "@llm-space/core";
+import type { ModelProviderGroup } from "@llm-space/core";
 
 import {
   BUILTIN_PROVIDER_META,
-  BUILTIN_PROVIDERS,
+  BUILTIN_PROVIDERS
 } from "./providers/builtin-providers";
 import { createCustomProvider } from "./providers/custom-provider";
 import {
-  DEFAULT_CUSTOM_PROVIDER_API,
   type CustomModelConfig,
   type CustomProviderApi,
+  DEFAULT_CUSTOM_PROVIDER_API,
   type ModelsConfig,
-  type ProviderConfig,
+  type ProviderConfig
 } from "./types";
 
 /**
@@ -70,7 +70,7 @@ export class ModelManager {
    */
   buildModelsWithCandidate(providerId: string, candidate: CustomModel): Models {
     const entry = this._config.providers.find(
-      (provider) => provider.id === providerId
+      provider => provider.id === providerId
     );
     if (!entry) {
       throw new Error(`Provider not configured: ${providerId}`);
@@ -81,14 +81,14 @@ export class ModelManager {
     // custom provider picks its API implementation from the provider-level
     // `api` — so a changed "API type" is what actually gets tested.
     const others = (entry.models ?? []).filter(
-      (model) => model.id !== candidate.id
+      model => model.id !== candidate.id
     );
     const syntheticEntry: ProviderConfig = {
       ...entry,
       ...(entry.builtin === true
         ? {}
         : { api: candidate.api as CustomProviderApi }),
-      models: [...others, candidate],
+      models: [...others, candidate]
     };
     const target = this._buildProvider(syntheticEntry);
     if (!target) {
@@ -106,29 +106,29 @@ export class ModelManager {
 
   async getBuiltinProviders(): Promise<ModelProviderGroup[]> {
     const detected = await this._detectProviders();
-    return Object.values(BUILTIN_PROVIDERS).map((provider) => ({
+    return Object.values(BUILTIN_PROVIDERS).map(provider => ({
       id: provider.id,
       name: provider.name,
       models: [],
       apiKeyDetected: detected.includes(provider.id),
-      websiteURL: this.getWebsiteLink(provider.id),
+      websiteURL: this.getWebsiteLink(provider.id)
     }));
   }
 
   /** Add a builtin provider to `settings/models.json`. */
-  addBuiltInProvider({ id, apiKey }: { id: string; apiKey?: string }): void {
+  addBuiltInProvider({ id, apiKey }: { apiKey?: string; id: string; }): void {
     if (!(id in BUILTIN_PROVIDERS)) {
       throw new Error(`Unknown builtin provider: ${id}`);
     }
 
-    if (this._config.providers.some((entry) => entry.id === id)) {
+    if (this._config.providers.some(entry => entry.id === id)) {
       throw new Error(`Provider already configured: ${id}`);
     }
 
     this._config.providers.push({
       id,
       builtin: true,
-      ...(apiKey !== undefined ? { apiKey } : {}),
+      ...(apiKey !== undefined ? { apiKey } : {})
     });
 
     this._models = null;
@@ -140,14 +140,14 @@ export class ModelManager {
     id,
     name,
     baseUrl,
-    api = DEFAULT_CUSTOM_PROVIDER_API,
+    api = DEFAULT_CUSTOM_PROVIDER_API
   }: {
+    api?: CustomProviderApi;
+    baseUrl: string;
     id: string;
     name: string;
-    baseUrl: string;
-    api?: CustomProviderApi;
   }): void {
-    if (this._config.providers.some((entry) => entry.id === id)) {
+    if (this._config.providers.some(entry => entry.id === id)) {
       throw new Error(`Provider already configured: ${id}`);
     }
 
@@ -171,29 +171,27 @@ export class ModelManager {
       headers,
       name,
       api,
-      icon,
+      icon
     }: {
+      api?: CustomProviderApi | null;
       apiKey?: string | null;
       baseUrl?: string | null;
       headers?: Record<string, string> | null;
-      name?: string | null;
-      api?: CustomProviderApi | null;
       icon?: string | null;
+      name?: string | null;
     }
   ): void {
     const entry = this._config.providers.find(
-      (provider) => provider.id === providerId
+      provider => provider.id === providerId
     );
     if (!entry) {
       throw new Error(`Provider not configured: ${providerId}`);
     }
     if (apiKey !== undefined) {
-      if (apiKey === null) delete entry.apiKey;
-      else entry.apiKey = apiKey;
+      if (apiKey === null) { delete entry.apiKey; } else { entry.apiKey = apiKey; }
     }
     if (baseUrl !== undefined) {
-      if (baseUrl === null) delete entry.baseUrl;
-      else entry.baseUrl = baseUrl;
+      if (baseUrl === null) { delete entry.baseUrl; } else { entry.baseUrl = baseUrl; }
     }
     if (headers !== undefined) {
       if (headers === null || Object.keys(headers).length === 0) {
@@ -203,16 +201,13 @@ export class ModelManager {
       }
     }
     if (name !== undefined) {
-      if (name === null) delete entry.name;
-      else entry.name = name;
+      if (name === null) { delete entry.name; } else { entry.name = name; }
     }
     if (api !== undefined) {
-      if (api === null) delete entry.api;
-      else entry.api = api;
+      if (api === null) { delete entry.api; } else { entry.api = api; }
     }
     if (icon !== undefined) {
-      if (icon === null) delete entry.icon;
-      else entry.icon = icon;
+      if (icon === null) { delete entry.icon; } else { entry.icon = icon; }
     }
     // Rebuild the registry so a cleared baseUrl restores the model's default
     // (the cached model instance would otherwise keep the mutated value).
@@ -222,20 +217,20 @@ export class ModelManager {
 
   /** The custom base URL override for a provider, if configured. */
   getBaseUrl(providerId: string): string | undefined {
-    return this._config.providers.find((entry) => entry.id === providerId)
+    return this._config.providers.find(entry => entry.id === providerId)
       ?.baseUrl;
   }
 
   /** The extra HTTP headers configured for a provider, if any. */
   getHeaders(providerId: string): Record<string, string> | undefined {
-    return this._config.providers.find((entry) => entry.id === providerId)
+    return this._config.providers.find(entry => entry.id === providerId)
       ?.headers;
   }
 
   /** The selected API compatibility mode for a custom provider. */
   getApi(providerId: string): CustomProviderApi | undefined {
     const entry = this._config.providers.find(
-      (provider) => provider.id === providerId
+      provider => provider.id === providerId
     );
     if (!entry || entry.builtin === true) {
       return undefined;
@@ -246,7 +241,7 @@ export class ModelManager {
   /** The model ids the user has disabled for a provider (empty by default). */
   getDisabledModels(providerId: string): string[] {
     return (
-      this._config.providers.find((entry) => entry.id === providerId)
+      this._config.providers.find(entry => entry.id === providerId)
         ?.disabledModels ?? []
     );
   }
@@ -257,14 +252,14 @@ export class ModelManager {
    * id/name.
    */
   getProviderIcon(providerId: string): string | undefined {
-    return this._config.providers.find((entry) => entry.id === providerId)
+    return this._config.providers.find(entry => entry.id === providerId)
       ?.icon;
   }
 
   /** The ids of the user-added models for a provider (empty by default). */
   getCustomModels(providerId: string): string[] {
     return (
-      this._config.providers.find((entry) => entry.id === providerId)
+      this._config.providers.find(entry => entry.id === providerId)
         ?.customModels ?? []
     );
   }
@@ -272,7 +267,7 @@ export class ModelManager {
   /** Whether a configured provider is one of the shipped builtin providers. */
   isBuiltin(providerId: string): boolean {
     return (
-      this._config.providers.find((entry) => entry.id === providerId)
+      this._config.providers.find(entry => entry.id === providerId)
         ?.builtin === true
     );
   }
@@ -284,10 +279,10 @@ export class ModelManager {
    * record verbatim.
    */
   isBuiltinCatalogModel(providerId: string, modelId: string): boolean {
-    if (!this.isBuiltin(providerId)) return false;
+    if (!this.isBuiltin(providerId)) { return false; }
     const provider = BUILTIN_PROVIDERS[providerId];
     return provider
-      ? provider.getModels().some((model) => model.id === modelId)
+      ? provider.getModels().some(model => model.id === modelId)
       : false;
   }
 
@@ -318,7 +313,7 @@ export class ModelManager {
 
   setModelEnabled(providerId: string, modelId: string, enabled: boolean): void {
     const entry = this._config.providers.find(
-      (provider) => provider.id === providerId
+      provider => provider.id === providerId
     );
     if (!entry) {
       throw new Error(`Provider not configured: ${providerId}`);
@@ -347,7 +342,7 @@ export class ModelManager {
    */
   setAllModelsEnabled(providerId: string, enabled: boolean): void {
     const entry = this._config.providers.find(
-      (provider) => provider.id === providerId
+      provider => provider.id === providerId
     );
     if (!entry) {
       throw new Error(`Provider not configured: ${providerId}`);
@@ -376,22 +371,21 @@ export class ModelManager {
     originalId?: string
   ): void {
     const entry = this._config.providers.find(
-      (provider) => provider.id === providerId
+      provider => provider.id === providerId
     );
     if (!entry) {
       throw new Error(`Provider not configured: ${providerId}`);
     }
     const removeId = originalId ?? model.id;
     const models = (entry.models ?? []).filter(
-      (existing) => existing.id !== removeId
+      existing => existing.id !== removeId
     );
     models.push(model);
     entry.models = models;
-    entry.customModels = models.map((existing) => existing.id);
+    entry.customModels = models.map(existing => existing.id);
     if (originalId && originalId !== model.id && entry.disabledModels) {
-      entry.disabledModels = entry.disabledModels.map((id) =>
-        id === originalId ? model.id : id
-      );
+      entry.disabledModels = entry.disabledModels.map(id =>
+        (id === originalId ? model.id : id));
     }
     this._models = null;
     this._saveConfig();
@@ -405,24 +399,24 @@ export class ModelManager {
    */
   removeCustomModel(providerId: string, modelId: string): void {
     const entry = this._config.providers.find(
-      (provider) => provider.id === providerId
+      provider => provider.id === providerId
     );
     if (!entry) {
       throw new Error(`Provider not configured: ${providerId}`);
     }
     if (entry.models) {
-      entry.models = entry.models.filter((model) => model.id !== modelId);
-      if (entry.models.length === 0) delete entry.models;
+      entry.models = entry.models.filter(model => model.id !== modelId);
+      if (entry.models.length === 0) { delete entry.models; }
     }
     if (entry.customModels) {
-      entry.customModels = entry.customModels.filter((id) => id !== modelId);
-      if (entry.customModels.length === 0) delete entry.customModels;
+      entry.customModels = entry.customModels.filter(id => id !== modelId);
+      if (entry.customModels.length === 0) { delete entry.customModels; }
     }
     if (entry.disabledModels) {
       entry.disabledModels = entry.disabledModels.filter(
-        (id) => id !== modelId
+        id => id !== modelId
       );
-      if (entry.disabledModels.length === 0) delete entry.disabledModels;
+      if (entry.disabledModels.length === 0) { delete entry.disabledModels; }
     }
     this._models = null;
     this._saveConfig();
@@ -431,7 +425,7 @@ export class ModelManager {
   /** Remove a provider from `settings/models.json`. No-op when not configured. */
   removeProvider(providerId: string): void {
     const index = this._config.providers.findIndex(
-      (entry) => entry.id === providerId
+      entry => entry.id === providerId
     );
     if (index === -1) {
       return;
@@ -445,7 +439,7 @@ export class ModelManager {
    * The raw API key value from config, without resolving `$ENV` references.
    */
   getRawApiKey(providerId: string): string | undefined {
-    return this._config.providers.find((entry) => entry.id === providerId)?.apiKey;
+    return this._config.providers.find(entry => entry.id === providerId)?.apiKey;
   }
 
   /**
@@ -475,7 +469,7 @@ export class ModelManager {
   private _providerModelIds(providerId: string): string[] {
     const provider = BUILTIN_PROVIDERS[providerId];
     const builtin = provider
-      ? provider.getModels().map((model) => model.id)
+      ? provider.getModels().map(model => model.id)
       : [];
     return [...builtin, ...this.getCustomModels(providerId)];
   }
@@ -499,11 +493,10 @@ export class ModelManager {
   private _buildProviders(): Provider[] {
     const seen = new Set<string>();
     return this._config.providers
-      .filter((entry) =>
-        seen.has(entry.id) ? false : (seen.add(entry.id), true)
-      )
+      .filter(entry =>
+        (seen.has(entry.id) ? false : (seen.add(entry.id), true)))
       .sort((a, b) => a.id.localeCompare(b.id))
-      .map((entry) => this._buildProvider(entry))
+      .map(entry => this._buildProvider(entry))
       .filter((provider): provider is Provider => provider !== null);
   }
 
@@ -520,7 +513,7 @@ export class ModelManager {
         name: entry.name ?? entry.id,
         baseUrl: entry.baseUrl ?? "",
         api: entry.api ?? DEFAULT_CUSTOM_PROVIDER_API,
-        models: this._customModelsFor(entry),
+        models: this._customModelsFor(entry)
       });
     }
     if (!base) {
@@ -539,16 +532,16 @@ export class ModelManager {
    * `baseUrl` (defaulting to the builtin provider's base URL so the model reuses
    * the same endpoint that `getBaseUrl` overrides at runtime).
    */
-  private _customModelsFor(entry: ProviderConfig): Model<Api>[] {
+  private _customModelsFor(entry: ProviderConfig): Array<Model<Api>> {
     const base = BUILTIN_PROVIDERS[entry.id];
-    return (entry.models ?? []).map((model) => ({
+    return (entry.models ?? []).map(model => ({
       ...model,
       api:
         entry.builtin === true
           ? model.api
           : (entry.api ?? DEFAULT_CUSTOM_PROVIDER_API),
       provider: entry.id,
-      baseUrl: model.baseUrl ?? base?.baseUrl ?? entry.baseUrl ?? "",
+      baseUrl: model.baseUrl ?? base?.baseUrl ?? entry.baseUrl ?? ""
     }));
   }
 
@@ -562,11 +555,11 @@ export class ModelManager {
       if (!entry.models || entry.models.length === 0) {
         continue;
       }
-      const ids = entry.models.map((model) => model.id);
+      const ids = entry.models.map(model => model.id);
       const current = entry.customModels ?? [];
       const same =
-        ids.length === current.length &&
-        ids.every((id, index) => id === current[index]);
+        ids.length === current.length
+        && ids.every((id, index) => id === current[index]);
       if (!same) {
         entry.customModels = ids;
         changed = true;
@@ -618,7 +611,7 @@ export class ModelManager {
       ) as ModelsConfig;
       return {
         providers: Array.isArray(parsed.providers) ? parsed.providers : [],
-        defaultModel: parsed.defaultModel,
+        defaultModel: parsed.defaultModel
       };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
@@ -641,9 +634,9 @@ export class ModelManager {
       const res = await provider.auth.apiKey?.resolve({
         model: provider.getModels()[0],
         ctx: {
-          env: async (name) => env[name],
-          fileExists: async (filePath) => existsSync(filePath),
-        },
+          env: async name => env[name],
+          fileExists: async filePath => existsSync(filePath)
+        }
       });
       if (res?.auth.apiKey) {
         potentialProviders.push(provider.id);

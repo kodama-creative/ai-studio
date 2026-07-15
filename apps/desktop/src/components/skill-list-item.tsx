@@ -8,17 +8,17 @@ import {
   ItemContent,
   ItemDescription,
   ItemMedia,
-  ItemTitle,
+  ItemTitle
 } from "@/components/ui/item";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 
 interface SkillListItemProps {
-  name: string;
-  description?: string;
-  checked: boolean;
-  disabled?: boolean;
-  onCheckedChange: (checked: boolean) => void;
+  readonly name: string;
+  readonly description?: string;
+  readonly checked: boolean;
+  readonly disabled?: boolean;
+  readonly onCheckedChange: (checked: boolean) => void;
 }
 
 function _SkillListItem({
@@ -26,23 +26,23 @@ function _SkillListItem({
   description,
   checked,
   disabled,
-  onCheckedChange,
+  onCheckedChange
 }: SkillListItemProps) {
   return (
-    <Item variant="muted" size="sm">
+    <Item size="sm" variant="muted">
       <ItemMedia>
         <SparklesIcon className="text-muted-foreground size-4" />
       </ItemMedia>
       <ItemContent className={cn(!checked && "opacity-50")}>
         <ItemTitle>{name}</ItemTitle>
-        {description && <ItemDescription>{description}</ItemDescription>}
+        {description ? <ItemDescription>{description}</ItemDescription> : null}
       </ItemContent>
       <Switch
-        size="sm"
+        aria-label={checked ? `Disable ${name}` : `Enable ${name}`}
         checked={checked}
         disabled={disabled}
         onCheckedChange={onCheckedChange}
-        aria-label={checked ? `Disable ${name}` : `Enable ${name}`}
+        size="sm"
       />
     </Item>
   );

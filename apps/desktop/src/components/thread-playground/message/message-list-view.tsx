@@ -2,39 +2,38 @@ import {
   DragDropContext,
   Draggable,
   Droppable,
-  type DropResult,
   type DroppableProvided,
+  type DropResult
 } from "@hello-pangea/dnd";
-import type { AssistantMessage, Message, ThreadContext } from "@llm-space/core";
 import { PlusIcon } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { cn } from "@/lib/utils";
+import type { AssistantMessage, Message, ThreadContext } from "@llm-space/core";
 
+import { cn } from "@/lib/utils";
+import { MessageListItem } from "./message-list-item";
 import { Button } from "../../ui/button";
 import { ScrollArea } from "../../ui/scroll-area";
 import { useThreadStore, useThreadStoreActions } from "../stores";
-
-import { MessageListItem } from "./message-list-item";
 
 export function MessageListView({
   className,
   context: contextFromProps,
   messages: messagesFromProps,
   readonly: readonlyFromProps = false,
-  runDisabled = false,
+  runDisabled = false
 }: {
-  className?: string;
-  context?: ThreadContext;
-  messages?: Message[];
-  readonly?: boolean;
-  runDisabled?: boolean;
+  readonly className?: string;
+  readonly context?: ThreadContext;
+  readonly messages?: Message[];
+  readonly readonly?: boolean;
+  readonly runDisabled?: boolean;
 }) {
   const isSnapshotView = messagesFromProps !== undefined;
-  const status = useThreadStore((s) => s.status);
-  const collapsedMessageIds = useThreadStore((s) => s.collapsedMessageIds);
-  const autoFocusMessageId = useThreadStore((s) => s.autoFocusMessageId);
-  const storeMessages = useThreadStore((s) => s.thread.context?.messages);
+  const status = useThreadStore(s => s.status);
+  const collapsedMessageIds = useThreadStore(s => s.collapsedMessageIds);
+  const autoFocusMessageId = useThreadStore(s => s.autoFocusMessageId);
+  const storeMessages = useThreadStore(s => s.thread.context?.messages);
   const { appendMessage, moveMessage } = useThreadStoreActions();
   const [dragging, setDragging] = useState(false);
   const messages = messagesFromProps ?? storeMessages ?? [];
@@ -48,7 +47,7 @@ export function MessageListView({
   const handleDragEnd = useCallback((result: DropResult) => {
     setDragging(false);
     const { source, destination } = result;
-    if (!destination || source.index === destination.index) return;
+    if (!destination || source.index === destination.index) { return; }
     moveMessage(source.index, destination.index);
   }, []);
 
@@ -71,33 +70,35 @@ export function MessageListView({
   }, [status, scrollToBottom]);
 
   return (
-    <ScrollArea type="auto" className={cn("size-full", className)}>
-      <div ref={contentRef} className="flex flex-col p-3 pt-0.5">
-        {isSnapshotView ? (
-          <StaticMessageList
-            context={contextFromProps}
-            messages={messages}
-            readonly={readonly}
-          />
-        ) : (
-          <DragDropContext
-            onDragStart={handleDragStart}
-            onDragEnd={handleDragEnd}
-          >
-            <Droppable droppableId="message-list">
-              {(droppableProvided) => (
-                <DroppableMessageList
-                  droppableProvided={droppableProvided}
-                  messages={messages}
-                  readonly={readonly}
-                  runDisabled={runDisabled}
-                  autoFocusMessageId={autoFocusMessageId}
-                  collapsedMessageIds={collapsedMessageIds}
-                />
-              )}
-            </Droppable>
-          </DragDropContext>
-        )}
+    <ScrollArea className={cn("size-full", className)} type="auto">
+      <div className="flex flex-col p-3 pt-0.5" ref={contentRef}>
+        {isSnapshotView
+          ? (
+            <StaticMessageList
+              context={contextFromProps}
+              messages={messages}
+              readonly={readonly}
+            />
+          )
+          : (
+            <DragDropContext
+              onDragEnd={handleDragEnd}
+              onDragStart={handleDragStart}
+            >
+              <Droppable droppableId="message-list">
+                {droppableProvided => (
+                  <DroppableMessageList
+                    autoFocusMessageId={autoFocusMessageId}
+                    collapsedMessageIds={collapsedMessageIds}
+                    droppableProvided={droppableProvided}
+                    messages={messages}
+                    readonly={readonly}
+                    runDisabled={runDisabled}
+                  />
+                )}
+              </Droppable>
+            </DragDropContext>
+          )}
         {!isSnapshotView && (
           <StreamingMessageListItem streaming={status === "running"} />
         )}
@@ -110,9 +111,9 @@ export function MessageListView({
             readonly && "hidden"
           )}
           disabled={readonly}
-          variant="secondary"
-          size="lg"
           onClick={appendMessage}
+          size="lg"
+          variant="secondary"
         >
           <PlusIcon className="size-4" />
           Add message
@@ -125,19 +126,19 @@ export function MessageListView({
 function StaticMessageList({
   context,
   messages,
-  readonly,
+  readonly
 }: {
-  context?: ThreadContext;
-  messages: Message[];
-  readonly: boolean;
+  readonly context?: ThreadContext;
+  readonly messages: Message[];
+  readonly readonly: boolean;
 }) {
   return (
     <div className="flex flex-col pt-3">
-      {messages.map((message) => (
+      {messages.map(message => (
         <MessageListItem
-          key={message.id}
           className="mb-3.5"
           context={context}
+          key={message.id}
           message={message}
           readonly={readonly}
         />
@@ -146,17 +147,17 @@ function StaticMessageList({
   );
 }
 
-export const SnapshotMessageListView = memo(function SnapshotMessageListView({
+export const SnapshotMessageListView = memo(({
   className,
   context,
-  messages,
+  messages
 }: {
-  className?: string;
-  context?: ThreadContext;
-  messages: Message[];
-}) {
+  readonly className?: string;
+  readonly context?: ThreadContext;
+  readonly messages: Message[];
+}) => {
   return (
-    <ScrollArea type="auto" className={cn("size-full", className)}>
+    <ScrollArea className={cn("size-full", className)} type="auto">
       <div className="flex flex-col p-3 pt-0.5">
         <StaticMessageList context={context} messages={messages} readonly />
       </div>
@@ -170,14 +171,14 @@ function DroppableMessageList({
   readonly,
   runDisabled,
   autoFocusMessageId,
-  collapsedMessageIds,
+  collapsedMessageIds
 }: {
-  droppableProvided: DroppableProvided;
-  messages: Message[];
-  readonly: boolean;
-  runDisabled: boolean;
-  autoFocusMessageId: string | null;
-  collapsedMessageIds: string[];
+  readonly autoFocusMessageId: string | null;
+  readonly collapsedMessageIds: string[];
+  readonly droppableProvided: DroppableProvided;
+  readonly messages: Message[];
+  readonly readonly: boolean;
+  readonly runDisabled: boolean;
 }) {
   return (
     <div
@@ -187,13 +188,13 @@ function DroppableMessageList({
     >
       {messages.map((message, index) => (
         <DraggableMessageRow
-          key={message.id}
-          message={message}
-          index={index}
-          readonly={readonly}
-          runDisabled={runDisabled}
           autoFocus={message.id === autoFocusMessageId}
           collapsed={collapsedMessageIds.includes(message.id)}
+          index={index}
+          key={message.id}
+          message={message}
+          readonly={readonly}
+          runDisabled={runDisabled}
         />
       ))}
       {droppableProvided.placeholder}
@@ -215,18 +216,18 @@ const _DraggableMessageRow = function DraggableMessageRow({
   readonly,
   runDisabled,
   autoFocus,
-  collapsed,
+  collapsed
 }: {
-  message: Message;
-  index: number;
-  readonly: boolean;
-  runDisabled: boolean;
-  autoFocus: boolean;
-  collapsed: boolean;
+  readonly autoFocus: boolean;
+  readonly collapsed: boolean;
+  readonly index: number;
+  readonly message: Message;
+  readonly readonly: boolean;
+  readonly runDisabled: boolean;
 }) {
   return (
     <Draggable draggableId={message.id} index={index} isDragDisabled={readonly}>
-      {(draggableProvided) => {
+      {draggableProvided => {
         const { style, ...draggableProps } = draggableProvided.draggableProps;
         return (
           <div
@@ -240,12 +241,12 @@ const _DraggableMessageRow = function DraggableMessageRow({
             style={style}
           >
             <MessageListItem
-              message={message}
-              readonly={readonly}
-              runDisabled={runDisabled}
               autoFocus={autoFocus}
               collapsed={collapsed}
               dragHandleProps={draggableProvided.dragHandleProps}
+              message={message}
+              readonly={readonly}
+              runDisabled={runDisabled}
             />
           </div>
         );
@@ -255,15 +256,15 @@ const _DraggableMessageRow = function DraggableMessageRow({
 };
 const DraggableMessageRow = memo(_DraggableMessageRow);
 
-function StreamingMessageListItem({ streaming }: { streaming: boolean }) {
+function StreamingMessageListItem({ streaming }: { readonly streaming: boolean; }) {
   let streamingMessage: AssistantMessage | null = useThreadStore(
-    (s) => s.streamingMessage
+    s => s.streamingMessage
   );
   if (!streamingMessage && streaming) {
-    streamingMessage ??= {
+    streamingMessage = streamingMessage ?? {
       id: "streaming",
       role: "assistant",
-      content: [],
+      content: []
     };
   }
   if (!streamingMessage) {

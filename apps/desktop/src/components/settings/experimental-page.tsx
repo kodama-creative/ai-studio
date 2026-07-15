@@ -6,7 +6,6 @@ import { useCommands } from "@/commands";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { useExperimental } from "@/components/experimental-provider";
 import { Switch } from "@/components/ui/switch";
-
 import { SettingsPage } from "./settings-page";
 
 export function ExperimentalPage() {
@@ -33,42 +32,44 @@ export function ExperimentalPage() {
           </span>
         </span>
         <Switch
+          aria-label="Tracing"
           checked={tracingEnabled}
           onCheckedChange={setTracingEnabled}
-          aria-label="Tracing"
         />
       </div>
-      {import.meta.env.DEV ? (
-        <div className="flex h-14 items-center justify-between gap-4">
-          <span className="flex flex-col gap-0.5 text-sm">
-            React Scan
-            <span className="text-muted-foreground text-xs">
-              Overlay that highlights component re-renders. Takes effect after a
-              reload. Dev builds only.
+      {import.meta.env.DEV
+        ? (
+          <div className="flex h-14 items-center justify-between gap-4">
+            <span className="flex flex-col gap-0.5 text-sm">
+              React Scan
+              <span className="text-muted-foreground text-xs">
+                Overlay that highlights component re-renders. Takes effect after a
+                reload. Dev builds only.
+              </span>
             </span>
-          </span>
-          <Switch
-            checked={reactScanEnabled}
-            onCheckedChange={handleReactScanChange}
-            aria-label="React Scan"
-          />
-        </div>
-      ) : null}
+            <Switch
+              aria-label="React Scan"
+              checked={reactScanEnabled}
+              onCheckedChange={handleReactScanChange}
+            />
+          </div>
+        )
+        : null}
       <ConfirmDialog
-        open={reloadPromptOpen}
-        onOpenChange={setReloadPromptOpen}
-        dimBackground={false}
-        title="Reload to apply?"
-        description={`React Scan will be ${
-          reactScanEnabled ? "enabled" : "disabled"
-        } after the app reloads. Reload now?`}
         cancelLabel="Later"
         confirmLabel="Reload"
         confirmVariant="default"
+        description={`React Scan will be ${
+          reactScanEnabled ? "enabled" : "disabled"
+        } after the app reloads. Reload now?`}
+        dimBackground={false}
         onConfirm={() => {
           setReloadPromptOpen(false);
           executeCommand({ type: "reload", args: {} });
         }}
+        onOpenChange={setReloadPromptOpen}
+        open={reloadPromptOpen}
+        title="Reload to apply?"
       />
     </SettingsPage>
   );

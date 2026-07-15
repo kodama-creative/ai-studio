@@ -1,7 +1,8 @@
 import { extractInitials } from "@llm-space/core";
 
-import type { BrandIcon } from "@/lib/brand-icons";
 import { cn } from "@/lib/utils";
+
+import type { BrandIcon } from "@/lib/brand-icons";
 
 /**
  * Shared avatar body for {@link ModelAvatar} and {@link ProviderAvatar}: renders
@@ -16,17 +17,20 @@ export function BrandAvatar({
   size,
   colorClassName,
   fallbackClassName,
-  className,
+  className
 }: {
-  brand: BrandIcon | null;
-  id: string;
-  name: string;
-  size: number;
+  readonly brand: BrandIcon | null;
+  readonly id: string;
+  readonly name: string;
+  readonly size: number;
+
   /** Text color applied to both the brand icon and the fallback initials. */
-  colorClassName: string;
+  readonly colorClassName: string;
+
+  readonly className?: string;
+
   /** Shape/typography for the initials fallback (e.g. `rounded-full text-xs`). */
-  fallbackClassName: string;
-  className?: string;
+  readonly fallbackClassName: string;
 }) {
   if (brand) {
     const { Icon, props } = brand;
@@ -55,7 +59,7 @@ export function BrandAvatar({
       style={{
         width: size,
         height: size,
-        backgroundImage: `url(https://avatar.vercel.sh/${encodeURIComponent(id)}?size=${size})`,
+        backgroundImage: `url(https://avatar.vercel.sh/${encodeURIComponent(id)}?size=${size})`
       }}
     >
       {extractInitials(name)}

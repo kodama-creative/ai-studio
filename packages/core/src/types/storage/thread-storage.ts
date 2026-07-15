@@ -1,4 +1,4 @@
-import { Thread } from "../threads/thread";
+import type { Thread } from "../threads/thread";
 
 /**
  * Storage for threads: read and overwrite a single Thread by path.

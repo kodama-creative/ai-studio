@@ -1,4 +1,5 @@
 import { electrobun } from "@/lib/electrobun";
+
 import type { SearchSettings } from "@/shared/search";
 
 function _rpc() {

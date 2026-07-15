@@ -21,8 +21,8 @@ const skipSigning = Boolean(Bun.env.LLM_SPACE_SKIP_SIGNING);
 const skipNotarize =
   skipSigning || Boolean(Bun.env.LLM_SPACE_SKIP_NOTARIZE);
 const updateBaseUrl =
-  Bun.env.LLM_SPACE_UPDATE_BASE_URL ??
-  "https://github.com/deer-flow/llm-space/releases/download/updates";
+  Bun.env.LLM_SPACE_UPDATE_BASE_URL
+  ?? "https://github.com/deer-flow/llm-space/releases/download/updates";
 
 export default {
   app: {
@@ -30,7 +30,7 @@ export default {
     identifier: "tech.deerflow.llm-space",
     // Single source of truth for the app version; release tags must match
     // (CI validates `v{version}` against the pushed tag).
-    version: packageJson.version,
+    version: packageJson.version
   },
   build: {
     // Vite builds to dist/, we copy from there. `assets/` holds hashed,
@@ -40,7 +40,7 @@ export default {
     copy: {
       "dist/index.html": "views/mainview/index.html",
       "dist/assets": "views/mainview/assets",
-      "dist/images": "views/mainview/images",
+      "dist/images": "views/mainview/images"
     },
     // Ignore Vite output in watch mode — HMR handles view rebuilds separately
     watchIgnore: ["dist/**"],
@@ -52,31 +52,31 @@ export default {
       bundleCEF: useCefRenderer,
       ...(useCefRenderer
         ? {
-            defaultRenderer: "cef" as const,
-            chromiumFlags: {
-              "remote-debugging-port": cdpPort,
-            },
+          defaultRenderer: "cef" as const,
+          chromiumFlags: {
+            "remote-debugging-port": cdpPort
           }
+        }
         : {}),
-      icons: "icon.iconset",
+      icons: "icon.iconset"
     },
     linux: {
-      bundleCEF: false,
+      bundleCEF: false
     },
     win: {
-      bundleCEF: false,
-    },
+      bundleCEF: false
+    }
   },
   scripts: {
     // Both run right before their respective codesign step. Workaround for
     // electrobun#485 (x64-only, no-op elsewhere); see the script header.
     postBuild: "scripts/fix-x64-headerpad.ts",
-    postWrap: "scripts/fix-x64-headerpad.ts",
+    postWrap: "scripts/fix-x64-headerpad.ts"
   },
   release: {
     // Burned into every shipped bundle — the updater fetches
     // `{baseUrl}/{channel}-{os}-{arch}-update.json` from here. Both channels
     // share the rolling `updates` GitHub release (artifacts are channel-prefixed).
-    baseUrl: updateBaseUrl,
-  },
+    baseUrl: updateBaseUrl
+  }
 } satisfies ElectrobunConfig;

@@ -3,6 +3,7 @@
 import type { AnchorHTMLAttributes, MouseEvent } from "react";
 
 import { useCommands } from "@/commands";
+
 import type { Command } from "@/shared/commands";
 
 /**
@@ -17,22 +18,22 @@ export function Link({
   onClick,
   command,
   ...props
-}: AnchorHTMLAttributes<HTMLAnchorElement> & {
+}: {
   /** When set, click dispatches this command instead of `openLink`. */
-  command?: Command;
-}) {
+  readonly command?: Command;
+} & AnchorHTMLAttributes<HTMLAnchorElement>) {
   const { executeCommand } = useCommands();
 
   const handleClick = (event: MouseEvent<HTMLAnchorElement>) => {
     onClick?.(event);
-    if (event.defaultPrevented) return;
+    if (event.defaultPrevented) { return; }
     // The OS opens the URL or path; the webview must not navigate to it.
     event.preventDefault();
     if (command) {
       executeCommand(command);
       return;
     }
-    if (!href) return;
+    if (!href) { return; }
     executeCommand({ type: "openLink", args: { url: href } });
   };
 

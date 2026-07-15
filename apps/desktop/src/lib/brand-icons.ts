@@ -1,7 +1,7 @@
 import {
   Ai21,
-  Anthropic,
   AntGroup,
+  Anthropic,
   Azure,
   Baichuan,
   Bedrock,
@@ -35,14 +35,15 @@ import {
   Wenxin,
   XAI,
   Yi,
-  Zhipu,
+  Zhipu
 } from "@lobehub/icons";
-import type { CSSProperties, ComponentType } from "react";
+
+import type { ComponentType, CSSProperties } from "react";
 
 /** The subset of props our avatars pass to a resolved brand icon component. */
 export type BrandIconComponent = ComponentType<{
-  size?: number;
   className?: string;
+  size?: number;
   style?: CSSProperties;
 }>;
 
@@ -60,7 +61,7 @@ export interface BrandIcon {
  * A `@lobehub/icons` icon component: a base (monochrome) component with an
  * optional colored variant hung off `.Color`.
  */
-type LobeIcon = BrandIconComponent & { Color?: BrandIconComponent };
+type LobeIcon = { Color?: BrandIconComponent; } & BrandIconComponent;
 
 /** One entry of our curated icon vocabulary: a brand icon plus its keywords. */
 interface IconMapping {
@@ -112,7 +113,7 @@ const PROVIDER_MAPPINGS: IconMapping[] = [
   { Icon: XAI, keywords: ["xai"] },
   { Icon: Volcengine, keywords: ["volcengine", "volcenginecodingplan"] },
   { Icon: Cohere, keywords: ["cohere"] },
-  { Icon: Vercel, keywords: ["vercel", "vercelaigateway", "v0"] },
+  { Icon: Vercel, keywords: ["vercel", "vercelaigateway", "v0"] }
 ];
 
 // Model keywords are regexes tested against the model string; order matters
@@ -142,15 +143,15 @@ const MODEL_MAPPINGS: IconMapping[] = [
       "whisper-",
       "^gpt-",
       "/gpt-",
-      "openai",
-    ],
+      "openai"
+    ]
   },
   { Icon: ChatGLM, keywords: ["^glm-", "/glm-", "chatglm", "-glm-"] },
   { Icon: Claude, keywords: ["claude"] },
   { Icon: Anthropic, keywords: ["anthropic"] },
   {
     Icon: Nvidia,
-    keywords: ["nemotron", "openreasoning", "nemoretriever", "neva-", "nv-"],
+    keywords: ["nemotron", "openreasoning", "nemoretriever", "neva-", "nv-"]
   },
   { Icon: Meta, keywords: ["llama", "/l3"] },
   { Icon: Gemini, keywords: ["gemini"] },
@@ -166,8 +167,8 @@ const MODEL_MAPPINGS: IconMapping[] = [
       "wan\\d/",
       "wan\\d\\.\\d-",
       "tongyi",
-      "gte-rerank",
-    ],
+      "gte-rerank"
+    ]
   },
   { Icon: Minimax, keywords: ["minimax", "abab"] },
   {
@@ -182,8 +183,8 @@ const MODEL_MAPPINGS: IconMapping[] = [
       "ministral",
       "magistral",
       "devstral",
-      "voxtral",
-    ],
+      "voxtral"
+    ]
   },
   { Icon: Perplexity, keywords: ["pplx", "sonar"] },
   { Icon: Yi, keywords: ["^yi-", "/yi-", "-yi-"] },
@@ -196,13 +197,13 @@ const MODEL_MAPPINGS: IconMapping[] = [
   { Icon: Hunyuan, keywords: ["hunyuan"] },
   {
     Icon: Microsoft,
-    keywords: ["wizardlm", "/phi-", "^phi-", "-phi-", "mai-", "microsoft"],
+    keywords: ["wizardlm", "/phi-", "^phi-", "-phi-", "mai-", "microsoft"]
   },
   { Icon: Ai21, keywords: ["jamba", "^j2-", "ai21"] },
   { Icon: Grok, keywords: ["^grok-", "/grok-"] },
   { Icon: Spark, keywords: ["spark"] },
   { Icon: DeepSeek, keywords: ["deepseek"] },
-  { Icon: Google, keywords: ["google", "learnlm", "nano-banana"] },
+  { Icon: Google, keywords: ["google", "learnlm", "nano-banana"] }
 ];
 
 /**
@@ -224,7 +225,7 @@ export const PROVIDER_ICON_ALIASES: Record<string, string> = {
   "openai-codex": "openai",
   "vercel-ai-gateway": "vercel",
   zai: "zhipu",
-  "zai-coding-cn": "zhipu",
+  "zai-coding-cn": "zhipu"
 };
 
 /**
@@ -281,13 +282,13 @@ function matchesKeyword(keyword: string, value: string): boolean {
  * callers can fall back to their own placeholder.
  */
 export function resolveProviderIcon(
-  ...candidates: (string | undefined)[]
+  ...candidates: Array<string | undefined>
 ): BrandIcon | null {
   for (const candidate of candidates) {
     const key = candidate?.trim().toLowerCase();
-    if (!key) continue;
+    if (!key) { continue; }
     const brand = _providerIconByKeyword.get(key);
-    if (brand) return brand;
+    if (brand) { return brand; }
   }
   return null;
 }
@@ -300,13 +301,13 @@ export function resolveProviderIcon(
  * logo (e.g. `deepseek-v4` → DeepSeek). Returns `null` when nothing matches.
  */
 export function resolveModelIcon(
-  ...candidates: (string | undefined)[]
+  ...candidates: Array<string | undefined>
 ): BrandIcon | null {
   for (const candidate of candidates) {
     const value = candidate?.trim();
-    if (!value) continue;
+    if (!value) { continue; }
     for (const item of MODEL_MAPPINGS) {
-      if (item.keywords.some((keyword) => matchesKeyword(keyword, value))) {
+      if (item.keywords.some(keyword => matchesKeyword(keyword, value))) {
         return toBrandIcon(item);
       }
     }

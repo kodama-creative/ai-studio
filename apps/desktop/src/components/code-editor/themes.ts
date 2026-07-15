@@ -1,4 +1,4 @@
-import { githubLightInit, githubDarkInit } from "@uiw/codemirror-theme-github";
+import { githubDarkInit, githubLightInit } from "@uiw/codemirror-theme-github";
 
 export const dark = githubDarkInit({
   settings: {
@@ -6,8 +6,8 @@ export const dark = githubDarkInit({
     gutterBackground: "transparent",
     gutterForeground: "#555",
     gutterActiveForeground: "#FFF",
-    fontSize: "var(--text-sm)",
-  },
+    fontSize: "var(--text-sm)"
+  }
 });
 
 export const light = githubLightInit({
@@ -16,6 +16,6 @@ export const light = githubLightInit({
     // default is a plain white that clashes with the app's light-gray fields.
     background: "var(--textarea)",
     gutterBackground: "transparent",
-    fontSize: "var(--text-sm)",
-  },
+    fontSize: "var(--text-sm)"
+  }
 });

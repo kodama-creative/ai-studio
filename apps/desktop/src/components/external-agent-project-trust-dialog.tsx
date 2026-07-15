@@ -1,27 +1,28 @@
 import { ConfirmDialog } from "@/components/confirm-dialog";
+
 import type { ExternalAgentProjectPreview } from "@/shared/external-agent-project";
 
 export function ExternalAgentProjectTrustDialog({
   project,
   onOpenChange,
-  onConfirm,
+  onConfirm
 }: {
-  project: ExternalAgentProjectPreview | null;
-  onOpenChange: (open: boolean) => void;
-  onConfirm: () => void;
+  readonly onConfirm: () => void;
+  readonly onOpenChange: (open: boolean) => void;
+  readonly project: ExternalAgentProjectPreview | null;
 }) {
   return (
     <ConfirmDialog
-      open={project !== null}
-      onOpenChange={onOpenChange}
-      title="Trust this Agent Project?"
+      confirmLabel="Trust and open"
       description={
         project
           ? `Tools in “${project.name}” are local code and can access your computer with your user permissions. Only continue if you trust this directory: ${project.path}`
           : undefined
       }
-      confirmLabel="Trust and open"
       onConfirm={onConfirm}
+      onOpenChange={onOpenChange}
+      open={project !== null}
+      title="Trust this Agent Project?"
     />
   );
 }

@@ -1,27 +1,29 @@
 "use client";
 
-import type { Thread } from "@llm-space/core";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CopyIcon } from "lucide-react";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+
+import type { Thread } from "@llm-space/core";
 
 import { createRpcTransport, traceClient } from "@/client";
 import { ThreadPlayground } from "@/components/thread-playground";
 import { Tooltip } from "@/components/tooltip";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+
 import type { TraceRecord } from "@/shared/traces";
 
 const rpcTransport = createRpcTransport();
 
 interface TraceTabPaneProps {
-  projectId: string;
-  traceKey: string;
-  active: boolean;
-  refreshNonce?: number;
-  onClose?: (tabId: string) => void;
-  onRenameTitle?: (projectId: string, traceKey: string, title: string) => void;
+  readonly projectId: string;
+  readonly traceKey: string;
+  readonly active: boolean;
+  readonly refreshNonce?: number;
+  readonly onClose?: (tabId: string) => void;
+  readonly onRenameTitle?: (projectId: string, traceKey: string, title: string) => void;
 }
 
 function _TraceTabPane({
@@ -30,16 +32,16 @@ function _TraceTabPane({
   active,
   refreshNonce = 0,
   onClose,
-  onRenameTitle,
+  onRenameTitle
 }: TraceTabPaneProps) {
   const tabId = `trace:${projectId}:${traceKey}`;
   const qc = useQueryClient();
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ["trace", "workbench", projectId, traceKey],
-    queryFn: () => traceClient.readOrCreateWorkbench(projectId, traceKey),
+    queryFn: async () => traceClient.readOrCreateWorkbench(projectId, traceKey),
     staleTime: 0,
     gcTime: 0,
-    retry: false,
+    retry: false
   });
 
   useEffect(() => {
@@ -48,7 +50,7 @@ function _TraceTabPane({
     }
     toast.error("Error", {
       description:
-        error instanceof Error ? error.message : "Trace workbench not found",
+        error instanceof Error ? error.message : "Trace workbench not found"
     });
     onClose?.(tabId);
   }, [error, isError, onClose, tabId]);
@@ -119,13 +121,13 @@ function _TraceTabPane({
       try {
         await qc.refetchQueries({
           queryKey: ["trace", "workbench", projectId, traceKey],
-          exact: true,
+          exact: true
         });
-        setReloadKey((key) => key + 1);
+        setReloadKey(key => key + 1);
       } catch (error) {
         toast.error("Error", {
           description:
-            error instanceof Error ? error.message : "Failed to refresh trace",
+            error instanceof Error ? error.message : "Failed to refresh trace"
         });
       }
     })();
@@ -136,17 +138,17 @@ function _TraceTabPane({
   return (
     <div className={cn("flex size-full flex-col", !active && "hidden")}>
       <ThreadPlayground
-        key={reloadKey}
+        active={active}
         className="bg-background min-h-0 flex-1 shadow-lg"
-        loading={isLoading || !data}
-        path={`trace/${projectId}/${traceKey}/workbench.json`}
-        title={trace?.title ?? traceKey}
         headerDetails={trace ? <TraceHeaderDetails trace={trace} /> : null}
         initialValue={data?.thread}
-        active={active}
-        transport={rpcTransport}
+        key={reloadKey}
+        loading={isLoading || !data}
         onChange={handleChange}
         onRenameTitle={handleRenameTitle}
+        path={`trace/${projectId}/${traceKey}/workbench.json`}
+        title={trace?.title ?? traceKey}
+        transport={rpcTransport}
         validateTitle={_validateTraceTitle}
       />
     </div>
@@ -155,7 +157,7 @@ function _TraceTabPane({
 
 export const TraceTabPane = memo(_TraceTabPane);
 
-function _TraceHeaderDetails({ trace }: { trace: TraceRecord }) {
+function _TraceHeaderDetails({ trace }: { readonly trace: TraceRecord; }) {
   const traceId = trace.source.traceId;
   const copyTraceId = useCallback(async () => {
     try {
@@ -183,10 +185,10 @@ function _TraceHeaderDetails({ trace }: { trace: TraceRecord }) {
       </span>
       <Tooltip content="Copy Trace ID">
         <Button
-          variant="ghost"
-          size="icon-xs"
           aria-label="Copy trace ID"
           onClick={copyTraceId}
+          size="icon-xs"
+          variant="ghost"
         >
           <CopyIcon className="size-3" />
         </Button>
@@ -202,11 +204,11 @@ function _validateTraceTitle(value: string) {
   if (!title) {
     return { valid: false, value: title, error: "Trace title is required." };
   }
-  if ([...title].some((char) => char.charCodeAt(0) < 32)) {
+  if ([...title].some(char => char.charCodeAt(0) < 32)) {
     return {
       valid: false,
       value: title,
-      error: "Trace title contains a control character.",
+      error: "Trace title contains a control character."
     };
   }
   return { valid: true, value: title };

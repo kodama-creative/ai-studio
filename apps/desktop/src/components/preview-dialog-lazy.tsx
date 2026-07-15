@@ -2,9 +2,8 @@ import { lazy, memo, Suspense, useRef } from "react";
 
 import type { PreviewMode, PreviewType } from "./preview-dialog";
 
-const PreviewDialogImpl = lazy(() =>
-  import("./preview-dialog").then((m) => ({ default: m.PreviewDialog }))
-);
+const PreviewDialogImpl = lazy(async () =>
+  import("./preview-dialog").then(m => ({ default: m.PreviewDialog })));
 
 /**
  * Lazily-loaded {@link PreviewDialog}. Its chunk (CodeEditor + Markdown) stays
@@ -14,16 +13,16 @@ const PreviewDialogImpl = lazy(() =>
  * reopens instant. The public props mirror {@link PreviewDialog} exactly.
  */
 function _PreviewDialog(props: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  title?: string;
-  value: string;
-  type?: PreviewType;
-  mode?: PreviewMode;
+  readonly mode?: PreviewMode;
+  readonly onOpenChange: (open: boolean) => void;
+  readonly open: boolean;
+  readonly title?: string;
+  readonly type?: PreviewType;
+  readonly value: string;
 }) {
   const mounted = useRef(false);
-  if (props.open) mounted.current = true;
-  if (!mounted.current) return null;
+  if (props.open) { mounted.current = true; }
+  if (!mounted.current) { return null; }
   return (
     <Suspense fallback={null}>
       <PreviewDialogImpl {...props} />

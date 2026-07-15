@@ -1,12 +1,11 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-
 import { getSettingsDir } from "@llm-space/core/server";
 
 import {
   DEFAULT_SEARCH_SETTINGS,
   type SearchProviderId,
-  type SearchSettings,
+  type SearchSettings
 } from "../../shared/search";
 
 const VALID_PROVIDERS: readonly SearchProviderId[] = ["firecrawl", "tavily"];
@@ -85,7 +84,7 @@ export class SearchSettingsManager {
       tavilyApiKey:
         typeof input.tavilyApiKey === "string"
           ? input.tavilyApiKey
-          : DEFAULT_SEARCH_SETTINGS.tavilyApiKey,
+          : DEFAULT_SEARCH_SETTINGS.tavilyApiKey
     };
   }
 }

@@ -9,11 +9,11 @@ import { cn } from "@/lib/utils";
 function _SourceTabPane({
   path,
   active,
-  refreshNonce,
+  refreshNonce
 }: {
-  path: string;
-  active: boolean;
-  refreshNonce: number;
+  readonly active: boolean;
+  readonly path: string;
+  readonly refreshNonce: number;
 }) {
   const [value, setValue] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -25,7 +25,7 @@ function _SourceTabPane({
     void electrobun.rpc?.request
       .fsReadText({ path })
       .then(({ text }) => {
-        if (!cancelled) setValue(text);
+        if (!cancelled) { setValue(text); }
       })
       .catch((cause: unknown) => {
         if (!cancelled) {
@@ -45,7 +45,7 @@ function _SourceTabPane({
         await electrobun.rpc?.request.fsWriteText({ path, text: next });
       } catch (cause) {
         toast.error("Unable to save source file", {
-          description: cause instanceof Error ? cause.message : String(cause),
+          description: cause instanceof Error ? cause.message : String(cause)
         });
       } finally {
         setSaving(false);
@@ -56,8 +56,8 @@ function _SourceTabPane({
 
   return (
     <section
-      className={cn("absolute inset-0 flex flex-col", !active && "hidden")}
       aria-hidden={!active}
+      className={cn("absolute inset-0 flex flex-col", !active && "hidden")}
     >
       <header className="border-border/70 flex h-10 shrink-0 items-center justify-between border-b px-4 text-xs">
         <span className="text-muted-foreground truncate font-mono">{path}</span>
@@ -66,20 +66,22 @@ function _SourceTabPane({
           {saving ? "Saving" : "Saved"}
         </span>
       </header>
-      {error ? (
-        <div className="text-destructive flex flex-1 items-center justify-center gap-2 p-6 text-sm">
-          <AlertCircleIcon className="size-4" />
-          {error}
-        </div>
-      ) : (
-        <CodeEditor
-          className="min-h-0 flex-1 rounded-none border-0"
-          hideBorder
-          value={value}
-          language={path.endsWith(".md") ? "markdown" : undefined}
-          onChange={(next) => void save(next)}
-        />
-      )}
+      {error
+        ? (
+          <div className="text-destructive flex flex-1 items-center justify-center gap-2 p-6 text-sm">
+            <AlertCircleIcon className="size-4" />
+            {error}
+          </div>
+        )
+        : (
+          <CodeEditor
+            className="min-h-0 flex-1 rounded-none border-0"
+            hideBorder
+            language={path.endsWith(".md") ? "markdown" : undefined}
+            onChange={next => void save(next)}
+            value={value}
+          />
+        )}
     </section>
   );
 }

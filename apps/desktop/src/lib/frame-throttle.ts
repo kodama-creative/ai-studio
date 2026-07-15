@@ -10,7 +10,7 @@
 export function createFrameThrottle(
   flush: () => void,
   minIntervalMs: number
-): { schedule: () => void; cancel: () => void } {
+): { cancel: () => void; schedule: () => void; } {
   let frame: number | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let lastFlushAt = 0;

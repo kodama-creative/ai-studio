@@ -1,5 +1,4 @@
 import { basename } from "node:path";
-
 import { Utils } from "electrobun/bun";
 
 import type { Command, ImportFilePayload } from "../shared/commands";
@@ -7,13 +6,13 @@ import type { Command, ImportFilePayload } from "../shared/commands";
 type SendCommand = (command: Command) => void;
 
 function _normalizeSelectedPaths(paths: string[]): string[] {
-  return paths.map((path) => path.trim()).filter(Boolean);
+  return paths.map(path => path.trim()).filter(Boolean);
 }
 
 async function _readImportFile(path: string): Promise<ImportFilePayload> {
   return {
     name: basename(path),
-    text: await Bun.file(path).text(),
+    text: await Bun.file(path).text()
   };
 }
 
@@ -31,15 +30,15 @@ export async function importFilesWithNativePicker(
       allowedFileTypes: "json",
       canChooseFiles: true,
       canChooseDirectory: false,
-      allowsMultipleSelection: true,
+      allowsMultipleSelection: true
     })
   );
-  if (paths.length === 0) return;
+  if (paths.length === 0) { return; }
 
-  const files = await Promise.all(paths.map((path) => _readImportFile(path)));
+  const files = await Promise.all(paths.map(async path => _readImportFile(path)));
   sendCommand({
     type: "importFiles",
-    args: { parent, files },
+    args: { parent, files }
   });
 }
 
@@ -53,7 +52,7 @@ export function importTextFromClipboard(sendCommand: SendCommand, parent = "") {
     type: "importFiles",
     args: {
       parent,
-      files: [{ name: "clipboard.json", text: text ?? "" }],
-    },
+      files: [{ name: "clipboard.json", text: text ?? "" }]
+    }
   });
 }

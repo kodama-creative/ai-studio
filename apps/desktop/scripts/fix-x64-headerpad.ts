@@ -33,6 +33,7 @@ const LC_UUID = 0x1b;
 const LC_CODE_SIGNATURE = 0x1d;
 const LC_SOURCE_VERSION = 0x2a;
 const MACHO_HEADER_SIZE = 32;
+
 /** codesign appends one linkedit_data_command: 16 bytes. */
 const REQUIRED_PAD = 16;
 
@@ -40,7 +41,7 @@ interface MachOInfo {
   isThinX64: boolean;
   hasCodeSignature: boolean;
   headerpad: number;
-  commandOffsets: Map<number, { offset: number; size: number }>;
+  commandOffsets: Map<number, { offset: number; size: number; }>;
 }
 
 function _analyze(buf: Buffer): MachOInfo {
@@ -48,15 +49,15 @@ function _analyze(buf: Buffer): MachOInfo {
     isThinX64: false,
     hasCodeSignature: false,
     headerpad: 0,
-    commandOffsets: new Map(),
+    commandOffsets: new Map()
   };
-  if (buf.length < MACHO_HEADER_SIZE) return none;
-  if (buf.readUInt32LE(0) !== MH_MAGIC_64_LE) return none;
-  if (buf.readUInt32LE(4) !== CPU_TYPE_X86_64) return none;
+  if (buf.length < MACHO_HEADER_SIZE) { return none; }
+  if (buf.readUInt32LE(0) !== MH_MAGIC_64_LE) { return none; }
+  if (buf.readUInt32LE(4) !== CPU_TYPE_X86_64) { return none; }
 
   const ncmds = buf.readUInt32LE(16);
   const sizeofcmds = buf.readUInt32LE(20);
-  const commandOffsets = new Map<number, { offset: number; size: number }>();
+  const commandOffsets = new Map<number, { offset: number; size: number; }>();
   let hasCodeSignature = false;
   let minContentOffset = Number.MAX_SAFE_INTEGER;
 
@@ -67,7 +68,7 @@ function _analyze(buf: Buffer): MachOInfo {
     if (!commandOffsets.has(cmd)) {
       commandOffsets.set(cmd, { offset, size: cmdsize });
     }
-    if (cmd === LC_CODE_SIGNATURE) hasCodeSignature = true;
+    if (cmd === LC_CODE_SIGNATURE) { hasCodeSignature = true; }
     if (cmd === LC_SEGMENT_64) {
       const nsects = buf.readUInt32LE(offset + 64);
       let sectionOffset = offset + 72;
@@ -94,7 +95,7 @@ function _analyze(buf: Buffer): MachOInfo {
 /** Remove one load command in place: shift the rest up, zero the freed tail. */
 function _removeLoadCommand(
   buf: Buffer,
-  target: { offset: number; size: number }
+  target: { offset: number; size: number; }
 ): void {
   const ncmds = buf.readUInt32LE(16);
   const sizeofcmds = buf.readUInt32LE(20);
@@ -105,35 +106,35 @@ function _removeLoadCommand(
   buf.writeUInt32LE(sizeofcmds - target.size, 20);
 }
 
-function _fixFile(filePath: string): "fixed" | "ok" | "skipped" | "failed" {
+function _fixFile(filePath: string): "failed" | "fixed" | "ok" | "skipped" {
   const buf = Buffer.from(readFileSync(filePath));
   const info = _analyze(buf);
-  if (!info.isThinX64) return "skipped";
+  if (!info.isThinX64) { return "skipped"; }
   // A pre-signed binary (e.g. the bun runtime) re-signs in place — no room needed.
-  if (info.hasCodeSignature) return "ok";
-  if (info.headerpad >= REQUIRED_PAD) return "ok";
+  if (info.hasCodeSignature) { return "ok"; }
+  if (info.headerpad >= REQUIRED_PAD) { return "ok"; }
 
   const removable =
-    info.commandOffsets.get(LC_SOURCE_VERSION) ??
-    info.commandOffsets.get(LC_UUID);
-  if (!removable) return "failed";
+    info.commandOffsets.get(LC_SOURCE_VERSION)
+    ?? info.commandOffsets.get(LC_UUID);
+  if (!removable) { return "failed"; }
   _removeLoadCommand(buf, removable);
 
   const after = _analyze(buf);
-  if (after.headerpad < REQUIRED_PAD) return "failed";
+  if (after.headerpad < REQUIRED_PAD) { return "failed"; }
   writeFileSync(filePath, buf);
   return "fixed";
 }
 
 function _findBundle(): string {
   const wrapperPath = process.env.ELECTROBUN_WRAPPER_BUNDLE_PATH;
-  if (wrapperPath) return wrapperPath;
+  if (wrapperPath) { return wrapperPath; }
   const buildDir = process.env.ELECTROBUN_BUILD_DIR;
   if (!buildDir) {
     console.error("fix-x64-headerpad: no ELECTROBUN_BUILD_DIR in env");
     process.exit(1);
   }
-  const app = readdirSync(buildDir).find((name) => name.endsWith(".app"));
+  const app = readdirSync(buildDir).find(name => name.endsWith(".app"));
   if (!app) {
     console.error(`fix-x64-headerpad: no .app bundle in ${buildDir}`);
     process.exit(1);
@@ -150,9 +151,9 @@ const macosDir = join(bundle, "Contents", "MacOS");
 let failures = 0;
 for (const name of readdirSync(macosDir)) {
   const filePath = join(macosDir, name);
-  if (!statSync(filePath).isFile()) continue;
+  if (!statSync(filePath).isFile()) { continue; }
   const result = _fixFile(filePath);
-  if (result === "failed") failures++;
+  if (result === "failed") { failures++; }
   if (result !== "skipped") {
     console.info(`fix-x64-headerpad: ${name} — ${result}`);
   }

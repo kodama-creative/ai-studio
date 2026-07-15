@@ -2,9 +2,9 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import {
-  CompatibilityCallToolResultSchema,
   type CallToolResult,
-  type Tool as McpTool,
+  CompatibilityCallToolResultSchema,
+  type Tool as McpTool
 } from "@modelcontextprotocol/sdk/types.js";
 
 import type { McpRemoteTransport } from "../../public/definitions/connections/mcp";
@@ -43,18 +43,18 @@ export class RemoteMcpClient {
       options.transport === "streamableHttp"
         ? new StreamableHTTPClientTransport(url, { requestInit })
         : new SSEClientTransport(url, {
-            requestInit,
-            eventSourceInit: {
-              fetch: (input, init) =>
-                fetch(input, {
-                  ...init,
-                  headers: {
-                    ...options.headers,
-                    ..._headersToRecord(init.headers),
-                  },
-                }),
-            },
-          });
+          requestInit,
+          eventSourceInit: {
+            fetch: async (input, init) =>
+              fetch(input, {
+                ...init,
+                headers: {
+                  ...options.headers,
+                  ..._headersToRecord(init.headers)
+                }
+              })
+          }
+        });
     try {
       await client.connect(transport, { timeout: CONNECT_TIMEOUT_MS });
       return new RemoteMcpClient(client);
@@ -91,7 +91,7 @@ export class RemoteMcpClient {
     return flattenMcpToolResult(result as CallToolResult);
   }
 
-  close(): Promise<void> {
+  async close(): Promise<void> {
     return this._client.close();
   }
 }
@@ -128,20 +128,22 @@ export function flattenMcpToolResult(
       text.length > MAX_OUTPUT_CHARS
         ? `${text.slice(0, MAX_OUTPUT_CHARS)}\n\n[truncated]`
         : text,
-    isError: result.isError ?? false,
+    isError: result.isError ?? false
   };
 }
 
 function _headersToRecord(
   headers: RequestInit["headers"] | undefined
 ): Record<string, string> {
-  if (!headers) return {};
-  if (headers instanceof Headers) return Object.fromEntries(headers.entries());
-  if (Array.isArray(headers)) return Object.fromEntries(headers);
+  if (!headers) { return {}; }
+  if (headers instanceof Headers) { return Object.fromEntries(headers.entries()); }
+  if (Array.isArray(headers)) { return Object.fromEntries(headers); }
   return Object.fromEntries(
-    Object.entries(headers).map(([key, value]) => [
-      key,
-      Array.isArray(value) ? value.join(", ") : value,
-    ])
-  ) as Record<string, string>;
+    Object.entries(headers).map(([key, value]) =>
+      [
+        key,
+        typeof value === "string" ? value : Array.from(value).join(", ")
+      ] as const
+    )
+  );
 }

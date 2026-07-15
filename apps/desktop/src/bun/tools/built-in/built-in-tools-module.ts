@@ -1,13 +1,13 @@
-import type { DesktopModule } from "../../host/desktop-host";
-
 import { createFsBuiltInTools } from "./fs";
-import type { FsBuiltInToolsDependencies } from "./fs";
 import { miscBuiltInTools } from "./misc";
 import { createWebBuiltInTools } from "./web";
-import type { WebBuiltInToolsDependencies } from "./web";
 
-export type BuiltInToolsModuleDependencies = FsBuiltInToolsDependencies &
-  WebBuiltInToolsDependencies;
+import type { FsBuiltInToolsDependencies } from "./fs";
+import type { WebBuiltInToolsDependencies } from "./web";
+import type { DesktopModule } from "../../host/desktop-host";
+
+export type BuiltInToolsModuleDependencies = FsBuiltInToolsDependencies
+  & WebBuiltInToolsDependencies;
 
 export function createBuiltInToolsModule(
   dependencies: BuiltInToolsModuleDependencies
@@ -18,17 +18,17 @@ export function createBuiltInToolsModule(
       _assertDependencies(dependencies);
       tools.register({
         id: "llm-space.built-in-tools.web",
-        entries: createWebBuiltInTools(dependencies),
+        entries: createWebBuiltInTools(dependencies)
       });
       tools.register({
         id: "llm-space.built-in-tools.file-system",
-        entries: createFsBuiltInTools(dependencies),
+        entries: createFsBuiltInTools(dependencies)
       });
       tools.register({
         id: "llm-space.built-in-tools.misc",
-        entries: miscBuiltInTools,
+        entries: miscBuiltInTools
       });
-    },
+    }
   };
 }
 

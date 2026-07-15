@@ -2,11 +2,11 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
 import {
-  normalizeThread,
   type FileNode,
   type FileSystem,
+  normalizeThread,
   type Thread,
-  type ThreadStorage,
+  type ThreadStorage
 } from "../../../types";
 
 /**
@@ -40,7 +40,7 @@ export class LocalFileSystem implements FileSystem, ThreadStorage {
         const node: FileNode = {
           name: entry.name,
           path: path.posix.join(dirRel, entry.name),
-          type: isDir ? "directory" : "file",
+          type: isDir ? "directory" : "file"
         };
         if (isDir) {
           const directory = path.join(real, entry.name);
@@ -53,7 +53,7 @@ export class LocalFileSystem implements FileSystem, ThreadStorage {
 
     // Directories first, then alphabetical, for a stable tree ordering.
     return nodes.sort((a, b) => {
-      if (a.type !== b.type) return a.type === "directory" ? -1 : 1;
+      if (a.type !== b.type) { return a.type === "directory" ? -1 : 1; }
       return a.name.localeCompare(b.name);
     });
   }
@@ -112,7 +112,7 @@ export class LocalFileSystem implements FileSystem, ThreadStorage {
    * climb above the root; the leading slash is then dropped.
    */
   private _relative(p: string): string {
-    return path.posix.normalize("/" + p).slice(1);
+    return path.posix.normalize(`/${p}`).slice(1);
   }
 
   /**
@@ -130,7 +130,7 @@ export class LocalFileSystem implements FileSystem, ThreadStorage {
   /** Whether a real directory contains any entries. */
   private async _hasChildren(realDir: string): Promise<boolean> {
     const entries = await fs.readdir(realDir);
-    return entries.some((entry) => entry !== ".llm-space");
+    return entries.some(entry => entry !== ".llm-space");
   }
 
   private async _isAgentProject(realDir: string): Promise<boolean> {

@@ -34,6 +34,6 @@ export function parseAgentProjectManifest(
   }
   return {
     schemaVersion: AGENT_PROJECT_MANIFEST_VERSION,
-    agent: manifest.agent.trim(),
+    agent: manifest.agent.trim()
   };
 }

@@ -15,7 +15,7 @@ describe("DesktopHost", () => {
             return () => {
               events.push("stop:first");
             };
-          },
+          }
         },
         {
           id: "fixture.second",
@@ -25,9 +25,9 @@ describe("DesktopHost", () => {
             return () => {
               events.push("stop:second");
             };
-          },
-        },
-      ],
+          }
+        }
+      ]
     });
 
     await host.start();
@@ -39,7 +39,7 @@ describe("DesktopHost", () => {
       "start:first",
       "start:second",
       "stop:second",
-      "stop:first",
+      "stop:first"
     ]);
   });
 
@@ -48,8 +48,8 @@ describe("DesktopHost", () => {
     const host = new DesktopHost({
       modules: [
         { id: "fixture.duplicate", register: () => events.push("first") },
-        { id: "fixture.duplicate", register: () => events.push("second") },
-      ],
+        { id: "fixture.duplicate", register: () => events.push("second") }
+      ]
     });
 
     expect((await _rejectionOf(host.start())).message).toBe(
@@ -67,16 +67,16 @@ describe("DesktopHost", () => {
           register: () => undefined,
           start: () => () => {
             events.push("stop:first");
-          },
+          }
         },
         {
           id: "fixture.second",
           register: () => undefined,
           start: () => {
             throw new Error("boom");
-          },
-        },
-      ],
+          }
+        }
+      ]
     });
 
     expect((await _rejectionOf(host.start())).message).toBe(
@@ -95,7 +95,7 @@ describe("DesktopHost", () => {
           register: () => undefined,
           start: () => () => {
             events.push("stop:first");
-          },
+          }
         },
         {
           id: "fixture.second",
@@ -103,11 +103,11 @@ describe("DesktopHost", () => {
           start: () => () => {
             events.push("stop:second");
             throw new Error("cleanup failed");
-          },
-        },
+          }
+        }
       ],
       onShutdownError: (moduleId, error) =>
-        errors.push(`${moduleId}:${error.message}`),
+        errors.push(`${moduleId}:${error.message}`)
     });
 
     await host.start();
@@ -124,9 +124,9 @@ describe("DesktopHost", () => {
           id: "fixture.broken",
           register: () => {
             throw new Error("bad contribution");
-          },
-        },
-      ],
+          }
+        }
+      ]
     });
 
     expect((await _rejectionOf(host.start())).message).toBe(
@@ -146,9 +146,9 @@ describe("DesktopHost", () => {
             return () => {
               events.push("stop");
             };
-          },
-        },
-      ],
+          }
+        }
+      ]
     });
 
     await host.start();

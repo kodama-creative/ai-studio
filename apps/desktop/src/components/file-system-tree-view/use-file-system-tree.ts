@@ -1,11 +1,11 @@
 "use client";
 
 import {
-  uuid,
   type FileNode,
   type Message,
   type Thread,
   type Tool,
+  uuid
 } from "@llm-space/core";
 import { useQueries, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -18,12 +18,12 @@ import {
   normalizeThreadForPath,
   parentOf,
   threadTitleFromPath,
-  uniqueThreadFileName,
+  uniqueThreadFileName
 } from "@/lib/thread-file";
 
 /** Query-key factory for a directory listing. */
 export const fsKeys = {
-  ls: (path: string) => ["fs", "local", "ls", path] as const,
+  ls: (path: string) => ["fs", "local", "ls", path] as const
 };
 
 /** localStorage key under which the expanded directory paths live. */
@@ -46,12 +46,12 @@ function _depth(path: string): number {
  * `[]` when storage is unavailable or malformed.
  */
 function _loadPersistedExpanded(): string[] {
-  if (typeof window === "undefined") return [];
+  if (typeof window === "undefined") { return []; }
   try {
     const raw = window.localStorage.getItem(EXPANDED_KEY);
-    if (!raw) return [];
+    if (!raw) { return []; }
     const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
+    if (!Array.isArray(parsed)) { return []; }
     return parsed
       .filter((p): p is string => typeof p === "string")
       .sort((a, b) => _depth(a) - _depth(b));
@@ -62,7 +62,7 @@ function _loadPersistedExpanded(): string[] {
 
 /** Persist the expanded paths, ignoring any storage failure. */
 function _savePersistedExpanded(paths: string[]): void {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined") { return; }
   try {
     window.localStorage.setItem(EXPANDED_KEY, JSON.stringify(paths));
   } catch {
@@ -77,10 +77,10 @@ function _savePersistedExpanded(paths: string[]): void {
 function uniqueUntitled(
   names: Set<string>,
   ext: string
-): { name: string; index: number } {
-  if (!names.has(`untitled${ext}`)) return { name: `untitled${ext}`, index: 0 };
+): { index: number; name: string; } {
+  if (!names.has(`untitled${ext}`)) { return { name: `untitled${ext}`, index: 0 }; }
   let n = 1;
-  while (names.has(`untitled-${n}${ext}`)) n++;
+  while (names.has(`untitled-${n}${ext}`)) { n++; }
   return { name: `untitled-${n}${ext}`, index: n };
 }
 
@@ -94,7 +94,7 @@ function uniqueCopyName(names: Set<string>, name: string): string {
   const stem = ext ? name.slice(0, -ext.length) : name;
   let candidate = `${stem}_copy${ext}`;
   let n = 2;
-  while (names.has(candidate)) candidate = `${stem}_copy_${n++}${ext}`;
+  while (names.has(candidate)) { candidate = `${stem}_copy_${n++}${ext}`; }
   return candidate;
 }
 
@@ -105,7 +105,7 @@ function isSelfOrDescendant(ancestor: string, path: string): boolean {
 /** Match the server's ordering: directories first, then name ascending. */
 function sortNodes(nodes: FileNode[]): FileNode[] {
   return [...nodes].sort((a, b) => {
-    if (a.type !== b.type) return a.type === "directory" ? -1 : 1;
+    if (a.type !== b.type) { return a.type === "directory" ? -1 : 1; }
     return a.name.localeCompare(b.name);
   });
 }
@@ -120,9 +120,9 @@ function _createBlankThread(title: string): Thread {
     title,
     context: {
       messages: [
-        { id: uuid(), role: "user", content: [{ type: "text", text: "" }] },
-      ],
-    },
+        { id: uuid(), role: "user", content: [{ type: "text", text: "" }] }
+      ]
+    }
   };
 }
 
@@ -143,9 +143,9 @@ function _createThreadFromPromptExample(
       systemPrompt,
       tools,
       messages: messages ?? [
-        { id: uuid(), role: "user", content: [{ type: "text", text: "" }] },
-      ],
-    },
+        { id: uuid(), role: "user", content: [{ type: "text", text: "" }] }
+      ]
+    }
   };
 }
 
@@ -153,6 +153,7 @@ function _createThreadFromPromptExample(
 export interface MoveConflict {
   /** The colliding base name in the destination directory. */
   name: string;
+
   /** Whether the existing entry being overwritten is a directory. */
   isDir: boolean;
 }
@@ -160,37 +161,49 @@ export interface MoveConflict {
 export interface FileSystemTree {
   /** Cached listing for each loaded directory path. */
   nodesByPath: Map<string, FileNode[]>;
+
   /** Directory paths whose listing is currently loading. */
   loadingByPath: Set<string>;
+
   /** Whether the root listing is still loading. */
   isRootLoading: boolean;
+
   /** Expanded directory paths (mirrors the tree's open state). */
   expanded: Set<string>;
   toggle: (path: string) => void;
+
   /** Expand a directory (idempotent; does not collapse). */
   expand: (path: string) => void;
+
   /** Re-fetch all loaded directory listings. */
   refresh: () => void;
+
   /** Create an auto-named `untitled` folder under `parent`; returns its path. */
   createFolder: (parent: string) => Promise<string | null>;
+
   /** Create an auto-named thread under `parent`; returns its path. */
   createFile: (parent: string) => Promise<string | null>;
+
   /** Create a thread from a built-in prompt example; returns its path. */
   createFileFromPromptExample: (
     parent: string,
     example: {
       fileStem: string;
+      messages?: Message[];
       systemPrompt: string;
       tools?: Tool[];
-      messages?: Message[];
     }
   ) => Promise<string | null>;
+
   /** Delete a file or directory; resolves to whether it succeeded. */
   remove: (path: string) => Promise<boolean>;
+
   /** Copy a file/directory beside itself as `<name>_copy`; returns the new path. */
   duplicate: (path: string) => Promise<string | null>;
+
   /** Reveal a file/directory in the OS file manager (Finder/Explorer). */
   reveal: (path: string) => Promise<void>;
+
   /**
    * Move into `destDir`; resolves to the new path, or null on no-op/error/cancel.
    * When an entry of the same name already exists in `destDir`, `confirmOverwrite`
@@ -201,8 +214,9 @@ export interface FileSystemTree {
   move: (
     src: string,
     destDir: string,
-    opts?: { confirmOverwrite?: (info: MoveConflict) => Promise<boolean> }
+    opts?: { confirmOverwrite?: (info: MoveConflict) => Promise<boolean>; }
   ) => Promise<string | null>;
+
   /** Rename within the same directory; resolves to the new path, or null. */
   rename: (path: string, newBase: string) => Promise<string | null>;
 }
@@ -224,17 +238,17 @@ export function useFileSystemTree(): FileSystemTree {
   // Root ("") is always queried; each expanded directory adds one query.
   const paths = useMemo(() => ["", ...expanded], [expanded]);
   const results = useQueries({
-    queries: paths.map((path) => ({
+    queries: paths.map(path => ({
       queryKey: fsKeys.ls(path),
-      queryFn: () => localFs.ls(path),
-    })),
+      queryFn: async () => localFs.ls(path)
+    }))
   });
 
   const nodesByPath = useMemo(() => {
     const map = new Map<string, FileNode[]>();
     paths.forEach((path, i) => {
       const data = results[i]?.data;
-      if (data) map.set(path, data);
+      if (data) { map.set(path, data); }
     });
     return map;
   }, [paths, results]);
@@ -242,7 +256,7 @@ export function useFileSystemTree(): FileSystemTree {
   const loadingByPath = useMemo(() => {
     const set = new Set<string>();
     paths.forEach((path, i) => {
-      if (results[i]?.isLoading) set.add(path);
+      if (results[i]?.isLoading) { set.add(path); }
     });
     return set;
   }, [paths, results]);
@@ -252,7 +266,7 @@ export function useFileSystemTree(): FileSystemTree {
   useEffect(() => {
     _savePersistedExpanded(
       [...expanded]
-        .filter((p) => _depth(p) <= MAX_PERSISTED_DEPTH)
+        .filter(p => _depth(p) <= MAX_PERSISTED_DEPTH)
         .sort((a, b) => _depth(a) - _depth(b))
     );
   }, [expanded]);
@@ -263,7 +277,7 @@ export function useFileSystemTree(): FileSystemTree {
   // surfaced as an error. Walking shallowest-first lets a removed ancestor
   // cascade to its descendants within a single pass.
   useEffect(() => {
-    setExpanded((prev) => {
+    setExpanded(prev => {
       const ordered = [...prev].sort((a, b) => _depth(a) - _depth(b));
       const next = new Set(prev);
       let changed = false;
@@ -277,8 +291,8 @@ export function useFileSystemTree(): FileSystemTree {
         const siblings = nodesByPath.get(parent);
         // Undefined ⇒ the parent's listing is still loading; leave it for now.
         if (
-          siblings &&
-          !siblings.some((n) => n.path === path && n.type === "directory")
+          siblings
+          && !siblings.some(n => n.path === path && n.type === "directory")
         ) {
           next.delete(path);
           changed = true;
@@ -289,16 +303,15 @@ export function useFileSystemTree(): FileSystemTree {
   }, [nodesByPath]);
 
   const toggle = useCallback((path: string) => {
-    setExpanded((prev) => {
+    setExpanded(prev => {
       const next = new Set(prev);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
+      if (next.has(path)) { next.delete(path); } else { next.add(path); }
       return next;
     });
   }, []);
 
   const expand = useCallback((path: string) => {
-    setExpanded((prev) => (prev.has(path) ? prev : new Set(prev).add(path)));
+    setExpanded(prev => (prev.has(path) ? prev : new Set(prev).add(path)));
   }, []);
 
   const refresh = useCallback(() => {
@@ -309,7 +322,7 @@ export function useFileSystemTree(): FileSystemTree {
     async (parent: string): Promise<string | null> => {
       let path: string;
       try {
-        const names = new Set((await localFs.ls(parent)).map((n) => n.name));
+        const names = new Set((await localFs.ls(parent)).map(n => n.name));
         const { name } = uniqueUntitled(names, "");
         path = joinPath(parent, name);
         await localFs.mkdir(path);
@@ -327,7 +340,7 @@ export function useFileSystemTree(): FileSystemTree {
     async (parent: string): Promise<string | null> => {
       let path: string;
       try {
-        const names = new Set((await localFs.ls(parent)).map((n) => n.name));
+        const names = new Set((await localFs.ls(parent)).map(n => n.name));
         const name = uniqueUntitled(names, ".json").name;
         path = joinPath(parent, name);
         const title = threadTitleFromPath(path);
@@ -348,14 +361,14 @@ export function useFileSystemTree(): FileSystemTree {
       parent: string,
       example: {
         fileStem: string;
+        messages?: Message[];
         systemPrompt: string;
         tools?: Tool[];
-        messages?: Message[];
       }
     ): Promise<string | null> => {
       let path: string;
       try {
-        const names = new Set((await localFs.ls(parent)).map((n) => n.name));
+        const names = new Set((await localFs.ls(parent)).map(n => n.name));
         const name = uniqueThreadFileName(names, example.fileStem);
         path = joinPath(parent, name);
         const title = threadTitleFromPath(path);
@@ -391,10 +404,10 @@ export function useFileSystemTree(): FileSystemTree {
         return false;
       }
       // Prune the removed subtree from the expanded set.
-      setExpanded((prev) => {
+      setExpanded(prev => {
         const next = new Set(prev);
         for (const p of prev) {
-          if (isSelfOrDescendant(path, p)) next.delete(p);
+          if (isSelfOrDescendant(path, p)) { next.delete(p); }
         }
         return next;
       });
@@ -409,7 +422,7 @@ export function useFileSystemTree(): FileSystemTree {
       const parent = parentOf(path);
       let dest: string;
       try {
-        const names = new Set((await localFs.ls(parent)).map((n) => n.name));
+        const names = new Set((await localFs.ls(parent)).map(n => n.name));
         dest = joinPath(parent, uniqueCopyName(names, basename(path)));
         await localFs.cp(path, dest);
       } catch (err) {
@@ -434,15 +447,15 @@ export function useFileSystemTree(): FileSystemTree {
     async (
       src: string,
       destDir: string,
-      opts?: { confirmOverwrite?: (info: MoveConflict) => Promise<boolean> }
+      opts?: { confirmOverwrite?: (info: MoveConflict) => Promise<boolean>; }
     ): Promise<string | null> => {
-      if (!src) return null;
+      if (!src) { return null; }
       if (isSelfOrDescendant(src, destDir)) {
         toast.error("Cannot move a folder into itself.");
         return null;
       }
       const srcParent = parentOf(src);
-      if (srcParent === destDir) return null; // no-op
+      if (srcParent === destDir) { return null; } // no-op
 
       const name = basename(src);
       const dest = joinPath(destDir, name);
@@ -455,13 +468,13 @@ export function useFileSystemTree(): FileSystemTree {
       let overwrite = false;
       try {
         const destNodes = await localFs.ls(destDir);
-        const clash = destNodes.find((n) => n.name === name);
+        const clash = destNodes.find(n => n.name === name);
         if (clash) {
           const confirmed = await opts?.confirmOverwrite?.({
             name,
-            isDir: clash.type === "directory",
+            isDir: clash.type === "directory"
           });
-          if (!confirmed) return null;
+          if (!confirmed) { return null; }
           overwrite = true;
         }
       } catch (err) {
@@ -471,26 +484,26 @@ export function useFileSystemTree(): FileSystemTree {
 
       await Promise.all([
         qc.cancelQueries({ queryKey: srcKey }),
-        qc.cancelQueries({ queryKey: destKey }),
+        qc.cancelQueries({ queryKey: destKey })
       ]);
       const prevSrc = qc.getQueryData<FileNode[]>(srcKey);
       const prevDest = qc.getQueryData<FileNode[]>(destKey);
-      const moved = prevSrc?.find((n) => n.path === src);
+      const moved = prevSrc?.find(n => n.path === src);
 
       // Optimistically remove from the source and add to the destination,
       // dropping any same-named entry there (the one being overwritten).
       if (prevSrc) {
         qc.setQueryData<FileNode[]>(
           srcKey,
-          prevSrc.filter((n) => n.path !== src)
+          prevSrc.filter(n => n.path !== src)
         );
       }
       if (moved && prevDest) {
         qc.setQueryData<FileNode[]>(
           destKey,
           sortNodes([
-            ...prevDest.filter((n) => n.name !== name),
-            { ...moved, path: dest, name },
+            ...prevDest.filter(n => n.name !== name),
+            { ...moved, path: dest, name }
           ])
         );
       }
@@ -505,8 +518,8 @@ export function useFileSystemTree(): FileSystemTree {
         await localFs.mv(src, dest);
       } catch (err) {
         // Roll back.
-        if (prevSrc) qc.setQueryData(srcKey, prevSrc);
-        if (prevDest) qc.setQueryData(destKey, prevDest);
+        if (prevSrc) { qc.setQueryData(srcKey, prevSrc); }
+        if (prevDest) { qc.setQueryData(destKey, prevDest); }
         toast.error((err as Error).message);
         ok = false;
       } finally {
@@ -515,10 +528,10 @@ export function useFileSystemTree(): FileSystemTree {
       }
       // Moving a subtree invalidates the expanded paths under it.
       if (ok) {
-        setExpanded((prev) => {
+        setExpanded(prev => {
           const next = new Set(prev);
           for (const p of prev) {
-            if (isSelfOrDescendant(src, p)) next.delete(p);
+            if (isSelfOrDescendant(src, p)) { next.delete(p); }
           }
           return next;
         });
@@ -531,7 +544,7 @@ export function useFileSystemTree(): FileSystemTree {
   const rename = useCallback(
     async (path: string, newBase: string): Promise<string | null> => {
       const dest = joinPath(parentOf(path), newBase);
-      if (dest === path) return null;
+      if (dest === path) { return null; }
       try {
         await localFs.mv(path, dest);
         if (dest.endsWith(".json")) {
@@ -544,10 +557,10 @@ export function useFileSystemTree(): FileSystemTree {
       }
       // The renamed subtree's old paths are no longer valid query keys; collapse
       // it so its children reload under the new path on next expand.
-      setExpanded((prev) => {
+      setExpanded(prev => {
         const next = new Set(prev);
         for (const p of prev) {
-          if (isSelfOrDescendant(path, p)) next.delete(p);
+          if (isSelfOrDescendant(path, p)) { next.delete(p); }
         }
         return next;
       });
@@ -572,6 +585,6 @@ export function useFileSystemTree(): FileSystemTree {
     duplicate,
     reveal,
     move,
-    rename,
+    rename
   };
 }

@@ -75,6 +75,7 @@ function _subscribe(listener: () => void): () => void {
 export interface RunMode {
   /** The user's stored auto-run-tools flag (independent of the ReAct loop). */
   autoRunTools: boolean;
+
   /** The effective flag: `true` whenever the ReAct loop is on. */
   effectiveAutoRunTools: boolean;
   reactLoop: boolean;
@@ -98,6 +99,6 @@ export function useRunMode(): RunMode {
     effectiveAutoRunTools: reactLoop || autoRunTools,
     reactLoop,
     setAutoRunTools,
-    setReactLoop,
+    setReactLoop
   };
 }

@@ -1,7 +1,6 @@
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-
 import { afterEach, describe, expect, test } from "bun:test";
 
 import { loadAgentProject } from "./load-agent-project";
@@ -10,7 +9,7 @@ const ROOTS: string[] = [];
 
 afterEach(async () => {
   await Promise.all(
-    ROOTS.splice(0).map((root) => rm(root, { recursive: true }))
+    ROOTS.splice(0).map(async root => rm(root, { recursive: true }))
   );
 });
 
@@ -30,7 +29,7 @@ describe("loadAgentProject", () => {
 
     expect(snapshot.definition).toEqual({
       model: { provider: "fake", id: "models/codex" },
-      reasoning: "off",
+      reasoning: "off"
     });
     expect(snapshot.diagnostics).toEqual([]);
     expect(Object.isFrozen(snapshot)).toBe(true);
@@ -60,9 +59,9 @@ describe("loadAgentProject", () => {
     const snapshot = await loadAgentProject(root);
 
     expect(snapshot.instructions).toBe("You are helpful.\n");
-    expect(snapshot.tools.map((tool) => tool.name)).toEqual(["weather"]);
-    expect(snapshot.resources.skills?.map((skill) => skill.name)).toEqual([
-      "forecast",
+    expect(snapshot.tools.map(tool => tool.name)).toEqual(["weather"]);
+    expect(snapshot.resources.skills?.map(skill => skill.name)).toEqual([
+      "forecast"
     ]);
     expect(snapshot.diagnostics).toEqual([]);
     expect(snapshot.fingerprint).toHaveLength(64);
@@ -88,12 +87,12 @@ describe("loadAgentProject", () => {
     expect(
       (globalThis as Record<string, unknown>).__MCP_AUTH_CALLED__
     ).toBeUndefined();
-    expect(snapshot.connections.map((connection) => ({
+    expect(snapshot.connections.map(connection => ({
       name: connection.name,
       transport: connection.definition.transport,
-      allow: connection.definition.tools.allow,
+      allow: connection.definition.tools.allow
     }))).toEqual([
-      { name: "project", transport: "streamableHttp", allow: ["search"] },
+      { name: "project", transport: "streamableHttp", allow: ["search"] }
     ]);
     expect(snapshot.diagnostics).toEqual([]);
   });
@@ -114,7 +113,7 @@ describe("loadAgentProject", () => {
 
     const snapshot = await loadAgentProject(root);
 
-    expect(snapshot.tools.map((item) => item.name)).toEqual(["Z", "a"]);
+    expect(snapshot.tools.map(item => item.name)).toEqual(["Z", "a"]);
   });
 
   test("returns blocking diagnostics for missing instructions and duplicate tools", async () => {
@@ -132,9 +131,9 @@ describe("loadAgentProject", () => {
 
     const snapshot = await loadAgentProject(root);
 
-    expect(snapshot.diagnostics.map((item) => item.code)).toEqual([
+    expect(snapshot.diagnostics.map(item => item.code)).toEqual([
       "instructions_missing",
-      "tool_name_duplicate",
+      "tool_name_duplicate"
     ]);
   });
 
@@ -163,8 +162,8 @@ describe("loadAgentProject", () => {
         code: "tool_export_invalid",
         message: expect.stringContaining(
           "Remove authored name/label fields; tool identity comes from the filename"
-        ),
-      }),
+        )
+      })
     ]);
   });
 
@@ -199,8 +198,8 @@ describe("loadAgentProject", () => {
     expect(snapshot.diagnostics).toEqual([
       expect.objectContaining({
         code: "tool_name_duplicate",
-        message: expect.stringContaining("weather__forecast"),
-      }),
+        message: expect.stringContaining("weather__forecast")
+      })
     ]);
   });
 
@@ -230,8 +229,8 @@ describe("loadAgentProject", () => {
       expect.objectContaining({
         severity: "error",
         code: "connection_name_duplicate",
-        message: expect.stringContaining('Connection name "project"'),
-      }),
+        message: expect.stringContaining('Connection name "project"')
+      })
     ]);
   });
 
@@ -246,7 +245,7 @@ describe("loadAgentProject", () => {
     expect(snapshot.diagnostics).toHaveLength(1);
     expect(snapshot.diagnostics[0]).toMatchObject({
       severity: "error",
-      code: "definition_missing",
+      code: "definition_missing"
     });
   });
 
@@ -264,7 +263,7 @@ describe("loadAgentProject", () => {
     expect(snapshot.diagnostics).toHaveLength(1);
     expect(snapshot.diagnostics[0]).toMatchObject({
       severity: "error",
-      code: "skill_invalid",
+      code: "skill_invalid"
     });
   });
 
@@ -288,11 +287,11 @@ describe("loadAgentProject", () => {
 
     const snapshot = await loadAgentProject(root);
 
-    expect(snapshot.diagnostics.map((item) => item.code)).toEqual([
+    expect(snapshot.diagnostics.map(item => item.code)).toEqual([
       "definition_import_failed",
       "instructions_read_failed",
       "tool_import_failed",
-      "skill_invalid",
+      "skill_invalid"
     ]);
   });
 
@@ -316,7 +315,7 @@ describe("loadAgentProject", () => {
     expect(second.fingerprint).not.toBe(first.fingerprint);
     expect((await second.tools[0]!.execute("call", {})).content[0]).toEqual({
       type: "text",
-      text: "two",
+      text: "two"
     });
   });
 
@@ -344,7 +343,7 @@ describe("loadAgentProject", () => {
     expect(second.fingerprint).not.toBe(first.fingerprint);
     expect((await second.tools[0]!.execute("call", {})).content[0]).toEqual({
       type: "text",
-      text: "two",
+      text: "two"
     });
   });
 
@@ -364,11 +363,11 @@ describe("loadAgentProject", () => {
     const second = await loadAgentProject(root);
 
     expect(first.definition).toEqual({
-      model: { provider: "fake", id: "model-one" },
+      model: { provider: "fake", id: "model-one" }
     });
     expect(second.definition).toEqual({
       model: { provider: "fake", id: "model-two" },
-      reasoning: "xhigh",
+      reasoning: "xhigh"
     });
     expect(second.fingerprint).not.toBe(first.fingerprint);
   });

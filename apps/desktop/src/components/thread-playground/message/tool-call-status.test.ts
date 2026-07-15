@@ -4,19 +4,19 @@ import {
   getToolCallStatus,
   isToolCallOutcomeUnknown,
   isToolCallPending,
-  summarizeToolCalls,
+  summarizeToolCalls
 } from "./tool-call-status";
 
 test("a model tool request without a result still needs a response", () => {
   const toolCall = {
     id: "pending",
-    input: { name: "weather", arguments: {} },
+    input: { name: "weather", arguments: {} }
   };
 
   expect(getToolCallStatus(toolCall)).toBe("needsResponse");
   expect(summarizeToolCalls([toolCall])).toMatchObject({
     needsResponseCount: 1,
-    canContinue: false,
+    canContinue: false
   });
 });
 
@@ -25,21 +25,21 @@ describe("isToolCallPending", () => {
     expect(
       isToolCallPending({
         id: "pending",
-        input: { name: "weather", arguments: {} },
+        input: { name: "weather", arguments: {} }
       })
     ).toBe(true);
     expect(
       isToolCallPending({
         id: "completed",
         input: { name: "weather", arguments: {} },
-        output: { content: [{ type: "text", text: "sunny" }] },
+        output: { content: [{ type: "text", text: "sunny" }] }
       })
     ).toBe(false);
     expect(
       isToolCallPending({
         id: "outcome-unknown",
         input: { name: "weather", arguments: {} },
-        attempt: { status: "started", at: "2026-07-15T00:00:00.000Z" },
+        attempt: { status: "started", at: "2026-07-15T00:00:00.000Z" }
       })
     ).toBe(false);
   });
@@ -51,7 +51,7 @@ describe("isToolCallOutcomeUnknown", () => {
       isToolCallOutcomeUnknown({
         id: "attempted",
         input: { name: "weather", arguments: {} },
-        attempt: { status: "started", at: "2026-07-15T00:00:00.000Z" },
+        attempt: { status: "started", at: "2026-07-15T00:00:00.000Z" }
       })
     ).toBe(true);
     expect(
@@ -59,7 +59,7 @@ describe("isToolCallOutcomeUnknown", () => {
         id: "completed",
         input: { name: "weather", arguments: {} },
         attempt: { status: "started", at: "2026-07-15T00:00:00.000Z" },
-        output: { content: [{ type: "text", text: "sunny" }] },
+        output: { content: [{ type: "text", text: "sunny" }] }
       })
     ).toBe(false);
   });

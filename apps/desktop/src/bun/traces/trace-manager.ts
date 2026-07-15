@@ -2,22 +2,27 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
-
 import {
-  normalizeThread,
-  uuid,
   type AssistantMessage,
   type Message,
   type ModelConfig,
   type ModelUsage,
+  normalizeThread,
   type Thread,
   type ToolCall,
+  uuid
 } from "@llm-space/core";
 import { getLlmSpaceHomePath } from "@llm-space/core/server";
 import {
   aggregateMessageUsage,
-  aggregateModelUsage,
+  aggregateModelUsage
 } from "@llm-space/core/thread";
+
+import {
+  LangfuseClient,
+  normalizeLangfuseBaseUrl,
+  previewSecret
+} from "./langfuse-client";
 
 import type {
   TraceConnectedProjectInput,
@@ -28,14 +33,8 @@ import type {
   TraceRecord,
   TraceRemoteTraceSummary,
   TraceSyncResult,
-  TraceWorkbenchResponse,
+  TraceWorkbenchResponse
 } from "../../shared/traces";
-
-import {
-  LangfuseClient,
-  normalizeLangfuseBaseUrl,
-  previewSecret,
-} from "./langfuse-client";
 
 interface LangfuseRawTrace {
   source: TraceRecord["source"];
@@ -51,11 +50,11 @@ type LangfuseObservation = Record<string, unknown>;
  * `TraceProject`, whose source type has no credential fields.
  */
 type TraceStoredProjectSource =
-  | Extract<TraceProject["source"], { mode: "manual" }>
-  | (Extract<TraceProject["source"], { mode: "connected" }> & {
-      publicKey: string;
-      secretKey: string;
-    });
+  | ({
+    publicKey: string;
+    secretKey: string;
+  } & Extract<TraceProject["source"], { mode: "connected"; }>)
+  | Extract<TraceProject["source"], { mode: "manual"; }>;
 
 interface TraceStoredProject extends Omit<TraceProject, "source"> {
   source: TraceStoredProjectSource;
@@ -92,8 +91,8 @@ export class TraceManager {
     const entries = await this._safeReadDir(TRACE_ROOT);
     const projects = await Promise.all(
       entries
-        .filter((entry) => entry.isDirectory())
-        .map((entry) => this._readProject(entry.name).catch(() => null))
+        .filter(entry => entry.isDirectory())
+        .map(async entry => this._readProject(entry.name).catch(() => null))
     );
     return projects
       .filter((project): project is TraceStoredProject => project !== null)
@@ -117,7 +116,7 @@ export class TraceManager {
       name: trimmed,
       source: { type: "langfuse", mode: "manual" },
       createdAt: now,
-      updatedAt: now,
+      updatedAt: now
     };
     await fs.mkdir(this._projectDir(id), { recursive: true });
     await this._writeProject(project);
@@ -159,10 +158,10 @@ export class TraceManager {
           : {}),
         ...(projectInfo.projectName
           ? { langfuseProjectName: projectInfo.projectName }
-          : {}),
+          : {})
       },
       createdAt: now,
-      updatedAt: now,
+      updatedAt: now
     };
     await fs.mkdir(this._projectDir(id), { recursive: true });
     await this._writeProject(project);
@@ -179,10 +178,9 @@ export class TraceManager {
     const entries = await this._safeReadDir(tracesDir);
     const traces = await Promise.all(
       entries
-        .filter((entry) => entry.isDirectory())
-        .map((entry) =>
-          this._readTrace(projectId, entry.name).catch(() => null)
-        )
+        .filter(entry => entry.isDirectory())
+        .map(async entry =>
+          this._readTrace(projectId, entry.name).catch(() => null))
     );
     return traces
       .filter((trace): trace is TraceRecord => trace !== null)
@@ -228,15 +226,15 @@ export class TraceManager {
         fileName: file.name,
         groups,
         projectIds: _projectIdsFromRows(rows),
-        projectNames: _projectNamesFromRows(rows),
+        projectNames: _projectNamesFromRows(rows)
       });
     }
 
     const batchProjectIds = _mergeSets(
-      parsedFiles.map((file) => file.projectIds)
+      parsedFiles.map(file => file.projectIds)
     );
     const batchProjectNames = _mergeSets(
-      parsedFiles.map((file) => file.projectNames)
+      parsedFiles.map(file => file.projectNames)
     );
     const existingProjectIds = _projectIdsFromExistingTraces(
       project,
@@ -256,7 +254,7 @@ export class TraceManager {
           sourceMode: "manual",
           fileName: file.fileName,
           traceId,
-          rows: traceRows,
+          rows: traceRows
         });
         imported.push(trace);
       }
@@ -271,7 +269,7 @@ export class TraceManager {
           batchProjectIds,
           batchProjectNames
         ),
-        updatedAt: Date.now(),
+        updatedAt: Date.now()
       });
     }
 
@@ -284,10 +282,10 @@ export class TraceManager {
    */
   async searchLangfuseTraces({
     projectId,
-    filters,
+    filters
   }: {
-    projectId: string;
     filters?: TraceLangfuseSearchInput;
+    projectId: string;
   }): Promise<TraceRemoteTraceSummary[]> {
     const project = await this._requireConnectedProject(projectId);
     return this._clientForProject(project).searchTraces(filters);
@@ -300,13 +298,13 @@ export class TraceManager {
    */
   async syncLangfuseTraces({
     projectId,
-    traceIds,
+    traceIds
   }: {
     projectId: string;
     traceIds: string[];
   }): Promise<TraceSyncResult> {
     const project = await this._requireConnectedProject(projectId);
-    const requested = [...new Set(traceIds.map((id) => id.trim()))].filter(
+    const requested = [...new Set(traceIds.map(id => id.trim()))].filter(
       Boolean
     );
     if (requested.length === 0) {
@@ -337,7 +335,7 @@ export class TraceManager {
           sourceMode: "connected",
           traceId,
           rows: result.rows,
-          upsert: true,
+          upsert: true
         });
         imported.push(trace);
       } catch (error) {
@@ -356,9 +354,9 @@ export class TraceManager {
           ...project.source,
           lastSyncAt: now,
           lastSyncStatus: "error",
-          lastSyncError: warnings[0] ?? "Some traces could not be synced.",
+          lastSyncError: warnings[0] ?? "Some traces could not be synced."
         },
-        updatedAt: now,
+        updatedAt: now
       });
     } else {
       const sourceWithoutError = { ...project.source };
@@ -368,9 +366,9 @@ export class TraceManager {
         source: {
           ...sourceWithoutError,
           lastSyncAt: now,
-          lastSyncStatus: "success",
+          lastSyncStatus: "success"
         },
-        updatedAt: now,
+        updatedAt: now
       });
     }
 
@@ -437,7 +435,7 @@ export class TraceManager {
     const nextTrace: TraceRecord = {
       ...trace,
       title: normalizedTitle,
-      updatedAt: Date.now(),
+      updatedAt: Date.now()
     };
     await fs.writeFile(
       this._tracePath(projectId, traceKey),
@@ -484,13 +482,13 @@ export class TraceManager {
     fileName,
     traceId,
     rows,
-    upsert = false,
+    upsert = false
   }: {
-    project: TraceStoredProject;
-    sourceMode: TraceRecord["source"]["mode"];
     fileName?: string;
-    traceId: string;
+    project: TraceStoredProject;
     rows: LangfuseObservation[];
+    sourceMode: TraceRecord["source"]["mode"];
+    traceId: string;
     upsert?: boolean;
   }): Promise<TraceRecord> {
     const existing = upsert
@@ -508,14 +506,14 @@ export class TraceManager {
       fileName,
       importedAt,
       updatedAt: now,
-      rows,
+      rows
     });
     const dir = this._traceDir(project.id, key);
     await fs.mkdir(dir, { recursive: true });
     const raw: LangfuseRawTrace = {
       source: trace.source,
       importedAt,
-      rows,
+      rows
     };
     await fs.writeFile(
       path.join(dir, "raw.json"),
@@ -551,12 +549,12 @@ export class TraceManager {
   }
 
   private async _requireConnectedProject(projectId: string): Promise<
-    TraceStoredProject & {
-      source: Extract<TraceStoredProjectSource, { mode: "connected" }> & {
+    {
+      source: {
         publicKey: string;
         secretKey: string;
-      };
-    }
+      } & Extract<TraceStoredProjectSource, { mode: "connected"; }>;
+    } & TraceStoredProject
   > {
     const project = await this._requireProject(projectId);
     if (project.source.mode !== "connected") {
@@ -565,24 +563,24 @@ export class TraceManager {
     if (!project.source.publicKey || !project.source.secretKey) {
       throw new Error("Connected Langfuse credentials are missing.");
     }
-    return project as TraceStoredProject & {
-      source: Extract<TraceStoredProjectSource, { mode: "connected" }> & {
+    return project as {
+      source: {
         publicKey: string;
         secretKey: string;
-      };
-    };
+      } & Extract<TraceStoredProjectSource, { mode: "connected"; }>;
+    } & TraceStoredProject;
   }
 
   private _clientForProject(project: {
-    source: Extract<TraceStoredProjectSource, { mode: "connected" }> & {
+    source: {
       publicKey: string;
       secretKey: string;
-    };
+    } & Extract<TraceStoredProjectSource, { mode: "connected"; }>;
   }): LangfuseClient {
     return new LangfuseClient({
       baseUrl: project.source.baseUrl,
       publicKey: project.source.publicKey,
-      secretKey: project.source.secretKey,
+      secretKey: project.source.secretKey
     });
   }
 
@@ -591,7 +589,7 @@ export class TraceManager {
     traceId: string
   ): Promise<TraceRecord | null> {
     const traces = await this.listTraces(projectId);
-    return traces.find((trace) => trace.source.traceId === traceId) ?? null;
+    return traces.find(trace => trace.source.traceId === traceId) ?? null;
   }
 
   private async _readProject(projectId: string): Promise<TraceStoredProject> {
@@ -708,13 +706,13 @@ function _projectForRenderer(project: TraceStoredProject): TraceProject {
   }
   return {
     ...project,
-    source: _connectedSourceForRenderer(project.source),
+    source: _connectedSourceForRenderer(project.source)
   };
 }
 
 function _connectedSourceForRenderer(
-  source: Extract<TraceStoredProjectSource, { mode: "connected" }>
-): Extract<TraceProject["source"], { mode: "connected" }> {
+  source: Extract<TraceStoredProjectSource, { mode: "connected"; }>
+): Extract<TraceProject["source"], { mode: "connected"; }> {
   return {
     type: source.type,
     mode: source.mode,
@@ -729,13 +727,13 @@ function _connectedSourceForRenderer(
       : {}),
     ...(source.lastSyncAt ? { lastSyncAt: source.lastSyncAt } : {}),
     ...(source.lastSyncStatus ? { lastSyncStatus: source.lastSyncStatus } : {}),
-    ...(source.lastSyncError ? { lastSyncError: source.lastSyncError } : {}),
+    ...(source.lastSyncError ? { lastSyncError: source.lastSyncError } : {})
   };
 }
 
 function _connectedProjectName(
   inputName: string | undefined,
-  projectInfo: { projectName?: string },
+  projectInfo: { projectName?: string; },
   baseUrl: string
 ): string {
   const override = inputName?.trim();
@@ -770,7 +768,7 @@ function _groupRowsByTraceId(
 function _projectIdsFromRows(rows: LangfuseObservation[]): Set<string> {
   return new Set(
     rows
-      .map((row) => _firstString(row.projectId, row.project_id))
+      .map(row => _firstString(row.projectId, row.project_id))
       .filter((id): id is string => Boolean(id))
   );
 }
@@ -778,7 +776,7 @@ function _projectIdsFromRows(rows: LangfuseObservation[]): Set<string> {
 function _projectNamesFromRows(rows: LangfuseObservation[]): Set<string> {
   return new Set(
     rows
-      .map((row) => _firstString(row.projectName, row.project_name))
+      .map(row => _firstString(row.projectName, row.project_name))
       .filter((name): name is string => Boolean(name))
   );
 }
@@ -790,7 +788,7 @@ function _projectIdsFromExistingTraces(
   return new Set(
     [
       project.source.langfuseProjectId,
-      ...traces.map((trace) => trace.source.projectId),
+      ...traces.map(trace => trace.source.projectId)
     ].filter((id): id is string => Boolean(id))
   );
 }
@@ -812,7 +810,7 @@ function _assertSingleLangfuseSource(
   }
   if (existingProjectIds.size > 0 && batchProjectIds.size > 0) {
     const unexpected = [...batchProjectIds].filter(
-      (id) => !existingProjectIds.has(id)
+      id => !existingProjectIds.has(id)
     );
     if (unexpected.length > 0) {
       throw new Error(
@@ -831,23 +829,23 @@ function _projectSourceAfterImport(
   const existingProjectId = _onlySetValue(existingProjectIds);
   const batchProjectId = _onlySetValue(batchProjectIds);
   const langfuseProjectId =
-    source.langfuseProjectId ??
-    existingProjectId ??
-    (existingProjectIds.size === 0 ? batchProjectId : undefined);
+    source.langfuseProjectId
+    ?? existingProjectId
+    ?? (existingProjectIds.size === 0 ? batchProjectId : undefined);
   const batchMatchesSource =
     batchProjectIds.size > 0 && batchProjectId === langfuseProjectId;
   const langfuseProjectName =
-    source.langfuseProjectName ??
-    (batchMatchesSource ? _onlySetValue(batchProjectNames) : undefined);
+    source.langfuseProjectName
+    ?? (batchMatchesSource ? _onlySetValue(batchProjectNames) : undefined);
   return {
     ...source,
     ...(langfuseProjectId ? { langfuseProjectId } : {}),
-    ...(langfuseProjectName ? { langfuseProjectName } : {}),
+    ...(langfuseProjectName ? { langfuseProjectName } : {})
   };
 }
 
-function _mergeSets(sets: Set<string>[]): Set<string> {
-  return new Set(sets.flatMap((set) => [...set]));
+function _mergeSets(sets: Array<Set<string>>): Set<string> {
+  return new Set(sets.flatMap(set => [...set]));
 }
 
 function _onlySetValue(set: Set<string>): string | undefined {
@@ -857,11 +855,11 @@ function _onlySetValue(set: Set<string>): string | undefined {
 function _formatSourceIds(ids: Set<string>): string {
   const values = [...ids];
   if (values.length <= 2) {
-    return values.map((id) => `"${id}"`).join(" and ");
+    return values.map(id => `"${id}"`).join(" and ");
   }
   return `${values
     .slice(0, 2)
-    .map((id) => `"${id}"`)
+    .map(id => `"${id}"`)
     .join(", ")} and ${values.length - 2} more`;
 }
 
@@ -874,7 +872,7 @@ function _normalizeTraceTitle(value: string): string {
   if (!title) {
     throw new Error("Trace title is required.");
   }
-  if ([...title].some((char) => char.charCodeAt(0) < 32)) {
+  if ([...title].some(char => char.charCodeAt(0) < 32)) {
     throw new Error("Trace title contains a control character.");
   }
   return title;
@@ -884,10 +882,10 @@ function _threadWithTitle(thread: Thread, title: string): Thread {
   return {
     ...thread,
     title,
-    runHistory: thread.runHistory?.map((run) => ({
+    runHistory: thread.runHistory?.map(run => ({
       ...run,
-      thread: { ...run.thread, title },
-    })),
+      thread: { ...run.thread, title }
+    }))
   };
 }
 
@@ -905,11 +903,10 @@ function _threadWithImportedModel(
   return {
     ...thread,
     model,
-    runHistory: thread.runHistory?.map((run) =>
-      run.thread.model
+    runHistory: thread.runHistory?.map(run =>
+      (run.thread.model
         ? run
-        : { ...run, thread: { ...run.thread, model } }
-    ),
+        : { ...run, thread: { ...run.thread, model } }))
   };
 }
 
@@ -917,7 +914,7 @@ function _normalizeExistingWorkbenchThread(thread: Thread): Thread {
   const normalizedBase = normalizeThread(thread);
   const normalized = _normalizeThreadMessages(normalizedBase);
   let changed = normalizedBase !== thread || normalized.changed;
-  const nextRunHistory = normalized.thread.runHistory?.map((run) => {
+  const nextRunHistory = normalized.thread.runHistory?.map(run => {
     const normalizedRunBase = normalizeThread(run.thread);
     const normalizedRun = _normalizeThreadMessages(normalizedRunBase);
     if (normalizedRunBase !== run.thread || normalizedRun.changed) {
@@ -933,15 +930,15 @@ function _normalizeExistingWorkbenchThread(thread: Thread): Thread {
 }
 
 function _normalizeThreadMessages(thread: Thread): {
-  thread: Thread;
   changed: boolean;
+  thread: Thread;
 } {
   const messages = thread.context?.messages;
   if (!messages) {
     return { thread, changed: false };
   }
   let changed = false;
-  const nextMessages = messages.map((message) => {
+  const nextMessages = messages.map(message => {
     const next = _normalizeMessageText(message);
     if (next !== message) {
       changed = true;
@@ -954,9 +951,9 @@ function _normalizeThreadMessages(thread: Thread): {
   return {
     thread: {
       ...thread,
-      context: { ...thread.context, messages: nextMessages },
+      context: { ...thread.context, messages: nextMessages }
     },
-    changed: true,
+    changed: true
   };
 }
 
@@ -968,7 +965,7 @@ function _normalizeMessageText(message: Message): Message {
     return next;
   }
   let toolCallsChanged = false;
-  const toolCalls = next.toolCalls.map((toolCall) => {
+  const toolCalls = next.toolCalls.map(toolCall => {
     if (!toolCall.output) {
       return toolCall;
     }
@@ -979,7 +976,7 @@ function _normalizeMessageText(message: Message): Message {
     toolCallsChanged = true;
     return {
       ...toolCall,
-      output: { ...toolCall.output, content: outputContent },
+      output: { ...toolCall.output, content: outputContent }
     };
   });
   if (!toolCallsChanged) {
@@ -989,11 +986,11 @@ function _normalizeMessageText(message: Message): Message {
   return next;
 }
 
-function _normalizeTextContent<T extends { type: string; text?: string }>(
+function _normalizeTextContent<T extends { text?: string; type: string; }>(
   content: T[]
 ): T[] {
   let changed = false;
-  const next = content.map((item) => {
+  const next = content.map(item => {
     if (item.type !== "text" || typeof item.text !== "string") {
       return item;
     }
@@ -1015,16 +1012,16 @@ function _createTraceRecord({
   fileName,
   importedAt,
   updatedAt,
-  rows,
+  rows
 }: {
-  projectId: string;
-  key: string;
-  sourceMode: TraceRecord["source"]["mode"];
-  traceId: string;
   fileName?: string;
   importedAt: number;
-  updatedAt: number;
+  key: string;
+  projectId: string;
   rows: LangfuseObservation[];
+  sourceMode: TraceRecord["source"]["mode"];
+  traceId: string;
+  updatedAt: number;
 }): TraceRecord {
   const ordered = _sortRows(rows);
   const startedAt = _minDate(ordered.map(_rowStartTime));
@@ -1053,28 +1050,28 @@ function _createTraceRecord({
       traceId,
       ...(fileName ? { fileName } : {}),
       ...(_firstString(
-        ...rows.map((row) => row.projectId),
-        ...rows.map((row) => row.project_id)
+        ...rows.map(row => row.projectId),
+        ...rows.map(row => row.project_id)
       )
         ? {
-            projectId: _firstString(
-              ...rows.map((row) => row.projectId),
-              ...rows.map((row) => row.project_id)
-            ),
-          }
+          projectId: _firstString(
+            ...rows.map(row => row.projectId),
+            ...rows.map(row => row.project_id)
+          )
+        }
         : {}),
       ...(_firstString(
-        ...rows.map((row) => row.projectName),
-        ...rows.map((row) => row.project_name)
+        ...rows.map(row => row.projectName),
+        ...rows.map(row => row.project_name)
       )
         ? {
-            projectName: _firstString(
-              ...rows.map((row) => row.projectName),
-              ...rows.map((row) => row.project_name)
-            ),
-          }
-        : {}),
-    },
+          projectName: _firstString(
+            ...rows.map(row => row.projectName),
+            ...rows.map(row => row.project_name)
+          )
+        }
+        : {})
+    }
   };
 }
 
@@ -1095,7 +1092,7 @@ function _createWorkbench(
     if (parentId && !_isGenerationRow(row)) {
       spansByParent.set(parentId, [
         ...(spansByParent.get(parentId) ?? []),
-        row,
+        row
       ]);
     }
   }
@@ -1137,9 +1134,9 @@ function _createWorkbench(
       content: [
         {
           type: "text",
-          text: "Imported Langfuse trace has no chat-shaped messages.",
-        },
-      ],
+          text: "Imported Langfuse trace has no chat-shaped messages."
+        }
+      ]
     });
   }
 
@@ -1149,8 +1146,8 @@ function _createWorkbench(
     ...(model ? { model } : {}),
     context: {
       systemPrompt: systemParts.join("\n\n") || "",
-      messages,
-    },
+      messages
+    }
   };
   const usage = aggregateMessageUsage(messages) ?? undefined;
   thread.runHistory = [
@@ -1159,13 +1156,13 @@ function _createWorkbench(
       thread: {
         title: thread.title,
         ...(thread.model ? { model: thread.model } : {}),
-        context: thread.context,
+        context: thread.context
       },
       ...(usage ? { usage } : {}),
       timestamp: trace.startedAt
         ? Date.parse(trace.startedAt)
-        : trace.importedAt,
-    },
+        : trace.importedAt
+    }
   ];
   return thread;
 }
@@ -1185,7 +1182,7 @@ function _assistantFromGeneration(
     role: "assistant",
     content: [{ type: "text", text: outputText }],
     ...(toolCalls.length ? { toolCalls } : {}),
-    ...(usage ? { usage } : {}),
+    ...(usage ? { usage } : {})
   };
 }
 
@@ -1197,12 +1194,12 @@ function _toolCallFromSpan(row: LangfuseObservation): ToolCall {
         /-/g,
         "_"
       ),
-      arguments: _argumentsFromValue(row.input),
+      arguments: _argumentsFromValue(row.input)
     },
     output: {
       content: [{ type: "text", text: _textFromValue(row.output) }],
-      ...(_rowIsError(row) ? { isError: true } : {}),
-    },
+      ...(_rowIsError(row) ? { isError: true } : {})
+    }
   };
 }
 
@@ -1246,7 +1243,7 @@ function _appendUserMessage(messages: Message[], text: string): void {
   messages.push({
     id: uuid(),
     role: "user",
-    content: [{ type: "text", text }],
+    content: [{ type: "text", text }]
   });
 }
 
@@ -1298,17 +1295,17 @@ function _usageFromRow(row: LangfuseObservation): ModelUsage | null {
       cacheRead: _numberFromKeys(cost, "cacheRead", "cache_read"),
       cacheWrite: _numberFromKeys(cost, "cacheWrite", "cache_write"),
       total:
-        _numberFromKeys(cost, "total", "totalCost", "total_cost") ||
-        _finiteNumber(row.totalCost),
-    },
+        _numberFromKeys(cost, "total", "totalCost", "total_cost")
+        || _finiteNumber(row.totalCost)
+    }
   };
   const hasUsage =
-    modelUsage.input > 0 ||
-    modelUsage.output > 0 ||
-    modelUsage.cacheRead > 0 ||
-    modelUsage.cacheWrite > 0 ||
-    modelUsage.totalTokens > 0 ||
-    modelUsage.cost.total > 0;
+    modelUsage.input > 0
+    || modelUsage.output > 0
+    || modelUsage.cacheRead > 0
+    || modelUsage.cacheWrite > 0
+    || modelUsage.totalTokens > 0
+    || modelUsage.cost.total > 0;
   return hasUsage ? modelUsage : null;
 }
 
@@ -1317,7 +1314,7 @@ function _aggregateRowsUsage(
 ): ModelUsage | undefined {
   return (
     aggregateModelUsage(
-      rows.flatMap((row) => {
+      rows.flatMap(row => {
         const usage = _usageFromRow(row);
         return usage ? [usage] : [];
       })
@@ -1363,10 +1360,10 @@ function _rowIsError(row: LangfuseObservation): boolean {
     _firstString(row.level, row.statusMessage, row.status) ?? ""
   ).toLowerCase();
   return (
-    level.includes("error") ||
-    Boolean(row.error) ||
-    Boolean(row.errorMessage) ||
-    Boolean(row.statusMessage && level !== "success")
+    level.includes("error")
+    || Boolean(row.error)
+    || Boolean(row.errorMessage)
+    || Boolean(row.statusMessage && level !== "success")
   );
 }
 
@@ -1381,10 +1378,10 @@ function _sortRows(rows: LangfuseObservation[]): LangfuseObservation[] {
 function _titleFromRows(traceId: string, rows: LangfuseObservation[]): string {
   return (
     _firstString(
-      ...rows.map((row) => row.traceName),
-      ...rows.map((row) => row.trace_name),
-      ...rows.map((row) => _asRecord(row.trace)?.name),
-      ...rows.map((row) => row.name)
+      ...rows.map(row => row.traceName),
+      ...rows.map(row => row.trace_name),
+      ...rows.map(row => _asRecord(row.trace)?.name),
+      ...rows.map(row => row.name)
     ) ?? `Trace ${traceId.slice(0, 8)}`
   );
 }
@@ -1411,11 +1408,11 @@ function _traceModelIdFromRows(
   rows: LangfuseObservation[]
 ): string | undefined {
   return (
-    _codexModelFromRows(rows) ??
-    _firstString(
-      ...rows.map((row) => row.model),
-      ...rows.map((row) => row.providedModelName),
-      ...rows.map((row) => row.modelId)
+    _codexModelFromRows(rows)
+    ?? _firstString(
+      ...rows.map(row => row.model),
+      ...rows.map(row => row.providedModelName),
+      ...rows.map(row => row.modelId)
     )
   );
 }
@@ -1446,14 +1443,14 @@ function _codexModelFromRowMetadata(
   return _firstString(codex?.model, metadata["codex.model"]);
 }
 
-function _minDate(values: (string | undefined)[]): string | undefined {
+function _minDate(values: Array<string | undefined>): string | undefined {
   const sorted = values
     .filter(Boolean)
     .sort((a, b) => _timeValue(a) - _timeValue(b));
   return sorted[0];
 }
 
-function _maxDate(values: (string | undefined)[]): string | undefined {
+function _maxDate(values: Array<string | undefined>): string | undefined {
   const sorted = values
     .filter(Boolean)
     .sort((a, b) => _timeValue(b) - _timeValue(a));
@@ -1496,10 +1493,10 @@ function _textFromJsonWrapper(text: string): string {
   }
   const record = _asRecord(decoded);
   if (
-    record &&
-    (record.content !== undefined ||
-      record.text !== undefined ||
-      Array.isArray(record.choices))
+    record
+    && (record.content !== undefined
+      || record.text !== undefined
+      || Array.isArray(record.choices))
   ) {
     return _textFromValue(decoded);
   }
@@ -1524,7 +1521,7 @@ function _textFromValue(value: unknown): string {
   }
   if (Array.isArray(value)) {
     return value
-      .flatMap((item) => {
+      .flatMap(item => {
         const record = _asRecord(item);
         const text =
           record?.text !== undefined
@@ -1548,7 +1545,7 @@ function _textFromValue(value: unknown): string {
 
 function _messageText(content: Message["content"]): string {
   return content
-    .flatMap((item) => (item.type === "text" && item.text ? [item.text] : []))
+    .flatMap(item => (item.type === "text" && item.text ? [item.text] : []))
     .join("\n")
     .trim();
 }
@@ -1570,7 +1567,8 @@ function _safeSegment(segment: string): string {
 }
 
 function _shortHash(value: string): string {
-  return createHash("sha256").update(value).digest("hex").slice(0, 10);
+  return createHash("sha256").update(value).digest("hex")
+    .slice(0, 10);
 }
 
 function _firstString(...values: unknown[]): string | undefined {

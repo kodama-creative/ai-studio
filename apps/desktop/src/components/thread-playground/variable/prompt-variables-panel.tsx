@@ -1,16 +1,11 @@
 "use client";
 
-import type {
-  ThreadCurrentDateVariable,
-  ThreadSkillsVariable,
-  ThreadVariable,
-} from "@llm-space/core";
 import {
   DEFAULT_VARIABLE_VARIANT_NAME,
   formatCurrentDateVariable,
   formatSkillsVariable,
   normalizePromptVariableState,
-  VARIABLE_NAME_RE,
+  VARIABLE_NAME_RE
 } from "@llm-space/core/thread";
 import {
   BracesIcon,
@@ -18,23 +13,34 @@ import {
   ListFilterIcon,
   PlusIcon,
   SparklesIcon,
-  Trash2Icon,
+  Trash2Icon
 } from "lucide-react";
 import {
   memo,
+  type ReactNode,
   useCallback,
   useEffect,
   useMemo,
   useRef,
-  useState,
-  type ReactNode,
+  useState
 } from "react";
+
+import type {
+  ThreadCurrentDateVariable,
+  ThreadSkillsVariable,
+  ThreadVariable
+} from "@llm-space/core";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { Tooltip } from "@/components/tooltip";
 import { cn } from "@/lib/utils";
-import type { SkillInfo } from "@/shared/skills";
-
+import {
+  PROMPT_DATE_FORMATS,
+  PROMPT_SKILLS_FORMATS,
+  PROMPT_SKILLS_INDENTS
+} from "./prompt-variable-options";
+import { usePromptSkillsLoader } from "./prompt-variable-skills";
+import { SkillSelectionDialog } from "./skill-selection-dialog";
 import { Button } from "../../ui/button";
 import { Input } from "../../ui/input";
 import { ScrollArea } from "../../ui/scroll-area";
@@ -43,55 +49,49 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
+  SelectValue
 } from "../../ui/select";
 import { Textarea } from "../../ui/textarea";
 import { useThreadStore, useThreadStoreActions } from "../stores";
 
-import {
-  PROMPT_DATE_FORMATS,
-  PROMPT_SKILLS_FORMATS,
-  PROMPT_SKILLS_INDENTS,
-} from "./prompt-variable-options";
-import { usePromptSkillsLoader } from "./prompt-variable-skills";
-import { SkillSelectionDialog } from "./skill-selection-dialog";
+import type { SkillInfo } from "@/shared/skills";
 
 interface PromptVariablesPanelProps {
-  className?: string;
-  disabled?: boolean;
-  initialSelection?: PromptVariableSelection | null;
+  readonly className?: string;
+  readonly disabled?: boolean;
+  readonly initialSelection?: PromptVariableSelection | null;
 }
 
 export type PromptVariableSelection =
-  { kind: "builtIn"; name: string } | { kind: "custom"; name: string };
+  { kind: "builtIn"; name: string; } | { kind: "custom"; name: string; };
 
 type VariableListItem =
   | {
-      kind: "builtIn";
-      name: string;
-      variable: ThreadVariable;
-      status: string;
-      warning?: boolean;
-    }
+    kind: "builtIn";
+    name: string;
+    status: string;
+    variable: ThreadVariable;
+    warning?: boolean;
+  }
   | {
-      kind: "custom";
-      name: string;
-      value: string;
-      status: string;
-      warning?: boolean;
-    };
+    kind: "custom";
+    name: string;
+    status: string;
+    value: string;
+    warning?: boolean;
+  };
 
 function _PromptVariablesPanel({
   className,
   disabled,
-  initialSelection,
+  initialSelection
 }: PromptVariablesPanelProps) {
-  const rawVariables = useThreadStore((s) => s.thread.context?.variables);
+  const rawVariables = useThreadStore(s => s.thread.context?.variables);
   const rawVariableVariants = useThreadStore(
-    (s) => s.thread.context?.variableVariants
+    s => s.thread.context?.variableVariants
   );
   const systemPrompt = useThreadStore(
-    (s) => s.thread.context?.systemPrompt ?? ""
+    s => s.thread.context?.systemPrompt ?? ""
   );
   const {
     updatePromptVariable,
@@ -99,14 +99,14 @@ function _PromptVariablesPanel({
     addCustomVariable,
     updateCustomVariable,
     renameCustomVariable,
-    removeCustomVariable,
+    removeCustomVariable
   } = useThreadStoreActions();
 
   const { variables, variableVariants } = useMemo(
     () =>
       normalizePromptVariableState({
         variables: rawVariables,
-        variableVariants: rawVariableVariants,
+        variableVariants: rawVariableVariants
       }),
     [rawVariables, rawVariableVariants]
   );
@@ -124,10 +124,10 @@ function _PromptVariablesPanel({
   // the same mount commit) doesn't clobber it back to the first variable.
   const [selection, setSelection] = useState<PromptVariableSelection | null>(
     () =>
-      initialSelection &&
-      _selectionExists(initialSelection, variables, customValues)
+      (initialSelection
+        && _selectionExists(initialSelection, variables, customValues)
         ? initialSelection
-        : null
+        : null)
   );
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [skillsLoading, setSkillsLoading] = useState(false);
@@ -142,7 +142,7 @@ function _PromptVariablesPanel({
   const appliedInitialSelectionKeyRef = useRef<string | null>(null);
 
   const skillsByName = useMemo(
-    () => new Map(skills.map((skill) => [skill.name, skill])),
+    () => new Map(skills.map(skill => [skill.name, skill])),
     [skills]
   );
 
@@ -153,12 +153,12 @@ function _PromptVariablesPanel({
           kind: "builtIn" as const,
           name,
           variable,
-          status: _dateFormatLabel(variable.format),
+          status: _dateFormatLabel(variable.format)
         };
       }
       const selectedCount = variable.skillNames.length;
       const missingCount = variable.skillNames.filter(
-        (skillName) => !skillsByName.has(skillName)
+        skillName => !skillsByName.has(skillName)
       ).length;
       return {
         kind: "builtIn" as const,
@@ -170,14 +170,14 @@ function _PromptVariablesPanel({
             : missingCount > 0
               ? `${missingCount} missing`
               : `${selectedCount} selected`,
-        warning: missingCount > 0 || Boolean(skillsError),
+        warning: missingCount > 0 || Boolean(skillsError)
       };
     });
     const custom = Object.entries(customValues).map(([name, value]) => ({
       kind: "custom" as const,
       name,
       value,
-      status: value.trim() ? value : "(empty)",
+      status: value.trim() ? value : "(empty)"
     }));
     return { builtInItems, customItems: custom };
   }, [customValues, skillsByName, skillsError, variables]);
@@ -194,8 +194,8 @@ function _PromptVariablesPanel({
     }
     appliedInitialSelectionKeyRef.current = initialSelectionKey;
     if (
-      initialSelection &&
-      _selectionExists(initialSelection, variables, customValues)
+      initialSelection
+      && _selectionExists(initialSelection, variables, customValues)
     ) {
       setSelection(initialSelection);
     }
@@ -221,12 +221,12 @@ function _PromptVariablesPanel({
     setSkillsLoading(true);
     setSkillsError(null);
     void loadSkills()
-      .then((loaded) => {
+      .then(loaded => {
         if (!cancelled) {
           setSkills(loaded);
         }
       })
-      .catch((error) => {
+      .catch(error => {
         if (!cancelled) {
           setSkills([]);
           setSkillsError(
@@ -263,9 +263,9 @@ function _PromptVariablesPanel({
     [removeCustomVariable, systemPrompt]
   );
   const detailFillsAvailableHeight =
-    selection?.kind === "custom" ||
-    (selection?.kind === "builtIn" &&
-      variables[selection.name]?.type === "skills");
+    selection?.kind === "custom"
+    || (selection?.kind === "builtIn"
+      && variables[selection.name]?.type === "skills");
 
   return (
     <section
@@ -278,76 +278,69 @@ function _PromptVariablesPanel({
         <ScrollArea className="border-border/60 min-h-0 border-r">
           <div className="grid gap-3 p-2">
             <VariableListGroup title="Built-in">
-              {builtInItems.map((item) => (
+              {builtInItems.map(item => (
                 <VariableListRow
-                  key={`${item.kind}:${item.name}`}
-                  item={item}
-                  selected={
-                    selection?.kind === item.kind &&
-                    selection.name === item.name
-                  }
                   disabled={disabled}
-                  onSelect={() =>
-                    setSelection({ kind: item.kind, name: item.name })
+                  item={item}
+                  key={`${item.kind}:${item.name}`}
+                  onSelect={() => { setSelection({ kind: item.kind, name: item.name }); }}
+                  selected={
+                    selection?.kind === item.kind
+                    && selection.name === item.name
                   }
                 />
               ))}
             </VariableListGroup>
             <VariableListGroup
-              title="Custom"
               action={
                 <Button
                   className="h-6 px-1.5 text-[0.6875rem]"
-                  size="sm"
-                  variant="ghost"
                   disabled={disabled}
                   onClick={addCustom}
+                  size="sm"
+                  variant="ghost"
                 >
                   <PlusIcon className="size-3" />
                   Add variable
                 </Button>
               }
+              title="Custom"
             >
-              {customItems.length > 0 ? (
-                customItems.map((item) => (
-                  <VariableListRow
-                    key={`${item.kind}:${item.name}`}
-                    item={item}
-                    selected={
-                      selection?.kind === item.kind &&
-                      selection.name === item.name
-                    }
-                    disabled={disabled}
-                    onSelect={() =>
-                      setSelection({ kind: item.kind, name: item.name })
-                    }
-                  />
-                ))
-              ) : (
-                <div className="text-muted-foreground px-2 py-1 text-[0.6875rem]">
-                  No custom variables.
-                </div>
-              )}
+              {customItems.length > 0
+                ? (
+                  customItems.map(item => (
+                    <VariableListRow
+                      disabled={disabled}
+                      item={item}
+                      key={`${item.kind}:${item.name}`}
+                      onSelect={() => { setSelection({ kind: item.kind, name: item.name }); }}
+                      selected={
+                        selection?.kind === item.kind
+                        && selection.name === item.name
+                      }
+                    />
+                  ))
+                )
+                : (
+                  <div className="text-muted-foreground px-2 py-1 text-[0.6875rem]">
+                    No custom variables.
+                  </div>
+                )}
             </VariableListGroup>
           </div>
         </ScrollArea>
         <ScrollArea
           className={cn(
             "min-h-0",
-            detailFillsAvailableHeight &&
-              "[&_[data-radix-scroll-area-viewport]>div]:!flex [&_[data-radix-scroll-area-viewport]>div]:!h-full"
+            detailFillsAvailableHeight
+            && "[&_[data-radix-scroll-area-viewport]>div]:!flex [&_[data-radix-scroll-area-viewport]>div]:!h-full"
           )}
         >
           <VariableDetail
-            selection={selection}
-            disabled={disabled}
-            variables={variables}
             customNames={customNames}
             customValues={customValues}
-            skills={skills}
-            skillsByName={skillsByName}
-            skillsLoading={skillsLoading}
-            skillsError={skillsError}
+            disabled={disabled}
+            onRemoveCustom={confirmRemoveCustom}
             onRenameBuiltIn={(oldName, newName) => {
               const renamed = renamePromptVariable(oldName, newName);
               if (renamed) {
@@ -355,7 +348,6 @@ function _PromptVariablesPanel({
               }
               return renamed;
             }}
-            onUpdateBuiltIn={updatePromptVariable}
             onRenameCustom={(oldName, newName) => {
               const renamed = renameCustomVariable(oldName, newName);
               if (renamed) {
@@ -363,31 +355,37 @@ function _PromptVariablesPanel({
               }
               return renamed;
             }}
+            onUpdateBuiltIn={updatePromptVariable}
             onUpdateCustom={updateCustomVariable}
-            onRemoveCustom={confirmRemoveCustom}
+            selection={selection}
+            skills={skills}
+            skillsByName={skillsByName}
+            skillsError={skillsError}
+            skillsLoading={skillsLoading}
+            variables={variables}
           />
         </ScrollArea>
       </div>
       <ConfirmDialog
-        open={pendingRemoveCustom !== null}
-        onOpenChange={(open) => {
-          if (!open) {
-            setPendingRemoveCustom(null);
-          }
-        }}
-        title="Delete custom variable?"
+        confirmLabel="Delete variable"
         description={
           pendingRemoveCustom
             ? `The system prompt references "{{${pendingRemoveCustom}}}". Deleting this variable will block runs until the prompt is updated.`
             : undefined
         }
-        confirmLabel="Delete variable"
         onConfirm={() => {
           if (pendingRemoveCustom) {
             removeCustomVariable(pendingRemoveCustom);
           }
           setPendingRemoveCustom(null);
         }}
+        onOpenChange={open => {
+          if (!open) {
+            setPendingRemoveCustom(null);
+          }
+        }}
+        open={pendingRemoveCustom !== null}
+        title="Delete custom variable?"
       />
     </section>
   );
@@ -396,11 +394,11 @@ function _PromptVariablesPanel({
 function VariableListGroup({
   title,
   action,
-  children,
+  children
 }: {
-  title: string;
-  action?: ReactNode;
-  children: ReactNode;
+  readonly action?: ReactNode;
+  readonly children: ReactNode;
+  readonly title: string;
 }) {
   return (
     <div className="grid gap-1">
@@ -417,12 +415,12 @@ function VariableListRow({
   item,
   selected,
   disabled,
-  onSelect,
+  onSelect
 }: {
-  item: VariableListItem;
-  selected: boolean;
-  disabled?: boolean;
-  onSelect: () => void;
+  readonly disabled?: boolean;
+  readonly item: VariableListItem;
+  readonly onSelect: () => void;
+  readonly selected: boolean;
 }) {
   return (
     <div
@@ -433,16 +431,16 @@ function VariableListRow({
       )}
     >
       <button
-        type="button"
+        aria-pressed={selected}
         className="hover:bg-muted/40 focus-visible:ring-ring/30 flex min-w-0 grow items-center gap-2 rounded-md px-2 py-1 text-left transition-colors outline-none focus-visible:ring-2"
         disabled={disabled}
-        aria-pressed={selected}
         onClick={onSelect}
+        type="button"
       >
         {_variableIcon(item)}
         <span className="min-w-0 grow">
           <span className="block truncate text-xs font-medium">
-            {`${item.name}`}
+            {item.name}
           </span>
           <span
             className={cn(
@@ -472,22 +470,22 @@ function VariableDetail({
   onUpdateBuiltIn,
   onRenameCustom,
   onUpdateCustom,
-  onRemoveCustom,
+  onRemoveCustom
 }: {
-  selection: PromptVariableSelection | null;
-  disabled?: boolean;
-  variables: Record<string, ThreadVariable>;
-  customNames: Set<string>;
-  customValues: Record<string, string>;
-  skills: SkillInfo[];
-  skillsByName: Map<string, SkillInfo>;
-  skillsLoading: boolean;
-  skillsError: string | null;
-  onRenameBuiltIn: (oldName: string, newName: string) => boolean;
-  onUpdateBuiltIn: (name: string, variable: ThreadVariable) => void;
-  onRenameCustom: (oldName: string, newName: string) => boolean;
-  onUpdateCustom: (name: string, value: string) => void;
-  onRemoveCustom: (name: string) => void;
+  readonly customNames: Set<string>;
+  readonly customValues: Record<string, string>;
+  readonly disabled?: boolean;
+  readonly onRemoveCustom: (name: string) => void;
+  readonly onRenameBuiltIn: (oldName: string, newName: string) => boolean;
+  readonly onRenameCustom: (oldName: string, newName: string) => boolean;
+  readonly onUpdateBuiltIn: (name: string, variable: ThreadVariable) => void;
+  readonly onUpdateCustom: (name: string, value: string) => void;
+  readonly selection: PromptVariableSelection | null;
+  readonly skills: SkillInfo[];
+  readonly skillsByName: Map<string, SkillInfo>;
+  readonly skillsError: string | null;
+  readonly skillsLoading: boolean;
+  readonly variables: Record<string, ThreadVariable>;
 }) {
   if (!selection) {
     return (
@@ -508,14 +506,14 @@ function VariableDetail({
     }
     return (
       <CustomVariableDetail
-        name={selection.name}
-        value={value}
-        disabled={disabled}
-        variables={variables}
         customNames={customNames}
+        disabled={disabled}
+        name={selection.name}
+        onRemove={onRemoveCustom}
         onRename={onRenameCustom}
         onUpdate={onUpdateCustom}
-        onRemove={onRemoveCustom}
+        value={value}
+        variables={variables}
       />
     );
   }
@@ -532,30 +530,30 @@ function VariableDetail({
   if (variable.type === "currentDate") {
     return (
       <CurrentDateVariableDetail
-        name={selection.name}
-        variable={variable}
-        disabled={disabled}
-        variables={variables}
         customNames={customNames}
+        disabled={disabled}
+        name={selection.name}
         onRename={onRenameBuiltIn}
-        onUpdate={(name, next) => onUpdateBuiltIn(name, next)}
+        onUpdate={(name, next) => { onUpdateBuiltIn(name, next); }}
+        variable={variable}
+        variables={variables}
       />
     );
   }
 
   return (
     <SkillsVariableDetail
-      name={selection.name}
-      variable={variable}
-      disabled={disabled}
-      variables={variables}
       customNames={customNames}
+      disabled={disabled}
+      name={selection.name}
+      onRename={onRenameBuiltIn}
+      onUpdate={(name, next) => { onUpdateBuiltIn(name, next); }}
       skills={skills}
       skillsByName={skillsByName}
-      skillsLoading={skillsLoading}
       skillsError={skillsError}
-      onRename={onRenameBuiltIn}
-      onUpdate={(name, next) => onUpdateBuiltIn(name, next)}
+      skillsLoading={skillsLoading}
+      variable={variable}
+      variables={variables}
     />
   );
 }
@@ -567,46 +565,43 @@ function CurrentDateVariableDetail({
   variables,
   customNames,
   onRename,
-  onUpdate,
+  onUpdate
 }: {
-  name: string;
-  variable: ThreadCurrentDateVariable;
-  disabled?: boolean;
-  variables: Record<string, ThreadVariable>;
-  customNames: Set<string>;
-  onRename: (oldName: string, newName: string) => boolean;
-  onUpdate: (name: string, variable: ThreadCurrentDateVariable) => void;
+  readonly customNames: Set<string>;
+  readonly disabled?: boolean;
+  readonly name: string;
+  readonly onRename: (oldName: string, newName: string) => boolean;
+  readonly onUpdate: (name: string, variable: ThreadCurrentDateVariable) => void;
+  readonly variable: ThreadCurrentDateVariable;
+  readonly variables: Record<string, ThreadVariable>;
 }) {
   return (
     <DetailShell
+      disabled={disabled}
       icon={<CalendarDaysIcon className="text-muted-foreground size-4" />}
       title="Current date"
-      disabled={disabled}
     >
       <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_12rem]">
         <Field label="Name">
           <VariableNameInput
-            name={name}
             disabled={disabled}
-            isAvailable={(next) =>
-              _isBuiltInNameAvailable(next, name, variables, customNames)
-            }
-            onCommit={(next) => onRename(name, next)}
+            isAvailable={next =>
+              _isBuiltInNameAvailable(next, name, variables, customNames)}
+            name={name}
+            onCommit={next => onRename(name, next)}
           />
         </Field>
         <Field label="Format">
           <Select
-            value={variable.format}
             disabled={disabled}
-            onValueChange={(format: ThreadCurrentDateVariable["format"]) =>
-              onUpdate(name, { ...variable, format })
-            }
+            onValueChange={(format: ThreadCurrentDateVariable["format"]) => { onUpdate(name, { ...variable, format }); }}
+            value={variable.format}
           >
-            <SelectTrigger className="w-full" aria-label="Current date format">
+            <SelectTrigger aria-label="Current date format" className="w-full">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {PROMPT_DATE_FORMATS.map((format) => (
+              {PROMPT_DATE_FORMATS.map(format => (
                 <SelectItem key={format.value} value={format.value}>
                   {format.label}
                 </SelectItem>
@@ -633,22 +628,22 @@ function SkillsVariableDetail({
   skillsLoading,
   skillsError,
   onRename,
-  onUpdate,
+  onUpdate
 }: {
-  name: string;
-  variable: ThreadSkillsVariable;
-  disabled?: boolean;
-  variables: Record<string, ThreadVariable>;
-  customNames: Set<string>;
-  skills: SkillInfo[];
-  skillsByName: Map<string, SkillInfo>;
-  skillsLoading: boolean;
-  skillsError: string | null;
-  onRename: (oldName: string, newName: string) => boolean;
-  onUpdate: (name: string, variable: ThreadSkillsVariable) => void;
+  readonly customNames: Set<string>;
+  readonly disabled?: boolean;
+  readonly name: string;
+  readonly onRename: (oldName: string, newName: string) => boolean;
+  readonly onUpdate: (name: string, variable: ThreadSkillsVariable) => void;
+  readonly skills: SkillInfo[];
+  readonly skillsByName: Map<string, SkillInfo>;
+  readonly skillsError: string | null;
+  readonly skillsLoading: boolean;
+  readonly variable: ThreadSkillsVariable;
+  readonly variables: Record<string, ThreadVariable>;
 }) {
   const [skillsDialogOpen, setSkillsDialogOpen] = useState(false);
-  const selectedSkills = variable.skillNames.flatMap((skillName) => {
+  const selectedSkills = variable.skillNames.flatMap(skillName => {
     const skill = skillsByName.get(skillName);
     return skill ? [skill] : [];
   });
@@ -657,13 +652,13 @@ function SkillsVariableDetail({
   const someMissing =
     !usingAllSkills && selectedSkills.length !== variable.skillNames.length;
   const preview =
-    skillsError ??
-    (someMissing
+    skillsError
+    ?? (someMissing
       ? "Some selected skills are no longer enabled."
       : formatSkillsVariable(
-          usingAllSkills ? skills : selectedSkills,
-          variable
-        ));
+        usingAllSkills ? skills : selectedSkills,
+        variable
+      ));
 
   const update = (next: Partial<ThreadSkillsVariable>) => {
     onUpdate(name, { ...variable, ...next });
@@ -671,17 +666,14 @@ function SkillsVariableDetail({
 
   return (
     <DetailShell
-      icon={<SparklesIcon className="text-muted-foreground size-4" />}
-      title="Available skills"
-      disabled={disabled}
       action={
         <Tooltip content="Select skills">
           <Button
-            size="icon-sm"
-            variant="outline"
             aria-label="Select skills"
             disabled={disabled}
-            onClick={() => setSkillsDialogOpen(true)}
+            onClick={() => { setSkillsDialogOpen(true); }}
+            size="icon-sm"
+            variant="outline"
           >
             <ListFilterIcon className="size-3.5" />
           </Button>
@@ -689,31 +681,31 @@ function SkillsVariableDetail({
       }
       className="flex h-full flex-col"
       contentClassName="flex min-h-0 grow flex-col"
+      disabled={disabled}
+      icon={<SparklesIcon className="text-muted-foreground size-4" />}
+      title="Available skills"
     >
       <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_9rem_9rem]">
         <Field label="Name">
           <VariableNameInput
-            name={name}
             disabled={disabled}
-            isAvailable={(next) =>
-              _isBuiltInNameAvailable(next, name, variables, customNames)
-            }
-            onCommit={(next) => onRename(name, next)}
+            isAvailable={next =>
+              _isBuiltInNameAvailable(next, name, variables, customNames)}
+            name={name}
+            onCommit={next => onRename(name, next)}
           />
         </Field>
         <Field label="Format">
           <Select
-            value={variable.format}
             disabled={disabled}
-            onValueChange={(format: ThreadSkillsVariable["format"]) =>
-              update({ format })
-            }
+            onValueChange={(format: ThreadSkillsVariable["format"]) => { update({ format }); }}
+            value={variable.format}
           >
-            <SelectTrigger className="w-full" aria-label="Skills format">
+            <SelectTrigger aria-label="Skills format" className="w-full">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {PROMPT_SKILLS_FORMATS.map((format) => (
+              {PROMPT_SKILLS_FORMATS.map(format => (
                 <SelectItem key={format.value} value={format.value}>
                   {format.label}
                 </SelectItem>
@@ -723,15 +715,15 @@ function SkillsVariableDetail({
         </Field>
         <Field label="Indent">
           <Select
-            value={String(variable.indent)}
             disabled={disabled}
-            onValueChange={(indent) => update({ indent: Number(indent) })}
+            onValueChange={indent => { update({ indent: Number(indent) }); }}
+            value={String(variable.indent)}
           >
-            <SelectTrigger className="w-full" aria-label="Skills indentation">
+            <SelectTrigger aria-label="Skills indentation" className="w-full">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {PROMPT_SKILLS_INDENTS.map((indent) => (
+              {PROMPT_SKILLS_INDENTS.map(indent => (
                 <SelectItem key={indent} value={String(indent)}>
                   {indent === 0 ? "Default" : `${indent} spaces`}
                 </SelectItem>
@@ -740,7 +732,7 @@ function SkillsVariableDetail({
           </Select>
         </Field>
       </div>
-      <Field label="Value" className="flex min-h-0 grow flex-col">
+      <Field className="flex min-h-0 grow flex-col" label="Value">
         <PreviewBlock
           className="max-h-none min-h-32 grow"
           muted={skillsLoading || Boolean(skillsError) || someMissing}
@@ -748,14 +740,14 @@ function SkillsVariableDetail({
         />
       </Field>
       <SkillSelectionDialog
-        open={skillsDialogOpen}
         disabled={disabled}
-        loading={skillsLoading}
         error={skillsError}
-        skills={skills}
-        selectedSkillNames={variable.skillNames}
+        loading={skillsLoading}
+        onApply={skillNames => { update({ skillNames }); }}
         onOpenChange={setSkillsDialogOpen}
-        onApply={(skillNames) => update({ skillNames })}
+        open={skillsDialogOpen}
+        selectedSkillNames={variable.skillNames}
+        skills={skills}
       />
     </DetailShell>
   );
@@ -769,53 +761,52 @@ function CustomVariableDetail({
   customNames,
   onRename,
   onUpdate,
-  onRemove,
+  onRemove
 }: {
-  name: string;
-  value: string;
-  disabled?: boolean;
-  variables: Record<string, ThreadVariable>;
-  customNames: Set<string>;
-  onRename: (oldName: string, newName: string) => boolean;
-  onUpdate: (name: string, value: string) => void;
-  onRemove: (name: string) => void;
+  readonly customNames: Set<string>;
+  readonly disabled?: boolean;
+  readonly name: string;
+  readonly onRemove: (name: string) => void;
+  readonly onRename: (oldName: string, newName: string) => boolean;
+  readonly onUpdate: (name: string, value: string) => void;
+  readonly value: string;
+  readonly variables: Record<string, ThreadVariable>;
 }) {
   return (
     <DetailShell
-      icon={<BracesIcon className="text-muted-foreground size-4" />}
-      title="User defined variable"
-      disabled={disabled}
       action={
         <Button
-          size="icon-sm"
-          variant="ghost"
           aria-label="Delete custom variable"
           disabled={disabled}
-          onClick={() => onRemove(name)}
+          onClick={() => { onRemove(name); }}
+          size="icon-sm"
+          variant="ghost"
         >
           <Trash2Icon className="size-3.5" />
         </Button>
       }
       className="flex h-full flex-col"
       contentClassName="flex min-h-0 grow flex-col"
+      disabled={disabled}
+      icon={<BracesIcon className="text-muted-foreground size-4" />}
+      title="User defined variable"
     >
       <Field label="Name">
         <VariableNameInput
-          name={name}
           disabled={disabled}
-          isAvailable={(next) =>
-            _isCustomNameAvailable(next, name, variables, customNames)
-          }
-          onCommit={(next) => onRename(name, next)}
+          isAvailable={next =>
+            _isCustomNameAvailable(next, name, variables, customNames)}
+          name={name}
+          onCommit={next => onRename(name, next)}
         />
       </Field>
-      <Field label="Value" className="flex min-h-0 grow flex-col">
+      <Field className="flex min-h-0 grow flex-col" label="Value">
         <Textarea
           className="min-h-32 grow resize-none font-mono text-xs"
-          value={value}
           disabled={disabled}
+          onChange={event => { onUpdate(name, event.currentTarget.value); }}
           placeholder="Variable value"
-          onChange={(event) => onUpdate(name, event.currentTarget.value)}
+          value={value}
         />
       </Field>
     </DetailShell>
@@ -828,15 +819,15 @@ function DetailShell({
   action,
   children,
   className,
-  contentClassName,
+  contentClassName
 }: {
-  icon: ReactNode;
-  title: string;
-  disabled?: boolean;
-  action?: ReactNode;
-  children: ReactNode;
-  className?: string;
-  contentClassName?: string;
+  readonly action?: ReactNode;
+  readonly children: ReactNode;
+  readonly className?: string;
+  readonly contentClassName?: string;
+  readonly disabled?: boolean;
+  readonly icon: ReactNode;
+  readonly title: string;
 }) {
   return (
     <div className={cn("grid w-full gap-5 p-5", className)}>
@@ -855,11 +846,11 @@ function DetailShell({
 function Field({
   label,
   children,
-  className,
+  className
 }: {
-  label: string;
-  children: ReactNode;
-  className?: string;
+  readonly children: ReactNode;
+  readonly className?: string;
+  readonly label: string;
 }) {
   return (
     <label className={cn("grid min-w-0 gap-1.5", className)}>
@@ -872,11 +863,11 @@ function Field({
 function PreviewBlock({
   value,
   muted,
-  className,
+  className
 }: {
-  value: string;
-  muted?: boolean;
-  className?: string;
+  readonly className?: string;
+  readonly muted?: boolean;
+  readonly value: string;
 }) {
   return (
     <pre
@@ -898,15 +889,15 @@ function VariableNameInput({
   ariaLabel,
   showFeedback = true,
   isAvailable,
-  onCommit,
+  onCommit
 }: {
-  name: string;
-  disabled?: boolean;
-  className?: string;
-  ariaLabel?: string;
-  showFeedback?: boolean;
-  isAvailable: (name: string) => boolean;
-  onCommit: (name: string) => boolean;
+  readonly ariaLabel?: string;
+  readonly className?: string;
+  readonly disabled?: boolean;
+  readonly isAvailable: (name: string) => boolean;
+  readonly name: string;
+  readonly onCommit: (name: string) => boolean;
+  readonly showFeedback?: boolean;
 }) {
   const [draft, setDraft] = useState(name);
   useEffect(() => {
@@ -930,20 +921,19 @@ function VariableNameInput({
   return (
     <div className={cn("grid gap-1", className)}>
       <Input
+        aria-invalid={!valid || !available}
+        aria-label={ariaLabel}
         className={cn(
           "h-7 font-mono text-xs",
           !showFeedback && "h-7",
           (!valid || !available) && "border-destructive"
         )}
-        value={draft}
         disabled={disabled}
-        aria-label={ariaLabel}
-        aria-invalid={!valid || !available}
-        onChange={(event) => {
+        onBlur={commit}
+        onChange={event => {
           setDraft(event.currentTarget.value);
         }}
-        onBlur={commit}
-        onKeyDown={(event) => {
+        onKeyDown={event => {
           if (event.key === "Enter") {
             event.currentTarget.blur();
           }
@@ -952,15 +942,20 @@ function VariableNameInput({
             event.currentTarget.blur();
           }
         }}
+        value={draft}
       />
-      {showFeedback && !valid ? (
-        <div className="text-destructive text-xs">
-          Use letters, numbers, and underscores; start with a letter or
-          underscore.
-        </div>
-      ) : showFeedback && !available ? (
-        <div className="text-destructive text-xs">Name already exists.</div>
-      ) : null}
+      {showFeedback && !valid
+        ? (
+          <div className="text-destructive text-xs">
+            Use letters, numbers, and underscores; start with a letter or
+            underscore.
+          </div>
+        )
+        : showFeedback && !available
+          ? (
+            <div className="text-destructive text-xs">Name already exists.</div>
+          )
+          : null}
     </div>
   );
 }
@@ -979,7 +974,7 @@ function _variableIcon(item: VariableListItem): ReactNode {
 
 function _dateFormatLabel(value: ThreadCurrentDateVariable["format"]): string {
   return (
-    PROMPT_DATE_FORMATS.find((format) => format.value === value)?.label ?? value
+    PROMPT_DATE_FORMATS.find(format => format.value === value)?.label ?? value
   );
 }
 
@@ -989,9 +984,9 @@ function _selectionExists(
   customValues: Record<string, string>
 ): boolean {
   if (selection.kind === "builtIn") {
-    return Object.prototype.hasOwnProperty.call(variables, selection.name);
+    return Object.hasOwn(variables, selection.name);
   }
-  return Object.prototype.hasOwnProperty.call(customValues, selection.name);
+  return Object.hasOwn(customValues, selection.name);
 }
 
 function _customVariableNames(values: Record<string, string>): Set<string> {
@@ -1009,10 +1004,10 @@ function _isBuiltInNameAvailable(
   customNames: Set<string>
 ): boolean {
   return (
-    _isNameAvailable(name) &&
-    (name === currentName ||
-      (!Object.prototype.hasOwnProperty.call(variables, name) &&
-        !customNames.has(name)))
+    _isNameAvailable(name)
+    && (name === currentName
+      || (!Object.hasOwn(variables, name)
+        && !customNames.has(name)))
   );
 }
 
@@ -1023,9 +1018,9 @@ function _isCustomNameAvailable(
   customNames: Set<string>
 ): boolean {
   return (
-    _isNameAvailable(name) &&
-    !Object.prototype.hasOwnProperty.call(variables, name) &&
-    (name === currentName || !customNames.has(name))
+    _isNameAvailable(name)
+    && !Object.hasOwn(variables, name)
+    && (name === currentName || !customNames.has(name))
   );
 }
 

@@ -1,9 +1,10 @@
 "use client";
 
-import type { CustomModel } from "@llm-space/core";
 import { CableIcon, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+
+import type { CustomModel } from "@llm-space/core";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -12,7 +13,7 @@ import {
   DialogDescription,
   DialogFooter,
   DialogHeader,
-  DialogTitle,
+  DialogTitle
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
@@ -20,23 +21,21 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
+  SelectValue
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-
+import {
+  CUSTOM_PROVIDER_API_TYPES,
+  type CustomProviderApi,
+  DEFAULT_CUSTOM_PROVIDER_API,
+  isCustomProviderApi
+} from "./custom-provider-api";
 import {
   useTestModelConnection,
   useUpdateProvider,
-  useUpsertCustomModel,
+  useUpsertCustomModel
 } from "../model-provider";
 import { ModelAvatar } from "../thread-playground/model-avatar";
-
-import {
-  CUSTOM_PROVIDER_API_TYPES,
-  DEFAULT_CUSTOM_PROVIDER_API,
-  isCustomProviderApi,
-  type CustomProviderApi,
-} from "./custom-provider-api";
 
 const DEFAULT_CONTEXT_WINDOW = 262144;
 const DEFAULT_MAX_TOKENS = 131072;
@@ -67,7 +66,7 @@ function initialState(
       deepseekThinking: false,
       image: false,
       contextWindow: DEFAULT_CONTEXT_WINDOW,
-      maxTokens: DEFAULT_MAX_TOKENS,
+      maxTokens: DEFAULT_MAX_TOKENS
     };
   }
   return {
@@ -77,11 +76,11 @@ function initialState(
     api: isCustomProviderApi(model.api) ? model.api : api,
     reasoning: model.reasoning,
     deepseekThinking:
-      (model.compat as { thinkingFormat?: string } | undefined)
+      (model.compat as { thinkingFormat?: string; } | undefined)
         ?.thinkingFormat === "deepseek",
     image: model.input.includes("image"),
     contextWindow: model.contextWindow,
-    maxTokens: model.maxTokens,
+    maxTokens: model.maxTokens
   };
 }
 
@@ -96,20 +95,19 @@ export function ModelEditorDialog({
   onOpenChange,
   providerId,
   providerApi,
-  model,
+  model
 }: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  providerId: string;
-  providerApi?: CustomProviderApi;
-  model?: CustomModel | null;
+  readonly model?: CustomModel | null;
+  readonly onOpenChange: (open: boolean) => void;
+  readonly open: boolean;
+  readonly providerApi?: CustomProviderApi;
+  readonly providerId: string;
 }) {
   const updateProvider = useUpdateProvider();
   const upsertCustomModel = useUpsertCustomModel();
   const testModelConnection = useTestModelConnection();
   const [form, setForm] = useState<FormState>(() =>
-    initialState(model, providerApi)
-  );
+    initialState(model, providerApi));
   const [testing, setTesting] = useState(false);
 
   // Reset the form whenever the dialog opens (for a fresh create or a different
@@ -125,10 +123,10 @@ export function ModelEditorDialog({
   // Editing the id also updates the name while the two are still "linked" — the
   // name is empty or still mirrors the id. Editing the name never touches the id.
   const handleIdChange = (nextId: string) => {
-    setForm((prev) => ({
+    setForm(prev => ({
       ...prev,
       id: nextId,
-      name: prev.name === "" || prev.name === prev.id ? nextId : prev.name,
+      name: prev.name === "" || prev.name === prev.id ? nextId : prev.name
     }));
   };
 
@@ -153,13 +151,13 @@ export function ModelEditorDialog({
         supportsDeveloperRole: false,
         ...(form.reasoning && form.deepseekThinking
           ? { thinkingFormat: "deepseek" }
-          : {}),
-      },
+          : {})
+      }
     };
   };
 
   const handleSave = () => {
-    if (!canSave) return;
+    if (!canSave) { return; }
     const built = buildModel();
     void (async () => {
       if (providerApi && form.api !== providerApi) {
@@ -173,17 +171,17 @@ export function ModelEditorDialog({
   // Test the current form values without persisting them, reusing the same
   // provider-connection check as the model list's per-model test button.
   const handleTest = async () => {
-    if (!canSave) return;
+    if (!canSave) { return; }
     setTesting(true);
     try {
       await testModelConnection(providerId, trimmedId, buildModel());
       toast.success("Model connected successfully", {
-        description: form.name.trim() || trimmedId,
+        description: form.name.trim() || trimmedId
       });
     } catch (error) {
       toast.error("Failed to connect to model", {
         description:
-          error instanceof Error ? error.message : "Please try again.",
+          error instanceof Error ? error.message : "Please try again."
       });
     } finally {
       setTesting(false);
@@ -191,11 +189,11 @@ export function ModelEditorDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent
         className="max-h-[85vh] overflow-y-auto sm:max-w-md"
-        onInteractOutside={(e) => e.preventDefault()}
-        onPointerDownOutside={(e) => e.preventDefault()}
+        onInteractOutside={e => { e.preventDefault(); }}
+        onPointerDownOutside={e => { e.preventDefault(); }}
       >
         <DialogHeader>
           <DialogTitle>
@@ -211,44 +209,40 @@ export function ModelEditorDialog({
         <div className="flex flex-col gap-4">
           <Field label="Model ID">
             <Input
-              value={form.id}
+              onChange={e => { handleIdChange(e.target.value); }}
               placeholder="deepseek-v4-pro"
-              onChange={(e) => handleIdChange(e.target.value)}
+              value={form.id}
             />
           </Field>
 
           <Field label="Model name">
             <Input
-              value={form.name}
+              onChange={e => { setForm(prev => ({ ...prev, name: e.target.value })); }}
               placeholder="DeepSeek V4 Pro"
-              onChange={(e) =>
-                setForm((prev) => ({ ...prev, name: e.target.value }))
-              }
+              value={form.name}
             />
           </Field>
 
           <Field label="Icon">
             <div className="flex items-center gap-2">
               <ModelAvatar
+                icon={form.icon.trim() || undefined}
                 id={form.id.trim() || "model"}
                 name={form.name.trim() || form.id.trim() || "Model"}
-                icon={form.icon.trim() || undefined}
               />
               <Input
-                value={form.icon}
+                onChange={e => { setForm(prev => ({ ...prev, icon: e.target.value })); }}
                 placeholder="Auto (e.g. openai, claude, deepseek)"
-                onChange={(e) =>
-                  setForm((prev) => ({ ...prev, icon: e.target.value }))
-                }
+                value={form.icon}
               />
             </div>
             <p className="text-muted-foreground mt-1.5 text-xs">
               A{" "}
               <a
-                href="https://icons.lobehub.com"
-                target="_blank"
-                rel="noreferrer"
                 className="underline underline-offset-2"
+                href="https://icons.lobehub.com"
+                rel="noreferrer"
+                target="_blank"
               >
                 @lobehub/icons
               </a>{" "}
@@ -258,19 +252,19 @@ export function ModelEditorDialog({
 
           <Field label="API type">
             <Select
-              value={form.api}
-              onValueChange={(value) =>
-                setForm((prev) => ({
+              onValueChange={value => {
+                setForm(prev => ({
                   ...prev,
-                  api: value as CustomProviderApi,
-                }))
-              }
+                  api: value as CustomProviderApi
+                }));
+              }}
+              value={form.api}
             >
               <SelectTrigger className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {CUSTOM_PROVIDER_API_TYPES.map((type) => (
+                {CUSTOM_PROVIDER_API_TYPES.map(type => (
                   <SelectItem key={type.value} value={type.value}>
                     {type.label}
                   </SelectItem>
@@ -280,57 +274,53 @@ export function ModelEditorDialog({
           </Field>
 
           <ToggleField
-            label="Reasoning supported"
             checked={form.reasoning}
-            onCheckedChange={(checked) =>
-              setForm((prev) => ({ ...prev, reasoning: checked }))
-            }
+            label="Reasoning supported"
+            onCheckedChange={checked => { setForm(prev => ({ ...prev, reasoning: checked })); }}
           />
 
-          {form.reasoning && (
-            <ToggleField
-              label="Use DeepSeek thinking format"
-              checked={form.deepseekThinking}
-              onCheckedChange={(checked) =>
-                setForm((prev) => ({ ...prev, deepseekThinking: checked }))
-              }
-            />
-          )}
+          {form.reasoning
+            ? (
+              <ToggleField
+                checked={form.deepseekThinking}
+                label="Use DeepSeek thinking format"
+                onCheckedChange={checked => { setForm(prev => ({ ...prev, deepseekThinking: checked })); }}
+              />
+            )
+            : null}
 
           <ToggleField
-            label="Image supported"
             checked={form.image}
-            onCheckedChange={(checked) =>
-              setForm((prev) => ({ ...prev, image: checked }))
-            }
+            label="Image supported"
+            onCheckedChange={checked => { setForm(prev => ({ ...prev, image: checked })); }}
           />
 
           <div className="flex gap-4">
-            <Field label="Context window" className="flex-1">
+            <Field className="flex-1" label="Context window">
               <Input
-                type="number"
                 min={1}
-                value={form.contextWindow}
-                onChange={(e) =>
-                  setForm((prev) => ({
+                onChange={e => {
+                  setForm(prev => ({
                     ...prev,
                     contextWindow:
-                      Number(e.target.value) || DEFAULT_CONTEXT_WINDOW,
-                  }))
-                }
+                      Number(e.target.value) || DEFAULT_CONTEXT_WINDOW
+                  }));
+                }}
+                type="number"
+                value={form.contextWindow}
               />
             </Field>
-            <Field label="Max tokens" className="flex-1">
+            <Field className="flex-1" label="Max tokens">
               <Input
-                type="number"
                 min={1}
-                value={form.maxTokens}
-                onChange={(e) =>
-                  setForm((prev) => ({
+                onChange={e => {
+                  setForm(prev => ({
                     ...prev,
-                    maxTokens: Number(e.target.value) || DEFAULT_MAX_TOKENS,
-                  }))
-                }
+                    maxTokens: Number(e.target.value) || DEFAULT_MAX_TOKENS
+                  }));
+                }}
+                type="number"
+                value={form.maxTokens}
               />
             </Field>
           </div>
@@ -338,22 +328,24 @@ export function ModelEditorDialog({
 
         <DialogFooter className="sm:justify-between">
           <Button
-            variant="outline"
-            onClick={() => void handleTest()}
             disabled={!canSave || testing}
+            onClick={() => void handleTest()}
+            variant="outline"
           >
-            {testing ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              <CableIcon className="size-4" />
-            )}
+            {testing
+              ? (
+                <Loader2 className="size-4 animate-spin" />
+              )
+              : (
+                <CableIcon className="size-4" />
+              )}
             Test
           </Button>
           <div className="flex gap-2">
-            <Button variant="ghost" onClick={() => onOpenChange(false)}>
+            <Button onClick={() => { onOpenChange(false); }} variant="ghost">
               Cancel
             </Button>
-            <Button onClick={handleSave} disabled={!canSave}>
+            <Button disabled={!canSave} onClick={handleSave}>
               {isEdit ? "Save" : "Add"}
             </Button>
           </div>
@@ -366,11 +358,11 @@ export function ModelEditorDialog({
 function Field({
   label,
   className,
-  children,
+  children
 }: {
-  label: string;
-  className?: string;
-  children: React.ReactNode;
+  readonly children: React.ReactNode;
+  readonly className?: string;
+  readonly label: string;
 }) {
   return (
     <div className={className}>
@@ -383,19 +375,19 @@ function Field({
 function ToggleField({
   label,
   checked,
-  onCheckedChange,
+  onCheckedChange
 }: {
-  label: string;
-  checked: boolean;
-  onCheckedChange: (checked: boolean) => void;
+  readonly checked: boolean;
+  readonly label: string;
+  readonly onCheckedChange: (checked: boolean) => void;
 }) {
   return (
     <div className="flex items-center justify-between">
       <label className="text-sm font-medium">{label}</label>
       <Switch
+        aria-label={label}
         checked={checked}
         onCheckedChange={onCheckedChange}
-        aria-label={label}
       />
     </div>
   );

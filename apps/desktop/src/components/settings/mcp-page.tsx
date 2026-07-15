@@ -9,14 +9,14 @@ import {
   Plus,
   RefreshCw,
   Trash2,
-  Unplug,
+  Unplug
 } from "lucide-react";
 import {
+  type ReactNode,
   useCallback,
   useEffect,
   useMemo,
-  useState,
-  type ReactNode,
+  useState
 } from "react";
 import { toast } from "sonner";
 import { format } from "timeago.js";
@@ -27,7 +27,7 @@ import {
   listMcpServers,
   listMcpTools,
   removeMcpServer,
-  updateMcpServer,
+  updateMcpServer
 } from "@/client/mcp";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { Tooltip } from "@/components/tooltip";
@@ -39,13 +39,12 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
+  SelectValue
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import {
   getMcpReadinessLabel,
-  normalizeMcpName,
   type McpDiagnosticStep,
   type McpServerDraft,
   type McpServerReadiness,
@@ -53,8 +52,8 @@ import {
   type McpToolSummary,
   type McpToolView,
   type McpTransportType,
+  normalizeMcpName
 } from "@/shared/mcp";
-
 import { SettingsPage } from "./settings-page";
 
 interface Row {
@@ -81,7 +80,7 @@ const EMPTY_FORM: ServerForm = {
   cwd: "",
   env: [],
   url: "",
-  headers: [],
+  headers: []
 };
 
 function _formFromServer(server: McpServerView | null): ServerForm {
@@ -96,7 +95,7 @@ function _formFromServer(server: McpServerView | null): ServerForm {
     cwd: server.cwd ?? "",
     env: _rowsFromRecord(server.env),
     url: server.url ?? "",
-    headers: _rowsFromRecord(server.headers),
+    headers: _rowsFromRecord(server.headers)
   };
 }
 
@@ -108,17 +107,17 @@ function _draftFromForm(form: ServerForm): McpServerDraft {
       command: form.command,
       args: form.argsText
         .split("\n")
-        .map((item) => item.trim())
+        .map(item => item.trim())
         .filter(Boolean),
       cwd: form.cwd.trim() || null,
-      env: _recordFromRows(form.env),
+      env: _recordFromRows(form.env)
     };
   }
   return {
     name: form.name,
     transport: form.transport,
     url: form.url,
-    headers: _recordFromRows(form.headers),
+    headers: _recordFromRows(form.headers)
   };
 }
 
@@ -154,7 +153,7 @@ export function McpPage() {
   const [removeOpen, setRemoveOpen] = useState(false);
 
   const selectedServer = useMemo(
-    () => servers.find((server) => server.id === selectedId) ?? null,
+    () => servers.find(server => server.id === selectedId) ?? null,
     [selectedId, servers]
   );
   const normalizedName = normalizeMcpName(form.name);
@@ -164,11 +163,11 @@ export function McpPage() {
     try {
       const next = await listMcpServers();
       setServers(next);
-      setSelectedId((current) => {
+      setSelectedId(current => {
         if (creating) {
           return current;
         }
-        if (current && next.some((server) => server.id === current)) {
+        if (current && next.some(server => server.id === current)) {
           return current;
         }
         return next[0]?.id ?? null;
@@ -176,7 +175,7 @@ export function McpPage() {
     } catch (error) {
       toast.error("Failed to load MCP servers", {
         description:
-          error instanceof Error ? error.message : "Please try again.",
+          error instanceof Error ? error.message : "Please try again."
       });
     } finally {
       setLoading(false);
@@ -208,8 +207,8 @@ export function McpPage() {
     setFormError(null);
     setTools([]);
     setSelectedId(
-      selectedIdBeforeCreate &&
-        servers.some((server) => server.id === selectedIdBeforeCreate)
+      selectedIdBeforeCreate
+      && servers.some(server => server.id === selectedIdBeforeCreate)
         ? selectedIdBeforeCreate
         : (servers[0]?.id ?? null)
     );
@@ -229,11 +228,11 @@ export function McpPage() {
       const saved =
         creating || !selectedId
           ? [...next]
-              .reverse()
-              .find(
-                (server) => server.serverName === normalizeMcpName(form.name)
-              )
-          : next.find((server) => server.id === selectedId);
+            .reverse()
+            .find(
+              server => server.serverName === normalizeMcpName(form.name)
+            )
+          : next.find(server => server.id === selectedId);
       setCreating(false);
       setSelectedIdBeforeCreate(null);
       setSelectedId(saved?.id ?? next[0]?.id ?? null);
@@ -256,20 +255,18 @@ export function McpPage() {
     try {
       const response = await listMcpTools(selectedServer.id);
       setTools(response.tools);
-      setServers((current) =>
-        current.map((server) =>
-          server.id === response.server.id ? response.server : server
-        )
-      );
+      setServers(current =>
+        current.map(server =>
+          (server.id === response.server.id ? response.server : server)));
       toast.success("MCP server connected", {
-        description: `${response.tools.length} tool${response.tools.length === 1 ? "" : "s"} discovered`,
+        description: `${response.tools.length} tool${response.tools.length === 1 ? "" : "s"} discovered`
       });
     } catch (error) {
       setTools([]);
       await refresh();
       toast.error("Failed to connect MCP server", {
         description:
-          error instanceof Error ? error.message : "Please try again.",
+          error instanceof Error ? error.message : "Please try again."
       });
     } finally {
       setTesting(false);
@@ -289,7 +286,7 @@ export function McpPage() {
     } catch (error) {
       toast.error("Failed to disconnect MCP server", {
         description:
-          error instanceof Error ? error.message : "Please try again.",
+          error instanceof Error ? error.message : "Please try again."
       });
     } finally {
       setDisconnecting(false);
@@ -309,15 +306,15 @@ export function McpPage() {
     } catch (error) {
       toast.error("Failed to remove MCP server", {
         description:
-          error instanceof Error ? error.message : "Please try again.",
+          error instanceof Error ? error.message : "Please try again."
       });
     }
   };
 
   return (
     <SettingsPage
-      title="MCP"
       description="Connect a server to expose its tools, which you can then add to a thread's tools."
+      title="MCP"
     >
       <div className="flex h-full min-h-0 gap-6">
         <aside className="flex w-58 shrink-0 flex-col gap-3 border-r pr-4">
@@ -328,24 +325,26 @@ export function McpPage() {
             <div className="flex items-center gap-1">
               <Tooltip content="Refresh servers">
                 <button
-                  type="button"
                   aria-label="Refresh MCP servers"
                   className="text-muted-foreground hover:bg-accent hover:text-foreground inline-flex size-6 items-center justify-center rounded transition-colors"
                   onClick={() => void refresh()}
+                  type="button"
                 >
-                  {loading ? (
-                    <Loader2 className="size-3.5 animate-spin" />
-                  ) : (
-                    <RefreshCw className="size-3.5" />
-                  )}
+                  {loading
+                    ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    )
+                    : (
+                      <RefreshCw className="size-3.5" />
+                    )}
                 </button>
               </Tooltip>
               <Tooltip content="Add MCP server">
                 <button
-                  type="button"
                   aria-label="Add MCP server"
                   className="text-muted-foreground hover:bg-accent hover:text-foreground inline-flex size-6 items-center justify-center rounded transition-colors"
                   onClick={createServer}
+                  type="button"
                 >
                   <Plus className="size-4" />
                 </button>
@@ -354,19 +353,19 @@ export function McpPage() {
           </div>
           <ScrollArea className="min-h-0 grow">
             <div className="flex flex-col gap-1 pr-2">
-              {servers.map((server) => (
+              {servers.map(server => (
                 <button
-                  key={server.id}
-                  type="button"
                   className={cn(
                     "hover:bg-accent flex min-w-0 flex-col gap-1 rounded-md px-2 py-2 text-left transition-colors",
                     selectedId === server.id && "bg-accent"
                   )}
+                  key={server.id}
                   onClick={() => {
                     setCreating(false);
                     setFormError(null);
                     setSelectedId(server.id);
                   }}
+                  type="button"
                 >
                   <span className="flex min-w-0 items-center gap-2">
                     <StatusDot server={server} />
@@ -382,66 +381,72 @@ export function McpPage() {
                   </span>
                 </button>
               ))}
-              {creating ? (
-                <button
-                  type="button"
-                  className="bg-accent flex min-w-0 flex-col gap-1 rounded-md px-2 py-2 text-left"
-                >
-                  <span className="truncate text-sm font-medium">
-                    Unsaved server
-                  </span>
-                </button>
-              ) : null}
-              {servers.length === 0 && !creating ? (
-                <div className="text-muted-foreground px-1 py-2 text-xs">
-                  No MCP servers.
-                </div>
-              ) : null}
+              {creating
+                ? (
+                  <button
+                    className="bg-accent flex min-w-0 flex-col gap-1 rounded-md px-2 py-2 text-left"
+                    type="button"
+                  >
+                    <span className="truncate text-sm font-medium">
+                      Unsaved server
+                    </span>
+                  </button>
+                )
+                : null}
+              {servers.length === 0 && !creating
+                ? (
+                  <div className="text-muted-foreground px-1 py-2 text-xs">
+                    No MCP servers.
+                  </div>
+                )
+                : null}
             </div>
           </ScrollArea>
         </aside>
 
         <main className="min-w-0 grow">
-          {creating || selectedId ? (
-            <ServerEditor
-              form={form}
-              normalizedName={normalizedName}
-              server={selectedServer}
-              formError={formError}
-              saving={saving}
-              testing={testing}
-              disconnecting={disconnecting}
-              creating={creating}
-              tools={tools}
-              onFormChange={(nextForm) => {
-                setFormError(null);
-                setForm(nextForm);
-              }}
-              onSave={() => void save()}
-              onTest={() => void testServer()}
-              onDisconnect={() => void disconnectServer()}
-              onCancel={cancelCreate}
-              onRemove={() => setRemoveOpen(true)}
-            />
-          ) : (
-            <div className="text-muted-foreground flex h-full items-center justify-center text-sm">
-              Select or add an MCP server
-            </div>
-          )}
+          {creating || selectedId
+            ? (
+              <ServerEditor
+                creating={creating}
+                disconnecting={disconnecting}
+                form={form}
+                formError={formError}
+                normalizedName={normalizedName}
+                onCancel={cancelCreate}
+                onDisconnect={() => void disconnectServer()}
+                onFormChange={nextForm => {
+                  setFormError(null);
+                  setForm(nextForm);
+                }}
+                onRemove={() => { setRemoveOpen(true); }}
+                onSave={() => void save()}
+                onTest={() => void testServer()}
+                saving={saving}
+                server={selectedServer}
+                testing={testing}
+                tools={tools}
+              />
+            )
+            : (
+              <div className="text-muted-foreground flex h-full items-center justify-center text-sm">
+                Select or add an MCP server
+              </div>
+            )}
         </main>
       </div>
       <ConfirmDialog
-        open={removeOpen}
-        onOpenChange={setRemoveOpen}
-        title="Remove MCP Server"
+        confirmLabel="Remove"
         description={
           selectedServer
             ? `Remove ${selectedServer.name} from local MCP settings?`
             : undefined
         }
-        confirmLabel="Remove"
         dimBackground={false}
         onConfirm={() => void confirmRemove()}
+        onOpenChange={setRemoveOpen}
+        open={removeOpen}
+        title="Remove MCP Server"
       />
     </SettingsPage>
   );
@@ -462,26 +467,25 @@ function ServerEditor({
   onTest,
   onDisconnect,
   onCancel,
-  onRemove,
+  onRemove
 }: {
-  form: ServerForm;
-  normalizedName: string;
-  server: McpServerView | null;
-  formError: string | null;
-  saving: boolean;
-  testing: boolean;
-  disconnecting: boolean;
-  creating: boolean;
-  tools: McpToolView[];
-  onFormChange: (form: ServerForm) => void;
-  onSave: () => void;
-  onTest: () => void;
-  onDisconnect: () => void;
-  onCancel: () => void;
-  onRemove: () => void;
+  readonly creating: boolean;
+  readonly disconnecting: boolean;
+  readonly form: ServerForm;
+  readonly formError: string | null;
+  readonly normalizedName: string;
+  readonly onCancel: () => void;
+  readonly onDisconnect: () => void;
+  readonly onFormChange: (form: ServerForm) => void;
+  readonly onRemove: () => void;
+  readonly onSave: () => void;
+  readonly onTest: () => void;
+  readonly saving: boolean;
+  readonly server: McpServerView | null;
+  readonly testing: boolean;
+  readonly tools: McpToolView[];
 }) {
-  const patch = (partial: Partial<ServerForm>) =>
-    onFormChange({ ...form, ...partial });
+  const patch = (partial: Partial<ServerForm>) => { onFormChange({ ...form, ...partial }); };
   const toolItems: McpToolSummary[] =
     tools.length > 0 ? tools : (server?.readiness?.tools ?? []);
   const toolsLabel =
@@ -505,87 +509,97 @@ function ServerEditor({
                 : "mcp__server__tool"}
             </div>
           </div>
-          {creating ? (
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={onCancel}
-              disabled={saving}
-            >
-              Cancel
-            </Button>
-          ) : null}
-          <Button size="sm" onClick={onSave} disabled={saving}>
+          {creating
+            ? (
+              <Button
+                disabled={saving}
+                onClick={onCancel}
+                size="sm"
+                variant="ghost"
+              >
+                Cancel
+              </Button>
+            )
+            : null}
+          <Button disabled={saving} onClick={onSave} size="sm">
             {saving ? <Loader2 className="animate-spin" /> : <Check />}
             Save
           </Button>
-          {server ? (
-            <>
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={onTest}
-                disabled={testing || disconnecting}
-              >
-                {testing ? <Loader2 className="animate-spin" /> : <RefreshCw />}
-                {server.connected ? "Retest" : "Connect & Test"}
-              </Button>
-              {server.connected ? (
+          {server
+            ? (
+              <>
                 <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={onDisconnect}
                   disabled={testing || disconnecting}
+                  onClick={onTest}
+                  size="sm"
+                  variant="secondary"
                 >
-                  {disconnecting ? (
-                    <Loader2 className="animate-spin" />
-                  ) : (
-                    <Unplug />
-                  )}
-                  Disconnect
+                  {testing ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+                  {server.connected ? "Retest" : "Connect & Test"}
                 </Button>
-              ) : null}
-              <Tooltip content="Remove MCP server">
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  aria-label="Remove MCP server"
-                  onClick={onRemove}
-                >
-                  <Trash2 className="size-4" />
-                </Button>
-              </Tooltip>
-            </>
-          ) : null}
+                {server.connected
+                  ? (
+                    <Button
+                      disabled={testing || disconnecting}
+                      onClick={onDisconnect}
+                      size="sm"
+                      variant="ghost"
+                    >
+                      {disconnecting
+                        ? (
+                          <Loader2 className="animate-spin" />
+                        )
+                        : (
+                          <Unplug />
+                        )}
+                      Disconnect
+                    </Button>
+                  )
+                  : null}
+                <Tooltip content="Remove MCP server">
+                  <Button
+                    aria-label="Remove MCP server"
+                    onClick={onRemove}
+                    size="icon-sm"
+                    variant="ghost"
+                  >
+                    <Trash2 className="size-4" />
+                  </Button>
+                </Tooltip>
+              </>
+            )
+            : null}
         </div>
 
-        {formError ? (
-          <div className="border-destructive/40 text-destructive flex items-start gap-2 rounded-md border px-3 py-2 text-sm">
-            <CircleAlert className="mt-0.5 size-4 shrink-0" />
-            <span className="min-w-0 break-words">{formError}</span>
-          </div>
-        ) : null}
+        {formError
+          ? (
+            <div className="border-destructive/40 text-destructive flex items-start gap-2 rounded-md border px-3 py-2 text-sm">
+              <CircleAlert className="mt-0.5 size-4 shrink-0" />
+              <span className="min-w-0 break-words">{formError}</span>
+            </div>
+          )
+          : null}
 
-        {server ? (
-          <ReadinessPanel server={server} liveToolsLoaded={tools.length > 0} />
-        ) : null}
+        {server
+          ? (
+            <ReadinessPanel liveToolsLoaded={tools.length > 0} server={server} />
+          )
+          : null}
 
         <Field label="Name">
           <Input
-            value={form.name}
             aria-label="MCP server name"
-            onChange={(event) => patch({ name: event.target.value })}
+            onChange={event => { patch({ name: event.target.value }); }}
+            value={form.name}
           />
         </Field>
 
         <Field label="Transport">
           <Select
+            onValueChange={value => { patch({ transport: value as McpTransportType }); }}
             value={form.transport}
-            onValueChange={(value) =>
-              patch({ transport: value as McpTransportType })
-            }
           >
-            <SelectTrigger className="w-full" aria-label="MCP transport">
+            <SelectTrigger aria-label="MCP transport" className="w-full">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -596,93 +610,103 @@ function ServerEditor({
           </Select>
         </Field>
 
-        {form.transport === "stdio" ? (
-          <>
-            <Field label="Command">
-              <Input
-                value={form.command}
-                aria-label="MCP stdio command"
-                placeholder="npx"
-                onChange={(event) => patch({ command: event.target.value })}
+        {form.transport === "stdio"
+          ? (
+            <>
+              <Field label="Command">
+                <Input
+                  aria-label="MCP stdio command"
+                  onChange={event => { patch({ command: event.target.value }); }}
+                  placeholder="npx"
+                  value={form.command}
+                />
+              </Field>
+              <Field label="Args">
+                <Textarea
+                  aria-label="MCP stdio args"
+                  className="min-h-18"
+                  onChange={event => { patch({ argsText: event.target.value }); }}
+                  placeholder={"-y\n@modelcontextprotocol/server-filesystem"}
+                  value={form.argsText}
+                />
+              </Field>
+              <Field label="Working directory">
+                <Input
+                  aria-label="MCP stdio working directory"
+                  onChange={event => { patch({ cwd: event.target.value }); }}
+                  value={form.cwd}
+                />
+              </Field>
+              <KeyValueRows
+                label="Environment"
+                namePlaceholder="KEY"
+                onChange={env => { patch({ env }); }}
+                rows={form.env}
+                valuePlaceholder="$TOKEN"
+                valueType="password"
               />
-            </Field>
-            <Field label="Args">
-              <Textarea
-                className="min-h-18"
-                value={form.argsText}
-                aria-label="MCP stdio args"
-                placeholder={"-y\n@modelcontextprotocol/server-filesystem"}
-                onChange={(event) => patch({ argsText: event.target.value })}
+            </>
+          )
+          : (
+            <>
+              <Field label="URL">
+                <Input
+                  aria-label="MCP remote URL"
+                  onChange={event => { patch({ url: event.target.value }); }}
+                  placeholder="https://example.com/mcp"
+                  value={form.url}
+                />
+              </Field>
+              <KeyValueRows
+                label="Headers"
+                namePlaceholder="Authorization"
+                onChange={headers => { patch({ headers }); }}
+                rows={form.headers}
+                valuePlaceholder="Bearer $TOKEN"
+                valueType="password"
               />
-            </Field>
-            <Field label="Working directory">
-              <Input
-                value={form.cwd}
-                aria-label="MCP stdio working directory"
-                onChange={(event) => patch({ cwd: event.target.value })}
-              />
-            </Field>
-            <KeyValueRows
-              label="Environment"
-              rows={form.env}
-              valueType="password"
-              namePlaceholder="KEY"
-              valuePlaceholder="$TOKEN"
-              onChange={(env) => patch({ env })}
-            />
-          </>
-        ) : (
-          <>
-            <Field label="URL">
-              <Input
-                value={form.url}
-                aria-label="MCP remote URL"
-                placeholder="https://example.com/mcp"
-                onChange={(event) => patch({ url: event.target.value })}
-              />
-            </Field>
-            <KeyValueRows
-              label="Headers"
-              rows={form.headers}
-              valueType="password"
-              namePlaceholder="Authorization"
-              valuePlaceholder="Bearer $TOKEN"
-              onChange={(headers) => patch({ headers })}
-            />
-          </>
-        )}
+            </>
+          )}
 
-        {server ? (
-          <div className="flex flex-col gap-2">
-            <div className="flex min-w-0 items-center gap-2">
-              <span className="text-sm font-medium">Tools</span>
-              {server.toolCount !== null ? (
-                <span className="bg-muted text-muted-foreground rounded-full px-2 py-0.5 text-xs">
-                  {server.toolCount}
-                </span>
-              ) : null}
-              {toolsLabel ? (
-                <span className="text-muted-foreground truncate text-xs">
-                  {toolsLabel}
-                </span>
-              ) : null}
+        {server
+          ? (
+            <div className="flex flex-col gap-2">
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="text-sm font-medium">Tools</span>
+                {server.toolCount !== null
+                  ? (
+                    <span className="bg-muted text-muted-foreground rounded-full px-2 py-0.5 text-xs">
+                      {server.toolCount}
+                    </span>
+                  )
+                  : null}
+                {toolsLabel
+                  ? (
+                    <span className="text-muted-foreground truncate text-xs">
+                      {toolsLabel}
+                    </span>
+                  )
+                  : null}
+              </div>
+              <div className="flex flex-col gap-1.5">
+                {toolItems.length === 0
+                  ? (
+                    <div className="text-muted-foreground px-1 py-2 text-xs">
+                      No tools loaded.
+                    </div>
+                  )
+                  : (
+                    toolItems.map(tool => (
+                      <ToolSummaryRow
+                        key={`${tool.directName}:${tool.toolName}`}
+                        tool={tool}
+                      />
+                    ))
+                  )}
+              </div>
             </div>
-            <div className="flex flex-col gap-1.5">
-              {toolItems.length === 0 ? (
-                <div className="text-muted-foreground px-1 py-2 text-xs">
-                  No tools loaded.
-                </div>
-              ) : (
-                toolItems.map((tool) => (
-                  <ToolSummaryRow
-                    key={`${tool.directName}:${tool.toolName}`}
-                    tool={tool}
-                  />
-                ))
-              )}
-            </div>
-          </div>
-        ) : null}
+          )
+          : null}
       </div>
     </ScrollArea>
   );
@@ -690,10 +714,10 @@ function ServerEditor({
 
 function ReadinessPanel({
   server,
-  liveToolsLoaded,
+  liveToolsLoaded
 }: {
-  server: McpServerView;
-  liveToolsLoaded: boolean;
+  readonly liveToolsLoaded: boolean;
+  readonly server: McpServerView;
 }) {
   const readiness = server.readiness ?? _emptyReadiness();
   const label = getMcpReadinessLabel(readiness);
@@ -715,53 +739,63 @@ function ReadinessPanel({
         <span className={cn("text-sm font-medium", statusClass)}>{label}</span>
         <span className="text-muted-foreground truncate text-xs">{detail}</span>
       </div>
-      {server.lastError ? (
-        <div className="text-destructive flex min-w-0 items-start gap-2 text-xs">
-          <CircleAlert className="mt-0.5 size-3.5 shrink-0" />
-          <span className="min-w-0 break-words">{server.lastError}</span>
-        </div>
-      ) : null}
-      {server.connected ? (
-        <div className="text-muted-foreground text-xs">
-          Connected now in this app session.
-        </div>
-      ) : readiness.status === "ready" || readiness.status === "stale" ? (
-        <div className="text-muted-foreground text-xs">
-          Not connected. This is the last saved test result.
-        </div>
-      ) : null}
-      {diagnostic ? (
-        <div className="border-border/70 mt-1 flex flex-col gap-2 border-t pt-2">
-          <div className="flex min-w-0 items-center justify-between gap-2">
-            <div className="min-w-0">
-              <div className="text-xs font-medium">Diagnostics</div>
-              <div className="text-muted-foreground truncate text-xs">
-                {diagnostic.headline}
+      {server.lastError
+        ? (
+          <div className="text-destructive flex min-w-0 items-start gap-2 text-xs">
+            <CircleAlert className="mt-0.5 size-3.5 shrink-0" />
+            <span className="min-w-0 break-words">{server.lastError}</span>
+          </div>
+        )
+        : null}
+      {server.connected
+        ? (
+          <div className="text-muted-foreground text-xs">
+            Connected now in this app session.
+          </div>
+        )
+        : readiness.status === "ready" || readiness.status === "stale"
+          ? (
+            <div className="text-muted-foreground text-xs">
+              Not connected. This is the last saved test result.
+            </div>
+          )
+          : null}
+      {diagnostic
+        ? (
+          <div className="border-border/70 mt-1 flex flex-col gap-2 border-t pt-2">
+            <div className="flex min-w-0 items-center justify-between gap-2">
+              <div className="min-w-0">
+                <div className="text-xs font-medium">Diagnostics</div>
+                <div className="text-muted-foreground truncate text-xs">
+                  {diagnostic.headline}
+                </div>
               </div>
+              <Tooltip content="Copy diagnostic summary">
+                <Button
+                  aria-label="Copy diagnostic summary"
+                  onClick={() => void _copyDiagnosticSummary(diagnostic.summary)}
+                  size="icon-sm"
+                  variant="ghost"
+                >
+                  <Copy className="size-3.5" />
+                </Button>
+              </Tooltip>
             </div>
-            <Tooltip content="Copy diagnostic summary">
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                aria-label="Copy diagnostic summary"
-                onClick={() => void _copyDiagnosticSummary(diagnostic.summary)}
-              >
-                <Copy className="size-3.5" />
-              </Button>
-            </Tooltip>
-          </div>
-          {diagnostic.endpoint ? (
-            <div className="text-muted-foreground truncate font-mono text-[11px]">
-              {diagnostic.endpoint}
+            {diagnostic.endpoint
+              ? (
+                <div className="text-muted-foreground truncate font-mono text-[11px]">
+                  {diagnostic.endpoint}
+                </div>
+              )
+              : null}
+            <div className="flex flex-col gap-1">
+              {diagnostic.steps.map(step => (
+                <DiagnosticStepRow key={step.id} step={step} />
+              ))}
             </div>
-          ) : null}
-          <div className="flex flex-col gap-1">
-            {diagnostic.steps.map((step) => (
-              <DiagnosticStepRow key={step.id} step={step} />
-            ))}
           </div>
-        </div>
-      ) : null}
+        )
+        : null}
     </div>
   );
 }
@@ -770,7 +804,7 @@ function ReadinessPanel({
  * Renders one persisted diagnostic phase. Input is already redacted by the Bun
  * process; this component only maps status to compact visual state.
  */
-function DiagnosticStepRow({ step }: { step: McpDiagnosticStep }) {
+function DiagnosticStepRow({ step }: { readonly step: McpDiagnosticStep; }) {
   return (
     <div className="flex min-w-0 items-start gap-2 text-xs">
       <span
@@ -788,18 +822,20 @@ function DiagnosticStepRow({ step }: { step: McpDiagnosticStep }) {
           <span className="font-medium">{step.label}</span>
           <span className="text-muted-foreground">{step.message}</span>
         </div>
-        {step.detail ? (
-          <div
-            className={cn(
-              "break-words",
-              step.status === "failed"
-                ? "text-destructive"
-                : "text-muted-foreground"
-            )}
-          >
-            {step.detail}
-          </div>
-        ) : null}
+        {step.detail
+          ? (
+            <div
+              className={cn(
+                "break-words",
+                step.status === "failed"
+                  ? "text-destructive"
+                  : "text-muted-foreground"
+              )}
+            >
+              {step.detail}
+            </div>
+          )
+          : null}
       </div>
     </div>
   );
@@ -815,12 +851,12 @@ async function _copyDiagnosticSummary(summary: string): Promise<void> {
     toast.success("Diagnostic copied");
   } catch (error) {
     toast.error("Failed to copy diagnostic", {
-      description: error instanceof Error ? error.message : "Please try again.",
+      description: error instanceof Error ? error.message : "Please try again."
     });
   }
 }
 
-function ToolSummaryRow({ tool }: { tool: McpToolSummary }) {
+function ToolSummaryRow({ tool }: { readonly tool: McpToolSummary; }) {
   const schemaJson = JSON.stringify(tool.inputSchema, null, 2);
   return (
     <div className="bg-muted/40 flex min-w-0 flex-col gap-1.5 rounded-md px-2 py-1.5">
@@ -836,20 +872,24 @@ function ToolSummaryRow({ tool }: { tool: McpToolSummary }) {
           <div className="text-muted-foreground truncate font-mono text-[11px]">
             raw: {tool.toolName}
           </div>
-          {tool.description ? (
-            <div className="text-muted-foreground line-clamp-2 text-xs">
-              {tool.description}
-            </div>
-          ) : null}
+          {tool.description
+            ? (
+              <div className="text-muted-foreground line-clamp-2 text-xs">
+                {tool.description}
+              </div>
+            )
+            : null}
           <div className="text-muted-foreground flex flex-wrap gap-x-3 gap-y-1 text-xs">
             <span>required: {_joinOrNone(tool.requiredFields)}</span>
             <span>properties: {_joinOrNone(tool.topLevelProperties)}</span>
           </div>
-          {tool.disabledReason ? (
-            <div className="text-destructive text-xs">
-              {tool.disabledReason}
-            </div>
-          ) : null}
+          {tool.disabledReason
+            ? (
+              <div className="text-destructive text-xs">
+                {tool.disabledReason}
+              </div>
+            )
+            : null}
           <details className="text-muted-foreground mt-1 text-xs">
             <summary className="cursor-pointer select-none">
               JSON schema
@@ -864,7 +904,7 @@ function ToolSummaryRow({ tool }: { tool: McpToolSummary }) {
   );
 }
 
-function Field({ label, children }: { label: string; children: ReactNode }) {
+function Field({ label, children }: { readonly children: ReactNode; readonly label: string; }) {
   return (
     <div className="flex flex-col gap-2">
       <span className="text-sm font-medium">{label}</span>
@@ -879,48 +919,42 @@ function KeyValueRows({
   valueType = "text",
   namePlaceholder,
   valuePlaceholder,
-  onChange,
+  onChange
 }: {
-  label: string;
-  rows: Row[];
-  valueType?: "text" | "password";
-  namePlaceholder: string;
-  valuePlaceholder: string;
-  onChange: (rows: Row[]) => void;
+  readonly label: string;
+  readonly namePlaceholder: string;
+  readonly onChange: (rows: Row[]) => void;
+  readonly rows: Row[];
+  readonly valuePlaceholder: string;
+  readonly valueType?: "password" | "text";
 }) {
-  const setRow = (index: number, row: Row) =>
-    onChange(rows.map((item, itemIndex) => (itemIndex === index ? row : item)));
-  const removeRow = (index: number) =>
-    onChange(rows.filter((_, itemIndex) => itemIndex !== index));
+  const setRow = (index: number, row: Row) => { onChange(rows.map((item, itemIndex) => (itemIndex === index ? row : item))); };
+  const removeRow = (index: number) => { onChange(rows.filter((_, itemIndex) => itemIndex !== index)); };
 
   return (
     <div className="flex flex-col gap-2">
       <span className="text-sm font-medium">{label}</span>
       {rows.map((row, index) => (
-        <div key={index} className="flex items-center gap-2">
+        <div className="flex items-center gap-2" key={index}>
           <Input
-            value={row.key}
-            placeholder={namePlaceholder}
             aria-label={`${label} ${index + 1} name`}
-            onChange={(event) =>
-              setRow(index, { ...row, key: event.target.value })
-            }
+            onChange={event => { setRow(index, { ...row, key: event.target.value }); }}
+            placeholder={namePlaceholder}
+            value={row.key}
           />
           <Input
+            aria-label={`${label} ${index + 1} value`}
+            onChange={event => { setRow(index, { ...row, value: event.target.value }); }}
+            placeholder={valuePlaceholder}
             type={valueType}
             value={row.value}
-            placeholder={valuePlaceholder}
-            aria-label={`${label} ${index + 1} value`}
-            onChange={(event) =>
-              setRow(index, { ...row, value: event.target.value })
-            }
           />
           <Tooltip content={`Remove ${label.toLowerCase()} row`}>
             <button
-              type="button"
               aria-label={`Remove ${label} row ${index + 1}`}
               className="text-muted-foreground hover:bg-accent hover:text-foreground inline-flex size-6 shrink-0 items-center justify-center rounded transition-colors"
-              onClick={() => removeRow(index)}
+              onClick={() => { removeRow(index); }}
+              type="button"
             >
               <Trash2 className="size-4" />
             </button>
@@ -928,11 +962,11 @@ function KeyValueRows({
         </div>
       ))}
       <Button
+        className="self-start"
+        onClick={() => { onChange([...rows, { key: "", value: "" }]); }}
+        size="sm"
         type="button"
         variant="ghost"
-        size="sm"
-        className="self-start"
-        onClick={() => onChange([...rows, { key: "", value: "" }])}
       >
         <Plus /> Add {label.toLowerCase()}
       </Button>
@@ -940,7 +974,7 @@ function KeyValueRows({
   );
 }
 
-function StatusDot({ server }: { server: McpServerView }) {
+function StatusDot({ server }: { readonly server: McpServerView; }) {
   const status = server.readiness?.status ?? "untested";
   if (status === "error" || server.lastError) {
     return <CircleAlert className="text-destructive size-3.5 shrink-0" />;

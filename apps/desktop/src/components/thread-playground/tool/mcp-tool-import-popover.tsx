@@ -1,10 +1,11 @@
 "use client";
 
-import { type McpTool } from "@llm-space/core";
 import { Cable, Loader2, RefreshCw, Settings2 } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { format } from "timeago.js";
+
+import type { McpTool } from "@llm-space/core";
 
 import { listMcpServers, listMcpTools } from "@/client/mcp";
 import { useCommands } from "@/commands";
@@ -14,14 +15,14 @@ import {
   DialogContent,
   DialogDescription,
   DialogHeader,
-  DialogTitle,
+  DialogTitle
 } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import {
   getMcpReadinessLabel,
   type McpServerView,
-  type McpToolSummary,
+  type McpToolSummary
 } from "@/shared/mcp";
 
 function _McpToolImportDialog({
@@ -31,15 +32,15 @@ function _McpToolImportDialog({
   onAdd,
   onRemove,
   open,
-  onOpenChange,
+  onOpenChange
 }: {
-  existingToolNames: Set<string>;
-  initialServerId?: string | null;
-  initialToolName?: string | null;
-  onAdd: (tool: McpTool) => boolean;
-  onRemove: (toolName: string) => void;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
+  readonly existingToolNames: Set<string>;
+  readonly initialServerId?: string | null;
+  readonly initialToolName?: string | null;
+  readonly onAdd: (tool: McpTool) => boolean;
+  readonly onOpenChange: (open: boolean) => void;
+  readonly onRemove: (toolName: string) => void;
+  readonly open: boolean;
 }) {
   const { executeCommand } = useCommands();
   const [servers, setServers] = useState<McpServerView[]>([]);
@@ -53,7 +54,7 @@ function _McpToolImportDialog({
   const toolRowRefs = useRef(new Map<string, HTMLDivElement>());
 
   const selectedServer = useMemo(
-    () => servers.find((server) => server.id === selectedServerId) ?? null,
+    () => servers.find(server => server.id === selectedServerId) ?? null,
     [selectedServerId, servers]
   );
   const diagnostic = selectedServer?.readiness?.diagnostic;
@@ -66,17 +67,16 @@ function _McpToolImportDialog({
     try {
       const next = await listMcpServers();
       setServers(next);
-      setSelectedServerId((current) =>
-        initialServerId && next.some((server) => server.id === initialServerId)
+      setSelectedServerId(current =>
+        (initialServerId && next.some(server => server.id === initialServerId)
           ? initialServerId
-          : current && next.some((server) => server.id === current)
+          : current && next.some(server => server.id === current)
             ? current
-            : (next[0]?.id ?? "")
-      );
+            : (next[0]?.id ?? "")));
     } catch (error) {
       toast.error("Failed to load MCP servers", {
         description:
-          error instanceof Error ? error.message : "Please try again.",
+          error instanceof Error ? error.message : "Please try again."
       });
     } finally {
       setLoadingServers(false);
@@ -93,17 +93,15 @@ function _McpToolImportDialog({
       try {
         const response = await listMcpTools(serverId);
         setTools(response.tools);
-        setServers((current) =>
-          current.map((server) =>
-            server.id === response.server.id ? response.server : server
-          )
-        );
+        setServers(current =>
+          current.map(server =>
+            (server.id === response.server.id ? response.server : server)));
       } catch (error) {
         setTools([]);
         await refreshServers();
         toast.error("Failed to load MCP tools", {
           description:
-            error instanceof Error ? error.message : "Please try again.",
+            error instanceof Error ? error.message : "Please try again."
         });
       } finally {
         setLoadingTools(false);
@@ -116,11 +114,10 @@ function _McpToolImportDialog({
     if (!open || !initialServerId) {
       return;
     }
-    setSelectedServerId((current) =>
-      servers.some((server) => server.id === initialServerId)
+    setSelectedServerId(current =>
+      (servers.some(server => server.id === initialServerId)
         ? initialServerId
-        : current
-    );
+        : current));
   }, [initialServerId, open, servers]);
 
   useEffect(() => {
@@ -141,22 +138,21 @@ function _McpToolImportDialog({
     if (!open || !initialToolName) {
       return;
     }
-    if (!tools.some((tool) => tool.directName === initialToolName)) {
+    if (!tools.some(tool => tool.directName === initialToolName)) {
       return;
     }
     setHighlightedToolName(initialToolName);
     requestAnimationFrame(() => {
       toolRowRefs.current.get(initialToolName)?.scrollIntoView({
         block: "center",
-        behavior: "smooth",
+        behavior: "smooth"
       });
     });
     const timeout = window.setTimeout(() => {
-      setHighlightedToolName((current) =>
-        current === initialToolName ? null : current
-      );
+      setHighlightedToolName(current =>
+        (current === initialToolName ? null : current));
     }, 2000);
-    return () => window.clearTimeout(timeout);
+    return () => { window.clearTimeout(timeout); };
   }, [initialToolName, open, tools]);
 
   const handleToggleTool = (tool: McpToolSummary, checked: boolean) => {
@@ -174,7 +170,7 @@ function _McpToolImportDialog({
       parameters: tool.inputSchema,
       serverId: selectedServer.id,
       serverName: selectedServer.serverName,
-      toolName: tool.toolName,
+      toolName: tool.toolName
     });
   };
 
@@ -184,7 +180,7 @@ function _McpToolImportDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent className="flex h-[600px] max-h-[calc(100vh-4rem)] w-[min(800px,calc(100vw-2rem))] max-w-none! flex-col gap-0 overflow-hidden p-0">
         <DialogHeader className="border-b px-4 py-3">
           <DialogTitle>Add MCP tools</DialogTitle>
@@ -195,45 +191,49 @@ function _McpToolImportDialog({
         <div className="flex min-h-0 flex-1 overflow-hidden">
           <aside className="flex w-44 shrink-0 flex-col border-r p-3">
             <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
-              {servers.length === 0 ? (
-                <div className="text-muted-foreground px-2 py-6 text-center text-xs">
-                  {loadingServers ? "Loading…" : "No servers"}
-                </div>
-              ) : (
-                servers.map((server) => {
-                  const count = server.toolCount ?? server.readiness?.toolCount;
-                  const selected = server.id === selectedServerId;
-                  return (
-                    <button
-                      key={server.id}
-                      type="button"
-                      className={cn(
-                        "focus-visible:ring-ring/30 flex min-h-8 items-center gap-2 rounded-md px-2 text-left text-xs transition-colors outline-none focus-visible:ring-2",
-                        selected
-                          ? "bg-accent text-accent-foreground"
-                          : "text-muted-foreground hover:bg-accent/60 hover:text-accent-foreground"
-                      )}
-                      onClick={() => setSelectedServerId(server.id)}
-                    >
-                      <Cable className="size-3.5 shrink-0" />
-                      <span className="min-w-0 flex-1 truncate">
-                        {server.name}
-                      </span>
-                      {count != null ? (
-                        <span className="bg-muted text-muted-foreground rounded-full px-2 py-0.5 text-[0.625rem]">
-                          {count}
+              {servers.length === 0
+                ? (
+                  <div className="text-muted-foreground px-2 py-6 text-center text-xs">
+                    {loadingServers ? "Loading…" : "No servers"}
+                  </div>
+                )
+                : (
+                  servers.map(server => {
+                    const count = server.toolCount ?? server.readiness?.toolCount;
+                    const selected = server.id === selectedServerId;
+                    return (
+                      <button
+                        className={cn(
+                          "focus-visible:ring-ring/30 flex min-h-8 items-center gap-2 rounded-md px-2 text-left text-xs transition-colors outline-none focus-visible:ring-2",
+                          selected
+                            ? "bg-accent text-accent-foreground"
+                            : "text-muted-foreground hover:bg-accent/60 hover:text-accent-foreground"
+                        )}
+                        key={server.id}
+                        onClick={() => { setSelectedServerId(server.id); }}
+                        type="button"
+                      >
+                        <Cable className="size-3.5 shrink-0" />
+                        <span className="min-w-0 flex-1 truncate">
+                          {server.name}
                         </span>
-                      ) : null}
-                    </button>
-                  );
-                })
-              )}
+                        {count != null
+                          ? (
+                            <span className="bg-muted text-muted-foreground rounded-full px-2 py-0.5 text-[0.625rem]">
+                              {count}
+                            </span>
+                          )
+                          : null}
+                      </button>
+                    );
+                  })
+                )}
             </div>
             <Button
-              variant="outline"
-              size="sm"
               className="text-muted-foreground mt-2 w-full"
               onClick={openMcpSettings}
+              size="sm"
+              variant="outline"
             >
               <Settings2 className="size-3.5" />
               Configure MCP
@@ -241,102 +241,110 @@ function _McpToolImportDialog({
           </aside>
           <div className="flex min-w-0 flex-1 flex-col overflow-hidden pl-4">
             <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-              {servers.length === 0 ? (
-                <div className="text-muted-foreground flex flex-col items-center gap-3 px-3 py-8 text-center text-sm">
-                  <span>No MCP servers configured.</span>
-                  <Button size="sm" variant="outline" onClick={openMcpSettings}>
-                    Open settings
-                  </Button>
-                </div>
-              ) : tools.length === 0 ? (
-                <div className="flex flex-col items-center gap-3 px-3 py-8 text-center text-sm">
-                  <span
-                    className={cn(
-                      isErrorText ? "text-destructive" : "text-muted-foreground"
-                    )}
-                  >
-                    {errorText ??
-                      `${_serverReadinessLabel(selectedServer)} · no tools loaded`}
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={loadingTools}
-                      onClick={() => void refreshTools(selectedServerId)}
-                    >
-                      {loadingTools ? (
-                        <Loader2 className="size-4 animate-spin" />
-                      ) : (
-                        <RefreshCw className="size-4" />
-                      )}
-                      Test server
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={openMcpSettings}>
+              {servers.length === 0
+                ? (
+                  <div className="text-muted-foreground flex flex-col items-center gap-3 px-3 py-8 text-center text-sm">
+                    <span>No MCP servers configured.</span>
+                    <Button onClick={openMcpSettings} size="sm" variant="outline">
                       Open settings
                     </Button>
                   </div>
-                </div>
-              ) : (
-                tools.map((tool) => {
-                  const exists = existingToolNames.has(tool.directName);
-                  const highlighted = highlightedToolName === tool.directName;
-                  return (
-                    <div
-                      key={tool.toolName}
-                      ref={(element) => {
-                        if (element) {
-                          toolRowRefs.current.set(tool.directName, element);
-                        } else {
-                          toolRowRefs.current.delete(tool.directName);
-                        }
-                      }}
-                      className={cn(
-                        "flex min-w-0 items-center gap-3 border-b px-3 py-2 transition-colors duration-500 last:border-b-0",
-                        highlighted && "bg-primary/10 text-primary",
-                        !tool.available && "opacity-50"
-                      )}
-                    >
-                      <Cable
+                )
+                : tools.length === 0
+                  ? (
+                    <div className="flex flex-col items-center gap-3 px-3 py-8 text-center text-sm">
+                      <span
                         className={cn(
-                          "size-4 shrink-0",
-                          highlighted ? "text-primary" : "text-muted-foreground"
+                          isErrorText ? "text-destructive" : "text-muted-foreground"
                         )}
-                      />
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate font-mono text-sm">
-                          {tool.directName}
-                        </div>
-                        {tool.description ? (
-                          <div
-                            className={cn(
-                              "line-clamp-2 text-xs",
-                              highlighted
-                                ? "text-primary/80"
-                                : "text-muted-foreground"
+                      >
+                        {errorText
+                          ?? `${_serverReadinessLabel(selectedServer)} · no tools loaded`}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          disabled={loadingTools}
+                          onClick={() => void refreshTools(selectedServerId)}
+                          size="sm"
+                          variant="outline"
+                        >
+                          {loadingTools
+                            ? (
+                              <Loader2 className="size-4 animate-spin" />
+                            )
+                            : (
+                              <RefreshCw className="size-4" />
                             )}
-                          >
-                            {tool.description}
-                          </div>
-                        ) : null}
-                        {tool.disabledReason ? (
-                          <div className="text-destructive text-xs">
-                            {tool.disabledReason}
-                          </div>
-                        ) : null}
+                          Test server
+                        </Button>
+                        <Button onClick={openMcpSettings} size="sm" variant="ghost">
+                          Open settings
+                        </Button>
                       </div>
-                      <Switch
-                        checked={exists}
-                        disabled={!tool.available}
-                        aria-label={`${exists ? "Remove" : "Add"} ${tool.directName}`}
-                        onCheckedChange={(checked) =>
-                          handleToggleTool(tool, checked)
-                        }
-                      />
                     </div>
-                  );
-                })
-              )}
+                  )
+                  : (
+                    tools.map(tool => {
+                      const exists = existingToolNames.has(tool.directName);
+                      const highlighted = highlightedToolName === tool.directName;
+                      return (
+                        <div
+                          className={cn(
+                            "flex min-w-0 items-center gap-3 border-b px-3 py-2 transition-colors duration-500 last:border-b-0",
+                            highlighted && "bg-primary/10 text-primary",
+                            !tool.available && "opacity-50"
+                          )}
+                          key={tool.toolName}
+                          ref={element => {
+                            if (element) {
+                              toolRowRefs.current.set(tool.directName, element);
+                            } else {
+                              toolRowRefs.current.delete(tool.directName);
+                            }
+                          }}
+                        >
+                          <Cable
+                            className={cn(
+                              "size-4 shrink-0",
+                              highlighted ? "text-primary" : "text-muted-foreground"
+                            )}
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate font-mono text-sm">
+                              {tool.directName}
+                            </div>
+                            {tool.description
+                              ? (
+                                <div
+                                  className={cn(
+                                    "line-clamp-2 text-xs",
+                                    highlighted
+                                      ? "text-primary/80"
+                                      : "text-muted-foreground"
+                                  )}
+                                >
+                                  {tool.description}
+                                </div>
+                              )
+                              : null}
+                            {tool.disabledReason
+                              ? (
+                                <div className="text-destructive text-xs">
+                                  {tool.disabledReason}
+                                </div>
+                              )
+                              : null}
+                          </div>
+                          <Switch
+                            aria-label={`${exists ? "Remove" : "Add"} ${tool.directName}`}
+                            checked={exists}
+                            disabled={!tool.available}
+                            onCheckedChange={checked => { handleToggleTool(tool, checked); }}
+                          />
+                        </div>
+                      );
+                    })
+                  )}
             </div>
           </div>
         </div>

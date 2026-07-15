@@ -2,15 +2,15 @@ import { createHash } from "node:crypto";
 
 import type { Tool as McpTool } from "@modelcontextprotocol/sdk/types.js";
 
-import type { CompiledMcpConnection } from "../../runtime/agent/agent-project-snapshot";
-import { qualifyProjectMcpToolName } from "../../internal/project-mcp-tool-name";
-
 import { ProjectMcpToolCallRejectedError } from "./project-mcp-tool-call-rejected-error";
 import {
-  RemoteMcpClient,
   type RemoteMcpCallResult,
-  type RemoteMcpClientOptions,
+  RemoteMcpClient,
+  type RemoteMcpClientOptions
 } from "./remote-mcp-client";
+import { qualifyProjectMcpToolName } from "../../internal/project-mcp-tool-name";
+
+import type { CompiledMcpConnection } from "../../runtime/agent/agent-project-snapshot";
 
 export interface ProjectMcpRemoteClient {
   listTools(): Promise<McpTool[]>;
@@ -38,20 +38,20 @@ export interface ProjectMcpToolDescriptor {
 
 export type ProjectMcpConnectionStatus =
   | {
-      readonly connectionName: string;
-      readonly description: string;
-      readonly sourcePath: string;
-      readonly state: "ready";
-      readonly toolNames: readonly string[];
-    }
+    readonly connectionName: string;
+    readonly description: string;
+    readonly message: string;
+    readonly missingTools?: readonly string[];
+    readonly sourcePath: string;
+    readonly state: "unavailable";
+  }
   | {
-      readonly connectionName: string;
-      readonly description: string;
-      readonly sourcePath: string;
-      readonly state: "unavailable";
-      readonly message: string;
-      readonly missingTools?: readonly string[];
-    };
+    readonly connectionName: string;
+    readonly description: string;
+    readonly sourcePath: string;
+    readonly state: "ready";
+    readonly toolNames: readonly string[];
+  };
 
 interface ActiveTool {
   readonly client: ProjectMcpRemoteClient;
@@ -67,10 +67,10 @@ export class ProjectMcpSession {
   private readonly _abortController = new AbortController();
 
   private constructor(input: {
-    tools: ProjectMcpToolDescriptor[];
-    statuses: ProjectMcpConnectionStatus[];
     activeTools: Map<string, ActiveTool>;
     clients: ProjectMcpRemoteClient[];
+    statuses: ProjectMcpConnectionStatus[];
+    tools: ProjectMcpToolDescriptor[];
   }) {
     this.tools = Object.freeze(input.tools);
     this.statuses = Object.freeze(input.statuses);
@@ -86,8 +86,8 @@ export class ProjectMcpSession {
     } = {}
   ): Promise<ProjectMcpSession> {
     const connector =
-      options.connector ??
-      ((connectionOptions) => RemoteMcpClient.connect(connectionOptions));
+      options.connector
+      ?? (async connectionOptions => RemoteMcpClient.connect(connectionOptions));
     const tools: ProjectMcpToolDescriptor[] = [];
     const statuses: ProjectMcpConnectionStatus[] = [];
     const activeTools = new Map<string, ActiveTool>();
@@ -99,14 +99,14 @@ export class ProjectMcpSession {
         options.abortSignal
       );
       statuses.push(activated.status);
-      if (!activated.client) continue;
+      if (!activated.client) { continue; }
       clients.push(activated.client);
       for (const tool of activated.tools) {
         tools.push(tool);
         activeTools.set(tool.name, {
           client: activated.client,
           inputSchema: tool.parameters,
-          remoteToolName: tool.remoteToolName,
+          remoteToolName: tool.remoteToolName
         });
       }
     }
@@ -145,12 +145,12 @@ export class ProjectMcpSession {
     if (!this._abortController.signal.aborted) {
       this._abortController.abort(new Error("Project MCP session closed"));
     }
-    await Promise.allSettled(this._clients.map((client) => client.close()));
+    await Promise.allSettled(this._clients.map(async client => client.close()));
   }
 }
 
 function _checkJsonSchema(schema: unknown, value: unknown): boolean {
-  if (!schema || typeof schema !== "object") return true;
+  if (!schema || typeof schema !== "object") { return true; }
   const definition = schema as {
     allOf?: unknown[];
     anyOf?: unknown[];
@@ -162,22 +162,22 @@ function _checkJsonSchema(schema: unknown, value: unknown): boolean {
     required?: string[];
     type?: string | string[];
   };
-  if (definition.const !== undefined && value !== definition.const) return false;
-  if (definition.enum && !definition.enum.some((item) => item === value)) {
+  if (definition.const !== undefined && value !== definition.const) { return false; }
+  if (definition.enum && !definition.enum.some(item => item === value)) {
     return false;
   }
-  if (definition.allOf?.some((child) => !_checkJsonSchema(child, value))) {
+  if (definition.allOf?.some(child => !_checkJsonSchema(child, value))) {
     return false;
   }
   if (
-    definition.anyOf &&
-    !definition.anyOf.some((child) => _checkJsonSchema(child, value))
+    definition.anyOf
+    && !definition.anyOf.some(child => _checkJsonSchema(child, value))
   ) {
     return false;
   }
   if (definition.oneOf) {
     if (
-      definition.oneOf.filter((child) => _checkJsonSchema(child, value))
+      definition.oneOf.filter(child => _checkJsonSchema(child, value))
         .length !== 1
     ) {
       return false;
@@ -189,16 +189,15 @@ function _checkJsonSchema(schema: unknown, value: unknown): boolean {
       ? [definition.type]
       : [];
   if (types.length > 1) {
-    return types.some((type) =>
-      _checkJsonSchema({ ...definition, type }, value)
-    );
+    return types.some(type =>
+      _checkJsonSchema({ ...definition, type }, value));
   }
   switch (types[0]) {
     case "array":
       return (
-        Array.isArray(value) &&
-        (!definition.items ||
-          value.every((item) => _checkJsonSchema(definition.items, item)))
+        Array.isArray(value)
+        && (!definition.items
+          || value.every(item => _checkJsonSchema(definition.items, item)))
       );
     case "boolean":
       return typeof value === "boolean";
@@ -213,7 +212,7 @@ function _checkJsonSchema(schema: unknown, value: unknown): boolean {
         return false;
       }
       const record = value as Record<string, unknown>;
-      if (definition.required?.some((key) => !(key in record))) return false;
+      if (definition.required?.some(key => !(key in record))) { return false; }
       return Object.entries(definition.properties ?? {}).every(
         ([key, child]) =>
           !(key in record) || _checkJsonSchema(child, record[key])
@@ -232,8 +231,8 @@ async function _activateConnection(
   abortSignal = new AbortController().signal
 ): Promise<{
   client?: ProjectMcpRemoteClient;
-  tools: ProjectMcpToolDescriptor[];
   status: ProjectMcpConnectionStatus;
+  tools: ProjectMcpToolDescriptor[];
 }> {
   const { definition } = connection;
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -242,7 +241,7 @@ async function _activateConnection(
       const context = {
         abortSignal,
         connectionName: connection.name,
-        url: definition.url,
+        url: definition.url
       };
       const headers =
         typeof definition.headers === "function"
@@ -258,12 +257,12 @@ async function _activateConnection(
       client = await connector({
         transport: definition.transport,
         url: definition.url,
-        headers,
+        headers
       });
       const available = await client.listTools();
-      const byName = new Map(available.map((tool) => [tool.name, tool]));
+      const byName = new Map(available.map(tool => [tool.name, tool]));
       const missingTools = definition.tools.allow.filter(
-        (name) => !byName.has(name)
+        name => !byName.has(name)
       );
       if (missingTools.length > 0) {
         await client.close().catch(() => undefined);
@@ -275,11 +274,11 @@ async function _activateConnection(
             sourcePath: connection.logicalPath,
             state: "unavailable",
             message: "One or more allowlisted tools are unavailable.",
-            missingTools,
-          },
+            missingTools
+          }
         };
       }
-      const tools = definition.tools.allow.map((remoteToolName) => {
+      const tools = definition.tools.allow.map(remoteToolName => {
         const remote = byName.get(remoteToolName)!;
         return {
           name: qualifyProjectMcpToolName(
@@ -291,7 +290,7 @@ async function _activateConnection(
           sourcePath: connection.logicalPath,
           connectionName: connection.name,
           remoteToolName,
-          schemaFingerprint: _schemaFingerprint(remote),
+          schemaFingerprint: _schemaFingerprint(remote)
         };
       });
       return {
@@ -302,12 +301,12 @@ async function _activateConnection(
           description: definition.description,
           sourcePath: connection.logicalPath,
           state: "ready",
-          toolNames: tools.map((tool) => tool.name),
-        },
+          toolNames: tools.map(tool => tool.name)
+        }
       };
     } catch (error) {
       await client?.close().catch(() => undefined);
-      if (attempt === 0 && _isMetadataAuthError(error)) continue;
+      if (attempt === 0 && _isMetadataAuthError(error)) { continue; }
       return {
         tools: [],
         status: {
@@ -315,8 +314,8 @@ async function _activateConnection(
           description: definition.description,
           sourcePath: connection.logicalPath,
           state: "unavailable",
-          message: "Unable to connect and load allowlisted tools.",
-        },
+          message: "Unable to connect and load allowlisted tools."
+        }
       };
     }
   }
@@ -327,7 +326,7 @@ function _schemaFingerprint(tool: McpTool): string {
   const canonical = _canonicalJson({
     name: tool.name,
     description: tool.description ?? "",
-    inputSchema: tool.inputSchema,
+    inputSchema: tool.inputSchema
   });
   return `sha256:${createHash("sha256").update(canonical).digest("hex")}`;
 }
@@ -346,15 +345,14 @@ function _canonicalJson(value: unknown): string {
 }
 
 function _isMetadataAuthError(error: unknown): boolean {
-  if (!error || typeof error !== "object") return false;
+  if (!error || typeof error !== "object") { return false; }
   const status =
     "status" in error
       ? error.status
       : "code" in error
         ? error.code
         : undefined;
-  if (status === 401 || status === 403 || status === "401" || status === "403")
-    return true;
+  if (status === 401 || status === 403 || status === "401" || status === "403") { return true; }
   const message = error instanceof Error ? error.message : "";
   return /\b(?:401|403)\b/.test(message);
 }

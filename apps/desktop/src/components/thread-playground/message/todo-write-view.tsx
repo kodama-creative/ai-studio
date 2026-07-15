@@ -1,13 +1,14 @@
-import { type ToolCallInput } from "@llm-space/core";
 import { CheckIcon, EyeIcon } from "lucide-react";
 import { memo, useMemo, useState } from "react";
+
+import type { ToolCallInput } from "@llm-space/core";
 
 import { PreviewDialog } from "@/components/preview-dialog-lazy";
 import { Tooltip } from "@/components/tooltip";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-type TodoStatus = "pending" | "in_progress" | "completed";
+type TodoStatus = "completed" | "in_progress" | "pending";
 
 interface TodoItem {
   content: string;
@@ -39,7 +40,7 @@ export function parseTodoWriteInput(input: ToolCallInput): TodoItem[] | null {
     }
     todos.push({
       content: t.content,
-      status: _normalizeStatus(t.status),
+      status: _normalizeStatus(t.status)
     });
   }
   return todos;
@@ -56,10 +57,10 @@ function _normalizeStatus(value: unknown): TodoStatus {
  */
 function _TodoWriteView({
   todos,
-  input,
+  input
 }: {
-  todos: TodoItem[];
-  input: ToolCallInput;
+  readonly input: ToolCallInput;
+  readonly todos: TodoItem[];
 }) {
   const [previewOpen, setPreviewOpen] = useState(false);
   const previewValue = useMemo(
@@ -77,9 +78,9 @@ function _TodoWriteView({
           <Tooltip content="View arguments">
             <Button
               className="invisible shrink-0 group-hover/message:visible"
+              onClick={() => { setPreviewOpen(true); }}
               size="xs"
               variant="ghost"
-              onClick={() => setPreviewOpen(true)}
             >
               <EyeIcon className="size-3" />
             </Button>
@@ -87,11 +88,11 @@ function _TodoWriteView({
         </div>
       </div>
       <PreviewDialog
+        onOpenChange={setPreviewOpen}
         open={previewOpen}
         title="Arguments of todo_write()"
         type="json"
         value={previewValue}
-        onOpenChange={setPreviewOpen}
       />
       <ul className="flex flex-col gap-0.5">
         {todos.map((todo, index) => (
@@ -103,7 +104,7 @@ function _TodoWriteView({
 }
 export const TodoWriteView = memo(_TodoWriteView);
 
-function TodoRow({ todo }: { todo: TodoItem }) {
+function TodoRow({ todo }: { readonly todo: TodoItem; }) {
   const completed = todo.status === "completed";
   const inProgress = todo.status === "in_progress";
   return (
@@ -123,7 +124,7 @@ function TodoRow({ todo }: { todo: TodoItem }) {
   );
 }
 
-function TodoStatusIcon({ status }: { status: TodoStatus }) {
+function TodoStatusIcon({ status }: { readonly status: TodoStatus; }) {
   if (status === "completed") {
     return (
       <span className="border-muted-foreground/40 bg-muted-foreground/30 text-background mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border">

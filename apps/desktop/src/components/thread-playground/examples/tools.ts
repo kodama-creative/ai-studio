@@ -1,4 +1,3 @@
-import type { BuiltinTool, FunctionTool } from "@llm-space/core";
 import {
   ActivityIcon,
   BotIcon,
@@ -15,14 +14,16 @@ import {
   ImageIcon,
   ListTodoIcon,
   ListTreeIcon,
+  type LucideIcon,
   PlayIcon,
   SearchIcon,
   SparklesIcon,
   SquareIcon,
   TerminalIcon,
-  TimerIcon,
-  type LucideIcon,
+  TimerIcon
 } from "lucide-react";
+
+import type { BuiltinTool, FunctionTool } from "@llm-space/core";
 
 /**
  * Built-in function-tool definitions and the catalog that surfaces them in the
@@ -43,11 +44,11 @@ export const DEFAULT_TOOL: FunctionTool = _functionTool({
     properties: {
       location: {
         type: "string",
-        description: "The location to get the weather report for",
-      },
+        description: "The location to get the weather report for"
+      }
     },
-    required: ["location"],
-  },
+    required: ["location"]
+  }
 });
 
 const WEB_SEARCH_TOOL: FunctionTool = _functionTool({
@@ -61,11 +62,11 @@ const WEB_SEARCH_TOOL: FunctionTool = _functionTool({
     properties: {
       query: {
         type: "string",
-        description: "The search query string to look up on the web",
-      },
+        description: "The search query string to look up on the web"
+      }
     },
-    additionalProperties: false,
-  },
+    additionalProperties: false
+  }
 });
 
 const BASH_TOOL: FunctionTool = _functionTool({
@@ -80,21 +81,21 @@ const BASH_TOOL: FunctionTool = _functionTool({
       description: {
         type: "string",
         description:
-          "Must be the first parameter in the tool call. A short human-readable summary explaining the purpose of the command",
+          "Must be the first parameter in the tool call. A short human-readable summary explaining the purpose of the command"
       },
       command: {
         type: "string",
         description:
-          "The bash command to execute. Must be self-contained — include cd, export, and any other setup inline, because prior invocations leave no lasting shell state.",
+          "The bash command to execute. Must be self-contained — include cd, export, and any other setup inline, because prior invocations leave no lasting shell state."
       },
       timeout: {
         type: "number",
         description:
-          "Timeout in milliseconds (max 600000ms, 120000ms by default).",
-      },
+          "Timeout in milliseconds (max 600000ms, 120000ms by default)."
+      }
     },
-    additionalProperties: false,
-  },
+    additionalProperties: false
+  }
 });
 
 const READ_FILE_TOOL: FunctionTool = _functionTool({
@@ -109,25 +110,25 @@ const READ_FILE_TOOL: FunctionTool = _functionTool({
       description: {
         type: "string",
         description:
-          "Must be the first parameter in the tool call. A short human-readable summary explaining why this file is being read",
+          "Must be the first parameter in the tool call. A short human-readable summary explaining why this file is being read"
       },
       path: {
         type: "string",
-        description: "Absolute path to the file to read",
+        description: "Absolute path to the file to read"
       },
       offset: {
         type: "number",
         description:
-          "1-based line number to start reading from. Defaults to 1 (the first line).",
+          "1-based line number to start reading from. Defaults to 1 (the first line)."
       },
       limit: {
         type: "number",
         description:
-          "Maximum number of lines to read from offset. Defaults to unlimited (the rest of the file), still capped by the 256KB output limit.",
-      },
+          "Maximum number of lines to read from offset. Defaults to unlimited (the rest of the file), still capped by the 256KB output limit."
+      }
     },
-    additionalProperties: false,
-  },
+    additionalProperties: false
+  }
 });
 
 const WRITE_FILE_TOOL: FunctionTool = _functionTool({
@@ -142,19 +143,19 @@ const WRITE_FILE_TOOL: FunctionTool = _functionTool({
       description: {
         type: "string",
         description:
-          "Must be the first parameter in the tool call. A short human-readable summary explaining what is being written and why",
+          "Must be the first parameter in the tool call. A short human-readable summary explaining what is being written and why"
       },
       path: {
         type: "string",
-        description: "Absolute path to the file to write",
+        description: "Absolute path to the file to write"
       },
       contents: {
         type: "string",
-        description: "The full text content to write to the file",
-      },
+        description: "The full text content to write to the file"
+      }
     },
-    additionalProperties: false,
-  },
+    additionalProperties: false
+  }
 });
 
 const EDIT_TOOL: FunctionTool = _functionTool({
@@ -169,29 +170,29 @@ const EDIT_TOOL: FunctionTool = _functionTool({
       description: {
         type: "string",
         description:
-          "Must be the first parameter in the tool call. A short human-readable summary explaining the edit being made",
+          "Must be the first parameter in the tool call. A short human-readable summary explaining the edit being made"
       },
       path: {
         type: "string",
-        description: "Absolute path to the file to edit",
+        description: "Absolute path to the file to edit"
       },
       old_string: {
         type: "string",
         description:
-          "The exact text to replace (must be unique within the file unless replace_all is true)",
+          "The exact text to replace (must be unique within the file unless replace_all is true)"
       },
       new_string: {
         type: "string",
-        description: "The replacement text (must differ from old_string)",
+        description: "The replacement text (must differ from old_string)"
       },
       replace_all: {
         type: "boolean",
         description:
-          "Replace all occurrences of old_string. Defaults to false (first match only).",
-      },
+          "Replace all occurrences of old_string. Defaults to false (first match only)."
+      }
     },
-    additionalProperties: false,
-  },
+    additionalProperties: false
+  }
 });
 
 const LS_TOOL: FunctionTool = _functionTool({
@@ -206,15 +207,15 @@ const LS_TOOL: FunctionTool = _functionTool({
       description: {
         type: "string",
         description:
-          "Must be the first parameter in the tool call. A short human-readable summary explaining why this directory is being listed",
+          "Must be the first parameter in the tool call. A short human-readable summary explaining why this directory is being listed"
       },
       path: {
         type: "string",
-        description: "Absolute path to the directory to list",
-      },
+        description: "Absolute path to the directory to list"
+      }
     },
-    additionalProperties: false,
-  },
+    additionalProperties: false
+  }
 });
 
 const TREE_TOOL: FunctionTool = _functionTool({
@@ -229,20 +230,20 @@ const TREE_TOOL: FunctionTool = _functionTool({
       description: {
         type: "string",
         description:
-          "Must be the first parameter in the tool call. A short human-readable summary explaining why this tree is being generated",
+          "Must be the first parameter in the tool call. A short human-readable summary explaining why this tree is being generated"
       },
       path: {
         type: "string",
-        description: "Absolute path to the directory to print as a tree",
+        description: "Absolute path to the directory to print as a tree"
       },
       max_depth: {
         type: "number",
         description:
-          "Maximum directory depth to descend. Defaults to 5, capped at 20.",
-      },
+          "Maximum directory depth to descend. Defaults to 5, capped at 20."
+      }
     },
-    additionalProperties: false,
-  },
+    additionalProperties: false
+  }
 });
 
 const GREP_TOOL: FunctionTool = _functionTool({
@@ -257,34 +258,34 @@ const GREP_TOOL: FunctionTool = _functionTool({
       description: {
         type: "string",
         description:
-          "Must be the first parameter in the tool call. A short human-readable summary explaining what is being searched for",
+          "Must be the first parameter in the tool call. A short human-readable summary explaining what is being searched for"
       },
       pattern: {
         type: "string",
         description:
-          "Regular expression pattern to search for in file contents",
+          "Regular expression pattern to search for in file contents"
       },
       path: {
         type: "string",
-        description: "Absolute path to a file or directory to search in",
+        description: "Absolute path to a file or directory to search in"
       },
       glob: {
         type: "string",
         description:
-          'Glob filter for files (e.g. "*.ts", "**/*.tsx") — maps to rg --glob',
+          'Glob filter for files (e.g. "*.ts", "**/*.tsx") — maps to rg --glob'
       },
       case_insensitive: {
         type: "boolean",
-        description: "Case insensitive search",
+        description: "Case insensitive search"
       },
       context_lines: {
         type: "number",
         description:
-          "Number of context lines to show before and after each match (maps to rg -C). Defaults to 0.",
-      },
+          "Number of context lines to show before and after each match (maps to rg -C). Defaults to 0."
+      }
     },
-    additionalProperties: false,
-  },
+    additionalProperties: false
+  }
 });
 
 const GLOB_TOOL: FunctionTool = _functionTool({
@@ -299,20 +300,20 @@ const GLOB_TOOL: FunctionTool = _functionTool({
       description: {
         type: "string",
         description:
-          "Must be the first parameter in the tool call. A short human-readable summary explaining what files are being searched for",
+          "Must be the first parameter in the tool call. A short human-readable summary explaining what files are being searched for"
       },
       glob_pattern: {
         type: "string",
-        description: 'Glob pattern to match (e.g. "*.ts", "**/test_*.ts")',
+        description: 'Glob pattern to match (e.g. "*.ts", "**/test_*.ts")'
       },
       target_directory: {
         type: "string",
         description:
-          "Absolute path to the directory to search in. Defaults to the workspace root if omitted.",
-      },
+          "Absolute path to the directory to search in. Defaults to the workspace root if omitted."
+      }
     },
-    additionalProperties: false,
-  },
+    additionalProperties: false
+  }
 });
 
 const SKILL_TOOL: FunctionTool = _functionTool({
@@ -326,11 +327,11 @@ const SKILL_TOOL: FunctionTool = _functionTool({
     properties: {
       name: {
         type: "string",
-        description: "The name of the skill to load (its SKILL.md `name`).",
-      },
+        description: "The name of the skill to load (its SKILL.md `name`)."
+      }
     },
-    additionalProperties: false,
-  },
+    additionalProperties: false
+  }
 });
 
 const PRESENT_FILES_TOOL: FunctionTool = _functionTool({
@@ -345,18 +346,18 @@ const PRESENT_FILES_TOOL: FunctionTool = _functionTool({
       description: {
         type: "string",
         description:
-          "Must be the first parameter in the tool call. A short human-readable summary explaining what files are being presented and why",
+          "Must be the first parameter in the tool call. A short human-readable summary explaining what files are being presented and why"
       },
       paths: {
         type: "array",
         items: {
-          type: "string",
+          type: "string"
         },
-        description: "Absolute paths to the files to present to the user",
-      },
+        description: "Absolute paths to the files to present to the user"
+      }
     },
-    additionalProperties: false,
-  },
+    additionalProperties: false
+  }
 });
 
 const TODO_WRITE_TOOL: FunctionTool = _functionTool({
@@ -377,20 +378,20 @@ const TODO_WRITE_TOOL: FunctionTool = _functionTool({
           properties: {
             content: {
               type: "string",
-              description: "Short description of the work item.",
+              description: "Short description of the work item."
             },
             status: {
               type: "string",
               enum: ["pending", "in_progress", "completed", "cancelled"],
-              description: "Current state of the todo item.",
-            },
+              description: "Current state of the todo item."
+            }
           },
-          additionalProperties: false,
-        },
-      },
+          additionalProperties: false
+        }
+      }
     },
-    additionalProperties: false,
-  },
+    additionalProperties: false
+  }
 });
 
 const SLEEP_TOOL: FunctionTool = _functionTool({
@@ -405,15 +406,15 @@ const SLEEP_TOOL: FunctionTool = _functionTool({
       description: {
         type: "string",
         description:
-          "Must be the first parameter in the tool call. A short human-readable summary explaining why the sleep is being performed",
+          "Must be the first parameter in the tool call. A short human-readable summary explaining why the sleep is being performed"
       },
       duration_ms: {
         type: "number",
-        description: "How long to sleep, in milliseconds.",
-      },
+        description: "How long to sleep, in milliseconds."
+      }
     },
-    additionalProperties: false,
-  },
+    additionalProperties: false
+  }
 });
 
 const ASK_USER_QUESTION_TOOL: FunctionTool = _functionTool({
@@ -436,12 +437,12 @@ const ASK_USER_QUESTION_TOOL: FunctionTool = _functionTool({
             question: {
               type: "string",
               description:
-                "Full question text. Be specific and end with a question mark where appropriate.",
+                "Full question text. Be specific and end with a question mark where appropriate."
             },
             header: {
               type: "string",
               description:
-                "Very short tab or tag label for the question, maximum 12 characters, for example Auth or Library.",
+                "Very short tab or tag label for the question, maximum 12 characters, for example Auth or Library."
             },
             options: {
               type: "array",
@@ -454,34 +455,34 @@ const ASK_USER_QUESTION_TOOL: FunctionTool = _functionTool({
                   label: {
                     type: "string",
                     description:
-                      "Short display label for this choice, ideally 1–5 words.",
+                      "Short display label for this choice, ideally 1–5 words."
                   },
                   description: {
                     type: "string",
                     description:
-                      "Explanation of what this choice means or implies.",
+                      "Explanation of what this choice means or implies."
                   },
                   preview: {
                     type: "string",
                     description:
-                      "Optional markdown preview shown when this option is focused. Intended for single-select questions only.",
-                  },
+                      "Optional markdown preview shown when this option is focused. Intended for single-select questions only."
+                  }
                 },
-                additionalProperties: false,
-              },
+                additionalProperties: false
+              }
             },
             multi_select: {
               type: "boolean",
               description:
-                "If true, the user may select multiple options. If false, the user must select exactly one option.",
-            },
+                "If true, the user may select multiple options. If false, the user must select exactly one option."
+            }
           },
-          additionalProperties: false,
-        },
-      },
+          additionalProperties: false
+        }
+      }
     },
-    additionalProperties: false,
-  },
+    additionalProperties: false
+  }
 });
 
 /**
@@ -497,7 +498,7 @@ export const ASK_USER_QUESTION_BUILTIN_TOOL: BuiltinTool = {
   parameters: ASK_USER_QUESTION_TOOL.parameters,
   strict: ASK_USER_QUESTION_TOOL.strict,
   icon: "circle-help",
-  terminate: true,
+  terminate: true
 };
 
 const AGENT_TOOL: FunctionTool = _functionTool({
@@ -511,26 +512,26 @@ const AGENT_TOOL: FunctionTool = _functionTool({
     properties: {
       description: {
         type: "string",
-        description: "A short (3-6 word) summary of the sub-agent's task.",
+        description: "A short (3-6 word) summary of the sub-agent's task."
       },
       prompt: {
         type: "string",
         description:
-          "The full, self-contained task for the sub-agent. It starts with no memory of this conversation, so include all relevant context, file paths, and the expected output.",
+          "The full, self-contained task for the sub-agent. It starts with no memory of this conversation, so include all relevant context, file paths, and the expected output."
       },
       subagent_type: {
         type: "string",
         description:
-          'Which specialized agent persona to launch (e.g. "general-purpose", "researcher", "code-reviewer"). Defaults to a general-purpose agent if omitted.',
+          'Which specialized agent persona to launch (e.g. "general-purpose", "researcher", "code-reviewer"). Defaults to a general-purpose agent if omitted.'
       },
       run_in_background: {
         type: "boolean",
         description:
-          "Run the sub-agent asynchronously and return immediately instead of blocking on its result. Defaults to false.",
-      },
+          "Run the sub-agent asynchronously and return immediately instead of blocking on its result. Defaults to false."
+      }
     },
-    additionalProperties: false,
-  },
+    additionalProperties: false
+  }
 });
 
 const TASK_CREATE_TOOL: FunctionTool = _functionTool({
@@ -545,20 +546,20 @@ const TASK_CREATE_TOOL: FunctionTool = _functionTool({
       description: {
         type: "string",
         description:
-          "Must be the first parameter in the tool call. A short human-readable summary of what the task does",
+          "Must be the first parameter in the tool call. A short human-readable summary of what the task does"
       },
       command: {
         type: "string",
-        description: "The shell command to run in the background",
+        description: "The shell command to run in the background"
       },
       timeout: {
         type: "number",
         description:
-          "Optional maximum time in milliseconds to let the task run before it is automatically stopped",
-      },
+          "Optional maximum time in milliseconds to let the task run before it is automatically stopped"
+      }
     },
-    additionalProperties: false,
-  },
+    additionalProperties: false
+  }
 });
 
 const TASK_MONITOR_TOOL: FunctionTool = _functionTool({
@@ -572,16 +573,16 @@ const TASK_MONITOR_TOOL: FunctionTool = _functionTool({
     properties: {
       task_id: {
         type: "string",
-        description: "The id of the task returned by task_create",
+        description: "The id of the task returned by task_create"
       },
       block: {
         type: "boolean",
         description:
-          "Wait for the task to finish before returning, instead of immediately returning the output collected so far. Defaults to false.",
-      },
+          "Wait for the task to finish before returning, instead of immediately returning the output collected so far. Defaults to false."
+      }
     },
-    additionalProperties: false,
-  },
+    additionalProperties: false
+  }
 });
 
 const TASK_KILL_TOOL: FunctionTool = _functionTool({
@@ -596,11 +597,11 @@ const TASK_KILL_TOOL: FunctionTool = _functionTool({
       task_id: {
         type: "string",
         description:
-          "The id of the task to terminate, as returned by task_create",
-      },
+          "The id of the task to terminate, as returned by task_create"
+      }
     },
-    additionalProperties: false,
-  },
+    additionalProperties: false
+  }
 });
 
 const GENERATE_IMAGE_TOOL: FunctionTool = _functionTool({
@@ -615,16 +616,16 @@ const GENERATE_IMAGE_TOOL: FunctionTool = _functionTool({
       prompt: {
         type: "string",
         description:
-          "A detailed description of the image: subject, layout, style, colors, text (if any), and constraints",
+          "A detailed description of the image: subject, layout, style, colors, text (if any), and constraints"
       },
       aspect_ratio: {
         type: "string",
         description:
-          'Aspect ratio of the generated image (e.g. "1:1", "16:9", "9:16")',
-      },
+          'Aspect ratio of the generated image (e.g. "1:1", "16:9", "9:16")'
+      }
     },
-    additionalProperties: false,
-  },
+    additionalProperties: false
+  }
 });
 
 const WEB_FETCH_TOOL: FunctionTool = _functionTool({
@@ -639,36 +640,36 @@ const WEB_FETCH_TOOL: FunctionTool = _functionTool({
       url: {
         type: "string",
         description:
-          "The URL to fetch. Must be a fully qualified URL starting with http:// or https://",
-      },
+          "The URL to fetch. Must be a fully qualified URL starting with http:// or https://"
+      }
     },
-    additionalProperties: false,
-  },
+    additionalProperties: false
+  }
 });
 
 export type ToolExampleItem =
-  | { type: "separator" }
-  | { type: "tool"; label: string; tool: FunctionTool; icon: LucideIcon };
+  | { icon: LucideIcon; label: string; tool: FunctionTool; type: "tool"; }
+  | { type: "separator"; };
 
 export const TOOL_EXAMPLES: ToolExampleItem[] = [
   {
     type: "tool",
     label: "get_weather",
     tool: DEFAULT_TOOL,
-    icon: CloudSunIcon,
+    icon: CloudSunIcon
   },
   { type: "separator" },
   {
     type: "tool",
     label: "web_search",
     tool: WEB_SEARCH_TOOL,
-    icon: SearchIcon,
+    icon: SearchIcon
   },
   {
     type: "tool",
     label: "web_fetch",
     tool: WEB_FETCH_TOOL,
-    icon: GlobeIcon,
+    icon: GlobeIcon
   },
   { type: "separator" },
   { type: "tool", label: "bash", tool: BASH_TOOL, icon: TerminalIcon },
@@ -676,13 +677,13 @@ export const TOOL_EXAMPLES: ToolExampleItem[] = [
     type: "tool",
     label: "read",
     tool: READ_FILE_TOOL,
-    icon: FileTextIcon,
+    icon: FileTextIcon
   },
   {
     type: "tool",
     label: "write",
     tool: WRITE_FILE_TOOL,
-    icon: FileOutputIcon,
+    icon: FileOutputIcon
   },
   { type: "tool", label: "skill", tool: SKILL_TOOL, icon: SparklesIcon },
   { type: "tool", label: "edit", tool: EDIT_TOOL, icon: Edit3Icon },
@@ -694,58 +695,58 @@ export const TOOL_EXAMPLES: ToolExampleItem[] = [
     type: "tool",
     label: "present_files",
     tool: PRESENT_FILES_TOOL,
-    icon: FileIcon,
+    icon: FileIcon
   },
   { type: "separator" },
   {
     type: "tool",
     label: "todo_write",
     tool: TODO_WRITE_TOOL,
-    icon: ListTodoIcon,
+    icon: ListTodoIcon
   },
   {
     type: "tool",
     label: "ask_user_question",
     tool: ASK_USER_QUESTION_TOOL,
-    icon: CircleHelpIcon,
+    icon: CircleHelpIcon
   },
   {
     type: "tool",
     label: "sleep",
     tool: SLEEP_TOOL,
-    icon: TimerIcon,
+    icon: TimerIcon
   },
   {
     type: "tool",
     label: "agent",
     tool: AGENT_TOOL,
-    icon: BotIcon,
+    icon: BotIcon
   },
   {
     type: "tool",
     label: "task_create",
     tool: TASK_CREATE_TOOL,
-    icon: PlayIcon,
+    icon: PlayIcon
   },
   {
     type: "tool",
     label: "task_monitor",
     tool: TASK_MONITOR_TOOL,
-    icon: ActivityIcon,
+    icon: ActivityIcon
   },
   {
     type: "tool",
     label: "task_kill",
     tool: TASK_KILL_TOOL,
-    icon: SquareIcon,
+    icon: SquareIcon
   },
   { type: "separator" },
   {
     type: "tool",
     label: "generate_image",
     tool: GENERATE_IMAGE_TOOL,
-    icon: ImageIcon,
-  },
+    icon: ImageIcon
+  }
 ];
 
 /** Look up a built-in tool example by its function `name` (not display label). */

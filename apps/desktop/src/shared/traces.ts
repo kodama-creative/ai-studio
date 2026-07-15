@@ -7,23 +7,23 @@ import type { ModelUsage, Thread } from "@llm-space/core";
  */
 export type TraceProjectSource =
   | {
-      type: "langfuse";
-      mode: "manual";
-      langfuseProjectId?: string;
-      langfuseProjectName?: string;
-    }
+    baseUrl: string;
+    langfuseProjectId?: string;
+    langfuseProjectName?: string;
+    lastSyncAt?: number;
+    lastSyncError?: string;
+    lastSyncStatus?: "error" | "success";
+    mode: "connected";
+    publicKeyPreview: string;
+    secretKeyPreview: string;
+    type: "langfuse";
+  }
   | {
-      type: "langfuse";
-      mode: "connected";
-      baseUrl: string;
-      publicKeyPreview: string;
-      secretKeyPreview: string;
-      langfuseProjectId?: string;
-      langfuseProjectName?: string;
-      lastSyncAt?: number;
-      lastSyncStatus?: "success" | "error";
-      lastSyncError?: string;
-    };
+    langfuseProjectId?: string;
+    langfuseProjectName?: string;
+    mode: "manual";
+    type: "langfuse";
+  };
 
 /**
  * A top-level trace collection in `LLM_SPACE_HOME/traces/projects`. One project
@@ -55,15 +55,15 @@ export interface TraceRecord {
   endedAt?: string;
   latencyMs?: number;
   model?: string;
-  status?: "ok" | "error" | "unknown";
+  status?: "error" | "ok" | "unknown";
   usage?: ModelUsage;
   source: {
-    type: "langfuse";
-    mode: "manual" | "connected";
-    traceId: string;
+    fileName?: string;
+    mode: "connected" | "manual";
     projectId?: string;
     projectName?: string;
-    fileName?: string;
+    traceId: string;
+    type: "langfuse";
   };
 }
 

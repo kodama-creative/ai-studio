@@ -25,7 +25,7 @@ export interface GenericCommand<T extends string, A = Record<string, never>> {
  */
 export interface NewFileCommand extends GenericCommand<
   "newFile",
-  { parent?: string; rename?: boolean }
+  { parent?: string; rename?: boolean; }
 > {}
 
 /**
@@ -36,7 +36,7 @@ export interface NewFileCommand extends GenericCommand<
  */
 export interface NewFileFromPromptExampleCommand extends GenericCommand<
   "newFileFromPromptExample",
-  { parent?: string; exampleId: string }
+  { exampleId: string; parent?: string; }
 > {}
 
 /**
@@ -45,7 +45,7 @@ export interface NewFileFromPromptExampleCommand extends GenericCommand<
  */
 export interface OpenStartFromExampleCommand extends GenericCommand<
   "openStartFromExample",
-  { parent?: string }
+  { parent?: string; }
 > {}
 
 /** Choose, validate, trust, and open an external Agent Project directory. */
@@ -54,61 +54,61 @@ export interface OpenExternalAgentProjectCommand extends GenericCommand<"openExt
 /** Trust a previously previewed Agent Project path and open it in Desktop. */
 export interface TrustExternalAgentProjectCommand extends GenericCommand<
   "trustExternalAgentProject",
-  { path: string }
+  { path: string; }
 > {}
 
 /** Create a desktop-owned Thread for an imported Agent Project. */
 export interface CreateExternalAgentProjectThreadCommand extends GenericCommand<
   "createExternalAgentProjectThread",
-  { projectId: string }
+  { projectId: string; }
 > {}
 
 /** Reload one imported Agent Project from its watched source directory. */
 export interface RefreshExternalAgentProjectCommand extends GenericCommand<
   "refreshExternalAgentProject",
-  { projectId: string }
+  { projectId: string; }
 > {}
 
 /** Reveal an imported Agent Project directory in the OS file manager. */
 export interface RevealExternalAgentProjectCommand extends GenericCommand<
   "revealExternalAgentProject",
-  { path: string }
+  { path: string; }
 > {}
 
 /** Remove an imported Agent Project from Desktop without changing its source. */
 export interface RemoveExternalAgentProjectCommand extends GenericCommand<
   "removeExternalAgentProject",
-  { projectId: string }
+  { projectId: string; }
 > {}
 
 /** Rename a desktop-owned Agent Project Thread. */
 export interface RenameExternalAgentProjectThreadCommand extends GenericCommand<
   "renameExternalAgentProjectThread",
-  { projectId: string; threadId: string; title: string }
+  { projectId: string; threadId: string; title: string; }
 > {}
 
 /** Duplicate a desktop-owned Agent Project Thread. */
 export interface DuplicateExternalAgentProjectThreadCommand extends GenericCommand<
   "duplicateExternalAgentProjectThread",
-  { projectId: string; threadId: string }
+  { projectId: string; threadId: string; }
 > {}
 
 /** Delete a desktop-owned Agent Project Thread after confirmation. */
 export interface DeleteExternalAgentProjectThreadCommand extends GenericCommand<
   "deleteExternalAgentProjectThread",
-  { projectId: string; threadId: string }
+  { projectId: string; threadId: string; }
 > {}
 
 /** Replace one Thread's local definition fields with the latest Agent values. */
 export interface SyncExternalAgentProjectThreadFromAgentCommand extends GenericCommand<
   "syncExternalAgentProjectThreadFromAgent",
-  { projectId: string; threadId: string }
+  { projectId: string; threadId: string; }
 > {}
 
 /** Reconnect one active Project Thread's source-declared MCP connections. */
 export interface RetryExternalAgentProjectConnectionsCommand extends GenericCommand<
   "retryExternalAgentProjectConnections",
-  { projectId: string; threadId: string }
+  { projectId: string; threadId: string; }
 > {}
 
 /** Open the Build tab and focus the source that owns a project action. */
@@ -116,8 +116,8 @@ export interface OpenExternalAgentProjectSourceCommand extends GenericCommand<
   "openExternalAgentProjectSource",
   {
     projectId: string;
-    projectPath: string;
     projectName: string;
+    projectPath: string;
     sourcePath: string;
   }
 > {}
@@ -125,37 +125,37 @@ export interface OpenExternalAgentProjectSourceCommand extends GenericCommand<
 /** Save an Agent Project source file through the trusted Bun-side boundary. */
 export interface SaveExternalAgentProjectSourceCommand extends GenericCommand<
   "saveExternalAgentProjectSource",
-  { projectId: string; path: string; text: string; overwrite?: boolean }
+  { overwrite?: boolean; path: string; projectId: string; text: string; }
 > {}
 
 /** Create a new folder (with in-place rename). `parent` defaults to the root. */
 export interface NewFolderCommand extends GenericCommand<
   "newFolder",
-  { parent?: string }
+  { parent?: string; }
 > {}
 
 /** Start an in-place rename of the node at `path`. */
 export interface RenameFileCommand extends GenericCommand<
   "renameFile",
-  { path: string }
+  { path: string; }
 > {}
 
 /** Duplicate the node at `path`. */
 export interface DuplicateFileCommand extends GenericCommand<
   "duplicateFile",
-  { path: string }
+  { path: string; }
 > {}
 
 /** Move the node at `path` to the OS trash (via a confirm dialog). */
 export interface DeleteFileCommand extends GenericCommand<
   "deleteFile",
-  { path: string }
+  { path: string; }
 > {}
 
 /** Reveal the node at `path` in the OS file manager (`""` = the root). */
 export interface RevealFileCommand extends GenericCommand<
   "revealFile",
-  { path: string }
+  { path: string; }
 > {}
 
 /**
@@ -165,7 +165,7 @@ export interface RevealFileCommand extends GenericCommand<
  */
 export interface CopyFileCommand extends GenericCommand<
   "copyFile",
-  { path: string }
+  { path: string; }
 > {}
 
 /** Refresh (re-list) the file tree. */
@@ -183,7 +183,7 @@ export interface ImportFilePayload {
  */
 export interface ImportFilesCommand extends GenericCommand<
   "importFiles",
-  { parent?: string; files?: ImportFilePayload[] }
+  { files?: ImportFilePayload[]; parent?: string; }
 > {}
 
 /**
@@ -193,7 +193,7 @@ export interface ImportFilesCommand extends GenericCommand<
  */
 export interface ImportFromClipboardCommand extends GenericCommand<
   "importFromClipboard",
-  { parent?: string }
+  { parent?: string; }
 > {}
 
 // --- Traces ----------------------------------------------------------------
@@ -205,7 +205,7 @@ export interface ImportFromClipboardCommand extends GenericCommand<
  */
 export interface CreateTraceProjectCommand extends GenericCommand<
   "createTraceProject",
-  { name: string }
+  { name: string; }
 > {}
 
 /**
@@ -224,13 +224,13 @@ export interface CreateConnectedTraceProjectCommand extends GenericCommand<
  */
 export interface ImportLangfuseTraceFilesCommand extends GenericCommand<
   "importLangfuseTraceFiles",
-  { projectId: string; files: TraceImportFile[] }
+  { files: TraceImportFile[]; projectId: string; }
 > {}
 
 /** Sync selected remote Langfuse trace ids into a connected trace project. */
 export interface SyncLangfuseTraceIdsCommand extends GenericCommand<
   "syncLangfuseTraceIds",
-  { projectId: string; traceIds: string[] }
+  { projectId: string; traceIds: string[]; }
 > {}
 
 // --- Tabs ------------------------------------------------------------------
@@ -241,7 +241,7 @@ export interface SyncLangfuseTraceIdsCommand extends GenericCommand<
  */
 export interface CloseTabCommand extends GenericCommand<
   "closeTab",
-  { id?: string; path?: string }
+  { id?: string; path?: string; }
 > {}
 
 /**
@@ -250,7 +250,7 @@ export interface CloseTabCommand extends GenericCommand<
  */
 export interface CloseOtherTabsCommand extends GenericCommand<
   "closeOtherTabs",
-  { id?: string; path?: string }
+  { id?: string; path?: string; }
 > {}
 
 /** Close every open tab. */
@@ -272,12 +272,12 @@ export interface ToggleSidebarCommand extends GenericCommand<"toggleSidebar"> {}
 
 /** Which Settings tab to show. */
 export type SettingsTab =
-  "general" | "models" | "mcp" | "search" | "skills" | "experimental";
+  "experimental" | "general" | "mcp" | "models" | "search" | "skills";
 
 /** Open the Settings dialog, optionally on a specific `tab`. */
 export interface OpenSettingsCommand extends GenericCommand<
   "openSettings",
-  { tab?: SettingsTab }
+  { tab?: SettingsTab; }
 > {}
 
 /** Open the Settings dialog directly on the Models tab. */
@@ -299,24 +299,27 @@ export interface RunThreadCommand extends GenericCommand<"runThread"> {}
  */
 export interface OpenVariablesCommand extends GenericCommand<
   "openVariables",
-  { variableName?: string }
+  { variableName?: string; }
 > {}
 
 // --- Window (bun-side) -----------------------------------------------------
 
 /** Zoom the page in one step. */
 export interface ZoomInCommand extends GenericCommand<"zoomIn"> {}
+
 /** Zoom the page out one step. */
 export interface ZoomOutCommand extends GenericCommand<"zoomOut"> {}
+
 /** Reset the page zoom to 100%. */
 export interface ResetZoomCommand extends GenericCommand<"resetZoom"> {}
+
 /** Reload the webview. */
 export interface ReloadCommand extends GenericCommand<"reload"> {}
 
 /** Open a URL in the user's default browser (via the OS). */
 export interface OpenLinkCommand extends GenericCommand<
   "openLink",
-  { url: string }
+  { url: string; }
 > {}
 
 /**
@@ -325,7 +328,7 @@ export interface OpenLinkCommand extends GenericCommand<
  */
 export interface OpenDocumentCommand extends GenericCommand<
   "openDocument",
-  { path?: string }
+  { path?: string; }
 > {}
 
 /** Open the GitHub issues page in the user's default browser to report a bug. */
@@ -348,58 +351,58 @@ export interface ApplyUpdateAndRestartCommand extends GenericCommand<"applyUpdat
 
 /** The discriminated union of every command. */
 export type Command =
-  | NewFileCommand
-  | NewFileFromPromptExampleCommand
-  | OpenStartFromExampleCommand
-  | OpenExternalAgentProjectCommand
-  | TrustExternalAgentProjectCommand
-  | CreateExternalAgentProjectThreadCommand
-  | RefreshExternalAgentProjectCommand
-  | RevealExternalAgentProjectCommand
-  | RemoveExternalAgentProjectCommand
-  | RenameExternalAgentProjectThreadCommand
-  | DuplicateExternalAgentProjectThreadCommand
-  | DeleteExternalAgentProjectThreadCommand
-  | SyncExternalAgentProjectThreadFromAgentCommand
-  | RetryExternalAgentProjectConnectionsCommand
-  | OpenExternalAgentProjectSourceCommand
-  | SaveExternalAgentProjectSourceCommand
-  | NewFolderCommand
-  | RenameFileCommand
-  | DuplicateFileCommand
-  | DeleteFileCommand
-  | RevealFileCommand
+  | ApplyUpdateAndRestartCommand
+  | CheckForUpdatesCommand
+  | CloseAllTabsCommand
+  | CloseOtherTabsCommand
+  | CloseTabCommand
   | CopyFileCommand
-  | RefreshTreeCommand
+  | CreateConnectedTraceProjectCommand
+  | CreateExternalAgentProjectThreadCommand
+  | CreateTraceProjectCommand
+  | DeleteExternalAgentProjectThreadCommand
+  | DeleteFileCommand
+  | DuplicateExternalAgentProjectThreadCommand
+  | DuplicateFileCommand
   | ImportFilesCommand
   | ImportFromClipboardCommand
-  | CreateTraceProjectCommand
-  | CreateConnectedTraceProjectCommand
   | ImportLangfuseTraceFilesCommand
-  | SyncLangfuseTraceIdsCommand
-  | CloseTabCommand
-  | CloseOtherTabsCommand
-  | CloseAllTabsCommand
+  | NewFileCommand
+  | NewFileFromPromptExampleCommand
+  | NewFolderCommand
+  | OpenCommandPaletteCommand
+  | OpenDocumentCommand
+  | OpenExternalAgentProjectCommand
+  | OpenExternalAgentProjectSourceCommand
+  | OpenLinkCommand
+  | OpenModelSettingsCommand
+  | OpenOnboardCommand
+  | OpenSettingsCommand
+  | OpenStartFromExampleCommand
+  | OpenVariablesCommand
+  | OpenWorkspaceFolderCommand
+  | RefreshExternalAgentProjectCommand
+  | RefreshTreeCommand
+  | ReloadCommand
+  | RemoveExternalAgentProjectCommand
+  | RenameExternalAgentProjectThreadCommand
+  | RenameFileCommand
   | ReopenClosedTabCommand
+  | ReportBugsCommand
+  | ResetZoomCommand
+  | RetryExternalAgentProjectConnectionsCommand
+  | RevealExternalAgentProjectCommand
+  | RevealFileCommand
+  | RunThreadCommand
+  | SaveExternalAgentProjectSourceCommand
   | SelectNextTabCommand
   | SelectPreviousTabCommand
+  | SyncExternalAgentProjectThreadFromAgentCommand
+  | SyncLangfuseTraceIdsCommand
   | ToggleSidebarCommand
-  | OpenSettingsCommand
-  | OpenModelSettingsCommand
-  | OpenCommandPaletteCommand
-  | OpenOnboardCommand
-  | RunThreadCommand
-  | OpenVariablesCommand
+  | TrustExternalAgentProjectCommand
   | ZoomInCommand
-  | ZoomOutCommand
-  | ResetZoomCommand
-  | ReloadCommand
-  | OpenLinkCommand
-  | OpenDocumentCommand
-  | ReportBugsCommand
-  | OpenWorkspaceFolderCommand
-  | CheckForUpdatesCommand
-  | ApplyUpdateAndRestartCommand;
+  | ZoomOutCommand;
 
 /** The `type` string of any command. */
 export type CommandType = Command["type"];
@@ -407,7 +410,7 @@ export type CommandType = Command["type"];
 /** The `args` type for a specific command `type`. */
 export type CommandArgs<T extends CommandType> = Extract<
   Command,
-  { type: T }
+  { type: T; }
 >["args"];
 
 /**
@@ -418,68 +421,68 @@ export type CommandArgs<T extends CommandType> = Extract<
  */
 export const COMMAND_META: Record<
   CommandType,
-  { label: string; target: "webview" | "bun" }
+  { label: string; target: "bun" | "webview"; }
 > = {
   newFile: { label: "New File", target: "webview" },
   newFileFromPromptExample: {
     label: "Start from Example",
-    target: "webview",
+    target: "webview"
   },
   openStartFromExample: {
     label: "New from Examples...",
-    target: "webview",
+    target: "webview"
   },
   openExternalAgentProject: {
     label: "Open Agent Project...",
-    target: "webview",
+    target: "webview"
   },
   trustExternalAgentProject: {
     label: "Trust and Open Agent Project",
-    target: "webview",
+    target: "webview"
   },
   createExternalAgentProjectThread: {
     label: "New Agent Project Thread",
-    target: "webview",
+    target: "webview"
   },
   refreshExternalAgentProject: {
     label: "Refresh Agent Project",
-    target: "webview",
+    target: "webview"
   },
   revealExternalAgentProject: {
     label: "Reveal Agent Project in Finder",
-    target: "webview",
+    target: "webview"
   },
   removeExternalAgentProject: {
     label: "Remove Agent Project from Desktop",
-    target: "webview",
+    target: "webview"
   },
   renameExternalAgentProjectThread: {
     label: "Rename Agent Project Thread",
-    target: "webview",
+    target: "webview"
   },
   duplicateExternalAgentProjectThread: {
     label: "Duplicate Agent Project Thread",
-    target: "webview",
+    target: "webview"
   },
   deleteExternalAgentProjectThread: {
     label: "Delete Agent Project Thread",
-    target: "webview",
+    target: "webview"
   },
   syncExternalAgentProjectThreadFromAgent: {
     label: "Sync from Agent",
-    target: "webview",
+    target: "webview"
   },
   retryExternalAgentProjectConnections: {
     label: "Retry Agent Project Connections",
-    target: "webview",
+    target: "webview"
   },
   openExternalAgentProjectSource: {
     label: "Open Agent Project Source",
-    target: "webview",
+    target: "webview"
   },
   saveExternalAgentProjectSource: {
     label: "Save Agent Project Source",
-    target: "webview",
+    target: "webview"
   },
   newFolder: { label: "New Folder", target: "webview" },
   renameFile: { label: "Rename", target: "webview" },
@@ -493,11 +496,11 @@ export const COMMAND_META: Record<
   createTraceProject: { label: "New Trace Project", target: "webview" },
   createConnectedTraceProject: {
     label: "Connect Langfuse",
-    target: "webview",
+    target: "webview"
   },
   importLangfuseTraceFiles: {
     label: "Import Langfuse Export...",
-    target: "webview",
+    target: "webview"
   },
   syncLangfuseTraceIds: { label: "Sync Langfuse Traces", target: "webview" },
   closeTab: { label: "Close Tab", target: "webview" },
@@ -522,5 +525,5 @@ export const COMMAND_META: Record<
   reportBugs: { label: "Report Bug", target: "bun" },
   openWorkspaceFolder: { label: "Open Workspace Folder", target: "bun" },
   checkForUpdates: { label: "Check for Updates...", target: "bun" },
-  applyUpdateAndRestart: { label: "Restart to Update", target: "bun" },
+  applyUpdateAndRestart: { label: "Restart to Update", target: "bun" }
 };

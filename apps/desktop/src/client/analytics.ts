@@ -1,4 +1,5 @@
 import { electrobun } from "@/lib/electrobun";
+
 import type { AnalyticsStatus } from "@/shared/analytics";
 
 function _rpc() {

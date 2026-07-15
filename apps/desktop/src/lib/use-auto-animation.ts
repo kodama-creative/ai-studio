@@ -3,11 +3,11 @@
 import autoAnimate, {
   type AnimationController,
   type AutoAnimateOptions,
-  type AutoAnimationPlugin,
+  type AutoAnimationPlugin
 } from "@formkit/auto-animate";
-import { useCallback, useEffect, useRef, type RefCallback } from "react";
+import { type RefCallback, useCallback, useEffect, useRef } from "react";
 
-type AutoAnimationConfig = Partial<AutoAnimateOptions> | AutoAnimationPlugin;
+type AutoAnimationConfig = AutoAnimationPlugin | Partial<AutoAnimateOptions>;
 
 export function useAutoAnimation<T extends HTMLElement = HTMLElement>(
   config?: AutoAnimationConfig

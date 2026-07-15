@@ -15,7 +15,7 @@ export interface ToolCallResponse {
 }
 
 export class ToolRegistry {
-  private readonly _contributions: Readonly<ToolContribution>[] = [];
+  private readonly _contributions: Array<Readonly<ToolContribution>> = [];
   private readonly _contributionIds = new Set<string>();
   private readonly _entriesByName = new Map<string, Readonly<ToolEntry>>();
   private readonly _contributionIdByToolName = new Map<string, string>();
@@ -48,13 +48,12 @@ export class ToolRegistry {
     const snapshot = Object.freeze({
       id: contribution.id,
       entries: Object.freeze(
-        contribution.entries.map((entry) =>
+        contribution.entries.map(entry =>
           Object.freeze({
             tool: _cloneAndFreeze(entry.tool),
-            execute: entry.execute,
-          })
-        )
-      ),
+            execute: entry.execute
+          }))
+      )
     });
     this._contributions.push(snapshot);
     this._contributionIds.add(snapshot.id);
@@ -70,17 +69,16 @@ export class ToolRegistry {
   }
 
   listTools(): BuiltinTool[] {
-    return this._contributions.flatMap((contribution) =>
-      contribution.entries.map((entry) => entry.tool)
-    );
+    return this._contributions.flatMap(contribution =>
+      contribution.entries.map(entry => entry.tool));
   }
 
   async call({
     name,
-    arguments: args,
+    arguments: args
   }: {
-    name: string;
     arguments: Record<string, unknown>;
+    name: string;
   }): Promise<ToolCallResponse> {
     const entry = this._entriesByName.get(name);
     if (!entry) {

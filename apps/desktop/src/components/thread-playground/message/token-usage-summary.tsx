@@ -1,25 +1,25 @@
-import type { ModelUsage } from "@llm-space/core";
 import { hasModelUsage } from "@llm-space/core/thread";
 import { GaugeIcon } from "lucide-react";
 import { memo, useMemo } from "react";
 
-import { cn } from "@/lib/utils";
+import type { ModelUsage } from "@llm-space/core";
 
+import { cn } from "@/lib/utils";
 import { Tooltip } from "../../tooltip";
 import {
   formatCompactUsage,
   formatUsageSummary,
-  usageBreakdownRows,
+  usageBreakdownRows
 } from "../token-usage";
 
 function _TokenUsageSummary({
   className,
   usage,
-  variant = "default",
+  variant = "default"
 }: {
-  className?: string;
-  usage: ModelUsage | null | undefined;
-  variant?: "default" | "header";
+  readonly className?: string;
+  readonly usage: ModelUsage | null | undefined;
+  readonly variant?: "default" | "header";
 }) {
   const rows = useMemo(
     () => (hasModelUsage(usage) ? usageBreakdownRows(usage) : []),
@@ -27,11 +27,11 @@ function _TokenUsageSummary({
   );
   const label = useMemo(
     () =>
-      hasModelUsage(usage)
+      (hasModelUsage(usage)
         ? variant === "header"
           ? formatCompactUsage(usage)
           : formatUsageSummary(usage)
-        : null,
+        : null),
     [usage, variant]
   );
   if (!usage || !label) {
@@ -44,8 +44,8 @@ function _TokenUsageSummary({
         <div className="min-w-44 text-xs">
           <div className="text-foreground mb-1 font-medium">Token Usage</div>
           <div className="grid grid-cols-[auto_auto] gap-x-4 gap-y-1">
-            {rows.map((row) => (
-              <div key={row.label} className="contents">
+            {rows.map(row => (
+              <div className="contents" key={row.label}>
                 <span className="text-muted-foreground">{row.label}</span>
                 <span className="text-right font-mono tabular-nums">
                   {row.value}
@@ -60,8 +60,8 @@ function _TokenUsageSummary({
         aria-label={`Token usage: ${label}`}
         className={cn(
           "text-muted-foreground bg-foreground/4 flex w-fit max-w-full min-w-0 items-center gap-1.5 rounded-md px-2 py-1 text-[0.625rem]",
-          variant === "header" &&
-            "min-h-6 max-w-80 rounded px-1.5 py-1 text-[0.5625rem] leading-3",
+          variant === "header"
+          && "min-h-6 max-w-80 rounded px-1.5 py-1 text-[0.5625rem] leading-3",
           className
         )}
       >

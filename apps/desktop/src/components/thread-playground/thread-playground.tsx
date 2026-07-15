@@ -1,57 +1,37 @@
 "use client";
 
-import type { AgentTransport, ProjectTool, Thread } from "@llm-space/core";
 import {
   ChevronDownIcon,
   HistoryIcon,
   PlayIcon,
   Redo2Icon,
-  Undo2Icon,
+  Undo2Icon
 } from "lucide-react";
 import {
+  type ReactNode,
   useCallback,
   useEffect,
   useMemo,
   useRef,
-  useState,
-  type ReactNode,
+  useState
 } from "react";
 import { usePanelRef } from "react-resizable-panels";
 
+import type { AgentTransport, ProjectTool, Thread } from "@llm-space/core";
+
 import {
   executeTool,
-  type ToolExecutor,
+  type ToolExecutor
 } from "@/client/tool-execution";
 import { useRegisterCommands } from "@/commands";
 import {
   resolveModelConfig,
   useDefaultModel,
   useFirstAvailableModel,
-  useModels,
+  useModels
 } from "@/components/model-provider";
 import { threadTitleFromPath } from "@/lib/thread-file";
 import { cn } from "@/lib/utils";
-
-import { Tooltip } from "../tooltip";
-import { Button } from "../ui/button";
-import { ButtonGroup } from "../ui/button-group";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "../ui/dropdown-menu";
-import { Kbd, KbdGroup } from "../ui/kbd";
-import {
-  ResizableHandle,
-  ResizablePanel,
-  ResizablePanelGroup,
-} from "../ui/resizable";
-import { Spinner } from "../ui/spinner";
-import { Switch } from "../ui/switch";
-
 import { MessageListView } from "./message/message-list-view";
 import { ThreadPlaygroundSkeleton } from "./misc/skeleton";
 import { TitleEditor, type TitleValidator } from "./misc/title-editor";
@@ -67,61 +47,91 @@ import {
   ThreadStoreContext,
   useRunMode,
   useThreadStore,
-  useThreadStoreActions,
+  useThreadStoreActions
 } from "./stores";
-import { ToolListView } from "./tool/tool-list-view";
 import { ToolExecutionProvider } from "./tool-execution-context";
+import { ToolListView } from "./tool/tool-list-view";
 import { useShortcuts } from "./use-shortcuts";
 import { useThreadPlaygroundEvents } from "./use-thread-playground-events";
 import {
   listEnabledPromptVariableSkills,
-  PromptSkillsProvider,
   type PromptSkillsLoader,
+  PromptSkillsProvider
 } from "./variable/prompt-variable-skills";
 import { PromptVariablesListView } from "./variable/prompt-variables-list-view";
+import { Tooltip } from "../tooltip";
+import { Button } from "../ui/button";
+import { ButtonGroup } from "../ui/button-group";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger
+} from "../ui/dropdown-menu";
+import { Kbd, KbdGroup } from "../ui/kbd";
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup
+} from "../ui/resizable";
+import { Spinner } from "../ui/spinner";
+import { Switch } from "../ui/switch";
 
 export interface ThreadPlaygroundProps {
-  className?: string;
-  path: string;
-  title?: string;
-  headerDetails?: ReactNode;
-  initialValue: Thread;
-  readonly?: boolean;
+  readonly className?: string;
+  readonly path: string;
+  readonly title?: string;
+  readonly headerDetails?: ReactNode;
+  readonly initialValue: Thread;
+  readonly readonly?: boolean;
+
   /** Block new model runs while leaving manual tool-result editing available. */
-  runDisabled?: boolean;
+  readonly runDisabled?: boolean;
+
   /**
    * Whether this playground belongs to the active tab. Only the active one
    * registers the `runThread` command handler (the command registry keeps a
    * single handler per type), so a global run always targets the active tab.
    */
-  active?: boolean;
+  readonly active?: boolean;
+
   /** The streaming transport used by runs (e.g. HTTP or Electrobun RPC). */
-  transport: AgentTransport;
+  readonly transport: AgentTransport;
+
   /** Execute a tool with owning-surface context such as a Project Thread id. */
-  toolExecutor?: ToolExecutor;
+  readonly toolExecutor?: ToolExecutor;
+
   /** Project-authored actions are source-owned and cannot be added/removed. */
-  toolsReadonly?: boolean;
+  readonly toolsReadonly?: boolean;
+
   /** Navigate from a source-owned action chip to its authored file. */
-  onOpenProjectTool?: (tool: ProjectTool) => void;
+  readonly onOpenProjectTool?: (tool: ProjectTool) => void;
+
   /** The transport executes tool batches and ReAct continuation itself. */
-  runtimeOwnsToolLoop?: boolean;
+  readonly runtimeOwnsToolLoop?: boolean;
+
   /** Keep an unavailable saved model visible instead of resolving a fallback. */
-  preserveSavedModel?: boolean;
+  readonly preserveSavedModel?: boolean;
+
   /** Stamp runtime provenance into the durable run snapshot. */
-  prepareRunSnapshot?: (thread: Thread) => Thread;
+  readonly prepareRunSnapshot?: (thread: Thread) => Thread;
+
   /** Override local skill discovery for project-backed Threads. */
-  loadPromptSkills?: PromptSkillsLoader;
+  readonly loadPromptSkills?: PromptSkillsLoader;
+
   /** Apply an owning-surface edit through the normal undo history. */
-  externalUpdate?: {
+  readonly externalUpdate?: {
     revision: number;
     update: (thread: Thread) => Thread;
   };
 
-  onChange?: (thread: Thread) => void;
-  onRenameTitle?: (title: string) => Promise<boolean>;
-  validateTitle?: TitleValidator;
-  onStreamingStart?: () => void;
-  onStreamingEnd?: () => void;
+  readonly onChange?: (thread: Thread) => void;
+  readonly onRenameTitle?: (title: string) => Promise<boolean>;
+  readonly validateTitle?: TitleValidator;
+  readonly onStreamingStart?: () => void;
+  readonly onStreamingEnd?: () => void;
 }
 
 export function ThreadPlayground({
@@ -129,10 +139,10 @@ export function ThreadPlayground({
   initialValue,
   className,
   ...props
-}: Omit<ThreadPlaygroundProps, "initialValue"> & {
-  loading?: boolean;
-  initialValue?: Thread | null;
-}) {
+}: {
+  readonly initialValue?: Thread | null;
+  readonly loading?: boolean;
+} & Omit<ThreadPlaygroundProps, "initialValue">) {
   if (loading) {
     return <ThreadPlaygroundSkeleton className={className} />;
   }
@@ -178,45 +188,44 @@ function _ThreadPlayground({
   const [store] = useState(() =>
     createThreadStore(initialValue, {
       transport,
-      resolveModel: (saved) =>
-        preserveSavedModel && saved
+      resolveModel: saved =>
+        (preserveSavedModel && saved
           ? saved
           : resolveModelConfig(
-              providersRef.current,
-              saved,
-              defaultModelRef.current
-            ),
+            providersRef.current,
+            saved,
+            defaultModelRef.current
+          )),
       getAutoRunTools,
       getReactLoop,
       executeTool: toolExecutor,
       loadPromptSkills: loadPromptSkills
-        ? () =>
-            (loadPromptSkillsRef.current ?? listEnabledPromptVariableSkills)()
+        ? async () =>
+          (loadPromptSkillsRef.current ?? listEnabledPromptVariableSkills)()
         : undefined,
       runtimeOwnsToolLoop,
-      prepareRunSnapshot: (thread) =>
-        prepareRunSnapshotRef.current?.(thread) ?? thread,
-    })
-  );
+      prepareRunSnapshot: thread =>
+        prepareRunSnapshotRef.current?.(thread) ?? thread
+    }));
   const appliedExternalRevision = useRef(0);
   useEffect(() => {
     if (
-      !externalUpdate ||
-      externalUpdate.revision === appliedExternalRevision.current
+      !externalUpdate
+      || externalUpdate.revision === appliedExternalRevision.current
     ) {
       return;
     }
     const apply = () => {
-      if (store.getState().status === "running") return false;
+      if (store.getState().status === "running") { return false; }
       store
         .getState()
         .restoreThread(externalUpdate.update(store.getState().thread));
       appliedExternalRevision.current = externalUpdate.revision;
       return true;
     };
-    if (apply()) return;
-    const unsubscribe = store.subscribe((state) => {
-      if (state.status !== "idle" || !apply()) return;
+    if (apply()) { return; }
+    const unsubscribe = store.subscribe(state => {
+      if (state.status !== "idle" || !apply()) { return; }
       unsubscribe();
     });
     return unsubscribe;
@@ -224,7 +233,7 @@ function _ThreadPlayground({
   useThreadPlaygroundEvents(store, {
     onChange,
     onStreamingStart,
-    onStreamingEnd,
+    onStreamingEnd
   });
   return (
     <PromptSkillsProvider loader={loadPromptSkills}>
@@ -255,25 +264,25 @@ function ThreadPlaygroundContent({
   active = false,
   preserveSavedModel = false,
   toolsReadonly = false,
-  onOpenProjectTool,
+  onOpenProjectTool
 }: Omit<
   ThreadPlaygroundProps,
-  | "initialValue"
-  | "transport"
-  | "loadPromptSkills"
   | "externalUpdate"
+  | "initialValue"
+  | "loadPromptSkills"
   | "onChange"
-  | "onStreamingStart"
   | "onStreamingEnd"
+  | "onStreamingStart"
+  | "transport"
 >) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const status = useThreadStore((s) => s.status);
-  const savedModel = useThreadStore((s) => s.thread.model);
+  const status = useThreadStore(s => s.status);
+  const savedModel = useThreadStore(s => s.thread.model);
   const fallbackModel = useFirstAvailableModel();
   // A thread can run once a model resolves (its own, or the first available).
   const hasModel = Boolean(savedModel ?? fallbackModel);
-  const undoable = useThreadStore((s) => canUndo(s.changeHistory));
-  const redoable = useThreadStore((s) => canRedo(s.changeHistory));
+  const undoable = useThreadStore(s => canUndo(s.changeHistory));
+  const redoable = useThreadStore(s => canRedo(s.changeHistory));
   const { effectiveAutoRunTools, reactLoop, setAutoRunTools, setReactLoop } =
     useRunMode();
   const { run, abort, undo, redo, syncTitle } = useThreadStoreActions();
@@ -289,7 +298,7 @@ function ThreadPlaygroundContent({
     return readonlyFromProps || status === "running";
   }, [readonlyFromProps, status]);
   const handleRun = useCallback(async () => {
-    if (runDisabled) return;
+    if (runDisabled) { return; }
     await run();
   }, [run, runDisabled]);
   // Expose run as a command, but only from the active tab so a global
@@ -298,8 +307,8 @@ function ThreadPlaygroundContent({
   useRegisterCommands(
     {
       runThread: () => {
-        if (status !== "running" && !runDisabled) void run();
-      },
+        if (status !== "running" && !runDisabled) { void run(); }
+      }
     },
     active
   );
@@ -327,14 +336,14 @@ function ThreadPlaygroundContent({
     runHistoryPanelRef.current?.collapse();
   }, []);
   const handleShortcuts = useShortcuts({
-    readonly: readonlyFromProps || (runDisabled && status !== "running"),
+    readonly: readonlyFromProps || (runDisabled && status !== "running")
   });
   return (
     <div
-      ref={containerRef}
       className={cn("flex flex-col overflow-hidden", className)}
-      tabIndex={0}
       onKeyDownCapture={handleShortcuts}
+      ref={containerRef}
+      tabIndex={0}
     >
       <ResizablePanelGroup>
         <ResizablePanel className="flex min-h-0 flex-col overflow-hidden">
@@ -347,16 +356,18 @@ function ThreadPlaygroundContent({
             <div className="min-w-0 grow px-3">
               <TitleEditor
                 className="w-96 max-w-full"
-                title={title}
-                readonly={readonly || !onRenameTitle}
                 onRename={onRenameTitle}
+                readonly={readonly || !onRenameTitle}
+                title={title}
                 validateTitle={validateTitle}
               />
-              {headerDetails ? (
-                <div className="mt-0.5 flex min-w-0 items-center">
-                  {headerDetails}
-                </div>
-              ) : null}
+              {headerDetails
+                ? (
+                  <div className="mt-0.5 flex min-w-0 items-center">
+                    {headerDetails}
+                  </div>
+                )
+                : null}
             </div>
             <div
               className={cn(
@@ -366,35 +377,35 @@ function ThreadPlaygroundContent({
             >
               <Tooltip content="Undo last edit">
                 <Button
-                  variant="ghost"
-                  size="icon-lg"
                   aria-label="Undo last edit"
                   disabled={readonly || !undoable}
                   onClick={undo}
+                  size="icon-lg"
+                  variant="ghost"
                 >
                   <Undo2Icon className="size-4" />
                 </Button>
               </Tooltip>
               <Tooltip content="Redo last edit">
                 <Button
-                  variant="ghost"
-                  size="icon-lg"
                   aria-label="Redo last edit"
                   disabled={readonly || !redoable}
                   onClick={redo}
+                  size="icon-lg"
+                  variant="ghost"
                 >
                   <Redo2Icon className="size-4" />
                 </Button>
               </Tooltip>
               <Tooltip content="View run history">
                 <Button
-                  variant="ghost"
-                  size="icon-lg"
+                  aria-expanded={historyOpen}
                   aria-label={
                     historyOpen ? "Hide run history" : "View run history"
                   }
-                  aria-expanded={historyOpen}
                   onClick={toggleHistory}
+                  size="icon-lg"
+                  variant="ghost"
                 >
                   <HistoryIcon className="size-4" />
                 </Button>
@@ -420,34 +431,36 @@ function ThreadPlaygroundContent({
                   }
                 >
                   <Button
-                    className="border-r-primary border-none pr-1 pl-4 active:translate-y-0!"
                     aria-label={
                       status === "running"
                         ? "Stop running thread"
                         : "Run thread"
                     }
+                    className="border-r-primary border-none pr-1 pl-4 active:translate-y-0!"
                     disabled={
-                      readonlyFromProps ||
-                      (status !== "running" && (!hasModel || runDisabled))
+                      readonlyFromProps
+                      || (status !== "running" && (!hasModel || runDisabled))
                     }
                     onClick={status === "running" ? handleStop : handleRun}
                   >
-                    {status === "running" ? (
-                      <Spinner className="size-3" />
-                    ) : (
-                      <PlayIcon className="size-3" />
-                    )}
+                    {status === "running"
+                      ? (
+                        <Spinner className="size-3" />
+                      )
+                      : (
+                        <PlayIcon className="size-3" />
+                      )}
                     {status === "running" ? "Stop" : "Run"}
                   </Button>
                 </Tooltip>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
-                      className="border-none pr-1.5 pl-0.5 active:translate-y-0!"
                       aria-label="Run settings"
+                      className="border-none pr-1.5 pl-0.5 active:translate-y-0!"
                       disabled={
-                        readonlyFromProps ||
-                        (status !== "running" && (!hasModel || runDisabled))
+                        readonlyFromProps
+                        || (status !== "running" && (!hasModel || runDisabled))
                       }
                     >
                       <ChevronDownIcon className="size-3" />
@@ -457,36 +470,36 @@ function ThreadPlaygroundContent({
                     <DropdownMenuLabel>Run settings</DropdownMenuLabel>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem
-                      onSelect={(event) => {
+                      className="justify-between gap-6"
+                      onSelect={event => {
                         event.preventDefault();
                         setReactLoop(!reactLoop);
                       }}
-                      className="justify-between gap-6"
                     >
                       Enable ReAct loop
                       <Switch
-                        size="sm"
                         checked={reactLoop}
                         className="pointer-events-none"
+                        size="sm"
                       />
                     </DropdownMenuItem>
                     <DropdownMenuItem
+                      className="justify-between gap-6"
                       // The ReAct loop implies auto-running tools, so this row
                       // is forced on and locked while the loop is enabled.
                       disabled={reactLoop}
-                      onSelect={(event) => {
+                      onSelect={event => {
                         // Keep the menu open so the switch toggles in place.
                         event.preventDefault();
                         setAutoRunTools(!effectiveAutoRunTools);
                       }}
-                      className="justify-between gap-6"
                     >
                       Auto run tools
                       <Switch
-                        size="sm"
                         checked={effectiveAutoRunTools}
-                        disabled={reactLoop}
                         className="pointer-events-none"
+                        disabled={reactLoop}
+                        size="sm"
                       />
                     </DropdownMenuItem>
                   </DropdownMenuContent>
@@ -506,36 +519,36 @@ function ThreadPlaygroundContent({
             >
               <div className="flex size-full flex-col">
                 <div className="px-3">
-                  <div className={"flex w-full border-b py-2"}>
+                  <div className="flex w-full border-b py-2">
                     <div className="text-muted-foreground w-20 shrink-0 text-sm">
                       Models
                     </div>
                     <div className="flex grow items-center">
                       <ModelConfigEditor
-                        readonly={readonly}
                         preserveSavedModel={preserveSavedModel}
+                        readonly={readonly}
                       />
                     </div>
                   </div>
-                  <div className={"flex w-full border-b py-2"}>
+                  <div className="flex w-full border-b py-2">
                     <div className="text-muted-foreground w-20 shrink-0 text-sm">
                       Tools
                     </div>
                     <div className="flex grow items-center">
                       <ToolListView
-                        readonly={readonly || toolsReadonly}
                         onOpenProjectTool={onOpenProjectTool}
+                        readonly={readonly || toolsReadonly}
                       />
                     </div>
                   </div>
-                  <div className={"flex w-full border-b py-2"}>
+                  <div className="flex w-full border-b py-2">
                     <div className="text-muted-foreground w-20 shrink-0 text-sm">
                       Variables
                     </div>
                     <div className="flex grow items-center">
                       <PromptVariablesListView
-                        disabled={readonly || systemPromptStreaming}
                         active={active}
+                        disabled={readonly || systemPromptStreaming}
                       />
                     </div>
                   </div>
@@ -543,8 +556,8 @@ function ThreadPlaygroundContent({
                 <div className="flex min-h-0 w-full grow flex-col">
                   <SystemPromptEditor
                     className="size-full min-h-0 px-3"
-                    readonly={readonly}
                     onStreamingChange={setSystemPromptStreaming}
+                    readonly={readonly}
                   />
                 </div>
               </div>
@@ -557,14 +570,14 @@ function ThreadPlaygroundContent({
         </ResizablePanel>
         <ResizableHandle />
         <ResizablePanel
-          panelRef={runHistoryPanelRef}
-          collapsible
           collapsedSize={0}
+          collapsible
           defaultSize={0}
           minSize={RUN_HISTORY_PANEL_SIZE}
-          onResize={(size) => {
+          onResize={size => {
             setHistoryOpen(size.inPixels > 0);
           }}
+          panelRef={runHistoryPanelRef}
         >
           <RunHistoryListView onClose={closeHistory} />
         </ResizablePanel>

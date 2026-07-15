@@ -1,1 +1,1 @@
-export type RuntimeExecutionMode = "manual" | "autoOnce" | "react";
+export type RuntimeExecutionMode = "autoOnce" | "manual" | "react";

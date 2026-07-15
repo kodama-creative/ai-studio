@@ -1,21 +1,23 @@
 "use client";
 
-import type * as pi from "@earendil-works/pi-ai";
-import type {
-  CustomModel,
-  ModelConfig,
-  ModelProviderGroup,
-} from "@llm-space/core";
 import { uuid } from "@llm-space/core";
 import {
   createContext,
+  type ReactElement,
+  type ReactNode,
   useCallback,
   useContext,
   useEffect,
   useMemo,
-  useState,
-  type ReactNode,
+  useState
 } from "react";
+
+import type * as pi from "@earendil-works/pi-ai";
+import type {
+  CustomModel,
+  ModelConfig,
+  ModelProviderGroup
+} from "@llm-space/core";
 
 import { electrobun } from "@/lib/electrobun";
 
@@ -27,15 +29,15 @@ interface ModelContextValue {
   updateProvider: (
     providerId: string,
     fields: {
-      apiKey?: string | null;
-      baseUrl?: string | null;
-      name?: string | null;
       api?:
         | "anthropic-messages"
         | "openai-completions"
         | "openai-responses"
         | null;
+      apiKey?: string | null;
+      baseUrl?: string | null;
       icon?: string | null;
+      name?: string | null;
     }
   ) => Promise<void>;
   setModelEnabled: (
@@ -56,7 +58,7 @@ interface ModelContextValue {
     originalId?: string
   ) => Promise<void>;
   refresh: () => Promise<void>;
-  getModel: (ref: { id: string; provider: string }) => pi.Model<pi.Api> | null;
+  getModel: (ref: { id: string; provider: string; }) => pi.Model<pi.Api> | null;
   defaultModel: ModelConfig | null;
   setDefaultModel: (model: ModelConfig | null) => Promise<void>;
 }
@@ -85,7 +87,7 @@ export function firstAvailableModel(
   const sorted = [...providers].sort((a, b) => a.name.localeCompare(b.name));
   for (const group of sorted) {
     const disabled = new Set(group.disabledModels ?? []);
-    const model = group.models.find((m) => !disabled.has(m.id));
+    const model = group.models.find(m => !disabled.has(m.id));
     if (model) {
       return { provider: model.provider, id: model.id };
     }
@@ -100,10 +102,10 @@ export function firstAvailableModel(
  */
 export function isModelAvailable(
   providers: ModelProviderGroup[],
-  ref: { provider: string; id: string }
+  ref: { id: string; provider: string; }
 ): boolean {
-  const group = providers.find((g) => g.id === ref.provider);
-  if (!group?.models.some((m) => m.id === ref.id)) {
+  const group = providers.find(g => g.id === ref.provider);
+  if (!group?.models.some(m => m.id === ref.id)) {
     return false;
   }
   return !(group.disabledModels ?? []).includes(ref.id);
@@ -133,23 +135,21 @@ export function resolveModelConfig(
 export function ModelProvider({
   fetcher,
   children,
-  fallback = null,
+  fallback = null
 }: {
-  fetcher: () => Promise<ModelProviderGroup[]>;
-  children: ReactNode;
-  fallback?: ReactNode;
-}) {
+  readonly children: ReactNode;
+  readonly fallback?: ReactElement | null;
+  readonly fetcher: () => Promise<ModelProviderGroup[]>;
+}): ReactElement | null {
   const [providers, setProviders] = useState<ModelProviderGroup[] | null>(null);
-  const [defaultModel, setDefaultModelState] = useState<ModelConfig | null>(
-    null
-  );
+  const [defaultModel, setDefaultModel] = useState<ModelConfig | null>(null);
 
-  const setDefaultModel = useCallback(async (model: ModelConfig | null) => {
+  const _setDefaultModel = useCallback(async (model: ModelConfig | null) => {
     if (!electrobun.rpc) {
       throw new Error("Electrobun RPC is not initialized");
     }
     const updated = await electrobun.rpc.request.setDefaultModel({ model });
-    setDefaultModelState(updated);
+    setDefaultModel(updated);
   }, []);
 
   const removeProvider = useCallback(async (providerId: string) => {
@@ -177,7 +177,7 @@ export function ModelProvider({
       const updated = await electrobun.rpc.request.addCustomProvider({
         id,
         name,
-        baseUrl,
+        baseUrl
       });
       setProviders(updated);
       return id;
@@ -189,16 +189,16 @@ export function ModelProvider({
     async (
       providerId: string,
       fields: {
-        apiKey?: string | null;
-        baseUrl?: string | null;
-        headers?: Record<string, string> | null;
-        name?: string | null;
         api?:
           | "anthropic-messages"
           | "openai-completions"
           | "openai-responses"
           | null;
+        apiKey?: string | null;
+        baseUrl?: string | null;
+        headers?: Record<string, string> | null;
         icon?: string | null;
+        name?: string | null;
       }
     ) => {
       if (!electrobun.rpc) {
@@ -206,7 +206,7 @@ export function ModelProvider({
       }
       const updated = await electrobun.rpc.request.updateProvider({
         providerId,
-        ...fields,
+        ...fields
       });
       setProviders(updated);
     },
@@ -221,7 +221,7 @@ export function ModelProvider({
       const updated = await electrobun.rpc.request.setModelEnabled({
         providerId,
         modelId,
-        enabled,
+        enabled
       });
       setProviders(updated);
     },
@@ -235,7 +235,7 @@ export function ModelProvider({
       }
       const updated = await electrobun.rpc.request.setAllModelsEnabled({
         providerId,
-        enabled,
+        enabled
       });
       setProviders(updated);
     },
@@ -250,7 +250,7 @@ export function ModelProvider({
       await electrobun.rpc.request.testModelConnection({
         providerId,
         modelId,
-        candidate,
+        candidate
       });
     },
     []
@@ -263,7 +263,7 @@ export function ModelProvider({
       }
       const updated = await electrobun.rpc.request.removeCustomModel({
         providerId,
-        modelId,
+        modelId
       });
       setProviders(updated);
     },
@@ -278,7 +278,7 @@ export function ModelProvider({
       const updated = await electrobun.rpc.request.upsertCustomModel({
         providerId,
         model,
-        originalId,
+        originalId
       });
       setProviders(updated);
     },
@@ -294,10 +294,10 @@ export function ModelProvider({
         fetcher(),
         electrobun.rpc
           ? electrobun.rpc.request.getDefaultModel({})
-          : Promise.resolve(null),
+          : Promise.resolve(null)
       ]);
       setProviders(nextProviders);
-      setDefaultModelState(nextDefault ?? null);
+      setDefaultModel(nextDefault ?? null);
     } catch (error) {
       console.error("Failed to fetch models", error);
     }
@@ -324,9 +324,9 @@ export function ModelProvider({
       removeCustomModel,
       upsertCustomModel,
       refresh,
-      getModel: (ref) => index.get(`${ref.provider}:${ref.id}`) ?? null,
+      getModel: ref => index.get(`${ref.provider}:${ref.id}`) ?? null,
       defaultModel,
-      setDefaultModel,
+      setDefaultModel: _setDefaultModel
     };
   }, [
     providers,
@@ -341,7 +341,7 @@ export function ModelProvider({
     upsertCustomModel,
     refresh,
     defaultModel,
-    setDefaultModel,
+    _setDefaultModel
   ]);
 
   if (!contextValue) {
@@ -439,16 +439,16 @@ export function useFetchBuiltinProviders(): () => Promise<
 export function useUpdateProvider(): (
   providerId: string,
   fields: {
-    apiKey?: string | null;
-    baseUrl?: string | null;
-    headers?: Record<string, string> | null;
-    name?: string | null;
     api?:
       | "anthropic-messages"
       | "openai-completions"
       | "openai-responses"
       | null;
+    apiKey?: string | null;
+    baseUrl?: string | null;
+    headers?: Record<string, string> | null;
     icon?: string | null;
+    name?: string | null;
   }
 ) => Promise<void> {
   return useModelProvider().updateProvider;

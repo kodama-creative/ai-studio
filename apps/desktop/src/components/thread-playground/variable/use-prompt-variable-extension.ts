@@ -1,32 +1,32 @@
-import { type Extension } from "@codemirror/state";
-import type { ThreadContext } from "@llm-space/core";
 import { useContext, useMemo } from "react";
 
+import type { Extension } from "@codemirror/state";
+import type { ThreadContext } from "@llm-space/core";
+
 import { useCommands } from "@/commands";
-import type { SkillInfo } from "@/shared/skills";
-
-import { ThreadStoreContext, type ThreadStore } from "../stores";
-
 import {
   listPromptVariableCompletions,
-  resolvePromptVariableValueForPlace,
+  resolvePromptVariableValueForPlace
 } from "./prompt-variable-display";
 import { createPromptVariableExtension } from "./prompt-variable-extension";
 import { listEnabledPromptVariableSkills } from "./prompt-variable-skills";
+import { type ThreadStore, ThreadStoreContext } from "../stores";
+
+import type { SkillInfo } from "@/shared/skills";
 
 // Skills settings are global (not per-thread), so the resolved list is cached
 // module-wide with a short TTL and in-flight de-dupe. Repeated hovers over a
 // skills placeholder reuse the cache instead of re-firing the N+1 IPC load.
 const SKILLS_TTL_MS = 30_000;
-let skillsCache: { at: number; skills: SkillInfo[] } | null = null;
+let skillsCache: { at: number; skills: SkillInfo[]; } | null = null;
 let skillsInflight: Promise<SkillInfo[]> | null = null;
 
-function loadSkillsCached(): Promise<SkillInfo[]> {
+async function loadSkillsCached(): Promise<SkillInfo[]> {
   if (skillsCache && Date.now() - skillsCache.at < SKILLS_TTL_MS) {
     return Promise.resolve(skillsCache.skills);
   }
-  skillsInflight ??= listEnabledPromptVariableSkills()
-    .then((skills) => {
+  skillsInflight = skillsInflight ?? listEnabledPromptVariableSkills()
+    .then(skills => {
       skillsCache = { at: Date.now(), skills };
       return skills;
     })
@@ -58,7 +58,7 @@ function getExtensionForStore(
     extension = createPromptVariableExtension({
       // Lazy, non-reactive reads — run only on hover / while completing, so edits
       // to variables are always reflected without any subscription.
-      resolve: (name) =>
+      resolve: async name =>
         resolvePromptVariableValueForPlace(
           name,
           store.getState().thread.context,
@@ -67,7 +67,7 @@ function getExtensionForStore(
         ),
       listVariables: () =>
         listPromptVariableCompletions(store.getState().thread.context),
-      onInspect,
+      onInspect
     });
     byPlace.set(key, extension);
   }
@@ -104,21 +104,19 @@ export function usePromptVariableExtensionForContext(
     // button (its variables are historical, not the live thread's).
     if (context) {
       return createPromptVariableExtension({
-        resolve: (name) =>
+        resolve: async name =>
           resolvePromptVariableValueForPlace(
             name,
             context,
             placeKey,
             loadSkillsCached
           ),
-        listVariables: () => listPromptVariableCompletions(context),
+        listVariables: () => listPromptVariableCompletions(context)
       });
     }
-    if (!resolvedStore) return EMPTY;
+    if (!resolvedStore) { return EMPTY; }
     // `executeCommand` is app-stable; the tooltip's "view details" button routes
     // through the `openVariables` command handled by the active thread.
-    return getExtensionForStore(resolvedStore, placeKey, (name) =>
-      executeCommand({ type: "openVariables", args: { variableName: name } })
-    );
+    return getExtensionForStore(resolvedStore, placeKey, name => { executeCommand({ type: "openVariables", args: { variableName: name } }); });
   }, [context, placeKey, resolvedStore, executeCommand]);
 }

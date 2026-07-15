@@ -1,5 +1,5 @@
 export interface BeforeQuitEvent {
-  response?: { allow: boolean };
+  response?: { allow: boolean; };
 }
 
 /**
@@ -10,15 +10,15 @@ export interface BeforeQuitEvent {
 export function createShutdownCoordinator({
   quit,
   stop,
-  onStopError = (error) => console.error("Desktop shutdown failed:", error),
+  onStopError = error => { console.error("Desktop shutdown failed:", error); }
 }: {
+  onStopError?: (error: Error) => void;
   quit: () => void;
   stop: () => Promise<void>;
-  onStopError?: (error: Error) => void;
 }): (event: BeforeQuitEvent) => void {
-  let state: "idle" | "stopping" | "stopped" = "idle";
+  let state: "idle" | "stopped" | "stopping" = "idle";
 
-  return (event) => {
+  return event => {
     if (state === "stopped") {
       return;
     }
@@ -30,9 +30,7 @@ export function createShutdownCoordinator({
 
     state = "stopping";
     void stop()
-      .catch((error) =>
-        onStopError(error instanceof Error ? error : new Error(String(error)))
-      )
+      .catch(error => { onStopError(error instanceof Error ? error : new Error(String(error))); })
       .finally(() => {
         state = "stopped";
         quit();

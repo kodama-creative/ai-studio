@@ -6,14 +6,14 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
-  DropdownMenuTrigger,
+  DropdownMenuTrigger
 } from "../ui/dropdown-menu";
 
 /** An entry that renders as a plain divider in the menu. */
-interface SeparatorItem { type: "separator" }
+interface SeparatorItem { type: "separator"; }
 
 /** The minimum shape a selectable example item must provide to be rendered. */
-interface ExampleItem { type: string; label: string; icon: LucideIcon }
+interface ExampleItem { type: string; label: string; icon: LucideIcon; }
 
 /**
  * The shared "Examples ▾" dropdown used by the system-prompt and tool editors.
@@ -24,16 +24,16 @@ interface ExampleItem { type: string; label: string; icon: LucideIcon }
 export function ExamplesMenu<T extends ExampleItem>({
   items,
   onSelect,
-  align = "end",
+  align = "end"
 }: {
-  items: readonly (T | SeparatorItem)[];
-  onSelect: (item: T) => void;
-  align?: "start" | "end";
+  readonly align?: "end" | "start";
+  readonly items: ReadonlyArray<SeparatorItem | T>;
+  readonly onSelect: (item: T) => void;
 }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="sm">
+        <Button size="sm" variant="ghost">
           Examples
           <ChevronDown data-icon="inline-end" />
         </Button>
@@ -48,7 +48,7 @@ export function ExamplesMenu<T extends ExampleItem>({
           return (
             <DropdownMenuItem
               key={example.label}
-              onSelect={() => onSelect(example)}
+              onSelect={() => { onSelect(example); }}
             >
               <Icon />
               {example.label}

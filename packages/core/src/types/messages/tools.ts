@@ -1,4 +1,4 @@
-import { Type, type Static } from "typebox";
+import { type Static, Type } from "typebox";
 
 import { TextContent } from "./contents";
 
@@ -16,7 +16,7 @@ export const ToolCallInput = Type.Object({
    */
   arguments: Type.Record(Type.String(), Type.Any()),
 
-  partialArguments: Type.Optional(Type.String()),
+  partialArguments: Type.Optional(Type.String())
 });
 export type ToolCallInput = Static<typeof ToolCallInput>;
 
@@ -25,11 +25,12 @@ export type ToolCallInput = Static<typeof ToolCallInput>;
  */
 export const ToolCallOutput = Type.Object({
   content: Type.Array(TextContent),
+
   /**
    * Whether the tool runtime reported a failed call. This is forwarded back to
    * model providers that distinguish failed tool results from observations.
    */
-  isError: Type.Optional(Type.Boolean()),
+  isError: Type.Optional(Type.Boolean())
 });
 export type ToolCallOutput = Static<typeof ToolCallOutput>;
 
@@ -55,13 +56,13 @@ export const ToolCall = Type.Object({
   attempt: Type.Optional(
     Type.Object({
       status: Type.Literal("started"),
-      at: Type.String(),
+      at: Type.String()
     })
   ),
 
   /**
    * The output of the tool call.
    */
-  output: Type.Optional(ToolCallOutput),
+  output: Type.Optional(ToolCallOutput)
 });
 export type ToolCall = Static<typeof ToolCall>;

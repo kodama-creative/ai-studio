@@ -4,18 +4,18 @@ import {
   Edit3Icon,
   FileOutputIcon,
   FileSearchIcon,
-  FileTextIcon,
   FilesIcon,
+  FileTextIcon,
   FolderSearchIcon,
   FolderTreeIcon,
   GlobeIcon,
   ListTodoIcon,
   ListTreeIcon,
+  type LucideIcon,
   PackageCheckIcon,
   SearchIcon,
   SparklesIcon,
-  TerminalIcon,
-  type LucideIcon,
+  TerminalIcon
 } from "lucide-react";
 
 /** Stable icon keys set on each built-in tool's `icon` field (bun side). */
@@ -34,7 +34,7 @@ const ICON_BY_KEY: Record<string, LucideIcon> = {
   "circle-help": CircleHelpIcon,
   "cloud-sun": CloudSunIcon,
   files: FilesIcon,
-  "list-todo": ListTodoIcon,
+  "list-todo": ListTodoIcon
 };
 
 /** Fallback for tools persisted before the `icon` field existed. */
@@ -53,7 +53,7 @@ const ICON_KEY_BY_NAME: Record<string, string> = {
   weather_report: "cloud-sun",
   present_files: "files",
   todo_write: "list-todo",
-  ask_user_question: "circle-help",
+  ask_user_question: "circle-help"
 };
 
 /**
@@ -61,8 +61,8 @@ const ICON_KEY_BY_NAME: Record<string, string> = {
  * name-based lookup for legacy tools and finally a generic icon.
  */
 export function getBuiltInToolIcon(tool: {
-  name: string;
   icon?: string;
+  name: string;
 }): LucideIcon {
   const key = tool.icon ?? ICON_KEY_BY_NAME[tool.name];
   return (key ? ICON_BY_KEY[key] : undefined) ?? PackageCheckIcon;

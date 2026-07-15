@@ -1,4 +1,4 @@
-import { Type, type Static } from "typebox";
+import { type Static, Type } from "typebox";
 
 import { JSONSchema } from "../shared";
 
@@ -10,7 +10,7 @@ export const ResponseType = Type.Union([
   Type.Object({ type: Type.Literal("json_object") }),
   Type.Object({
     type: Type.Literal("json_schema"),
-    jsonSchema: JSONSchema,
-  }),
+    jsonSchema: JSONSchema
+  })
 ]);
 export type ResponseType = Static<typeof ResponseType>;

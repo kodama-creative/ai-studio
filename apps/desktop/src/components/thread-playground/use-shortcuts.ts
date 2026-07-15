@@ -1,4 +1,5 @@
 import { useCallback } from "react";
+
 import type { KeyboardEvent } from "react";
 
 import { useThreadStore, useThreadStoreActions } from "./stores";
@@ -7,8 +8,8 @@ import { useThreadStore, useThreadStoreActions } from "./stores";
  * Keyboard shortcuts for the thread playground, wired to the container's
  * keydown capture handler.
  */
-export function useShortcuts({ readonly }: { readonly: boolean }) {
-  const status = useThreadStore((s) => s.status);
+export function useShortcuts({ readonly }: { readonly: boolean; }) {
+  const status = useThreadStore(s => s.status);
   const { run, abort } = useThreadStoreActions();
 
   return useCallback(
@@ -48,9 +49,9 @@ function _isEditableTarget(target: EventTarget | null): boolean {
     return false;
   }
   return (
-    target.closest(".cm-editor") !== null ||
-    target.tagName === "INPUT" ||
-    target.tagName === "TEXTAREA" ||
-    target.isContentEditable
+    target.closest(".cm-editor") !== null
+    || target.tagName === "INPUT"
+    || target.tagName === "TEXTAREA"
+    || target.isContentEditable
   );
 }

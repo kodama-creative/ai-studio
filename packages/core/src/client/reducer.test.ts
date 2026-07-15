@@ -12,7 +12,7 @@ describe("reduceMessages tool calls", () => {
       { type: "message_start", message: partial },
       {}
     );
-    if (!started) throw new Error("Expected message start");
+    if (!started) { throw new Error("Expected message start"); }
     const toolCallStarted = reduceMessages(
       {
         type: "message_update",
@@ -20,12 +20,12 @@ describe("reduceMessages tool calls", () => {
         assistantMessageEvent: {
           type: "toolcall_start",
           contentIndex: 0,
-          partial,
-        },
+          partial
+        }
       },
       { streamingMessage: started.message, content: started.content }
     );
-    if (!toolCallStarted) throw new Error("Expected tool call start");
+    if (!toolCallStarted) { throw new Error("Expected tool call start"); }
 
     const toolCallEnded = reduceMessages(
       {
@@ -38,20 +38,20 @@ describe("reduceMessages tool calls", () => {
             type: "toolCall",
             id: "call-one",
             name: "fixture__remote_echo",
-            arguments: {},
+            arguments: {}
           },
-          partial,
-        },
+          partial
+        }
       },
       {
         streamingMessage: toolCallStarted.message,
-        content: toolCallStarted.content,
+        content: toolCallStarted.content
       }
     );
 
     expect(toolCallEnded?.message.toolCalls?.[0]).toEqual({
       id: "call-one",
-      input: { name: "fixture__remote_echo", arguments: {} },
+      input: { name: "fixture__remote_echo", arguments: {} }
     });
   });
 });
@@ -64,8 +64,8 @@ function _assistantMessage(): AssistantMessage {
         type: "toolCall",
         id: "call-one",
         name: "fixture__remote_echo",
-        arguments: {},
-      },
+        arguments: {}
+      }
     ],
     api: "openai-responses",
     provider: "openai",
@@ -76,9 +76,9 @@ function _assistantMessage(): AssistantMessage {
       cacheRead: 0,
       cacheWrite: 0,
       totalTokens: 0,
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
     },
     stopReason: "toolUse",
-    timestamp: 0,
-  } satisfies Extract<AgentEvent, { type: "message_start" }>["message"];
+    timestamp: 0
+  } satisfies Extract<AgentEvent, { type: "message_start"; }>["message"];
 }

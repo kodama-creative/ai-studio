@@ -1,4 +1,4 @@
-import { Type, type Static } from "typebox";
+import { type Static, Type } from "typebox";
 
 export const ReasoningLevel = Type.Union([
   Type.Literal("off"),
@@ -6,6 +6,6 @@ export const ReasoningLevel = Type.Union([
   Type.Literal("low"),
   Type.Literal("medium"),
   Type.Literal("high"),
-  Type.Literal("xhigh"),
+  Type.Literal("xhigh")
 ]);
 export type ReasoningLevel = Static<typeof ReasoningLevel>;

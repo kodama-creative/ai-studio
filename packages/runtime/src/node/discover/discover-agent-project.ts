@@ -31,14 +31,14 @@ export async function discoverAgentProject(
     fileName: DEFINITION_FILE,
     missingCode: "definition_missing",
     invalidCode: "definition_import_failed",
-    diagnostics,
+    diagnostics
   });
   const instructions = await _discoverRequiredFile({
     root,
     fileName: INSTRUCTIONS_FILE,
     missingCode: "instructions_missing",
     invalidCode: "instructions_read_failed",
-    diagnostics,
+    diagnostics
   });
   const tools = await _discoverTools(root, diagnostics);
   const connections = await _discoverConnections(root, diagnostics);
@@ -50,7 +50,7 @@ export async function discoverAgentProject(
         severity: "error",
         code: "skill_invalid",
         message: "The skills source directory cannot be a symbolic link",
-        path: skillsRootCandidate,
+        path: skillsRootCandidate
       });
       skillsRoot = undefined;
     } else {
@@ -59,7 +59,7 @@ export async function discoverAgentProject(
           severity: "error",
           code: "skill_invalid",
           message: "Symbolic links are not supported in Agent Project skills",
-          path: symlink,
+          path: symlink
         });
       }
     }
@@ -68,7 +68,7 @@ export async function discoverAgentProject(
       severity: "error",
       code: "skill_invalid",
       message: `Unable to load skills: ${_errorMessage(error)}`,
-      path: skillsRootCandidate,
+      path: skillsRootCandidate
     });
     skillsRoot = undefined;
   }
@@ -80,7 +80,7 @@ export async function discoverAgentProject(
     tools,
     connections,
     skillsRoot,
-    diagnostics,
+    diagnostics
   };
 }
 
@@ -96,39 +96,38 @@ async function _discoverConnections(
         severity: "error",
         code: "connection_import_failed",
         message: "The connections source directory cannot be a symbolic link",
-        path: connectionsRoot,
+        path: connectionsRoot
       });
       return [];
     }
     entries = await readdir(connectionsRoot, { withFileTypes: true });
   } catch (error) {
-    if (_hasCode(error, "ENOENT")) return [];
+    if (_hasCode(error, "ENOENT")) { return []; }
     diagnostics.push({
       severity: "error",
       code: "connection_import_failed",
       message: `Unable to list connections: ${_errorMessage(error)}`,
-      path: connectionsRoot,
+      path: connectionsRoot
     });
     return [];
   }
   const connections: AgentProjectSourceRef[] = [];
   for (const entry of entries.sort((left, right) =>
-    left.name < right.name ? -1 : left.name > right.name ? 1 : 0
-  )) {
-    if (!entry.name.endsWith(".ts") && !entry.name.endsWith(".js")) continue;
+    (left.name < right.name ? -1 : left.name > right.name ? 1 : 0))) {
+    if (!entry.name.endsWith(".ts") && !entry.name.endsWith(".js")) { continue; }
     const absolutePath = path.join(connectionsRoot, entry.name);
     if (entry.isSymbolicLink() || !entry.isFile()) {
       diagnostics.push({
         severity: "error",
         code: "connection_import_failed",
         message: `Connection source must be a regular file: ${entry.name}`,
-        path: absolutePath,
+        path: absolutePath
       });
       continue;
     }
     connections.push({
       absolutePath,
-      logicalPath: path.posix.join("connections", entry.name),
+      logicalPath: path.posix.join("connections", entry.name)
     });
   }
   return connections;
@@ -139,13 +138,13 @@ async function _discoverRequiredFile({
   fileName,
   missingCode,
   invalidCode,
-  diagnostics,
+  diagnostics
 }: {
-  root: string;
-  fileName: string;
-  missingCode: "definition_missing" | "instructions_missing";
-  invalidCode: "definition_import_failed" | "instructions_read_failed";
   diagnostics: AgentProjectDiagnostic[];
+  fileName: string;
+  invalidCode: "definition_import_failed" | "instructions_read_failed";
+  missingCode: "definition_missing" | "instructions_missing";
+  root: string;
 }): Promise<AgentProjectSourceRef | undefined> {
   const absolutePath = path.join(root, fileName);
   try {
@@ -155,7 +154,7 @@ async function _discoverRequiredFile({
         severity: "error",
         code: invalidCode,
         message: `${fileName} cannot be a symbolic link`,
-        path: absolutePath,
+        path: absolutePath
       });
       return undefined;
     }
@@ -164,7 +163,7 @@ async function _discoverRequiredFile({
         severity: "error",
         code: invalidCode,
         message: `${fileName} must be a file`,
-        path: absolutePath,
+        path: absolutePath
       });
       return undefined;
     }
@@ -175,7 +174,7 @@ async function _discoverRequiredFile({
         severity: "error",
         code: missingCode,
         message: `Missing required ${fileName}`,
-        path: absolutePath,
+        path: absolutePath
       });
       return undefined;
     }
@@ -183,7 +182,7 @@ async function _discoverRequiredFile({
       severity: "error",
       code: invalidCode,
       message: `Unable to inspect ${fileName}: ${_errorMessage(error)}`,
-      path: absolutePath,
+      path: absolutePath
     });
     return undefined;
   }
@@ -201,25 +200,24 @@ async function _discoverTools(
         severity: "error",
         code: "tool_import_failed",
         message: "The tools source directory cannot be a symbolic link",
-        path: toolsRoot,
+        path: toolsRoot
       });
       return [];
     }
     entries = await readdir(toolsRoot, { withFileTypes: true });
   } catch (error) {
-    if (_hasCode(error, "ENOENT")) return [];
+    if (_hasCode(error, "ENOENT")) { return []; }
     diagnostics.push({
       severity: "error",
       code: "tool_import_failed",
       message: `Unable to list tools: ${_errorMessage(error)}`,
-      path: toolsRoot,
+      path: toolsRoot
     });
     return [];
   }
   const tools: AgentProjectSourceRef[] = [];
   for (const entry of entries.sort((left, right) =>
-    left.name < right.name ? -1 : left.name > right.name ? 1 : 0
-  )) {
+    (left.name < right.name ? -1 : left.name > right.name ? 1 : 0))) {
     if (!entry.name.endsWith(".ts") && !entry.name.endsWith(".js")) {
       continue;
     }
@@ -229,7 +227,7 @@ async function _discoverTools(
         severity: "error",
         code: "tool_import_failed",
         message: `Symbolic-link tools are not supported: ${entry.name}`,
-        path: absolutePath,
+        path: absolutePath
       });
       continue;
     }
@@ -238,13 +236,13 @@ async function _discoverTools(
         severity: "error",
         code: "tool_import_failed",
         message: `Tool source must be a file: ${entry.name}`,
-        path: absolutePath,
+        path: absolutePath
       });
       continue;
     }
     tools.push({
       absolutePath,
-      logicalPath: path.posix.join("tools", entry.name),
+      logicalPath: path.posix.join("tools", entry.name)
     });
   }
   return tools;
@@ -254,7 +252,7 @@ async function _isSymlink(candidate: string): Promise<boolean> {
   try {
     return (await lstat(candidate)).isSymbolicLink();
   } catch (error) {
-    if (_hasCode(error, "ENOENT")) return false;
+    if (_hasCode(error, "ENOENT")) { return false; }
     throw error;
   }
 }
@@ -264,7 +262,7 @@ async function _findSymlinks(root: string): Promise<string[]> {
   try {
     entries = await readdir(root, { withFileTypes: true });
   } catch (error) {
-    if (_hasCode(error, "ENOENT")) return [];
+    if (_hasCode(error, "ENOENT")) { return []; }
     throw error;
   }
   const result: string[] = [];

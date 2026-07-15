@@ -2,9 +2,9 @@
 
 import {
   BlossomColorPicker,
-  hexToHsl,
   type BlossomColorPickerColor,
   type BlossomColorPickerValue,
+  hexToHsl
 } from "@dayflow/blossom-color-picker-react";
 import { useCallback } from "react";
 
@@ -27,23 +27,23 @@ function _toValue(hex: string): BlossomColorPickerValue {
  */
 export function PrimaryColorPicker({
   value,
-  onChange,
+  onChange
 }: {
-  value: string;
-  onChange: (hex: string) => void;
+  readonly onChange: (hex: string) => void;
+  readonly value: string;
 }) {
   const handleChange = useCallback(
-    (color: BlossomColorPickerColor) => onChange(color.hex),
+    (color: BlossomColorPickerColor) => { onChange(color.hex); },
     [onChange]
   );
   return (
     <BlossomColorPicker
-      className="mt-1.5"
-      defaultValue={_toValue(value)}
-      showCoreColor
       adaptivePositioning
+      className="mt-1.5"
       coreSize={20}
+      defaultValue={_toValue(value)}
       onChange={handleChange}
+      showCoreColor
     />
   );
 }

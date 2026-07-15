@@ -1,20 +1,18 @@
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-
 import { getSettingsDir } from "@llm-space/core/server";
 import matter from "gray-matter";
 import { isValidSkillName, validateSkillFrontmatter } from "skills-handler";
 
+import { getManagedSkillsDir } from "./seed";
 import {
   DEFAULT_SKILLS_SETTINGS,
   type DiscoveryPathConfig,
   type SkillContent,
   type SkillInfo,
-  type SkillsSettings,
+  type SkillsSettings
 } from "../../shared/skills";
-
-import { getManagedSkillsDir } from "./seed";
 
 /**
  * Owns `settings/skills.json`: the discovery folders backing the built-in Skill
@@ -43,7 +41,7 @@ export class SkillsManager {
     if (p === "") {
       return this.getConfig();
     }
-    if (!this._settings.discoveryPaths.some((entry) => entry.path === p)) {
+    if (!this._settings.discoveryPaths.some(entry => entry.path === p)) {
       this._settings.discoveryPaths.push({ path: p, hiddenSkills: [] });
       this._saveConfig();
     }
@@ -52,7 +50,7 @@ export class SkillsManager {
 
   removePath(inputPath: string): SkillsSettings {
     const next = this._settings.discoveryPaths.filter(
-      (entry) => entry.path !== inputPath
+      entry => entry.path !== inputPath
     );
     if (next.length !== this._settings.discoveryPaths.length) {
       this._settings.discoveryPaths = next;
@@ -68,7 +66,7 @@ export class SkillsManager {
     hidden: boolean
   ): SkillsSettings {
     const entry = this._settings.discoveryPaths.find(
-      (e) => e.path === inputPath
+      e => e.path === inputPath
     );
     if (!entry) {
       return this.getConfig();
@@ -78,7 +76,7 @@ export class SkillsManager {
       entry.hiddenSkills.push(skillName);
       this._saveConfig();
     } else if (!hidden && has) {
-      entry.hiddenSkills = entry.hiddenSkills.filter((n) => n !== skillName);
+      entry.hiddenSkills = entry.hiddenSkills.filter(n => n !== skillName);
       this._saveConfig();
     }
     return this.getConfig();
@@ -91,13 +89,13 @@ export class SkillsManager {
    */
   setAllSkillsHidden(inputPath: string, hidden: boolean): SkillsSettings {
     const entry = this._settings.discoveryPaths.find(
-      (e) => e.path === inputPath
+      e => e.path === inputPath
     );
     if (!entry) {
       return this.getConfig();
     }
     entry.hiddenSkills = hidden
-      ? this.listSkills(inputPath).map((skill) => skill.name)
+      ? this.listSkills(inputPath).map(skill => skill.name)
       : [];
     this._saveConfig();
     return this.getConfig();
@@ -111,15 +109,15 @@ export class SkillsManager {
    */
   listSkills(
     inputPath: string,
-    opts: { enabledOnly?: boolean } = {}
+    opts: { enabledOnly?: boolean; } = {}
   ): SkillInfo[] {
     const entry = this._settings.discoveryPaths.find(
-      (e) => e.path === inputPath
+      e => e.path === inputPath
     );
     const hidden = new Set(entry?.hiddenSkills ?? []);
     const dir = this._expand(inputPath);
 
-    let dirents: import("node:fs").Dirent[];
+    let dirents: Array<import("node:fs").Dirent>;
     try {
       dirents = readdirSync(dir, { withFileTypes: true });
     } catch {
@@ -132,8 +130,8 @@ export class SkillsManager {
       // symlinked). A symlink to a non-skill target is skipped below when its
       // `SKILL.md` fails to read.
       if (
-        (!dirent.isDirectory() && !dirent.isSymbolicLink()) ||
-        !isValidSkillName(dirent.name)
+        (!dirent.isDirectory() && !dirent.isSymbolicLink())
+        || !isValidSkillName(dirent.name)
       ) {
         continue;
       }
@@ -157,7 +155,7 @@ export class SkillsManager {
         name: data.name,
         description: data.description,
         path: skillDir,
-        enabled,
+        enabled
       });
     }
 
@@ -173,11 +171,11 @@ export class SkillsManager {
    */
   findSkill(
     name: string,
-    opts: { enabledOnly?: boolean } = { enabledOnly: true }
+    opts: { enabledOnly?: boolean; } = { enabledOnly: true }
   ): SkillContent | null {
     for (const entry of this._settings.discoveryPaths) {
       const match = this.listSkills(entry.path, opts).find(
-        (skill) => skill.name === name
+        skill => skill.name === name
       );
       if (match) {
         return this.readSkill(match.path);
@@ -197,7 +195,7 @@ export class SkillsManager {
     return {
       frontmatters: parsed.data,
       content: parsed.content,
-      path: skillDir,
+      path: skillDir
     };
   }
 
@@ -214,10 +212,10 @@ export class SkillsManager {
 
   private _clone(settings: SkillsSettings): SkillsSettings {
     return {
-      discoveryPaths: settings.discoveryPaths.map((entry) => ({
+      discoveryPaths: settings.discoveryPaths.map(entry => ({
         path: entry.path,
-        hiddenSkills: [...entry.hiddenSkills],
-      })),
+        hiddenSkills: [...entry.hiddenSkills]
+      }))
     };
   }
 
@@ -229,7 +227,7 @@ export class SkillsManager {
   private _defaultSettings(): SkillsSettings {
     const settings = this._clone(DEFAULT_SKILLS_SETTINGS);
     const managed = getManagedSkillsDir();
-    if (!settings.discoveryPaths.some((entry) => entry.path === managed)) {
+    if (!settings.discoveryPaths.some(entry => entry.path === managed)) {
       settings.discoveryPaths.push({ path: managed, hiddenSkills: [] });
     }
     return settings;
@@ -287,8 +285,8 @@ export class SkillsManager {
       seen.add(p);
       const hiddenSkills = Array.isArray(entry?.hiddenSkills)
         ? entry.hiddenSkills.filter(
-            (name): name is string => typeof name === "string"
-          )
+          (name): name is string => typeof name === "string"
+        )
         : [];
       discoveryPaths.push({ path: p, hiddenSkills });
     }

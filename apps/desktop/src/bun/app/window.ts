@@ -3,15 +3,15 @@ import {
   getWindowFrame,
   getWindowMaximized,
   getWindowZoom,
-  loadWindowState,
+  loadWindowState
 } from "@llm-space/core/server";
 import { BrowserWindow, Updater } from "electrobun/bun";
 
-import type { Command } from "../../shared/commands";
-import type { MainWindowRPC } from "../rpc";
-
 import { registerMenuActions } from "./menu";
 import { attachWindowStates } from "./window-state";
+
+import type { Command } from "../../shared/commands";
+import type { MainWindowRPC } from "../rpc";
 
 const DEV_SERVER_PORT = 5173;
 const DEV_SERVER_URL = `http://localhost:${DEV_SERVER_PORT}`;
@@ -35,10 +35,10 @@ async function getMainViewUrl(): Promise<string> {
 
 export async function createMainWindow({
   rpc,
-  executeCommand,
+  executeCommand
 }: {
-  rpc: MainWindowRPC;
   executeCommand: (command: Command, window: BrowserWindow) => void;
+  rpc: MainWindowRPC;
 }): Promise<BrowserWindow> {
   const url = await getMainViewUrl();
   const windowState = await loadWindowState();
@@ -52,17 +52,17 @@ export async function createMainWindow({
     rpc,
     trafficLightOffset: {
       x: 2,
-      y: 16,
+      y: 16
     },
-    frame: savedFrame,
+    frame: savedFrame
   });
 
   attachWindowStates(window, {
     isMaximized: getWindowMaximized(windowState),
     zoom: savedZoom,
-    onFullScreenChange: (fullScreen) => {
+    onFullScreenChange: fullScreen => {
       rpc.send.fullScreenChanged({ fullScreen });
-    },
+    }
   });
   registerMenuActions(window, executeCommand);
   return window;

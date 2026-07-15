@@ -1,16 +1,17 @@
 import { mkdirSync } from "node:fs";
 import { readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { BrowserView, type BrowserWindow, Utils } from "electrobun/bun";
 
-import { ModelProviderGroup } from "@llm-space/core";
+import type { ModelProviderGroup } from "@llm-space/core";
 import type { LocalFileSystem } from "@llm-space/core/server";
-import { BrowserView, Utils, type BrowserWindow } from "electrobun/bun";
+
+import { moveToTrash, revealInFileManager } from "../fs";
 
 import type { Command } from "../../shared/commands";
 import type { DesktopRPCType } from "../../shared/rpc";
 import type { Analytics } from "../analytics";
 import type { ExternalAgentProjectManager } from "../external-projects";
-import { moveToTrash, revealInFileManager } from "../fs";
 import type { McpManager } from "../mcp";
 import type { ModelManager } from "../models";
 import type { SearchSettingsManager } from "../search";
@@ -23,7 +24,7 @@ import type { UpdaterService } from "../updates";
 async function _getModelProviderGroups(modelManager: ModelManager) {
   const models = await modelManager.getAvailableModels();
   return Promise.all(
-    models.getProviders().map(async (provider) => ({
+    models.getProviders().map(async provider => ({
       id: provider.id,
       name: provider.name,
       builtin: modelManager.isBuiltin(provider.id),
@@ -35,7 +36,7 @@ async function _getModelProviderGroups(modelManager: ModelManager) {
       disabledModels: modelManager.getDisabledModels(provider.id),
       customModels: modelManager.getCustomModels(provider.id),
       websiteLink: modelManager.getWebsiteLink(provider.id),
-      icon: modelManager.getProviderIcon(provider.id),
+      icon: modelManager.getProviderIcon(provider.id)
     }))
   ) as Promise<ModelProviderGroup[]>;
 }
@@ -89,9 +90,9 @@ export function createMainWindowRPC({
   streaming,
   tools,
   traceManager,
-  updater,
+  updater
 }: MainWindowRPCDependencies): MainWindowRPC {
-  const getModelProviderGroups = () => _getModelProviderGroups(modelManager);
+  const getModelProviderGroups = async () => _getModelProviderGroups(modelManager);
   const rpc: MainWindowRPC = BrowserView.defineRPC<DesktopRPCType>({
     maxRequestTime: MAX_REQUEST_TIME_MS,
     handlers: {
@@ -112,7 +113,7 @@ export function createMainWindowRPC({
           // Only the provider id is recorded — never the base URL or name.
           analytics.capture("provider_added", {
             providerId: id,
-            kind: "custom",
+            kind: "custom"
           });
           return getModelProviderGroups();
         },
@@ -123,7 +124,7 @@ export function createMainWindowRPC({
           headers,
           name,
           api,
-          icon,
+          icon
         }) => {
           modelManager.updateProvider(providerId, {
             apiKey,
@@ -131,7 +132,7 @@ export function createMainWindowRPC({
             headers,
             name,
             api,
-            icon,
+            icon
           });
           return getModelProviderGroups();
         },
@@ -143,8 +144,8 @@ export function createMainWindowRPC({
           modelManager.setAllModelsEnabled(providerId, enabled);
           return getModelProviderGroups();
         },
-        getDefaultModel: () => Promise.resolve(modelManager.getDefaultModel()),
-        setDefaultModel: ({ model }) => {
+        getDefaultModel: async () => Promise.resolve(modelManager.getDefaultModel()),
+        setDefaultModel: async ({ model }) => {
           modelManager.setDefaultModel(model);
           return Promise.resolve(modelManager.getDefaultModel());
         },
@@ -152,7 +153,7 @@ export function createMainWindowRPC({
           await streaming.testModelConnection({
             providerId,
             modelId,
-            candidate,
+            candidate
           });
           return null;
         },
@@ -177,12 +178,12 @@ export function createMainWindowRPC({
           const mainWindow = getMainWindow();
           return { fullScreen: mainWindow.isFullScreen() };
         },
-        ensureRootDir: ({ relativePath }) => {
+        ensureRootDir: async ({ relativePath }) => {
           const dir = path.join(homePath, relativePath);
           mkdirSync(dir, { recursive: true });
           return Promise.resolve({ path: dir });
         },
-        fsLs: ({ path }) => localFs.ls(path),
+        fsLs: async ({ path }) => localFs.ls(path),
         fsMkdir: async ({ path }) => {
           await localFs.mkdir(path);
           return null;
@@ -204,13 +205,13 @@ export function createMainWindowRPC({
           await moveToTrash(abs);
           return null;
         },
-        fsRead: ({ path }) => localFs.read(path),
+        fsRead: async ({ path }) => localFs.read(path),
         fsWrite: async ({ path, thread }) => {
           await localFs.write(path, thread);
           return null;
         },
         fsReadText: async ({ path }) => ({
-          text: await readFile(localFs.realpath(path), "utf8"),
+          text: await readFile(localFs.realpath(path), "utf8")
         }),
         fsWriteText: async ({ path, text }) => {
           await writeFile(localFs.realpath(path), text, "utf8");
@@ -243,40 +244,40 @@ export function createMainWindowRPC({
           await revealInFileManager(file);
           return { existed: true };
         },
-        fsRealpath: ({ path }) =>
+        fsRealpath: async ({ path }) =>
           Promise.resolve({ path: localFs.realpath(path) }),
         externalAgentProjectBrowse: async () => {
           const selected = await Utils.openFileDialog({
             startingFolder: "~/",
             canChooseFiles: false,
             canChooseDirectory: true,
-            allowsMultipleSelection: false,
+            allowsMultipleSelection: false
           });
-          const directory = selected.map((item) => item.trim()).find(Boolean);
+          const directory = selected.map(item => item.trim()).find(Boolean);
           return directory
             ? externalAgentProjects.preview(directory)
             : Promise.resolve(null);
         },
-        externalAgentProjectTrustAndOpen: ({ path }) =>
+        externalAgentProjectTrustAndOpen: async ({ path }) =>
           externalAgentProjects.trustAndOpen(path),
-        externalAgentProjectList: () => externalAgentProjects.list(),
-        externalAgentProjectInspect: ({ projectId }) =>
+        externalAgentProjectList: async () => externalAgentProjects.list(),
+        externalAgentProjectInspect: async ({ projectId }) =>
           externalAgentProjects.inspect(projectId),
         externalAgentProjectRemove: async ({ projectId }) => {
           await externalAgentProjects.remove(projectId);
           return null;
         },
-        externalAgentProjectRefresh: ({ projectId }) =>
+        externalAgentProjectRefresh: async ({ projectId }) =>
           externalAgentProjects.refresh(projectId),
-        externalAgentProjectCreateThread: ({ projectId, title }) =>
+        externalAgentProjectCreateThread: async ({ projectId, title }) =>
           externalAgentProjects.createThread(projectId, title),
-        externalAgentProjectReadThread: ({ projectId, threadId }) =>
+        externalAgentProjectReadThread: async ({ projectId, threadId }) =>
           externalAgentProjects.readThread(projectId, threadId),
-        externalAgentProjectActivateConnections: ({ projectId, threadId }) =>
+        externalAgentProjectActivateConnections: async ({ projectId, threadId }) =>
           externalAgentProjects.activateConnections(projectId, threadId),
         externalAgentProjectDeactivateConnections: async ({
           projectId,
-          threadId,
+          threadId
         }) => {
           await externalAgentProjects.deactivateConnections(
             projectId,
@@ -287,27 +288,27 @@ export function createMainWindowRPC({
         externalAgentProjectWriteThread: async ({
           projectId,
           threadId,
-          record,
+          record
         }) => {
           await externalAgentProjects.writeThread(projectId, threadId, record);
           return null;
         },
-        externalAgentProjectDuplicateThread: ({ projectId, threadId }) =>
+        externalAgentProjectDuplicateThread: async ({ projectId, threadId }) =>
           externalAgentProjects.duplicateThread(projectId, threadId),
         externalAgentProjectDeleteThread: async ({ projectId, threadId }) => {
           await externalAgentProjects.deleteThread(projectId, threadId);
           return null;
         },
-        externalAgentProjectSyncThreadFromAgent: ({ projectId, threadId }) =>
+        externalAgentProjectSyncThreadFromAgent: async ({ projectId, threadId }) =>
           externalAgentProjects.syncThreadFromAgent(projectId, threadId),
         externalAgentProjectReadSource: async ({ projectId, path }) => ({
-          text: await externalAgentProjects.readSource(projectId, path),
+          text: await externalAgentProjects.readSource(projectId, path)
         }),
         externalAgentProjectWriteSource: async ({ projectId, path, text }) => {
           await externalAgentProjects.writeSource(projectId, path, text);
           return null;
         },
-        externalAgentProjectCallTool: (input) =>
+        externalAgentProjectCallTool: async input =>
           externalAgentProjects.callTool(input),
         mcpListServers: () => mcpManager.listServers(),
         mcpAddServer: ({ server }) => {
@@ -325,87 +326,80 @@ export function createMainWindowRPC({
         mcpCallTool: async ({ serverId, toolName, arguments: args }) =>
           mcpManager.callTool({ serverId, toolName, arguments: args }),
         builtInListTools: () => tools.listTools(),
-        builtInCallTool: ({ name, arguments: args }) =>
+        builtInCallTool: async ({ name, arguments: args }) =>
           tools.call({ name, arguments: args }),
-        getAnalyticsSettings: () => Promise.resolve(analytics.getSettings()),
-        setAnalyticsSettings: ({ enabled }) =>
+        getAnalyticsSettings: async () => Promise.resolve(analytics.getSettings()),
+        setAnalyticsSettings: async ({ enabled }) =>
           Promise.resolve(analytics.setEnabled(enabled)),
         getSearchSettings: () => searchSettings.get(),
         setSearchSettings: ({ settings }) => searchSettings.set(settings),
-        skillsGetSettings: () => Promise.resolve(skillsManager.getConfig()),
+        skillsGetSettings: async () => Promise.resolve(skillsManager.getConfig()),
         skillsBrowseForPath: async () => {
           const selected = await Utils.openFileDialog({
             startingFolder: "~/",
             canChooseFiles: false,
             canChooseDirectory: true,
-            allowsMultipleSelection: false,
+            allowsMultipleSelection: false
           });
-          const path = selected.map((p) => p.trim()).find(Boolean) ?? null;
+          const path = selected.map(p => p.trim()).find(Boolean) ?? null;
           return { path };
         },
-        skillsAddPath: ({ path }) =>
+        skillsAddPath: async ({ path }) =>
           Promise.resolve(skillsManager.addPath(path)),
-        skillsRemovePath: ({ path }) =>
+        skillsRemovePath: async ({ path }) =>
           Promise.resolve(skillsManager.removePath(path)),
-        skillsSetSkillHidden: ({ path, skillName, hidden }) =>
+        skillsSetSkillHidden: async ({ path, skillName, hidden }) =>
           Promise.resolve(
             skillsManager.setSkillHidden(path, skillName, hidden)
           ),
-        skillsSetAllSkillsHidden: ({ path, hidden }) =>
+        skillsSetAllSkillsHidden: async ({ path, hidden }) =>
           Promise.resolve(skillsManager.setAllSkillsHidden(path, hidden)),
-        skillsListSkills: ({ path }) =>
+        skillsListSkills: async ({ path }) =>
           Promise.resolve(skillsManager.listSkills(path)),
-        skillsReadSkill: ({ path }) =>
+        skillsReadSkill: async ({ path }) =>
           Promise.resolve(skillsManager.readSkill(path)),
-        traceListProjects: () => traceManager.listProjects(),
-        traceCreateProject: ({ name }) => traceManager.createProject(name),
-        traceCreateConnectedProject: (input) =>
+        traceListProjects: async () => traceManager.listProjects(),
+        traceCreateProject: async ({ name }) => traceManager.createProject(name),
+        traceCreateConnectedProject: async input =>
           traceManager.createConnectedProject(input),
-        traceListTraces: ({ projectId }) => traceManager.listTraces(projectId),
-        traceImportLangfuseJson: ({ projectId, files }) =>
+        traceListTraces: async ({ projectId }) => traceManager.listTraces(projectId),
+        traceImportLangfuseJson: async ({ projectId, files }) =>
           traceManager.importLangfuseJson(projectId, files),
-        traceSearchLangfuseTraces: ({ projectId, filters }) =>
+        traceSearchLangfuseTraces: async ({ projectId, filters }) =>
           traceManager.searchLangfuseTraces({ projectId, filters }),
-        traceSyncLangfuseTraces: ({ projectId, traceIds }) =>
+        traceSyncLangfuseTraces: async ({ projectId, traceIds }) =>
           traceManager.syncLangfuseTraces({ projectId, traceIds }),
-        traceReadTrace: ({ projectId, traceKey }) =>
+        traceReadTrace: async ({ projectId, traceKey }) =>
           traceManager.readTrace(projectId, traceKey),
-        traceReadOrCreateWorkbench: ({ projectId, traceKey }) =>
+        traceReadOrCreateWorkbench: async ({ projectId, traceKey }) =>
           traceManager.readOrCreateWorkbench(projectId, traceKey),
-        traceUpdateTraceTitle: ({ projectId, traceKey, title }) =>
+        traceUpdateTraceTitle: async ({ projectId, traceKey, title }) =>
           traceManager.updateTraceTitle(projectId, traceKey, title),
         traceWriteWorkbench: async ({ projectId, traceKey, thread }) => {
           await traceManager.writeWorkbench(projectId, traceKey, thread);
           return null;
         },
-        updateMode: () => updater.getUpdateModeSetting(),
+        updateMode: async () => updater.getUpdateModeSetting(),
         setUpdateMode: async ({ mode }) => {
           await updater.setUpdateModeSetting(mode);
           return null;
         },
-        pendingInstalledVersion: () => updater.getInstalledVersion(),
+        pendingInstalledVersion: () => updater.getInstalledVersion()
       },
       messages: {
-        sendStreamThreadRequest: (payload) => {
+        sendStreamThreadRequest: payload => {
           // Fire-and-forget: stream events back as `receiveStreamThreadResponse`
           // messages. `rpc` is initialized by the time this handler runs.
-          void streaming.run(payload, (message) =>
-            rpc.send.receiveStreamThreadResponse(message)
-          );
+          void streaming.run(payload, message => { rpc.send.receiveStreamThreadResponse(message); });
         },
-        abortStreamThread: (payload) => streaming.abort(payload),
-        agentSourceDirtyStateChanged: ({ dirty }) =>
-          onAgentSourceDirtyStateChanged(dirty),
-        resolveDiscardDirtyAgentSources: ({ requestId, discard }) =>
-          onDiscardDirtyAgentSourcesResolved(requestId, discard),
-        captureAnalyticsEvent: ({ event, properties }) =>
-          analytics.capture(event, properties),
-        executeCommand: (command) => executeCommand(command),
-      },
-    },
+        abortStreamThread: payload => { streaming.abort(payload); },
+        agentSourceDirtyStateChanged: ({ dirty }) => { onAgentSourceDirtyStateChanged(dirty); },
+        resolveDiscardDirtyAgentSources: ({ requestId, discard }) => { onDiscardDirtyAgentSourcesResolved(requestId, discard); },
+        captureAnalyticsEvent: ({ event, properties }) => { analytics.capture(event, properties); },
+        executeCommand: command => { executeCommand(command); }
+      }
+    }
   });
-  externalAgentProjects.setOnChange((projectId) =>
-    rpc.send.externalAgentProjectChanged({ projectId })
-  );
+  externalAgentProjects.setOnChange(projectId => { rpc.send.externalAgentProjectChanged({ projectId }); });
   return rpc;
 }

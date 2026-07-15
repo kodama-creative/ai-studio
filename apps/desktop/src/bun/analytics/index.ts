@@ -1,20 +1,19 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-
 import { getSettingsDir } from "@llm-space/core/server";
 import { PostHog } from "posthog-node";
 
+import { ANALYTICS_DISABLED, POSTHOG_HOST, POSTHOG_KEY } from "./config";
 import electrobunConfig from "../../../electrobun.config";
+import { DEFAULT_ANALYTICS_SETTINGS } from "../../shared/analytics";
+
 import type {
   AnalyticsEventMap,
   AnalyticsEventName,
   AnalyticsSettings,
-  AnalyticsStatus,
+  AnalyticsStatus
 } from "../../shared/analytics";
-import { DEFAULT_ANALYTICS_SETTINGS } from "../../shared/analytics";
-
-import { ANALYTICS_DISABLED, POSTHOG_HOST, POSTHOG_KEY } from "./config";
 
 /**
  * Merged into every event so metrics can be sliced by release and OS. Only
@@ -23,7 +22,7 @@ import { ANALYTICS_DISABLED, POSTHOG_HOST, POSTHOG_KEY } from "./config";
 const COMMON_PROPERTIES = {
   appVersion: electrobunConfig.app.version,
   platform: process.platform,
-  arch: process.arch,
+  arch: process.arch
 } as const;
 
 /** On-disk shape of `settings/analytics.json`. */
@@ -53,6 +52,7 @@ export class Analytics {
   private readonly _anonymousId: string;
   private _enabled: boolean;
   private _client: PostHog | null = null;
+
   /** Hard gate fixed for the process lifetime: key present and not env-disabled. */
   private readonly _available = Boolean(POSTHOG_KEY) && !ANALYTICS_DISABLED;
 
@@ -74,7 +74,7 @@ export class Analytics {
    * lets the next `capture` re-create it lazily.
    */
   setEnabled(enabled: boolean): AnalyticsStatus {
-    if (enabled === this._enabled) return this.getSettings();
+    if (enabled === this._enabled) { return this.getSettings(); }
     this._enabled = enabled;
     this._saveConfig();
     if (!enabled && this._client) {
@@ -95,13 +95,13 @@ export class Analytics {
     event: K,
     properties: AnalyticsEventMap[K]
   ): void {
-    if (!this._available || !this._enabled) return;
+    if (!this._available || !this._enabled) { return; }
     try {
       // Desktop app: flush eagerly so events aren't lost when the window closes.
       this._client ??= new PostHog(POSTHOG_KEY, {
         host: POSTHOG_HOST,
         flushAt: 1,
-        flushInterval: 5_000,
+        flushInterval: 5_000
       });
       this._client.capture({
         distinctId: this._anonymousId,
@@ -110,10 +110,10 @@ export class Analytics {
           ...COMMON_PROPERTIES,
           ...properties,
           // Never materialize a person profile for an anonymous install id.
-          $process_person_profile: false,
+          $process_person_profile: false
         },
         // Don't infer location from the ingestion IP.
-        disableGeoip: true,
+        disableGeoip: true
       });
     } catch {
       // Telemetry must never break the app.
@@ -136,7 +136,7 @@ export class Analytics {
   private _saveConfig(): void {
     this._writeConfig({
       anonymousId: this._anonymousId,
-      enabled: this._enabled,
+      enabled: this._enabled
     });
   }
 
@@ -155,8 +155,8 @@ export class Analytics {
    * unreadable file is best-effort and never blocks startup.
    */
   private _loadConfig(): {
-    persisted: PersistedAnalytics;
     isFirstRun: boolean;
+    persisted: PersistedAnalytics;
   } {
     let parsed: Partial<PersistedAnalytics> = {};
     try {
@@ -178,7 +178,7 @@ export class Analytics {
     if (parsed.anonymousId) {
       return {
         persisted: { anonymousId: parsed.anonymousId, enabled },
-        isFirstRun: false,
+        isFirstRun: false
       };
     }
 

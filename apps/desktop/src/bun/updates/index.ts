@@ -1,14 +1,14 @@
 import { Updater } from "electrobun/bun";
 
-import type { UpdateMode, UpdateStatus } from "../../shared/updates";
-import { setUpdateReadyInMenu } from "../app/menu";
-
 import {
   getLastSeenHash,
   getUpdateMode,
-  setLastSeenHash,
   setUpdateMode as persistUpdateMode,
+  setLastSeenHash
 } from "./state";
+import { setUpdateReadyInMenu } from "../app/menu";
+
+import type { UpdateMode, UpdateStatus } from "../../shared/updates";
 
 const INITIAL_CHECK_DELAY_MS = 30_000;
 const CHECK_INTERVAL_MS = 4 * 60 * 60_000;
@@ -36,7 +36,7 @@ export class UpdaterService {
     if (this._isCheckInFlight) {
       if (manual && !this._isPassManual) {
         this._isPassManual = true;
-        if (this._lastStatus) this._sendStatus(this._lastStatus);
+        if (this._lastStatus) { this._sendStatus(this._lastStatus); }
       }
       return;
     }
@@ -102,11 +102,11 @@ export class UpdaterService {
 
   async start(): Promise<void> {
     const { channel, hash, version } = await Updater.getLocalInfo();
-    if (channel === "dev") return;
+    if (channel === "dev") { return; }
 
     const lastSeen = await getLastSeenHash();
-    if (lastSeen && lastSeen !== hash) this._installedVersion = version;
-    if (lastSeen !== hash) await setLastSeenHash(hash);
+    if (lastSeen && lastSeen !== hash) { this._installedVersion = version; }
+    if (lastSeen !== hash) { await setLastSeenHash(hash); }
 
     this._applySchedule(await getUpdateMode());
   }
@@ -121,15 +121,15 @@ export class UpdaterService {
   }
 
   private _clearSchedule(): void {
-    if (this._backgroundTimer) clearTimeout(this._backgroundTimer);
-    if (this._backgroundInterval) clearInterval(this._backgroundInterval);
+    if (this._backgroundTimer) { clearTimeout(this._backgroundTimer); }
+    if (this._backgroundInterval) { clearInterval(this._backgroundInterval); }
     this._backgroundTimer = null;
     this._backgroundInterval = null;
   }
 
   private _applySchedule(mode: UpdateMode): void {
     this._clearSchedule();
-    if (mode !== "automatic") return;
+    if (mode !== "automatic") { return; }
     this._backgroundTimer = setTimeout(
       () => void this.checkForUpdates(false),
       INITIAL_CHECK_DELAY_MS

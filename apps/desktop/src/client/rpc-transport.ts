@@ -1,14 +1,15 @@
 import {
-  uuid,
   type AgentEvent,
   type AgentTransport,
   type ThreadAgentRuntimeProvenance,
+  uuid
 } from "@llm-space/core";
 
 import { electrobun } from "@/lib/electrobun";
+
 import type {
   StreamThreadRequestPayload,
-  StreamThreadResponsePayload,
+  StreamThreadResponsePayload
 } from "@/shared/rpc";
 
 const ABORT_ERROR = () =>
@@ -20,8 +21,8 @@ const ABORT_ERROR = () =>
  * `receiveStreamThreadResponse` messages into an async iterator of events.
  */
 export function createRpcTransport(options?: {
-  runtime?: () => StreamThreadRequestPayload["runtime"];
   onRuntimeResolved?: (runtime: ThreadAgentRuntimeProvenance) => void;
+  runtime?: () => StreamThreadRequestPayload["runtime"];
 }): AgentTransport {
   return async function* rpcTransport(request, { signal }) {
     const rpc = electrobun.rpc;
@@ -75,7 +76,7 @@ export function createRpcTransport(options?: {
       rpc.send.sendStreamThreadRequest({
         streamId,
         request,
-        ...(options?.runtime ? { runtime: options.runtime() } : {}),
+        ...(options?.runtime ? { runtime: options.runtime() } : {})
       });
       while (true) {
         while (events.length > 0) {
@@ -90,7 +91,7 @@ export function createRpcTransport(options?: {
         if (finished) {
           return;
         }
-        await new Promise<void>((resolve) => {
+        await new Promise<void>(resolve => {
           wake = resolve;
         });
       }

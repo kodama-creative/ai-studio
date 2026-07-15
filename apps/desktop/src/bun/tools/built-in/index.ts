@@ -1,4 +1,4 @@
 export {
-  createBuiltInToolsModule,
   type BuiltInToolsModuleDependencies,
+  createBuiltInToolsModule
 } from "./built-in-tools-module";

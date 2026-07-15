@@ -1,9 +1,10 @@
 import { electrobun } from "@/lib/electrobun";
+
 import type {
   McpCallToolResponse,
   McpServerDraft,
   McpServerToolsResponse,
-  McpServerView,
+  McpServerView
 } from "@/shared/mcp";
 
 function _rpc() {
@@ -49,9 +50,9 @@ export async function listMcpTools(
 }
 
 export async function callMcpTool(input: {
+  arguments: Record<string, unknown>;
   serverId: string;
   toolName: string;
-  arguments: Record<string, unknown>;
 }): Promise<McpCallToolResponse> {
   return _rpc().request.mcpCallTool(input);
 }

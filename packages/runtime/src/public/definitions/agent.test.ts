@@ -6,12 +6,12 @@ describe("defineAgent", () => {
   test("preserves authored literal definition values", () => {
     const definition = defineAgent({
       model: "openai/gpt-5.3-codex",
-      reasoning: "high",
+      reasoning: "high"
     });
 
     expect(definition).toEqual({
       model: "openai/gpt-5.3-codex",
-      reasoning: "high",
+      reasoning: "high"
     });
     expect(definition.model).toBe("openai/gpt-5.3-codex");
   });

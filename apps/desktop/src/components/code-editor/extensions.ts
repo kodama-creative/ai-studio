@@ -2,12 +2,13 @@ import { javascript } from "@codemirror/lang-javascript";
 import { json } from "@codemirror/lang-json";
 import { markdown } from "@codemirror/lang-markdown";
 import { languages } from "@codemirror/language-data";
-import { type Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
+
+import type { Extension } from "@codemirror/state";
 
 import type { CodeEditorLanguage } from "./editor";
 
-export function createExtensions(language: CodeEditorLanguage | "none") {
+export function createExtensions(language: "none" | CodeEditorLanguage) {
   const extensions: Extension[] = [EditorView.lineWrapping];
   switch (language) {
     case "none":
@@ -24,7 +25,7 @@ export function createExtensions(language: CodeEditorLanguage | "none") {
     default:
       extensions.push(
         markdown({
-          codeLanguages: languages,
+          codeLanguages: languages
         })
       );
       break;

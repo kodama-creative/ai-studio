@@ -14,9 +14,9 @@ export async function listBuiltInTools(): Promise<BuiltinTool[]> {
 }
 
 export async function callBuiltInTool(input: {
-  name: string;
   arguments: Record<string, unknown>;
-}): Promise<{ contentText: string }> {
+  name: string;
+}): Promise<{ contentText: string; }> {
   return _rpc().request.builtInCallTool(input);
 }
 

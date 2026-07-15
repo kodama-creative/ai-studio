@@ -1,4 +1,4 @@
-export type FileNodeType = "file" | "directory";
+export type FileNodeType = "directory" | "file";
 
 /**
  * A single entry in the virtual file system.

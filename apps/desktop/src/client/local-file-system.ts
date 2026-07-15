@@ -10,7 +10,7 @@ import { normalizeThreadForPath } from "@/lib/thread-file";
  * issues a request and rejects with the bun handler's error on failure.
  */
 export class LocalFileSystemClient implements FileSystem, ThreadStorage {
-  ls(path: string): Promise<FileNode[]> {
+  async ls(path: string): Promise<FileNode[]> {
     return this._rpc().request.fsLs({ path });
   }
 
@@ -38,7 +38,7 @@ export class LocalFileSystemClient implements FileSystem, ThreadStorage {
   async write(path: string, thread: Thread): Promise<void> {
     await this._rpc().request.fsWrite({
       path,
-      thread: normalizeThreadForPath(thread, path),
+      thread: normalizeThreadForPath(thread, path)
     });
   }
 

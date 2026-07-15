@@ -11,7 +11,7 @@ const MAX_REQUEST_TIME_MS = 5 * 60_000 + 10_000;
 
 const rpc = Electroview.defineRPC<DesktopRPCType>({
   maxRequestTime: MAX_REQUEST_TIME_MS,
-  handlers: { requests: {}, messages: {} },
+  handlers: { requests: {}, messages: {} }
 });
 
 export const electrobun = new Electroview({ rpc });

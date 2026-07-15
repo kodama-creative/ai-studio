@@ -1,4 +1,4 @@
-import { uuid, type Message, type Tool } from "@llm-space/core";
+import { type Message, type Tool, uuid } from "@llm-space/core";
 import {
   BookOpenTextIcon,
   BotIcon,
@@ -6,15 +6,13 @@ import {
   FileIcon,
   ImageIcon,
   LanguagesIcon,
-  SparklesIcon,
-  TelescopeIcon,
   type LucideIcon,
+  SparklesIcon,
+  TelescopeIcon
 } from "lucide-react";
 
 import { ensureRootDir } from "@/client/paths";
 import { getSkillsSettings, listSkills } from "@/client/skills";
-import type { SkillInfo } from "@/shared/skills";
-
 import compactMemoryPrompt from "./compact-memory.md?raw";
 import deepResearchPrompt from "./deep-research.md?raw";
 import deepWikiPrompt from "./deep-wiki.md?raw";
@@ -24,20 +22,22 @@ import metaPromptWithTools from "./meta-prompt-with-tools.md?raw";
 import { TOOL_EXAMPLES } from "./tools";
 import translationPrompt from "./translation.md?raw";
 
+import type { SkillInfo } from "@/shared/skills";
+
 /**
  * A seed field that is either a literal value or a factory re-evaluated every
  * time a thread is created from the example. The factory form lets a field
  * depend on live state (e.g. the currently enabled skills) instead of a value
  * frozen at module load.
  */
-export type Resolvable<T> = T | (() => T | Promise<T>);
+export type Resolvable<T> = (() => Promise<T> | T) | T;
 
 /** Resolve a {@link Resolvable}, calling and awaiting the factory form. */
 export async function resolveSeed<T>(
   value: Resolvable<T> | undefined
 ): Promise<T | undefined> {
   if (typeof value === "function") {
-    return (value as () => T | Promise<T>)();
+    return (value as () => Promise<T> | T)();
   }
   return value;
 }
@@ -50,20 +50,22 @@ export interface PromptExample {
   description: string;
   content: Resolvable<string>;
   icon: LucideIcon;
+
   /** Tools to seed the new thread with (only used by "Start from Example"). */
   tools?: Resolvable<Tool[]>;
+
   /** Messages to seed the new thread with (only used by "Start from Example"). */
   messages?: Resolvable<Message[]>;
 }
 
-export type PromptExampleItem = PromptExample | { type: "separator" };
+export type PromptExampleItem = { type: "separator"; } | PromptExample;
 
 /** Resolve shared tool definitions by their function `name` (not display label). */
 function pickTools(names: string[]): Tool[] {
   return TOOL_EXAMPLES.filter(
-    (item) => item.type === "tool" && names.includes(item.tool.name)
+    item => item.type === "tool" && names.includes(item.tool.name)
   )
-    .map((item) => (item.type === "tool" ? item.tool : undefined))
+    .map(item => (item.type === "tool" ? item.tool : undefined))
     .filter(Boolean) as Tool[];
 }
 
@@ -74,9 +76,9 @@ function pickTools(names: string[]): Tool[] {
  */
 function pickBuiltInTools(names: string[]): Tool[] {
   return names
-    .map((name) => {
+    .map(name => {
       const item = TOOL_EXAMPLES.find(
-        (entry) => entry.type === "tool" && entry.tool.name === name
+        entry => entry.type === "tool" && entry.tool.name === name
       );
       return item?.type === "tool"
         ? { ...item.tool, type: "builtin" as const }
@@ -93,19 +95,19 @@ function userPrompt(text: string): Message[] {
       content: [
         {
           type: "text",
-          text,
-        },
-      ],
-    },
+          text
+        }
+      ]
+    }
   ];
 }
 
 /** Build one user message per text, each as its own turn. */
 function userPrompts(texts: string[]): Message[] {
-  return texts.map((text) => ({
+  return texts.map(text => ({
     id: uuid(),
     role: "user",
-    content: [{ type: "text", text }],
+    content: [{ type: "text", text }]
   }));
 }
 
@@ -117,7 +119,7 @@ function userPrompts(texts: string[]): Message[] {
 async function listEnabledSkills(): Promise<SkillInfo[]> {
   const { discoveryPaths } = await getSkillsSettings();
   const perPath = await Promise.all(
-    discoveryPaths.map((entry) => listSkills(entry.path))
+    discoveryPaths.map(async entry => listSkills(entry.path))
   );
   const byName = new Map<string, SkillInfo>();
   for (const skill of perPath.flat()) {
@@ -136,7 +138,7 @@ async function listEnabledSkills(): Promise<SkillInfo[]> {
 async function generalAgentMessages(): Promise<Message[]> {
   const [, rootPath] = await Promise.all([
     listEnabledSkills(),
-    ensureRootDir("tmp/deep-research"),
+    ensureRootDir("tmp/deep-research")
   ]);
   const reminder = `<system-reminder>
 <current-date>{{current_date}}</current_date>
@@ -151,7 +153,7 @@ async function generalAgentMessages(): Promise<Message[]> {
     {
       id: uuid(),
       role: "user",
-      content: [{ type: "text", text: reminder }],
+      content: [{ type: "text", text: reminder }]
     },
     {
       id: uuid(),
@@ -159,10 +161,10 @@ async function generalAgentMessages(): Promise<Message[]> {
       content: [
         {
           type: "text",
-          text: "Perform a deep research of Loop Engineering",
-        },
-      ],
-    },
+          text: "Perform a deep research of Loop Engineering"
+        }
+      ]
+    }
   ];
 }
 
@@ -181,7 +183,7 @@ export const PROMPT_EXAMPLES: readonly PromptExampleItem[] = [
     content:
       "You're a helpful and harmless assistant, answering questions, and more.",
     icon: FileIcon,
-    messages: userPrompt("What's the capital of France?"),
+    messages: userPrompt("What's the capital of France?")
   },
   { type: "separator" },
   {
@@ -207,11 +209,11 @@ export const PROMPT_EXAMPLES: readonly PromptExampleItem[] = [
         "glob",
         "bash",
         "todo_write",
-        "present_files",
+        "present_files"
       ]),
-      ...pickTools(["agent"]),
+      ...pickTools(["agent"])
     ],
-    messages: generalAgentMessages,
+    messages: generalAgentMessages
   },
   {
     type: "example",
@@ -225,8 +227,8 @@ export const PROMPT_EXAMPLES: readonly PromptExampleItem[] = [
     tools: pickBuiltInTools(["web_search", "web_fetch", "todo_write"]),
     messages: userPrompts([
       "<system-reminder>\n<current-date>{{current_date}}</current-date>\n</system-reminder>",
-      "What is Loop Engineering?",
-    ]),
+      "What is Loop Engineering?"
+    ])
   },
   {
     type: "example",
@@ -236,7 +238,7 @@ export const PROMPT_EXAMPLES: readonly PromptExampleItem[] = [
     description: "Translator prompt focused on preserving meaning and style.",
     content: translationPrompt,
     messages: userPrompt("Where there's a will, there's a way."),
-    icon: LanguagesIcon,
+    icon: LanguagesIcon
   },
   {
     type: "example",
@@ -247,7 +249,7 @@ export const PROMPT_EXAMPLES: readonly PromptExampleItem[] = [
     content: deepWikiPrompt,
     messages: userPrompt("Create a deep wiki for [/path/to/the/repository]"),
     icon: BookOpenTextIcon,
-    tools: [...pickBuiltInTools(["read", "ls", "tree"])],
+    tools: [...pickBuiltInTools(["read", "ls", "tree"])]
   },
   {
     type: "example",
@@ -256,7 +258,7 @@ export const PROMPT_EXAMPLES: readonly PromptExampleItem[] = [
     fileStem: "compact-memory",
     description: "Memory compaction prompt for keeping useful context concise.",
     content: compactMemoryPrompt,
-    icon: BrainCircuitIcon,
+    icon: BrainCircuitIcon
   },
   { type: "separator" },
   {
@@ -266,7 +268,7 @@ export const PROMPT_EXAMPLES: readonly PromptExampleItem[] = [
     fileStem: "meta-prompt",
     description: "Prompt-writing assistant that improves instructions.",
     content: metaPromptWithTools,
-    icon: SparklesIcon,
+    icon: SparklesIcon
   },
   {
     type: "example",
@@ -275,8 +277,8 @@ export const PROMPT_EXAMPLES: readonly PromptExampleItem[] = [
     fileStem: "meta-image-prompt",
     description: "Prompt builder for structured image-generation briefs.",
     content: metaImagePrompt,
-    icon: ImageIcon,
-  },
+    icon: ImageIcon
+  }
 ];
 
 export function isPromptExample(

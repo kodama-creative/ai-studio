@@ -4,14 +4,13 @@ import {
   CheckIcon,
   DownloadIcon,
   Loader2Icon,
-  TriangleAlertIcon,
   type LucideIcon,
+  TriangleAlertIcon
 } from "lucide-react";
-import { type ReactNode } from "react";
+
+import type { ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
-import type { UpdateStatus } from "@/shared/updates";
-
 import { Button } from "./ui/button";
 import {
   Dialog,
@@ -19,17 +18,19 @@ import {
   DialogDescription,
   DialogFooter,
   DialogHeader,
-  DialogTitle,
+  DialogTitle
 } from "./ui/dialog";
 
-type Tone = "primary" | "success" | "danger";
+import type { UpdateStatus } from "@/shared/updates";
+
+type Tone = "danger" | "primary" | "success";
 
 interface UpdateDialogProps {
-  open: boolean;
-  status: UpdateStatus | null;
-  onOpenChange: (open: boolean) => void;
-  onRestart: () => void;
-  onRetry: () => void;
+  readonly open: boolean;
+  readonly status: UpdateStatus | null;
+  readonly onOpenChange: (open: boolean) => void;
+  readonly onRestart: () => void;
+  readonly onRetry: () => void;
 }
 
 /**
@@ -43,19 +44,21 @@ export function UpdateDialog({
   status,
   onOpenChange,
   onRestart,
-  onRetry,
+  onRetry
 }: UpdateDialogProps) {
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent className="gap-0 p-0 sm:max-w-[400px]">
-        {status ? (
-          <UpdateDialogBody
-            status={status}
-            onRestart={onRestart}
-            onRetry={onRetry}
-            onClose={() => onOpenChange(false)}
-          />
-        ) : null}
+        {status
+          ? (
+            <UpdateDialogBody
+              onClose={() => { onOpenChange(false); }}
+              onRestart={onRestart}
+              onRetry={onRetry}
+              status={status}
+            />
+          )
+          : null}
       </DialogContent>
     </Dialog>
   );
@@ -75,17 +78,17 @@ function UpdateDialogBody({
   status,
   onRestart,
   onRetry,
-  onClose,
+  onClose
 }: {
-  status: UpdateStatus;
-  onRestart: () => void;
-  onRetry: () => void;
-  onClose: () => void;
+  readonly onClose: () => void;
+  readonly onRestart: () => void;
+  readonly onRetry: () => void;
+  readonly status: UpdateStatus;
 }) {
   const view = viewFor(status, { onRestart, onRetry, onClose });
   return (
     <div className="flex flex-col items-center px-6 pt-8 pb-6 text-center">
-      <IconBadge tone={view.tone} icon={view.icon} spin={view.spin} />
+      <IconBadge icon={view.icon} spin={view.spin} tone={view.tone} />
       <DialogHeader className="mt-4 items-center gap-1.5">
         <DialogTitle className="text-base">{view.title}</DialogTitle>
         <DialogDescription className="text-sm text-balance">
@@ -93,11 +96,13 @@ function UpdateDialogBody({
         </DialogDescription>
       </DialogHeader>
       {view.progress ? <IndeterminateBar tone={view.tone} /> : null}
-      {view.actions ? (
-        <DialogFooter className="mt-6 w-full sm:justify-center">
-          {view.actions}
-        </DialogFooter>
-      ) : null}
+      {view.actions
+        ? (
+          <DialogFooter className="mt-6 w-full sm:justify-center">
+            {view.actions}
+          </DialogFooter>
+        )
+        : null}
     </div>
   );
 }
@@ -107,8 +112,8 @@ function viewFor(
   {
     onRestart,
     onRetry,
-    onClose,
-  }: { onRestart: () => void; onRetry: () => void; onClose: () => void }
+    onClose
+  }: { onClose: () => void; onRestart: () => void; onRetry: () => void; }
 ): View {
   switch (status.state) {
     case "checking":
@@ -119,7 +124,7 @@ function viewFor(
         progress: true,
         title: "Checking for updates",
         description: "Contacting the update server…",
-        actions: null,
+        actions: null
       };
     case "downloading":
       return {
@@ -130,10 +135,10 @@ function viewFor(
         title: "Downloading update",
         description: `Getting version ${status.version} ready to install…`,
         actions: (
-          <Button size="sm" variant="outline" onClick={onClose}>
+          <Button onClick={onClose} size="sm" variant="outline">
             Continue in background
           </Button>
-        ),
+        )
       };
     case "up-to-date":
       return {
@@ -142,10 +147,10 @@ function viewFor(
         title: "You're all set!",
         description: `You're already running the latest version — v${status.version}.`,
         actions: (
-          <Button size="sm" onClick={onClose}>
+          <Button onClick={onClose} size="sm">
             Gotcha
           </Button>
-        ),
+        )
       };
     case "ready":
       return {
@@ -155,14 +160,14 @@ function viewFor(
         description: `Version ${status.version} has been downloaded and is ready to install. Restarting takes just a moment.`,
         actions: (
           <>
-            <Button size="sm" variant="outline" onClick={onClose}>
+            <Button onClick={onClose} size="sm" variant="outline">
               Later
             </Button>
-            <Button size="sm" onClick={onRestart}>
+            <Button onClick={onRestart} size="sm">
               Restart now
             </Button>
           </>
-        ),
+        )
       };
     case "error":
       return {
@@ -172,44 +177,44 @@ function viewFor(
         description: status.message,
         actions: (
           <>
-            <Button size="sm" variant="outline" onClick={onClose}>
+            <Button onClick={onClose} size="sm" variant="outline">
               Close
             </Button>
-            <Button size="sm" onClick={onRetry}>
+            <Button onClick={onRetry} size="sm">
               Try again
             </Button>
           </>
-        ),
+        )
       };
   }
 }
 
-const TONE: Record<Tone, { badge: string; glow: string; bar: string }> = {
+const TONE: Record<Tone, { badge: string; bar: string; glow: string; }> = {
   primary: {
     badge: "bg-primary/12 text-primary ring-primary/25",
     glow: "bg-primary/30",
-    bar: "bg-primary",
+    bar: "bg-primary"
   },
   success: {
     badge: "bg-emerald-500/12 text-emerald-300 ring-emerald-400/25",
     glow: "bg-emerald-500/30",
-    bar: "bg-emerald-400",
+    bar: "bg-emerald-400"
   },
   danger: {
     badge: "bg-destructive/12 text-destructive ring-destructive/25",
     glow: "bg-destructive/30",
-    bar: "bg-destructive",
-  },
+    bar: "bg-destructive"
+  }
 };
 
 function IconBadge({
   tone,
   icon: Icon,
-  spin,
+  spin
 }: {
-  tone: Tone;
-  icon: LucideIcon;
-  spin?: boolean;
+  readonly icon: LucideIcon;
+  readonly spin?: boolean;
+  readonly tone: Tone;
 }) {
   const t = TONE[tone];
   return (
@@ -233,7 +238,7 @@ function IconBadge({
   );
 }
 
-function IndeterminateBar({ tone }: { tone: Tone }) {
+function IndeterminateBar({ tone }: { readonly tone: Tone; }) {
   const t = TONE[tone];
   return (
     <div

@@ -1,33 +1,31 @@
-/* eslint-disable @typescript-eslint/unbound-method */
+
 import {
-  AssistantMessage,
+  type AgentTransport,
+  type BuiltinTool,
   getMessageText,
   isDangerousBashCommand,
   isExecutableTool,
   isRunnableConversation,
-  Message,
-  normalizeThread,
-  reduceMessages,
-  RUN_LAST_MESSAGE_ERROR,
-  streamThread,
-  Tool as ToolSchema,
-  uuid,
-  type AgentTransport,
-  type BuiltinTool,
   type McpTool,
-  type ProjectTool,
   type MessageContent,
   type ModelConfig,
   type ModelConfigParams,
+  normalizeThread,
+  type ProjectTool,
   type ReducedMessageContent,
+  reduceMessages,
+  RUN_LAST_MESSAGE_ERROR,
+  streamThread,
   type Thread,
   type ThreadContext,
   type ThreadVariable,
-  type ThreadVariableVariants,
   type ThreadVariables,
+  type ThreadVariableVariants,
   type Tool,
   type ToolCall,
+  Tool as ToolSchema,
   type UserMessage,
+  uuid
 } from "@llm-space/core";
 import {
   aggregateMessageUsage,
@@ -35,6 +33,11 @@ import {
   createToolResultPromptVariablePlaceKey,
   DEFAULT_VARIABLE_VARIANT_NAME,
   ensureThreadVariableState,
+  type EvaluationRecord,
+  type EvaluationRubricInput,
+  type EvaluationRubricRecord,
+  type EvaluationRubricSnapshot,
+  type EvaluationRunScores,
   normalizeEvaluationRubrics,
   normalizeEvaluations,
   normalizePromptVariableState,
@@ -44,37 +47,35 @@ import {
   removePromptVariableSnapshotPlaces,
   renderThreadPromptVariables,
   replaceThreadPromptVariableReferences,
+  type RunSnapshot,
   SYSTEM_PROMPT_PLACE_KEY,
   upsertEvaluation,
   upsertEvaluationRubric,
   withPromptVariableSnapshot,
-  withRunMetadata,
-  type EvaluationRecord,
-  type EvaluationRubricInput,
-  type EvaluationRubricRecord,
-  type EvaluationRubricSnapshot,
-  type EvaluationRunScores,
-  type RunSnapshot,
+  withRunMetadata
 } from "@llm-space/core/thread";
 import { createContext, useContext } from "react";
 import { toast } from "sonner";
 import { Compile } from "typebox/compile";
-import { createStore, useStore, type StoreApi } from "zustand";
+import { createStore, type StoreApi, useStore } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
 import { useShallow } from "zustand/shallow";
 
+import type {
+  AssistantMessage,
+  Message
+} from "@llm-space/core";
+
 import { createFrameThrottle } from "@/lib/frame-throttle";
-
-import { PREVIEW_THROTTLE_MS } from "../streaming-preview";
-import { listEnabledPromptVariableSkills } from "../variable/prompt-variable-skills";
-
 import {
+  type ChangeHistory,
   createInitialHistory,
   recordSnapshot,
   redo as redoHistory,
-  undo as undoHistory,
-  type ChangeHistory,
+  undo as undoHistory
 } from "./thread-history";
+import { PREVIEW_THROTTLE_MS } from "../streaming-preview";
+import { listEnabledPromptVariableSkills } from "../variable/prompt-variable-skills";
 
 const toolValidator = Compile(ToolSchema);
 
@@ -94,6 +95,7 @@ export interface ThreadState {
   abortController: AbortController | null;
   activeRunId: string | null;
   collapsedMessageIds: string[];
+
   /**
    * Id of the message whose editor should grab focus on mount — set only by
    * append/insert. Every other editor mounts with autoFocus off so opening a
@@ -102,10 +104,13 @@ export interface ThreadState {
    */
   autoFocusMessageId: string | null;
   changeHistory: ChangeHistory;
+
   /** Thread snapshot + completion time after each run; most recent last. */
   runHistory: RunSnapshot[];
+
   /** Manual verdicts comparing durable run snapshots. */
   evaluations: EvaluationRecord[];
+
   /** Reusable manual evaluation rubrics owned by this thread. */
   evaluationRubrics: EvaluationRubricRecord[];
 
@@ -116,11 +121,11 @@ export interface ThreadState {
   removeRun(run: RunSnapshot): void;
   saveEvaluation(input: {
     leftRunId: string;
-    rightRunId: string;
-    verdict: EvaluationRecord["verdict"];
     note?: string;
+    rightRunId: string;
     rubric?: EvaluationRubricSnapshot;
     runScores?: EvaluationRunScores[];
+    verdict: EvaluationRecord["verdict"];
   }): boolean;
   removeEvaluation(evaluation: EvaluationRecord): void;
   saveEvaluationRubric(
@@ -166,7 +171,37 @@ export type ThreadStore = StoreApi<ThreadState>;
 export function createThreadStore(
   initialThread: Thread,
   options: {
-    transport: AgentTransport;
+    /**
+     * Execute an MCP or built-in tool call, returning its textual result. Only
+     * used by the auto-run-tools path; manual tool runs go through the UI's own
+     * runner. Injected so the store stays decoupled from the RPC layer.
+     */
+    executeTool?: (
+      tool: BuiltinTool | McpTool | ProjectTool,
+      args: Record<string, unknown>
+    ) => Promise<{ contentText: string; isError: boolean; }>;
+
+    /**
+     * Whether a run should automatically execute a model turn's pending tool
+     * calls (instead of waiting for the user to click "Call tools"). Read fresh
+     * at run time. On its own it runs tools once and stops; combined with
+     * {@link getReactLoop} it keeps looping. Defaults to `false`.
+     */
+    getAutoRunTools?: () => boolean;
+
+    /**
+     * Whether the ReAct loop is enabled: keep alternating model turn ⇄ tool
+     * execution until the model stops calling tools. Implies auto-running tools.
+     * Read fresh at run time. Defaults to `false`.
+     */
+    getReactLoop?: () => boolean;
+
+    /** Skills available to prompt-variable rendering for this Thread. */
+    loadPromptSkills?: typeof listEnabledPromptVariableSkills;
+
+    /** Add host-owned runtime provenance before recording a run snapshot. */
+    prepareRunSnapshot?: (thread: Thread) => Thread;
+
     /**
      * Resolve the model a run/edit should use given the thread's saved model:
      * the saved model when still available, else the user's default, else the
@@ -177,34 +212,10 @@ export function createThreadStore(
     resolveModel?: (
       saved: ModelConfig | null | undefined
     ) => ModelConfig | null;
-    /**
-     * Whether a run should automatically execute a model turn's pending tool
-     * calls (instead of waiting for the user to click "Call tools"). Read fresh
-     * at run time. On its own it runs tools once and stops; combined with
-     * {@link getReactLoop} it keeps looping. Defaults to `false`.
-     */
-    getAutoRunTools?: () => boolean;
-    /**
-     * Whether the ReAct loop is enabled: keep alternating model turn ⇄ tool
-     * execution until the model stops calling tools. Implies auto-running tools.
-     * Read fresh at run time. Defaults to `false`.
-     */
-    getReactLoop?: () => boolean;
-    /**
-     * Execute an MCP or built-in tool call, returning its textual result. Only
-     * used by the auto-run-tools path; manual tool runs go through the UI's own
-     * runner. Injected so the store stays decoupled from the RPC layer.
-     */
-    executeTool?: (
-      tool: McpTool | BuiltinTool | ProjectTool,
-      args: Record<string, unknown>
-    ) => Promise<{ contentText: string; isError: boolean }>;
-    /** Skills available to prompt-variable rendering for this Thread. */
-    loadPromptSkills?: typeof listEnabledPromptVariableSkills;
+
     /** Runtime transport owns tool execution and continuation for this Thread. */
     runtimeOwnsToolLoop?: boolean;
-    /** Add host-owned runtime provenance before recording a run snapshot. */
-    prepareRunSnapshot?: (thread: Thread) => Thread;
+    transport: AgentTransport;
   }
 ): ThreadStore {
   const normalizedInputThread = ensureThreadVariableState(
@@ -223,7 +234,7 @@ export function createThreadStore(
   const normalizedInitialThread = withRunMetadata(normalizedInputThread, {
     runHistory: initialRunHistory,
     evaluations: initialEvaluations,
-    evaluationRubrics: initialEvaluationRubrics,
+    evaluationRubrics: initialEvaluationRubrics
   });
 
   return createStore<ThreadState>()(
@@ -267,7 +278,7 @@ export function createThreadStore(
         values: Record<string, string>
       ): ThreadVariableVariants => ({
         active: DEFAULT_VARIABLE_VARIANT_NAME,
-        variants: { [DEFAULT_VARIABLE_VARIANT_NAME]: values },
+        variants: { [DEFAULT_VARIABLE_VARIANT_NAME]: values }
       });
 
       /*
@@ -300,7 +311,7 @@ export function createThreadStore(
 
       const showDuplicateVariableName = (name: string) => {
         toast.error("Variable name already exists", {
-          description: `"${name}" is already used by another variable.`,
+          description: `"${name}" is already used by another variable.`
         });
       };
 
@@ -319,7 +330,7 @@ export function createThreadStore(
 
       const getMessage = (id: string) =>
         (get().thread.context?.messages ?? []).find(
-          (message) => message.id === id
+          message => message.id === id
         );
 
       /** Replace a single message by id; no-op (same array ref) if not found. */
@@ -327,9 +338,9 @@ export function createThreadStore(
         id: string,
         updater: (message: Message) => Message
       ) => {
-        updateMessages((messages) => {
+        updateMessages(messages => {
           let changed = false;
-          const next = messages.map((message) => {
+          const next = messages.map(message => {
             if (message.id !== id) {
               return message;
             }
@@ -343,7 +354,7 @@ export function createThreadStore(
       const createUserMessage = (): UserMessage => ({
         id: uuid(),
         role: "user",
-        content: [{ type: "text", text: "" }],
+        content: [{ type: "text", text: "" }]
       });
 
       /** Validate a tool against the schema, toasting the first errors. */
@@ -352,7 +363,7 @@ export function createThreadStore(
           const errors = [...toolValidator.Errors(tool)];
           toast.error("Error", {
             description:
-              errors.map((e) => e.message).join(", ") || "Invalid tool",
+              errors.map(e => e.message).join(", ") || "Invalid tool"
           });
           return false;
         }
@@ -361,14 +372,14 @@ export function createThreadStore(
 
       /** Keep image contents before any other content, preserving order. */
       const partitionImagesFirst = (content: UserMessage["content"]) => [
-        ...content.filter((c) => c.type === "image_data"),
-        ...content.filter((c) => c.type !== "image_data"),
+        ...content.filter(c => c.type === "image_data"),
+        ...content.filter(c => c.type !== "image_data")
       ];
 
       const hasContent = (message: AssistantMessage): boolean =>
-        Boolean(message.thinking) ||
-        message.content.length > 0 ||
-        (message.toolCalls?.length ?? 0) > 0;
+        Boolean(message.thinking)
+        || message.content.length > 0
+        || (message.toolCalls?.length ?? 0) > 0;
 
       /**
        * Auto-call the pending tool calls on the last message so a run can loop
@@ -396,15 +407,15 @@ export function createThreadStore(
           return null;
         }
         const toolsByName = new Map(
-          (get().thread.context?.tools ?? []).map((tool) => [tool.name, tool])
+          (get().thread.context?.tools ?? []).map(tool => [tool.name, tool])
         );
         // Every tool call must map to an executable (MCP/built-in) tool; a
         // single `function` stub means the turn needs a hand-written result, so
         // we bail and let the user fill it in.
-        const executable: {
+        const executable: Array<{
+          tool: BuiltinTool | McpTool | ProjectTool;
           toolCall: ToolCall;
-          tool: McpTool | BuiltinTool | ProjectTool;
-        }[] = [];
+        }> = [];
         for (const toolCall of toolCalls) {
           const tool = toolsByName.get(toolCall.input.name);
           if (!tool || !isExecutableTool(tool)) {
@@ -415,15 +426,15 @@ export function createThreadStore(
           // tool: stop the loop and leave it pending for the user to review and
           // run by hand.
           if (tool.type === "builtin" && tool.name === "bash") {
-            const command = (toolCall.input.arguments as { command?: unknown })
+            const command = (toolCall.input.arguments as { command?: unknown; })
               ?.command;
             if (
-              typeof command === "string" &&
-              isDangerousBashCommand(command)
+              typeof command === "string"
+              && isDangerousBashCommand(command)
             ) {
               toast.warning("Auto-run paused for a risky command", {
                 description:
-                  "A bash command looked destructive, so it wasn't run automatically. Review it and run it by hand if it's safe.",
+                  "A bash command looked destructive, so it wasn't run automatically. Review it and run it by hand if it's safe."
               });
               return null;
             }
@@ -450,19 +461,19 @@ export function createThreadStore(
         if (signal.aborted) {
           return null;
         }
-        const resultById = new Map(results.map((r) => [r.id, r]));
+        const resultById = new Map(results.map(r => [r.id, r]));
         const nextLast: AssistantMessage = {
           ...last,
-          toolCalls: toolCalls.map((toolCall) => {
+          toolCalls: toolCalls.map(toolCall => {
             const result = resultById.get(toolCall.id)!;
             return {
               ...toolCall,
               output: {
                 content: [{ type: "text", text: result.text }],
-                isError: result.isError,
-              },
+                isError: result.isError
+              }
             };
-          }),
+          })
         };
         const next = [...messages.slice(0, -1), nextLast];
         setMessages(next);
@@ -486,13 +497,13 @@ export function createThreadStore(
 
         appendMessage() {
           const message = createUserMessage();
-          updateMessages((messages) => [...messages, message]);
+          updateMessages(messages => [...messages, message]);
           set({ autoFocusMessageId: message.id });
           return message.id;
         },
         insertMessageBefore(beforeMessageId: string) {
           const messages = get().thread.context?.messages ?? [];
-          const index = messages.findIndex((m) => m.id === beforeMessageId);
+          const index = messages.findIndex(m => m.id === beforeMessageId);
           if (index === -1) {
             return;
           }
@@ -500,18 +511,18 @@ export function createThreadStore(
           setMessages([
             ...messages.slice(0, index),
             message,
-            ...messages.slice(index),
+            ...messages.slice(index)
           ]);
           set({ autoFocusMessageId: message.id });
         },
         moveMessage(fromIndex: number, toIndex: number) {
-          updateMessages((messages) => {
+          updateMessages(messages => {
             if (
-              fromIndex === toIndex ||
-              fromIndex < 0 ||
-              toIndex < 0 ||
-              fromIndex >= messages.length ||
-              toIndex >= messages.length
+              fromIndex === toIndex
+              || fromIndex < 0
+              || toIndex < 0
+              || fromIndex >= messages.length
+              || toIndex >= messages.length
             ) {
               return messages;
             }
@@ -525,13 +536,13 @@ export function createThreadStore(
           });
         },
         removeMessage(id: string) {
-          updateMessages((messages) => messages.filter((m) => m.id !== id));
+          updateMessages(messages => messages.filter(m => m.id !== id));
           const { collapsedMessageIds } = get();
           if (collapsedMessageIds.includes(id)) {
             set({
               collapsedMessageIds: collapsedMessageIds.filter(
-                (cid) => cid !== id
-              ),
+                cid => cid !== id
+              )
             });
           }
         },
@@ -543,8 +554,8 @@ export function createThreadStore(
           patchContext({
             systemPrompt,
             snapshot: removePromptVariableSnapshotPlaces(context.snapshot, [
-              SYSTEM_PROMPT_PLACE_KEY,
-            ]),
+              SYSTEM_PROMPT_PLACE_KEY
+            ])
           });
         },
         updatePromptVariable(name, variable) {
@@ -560,8 +571,8 @@ export function createThreadStore(
           }
           const { variables, variableVariants } = getVariableState();
           if (
-            Object.prototype.hasOwnProperty.call(variables, newName) ||
-            allCustomVariableNames(variableVariants).has(newName)
+            Object.hasOwn(variables, newName)
+            || allCustomVariableNames(variableVariants).has(newName)
           ) {
             showDuplicateVariableName(newName);
             return false;
@@ -578,22 +589,22 @@ export function createThreadStore(
               {
                 ...(get().thread.context ?? {}),
                 variables: nextVariables,
-                variableVariants,
+                variableVariants
               },
               oldName,
               newName
-            ),
+            )
           });
           return true;
         },
         addCustomVariable(name, value = "") {
           const { variables, variableVariants } = getVariableState();
           const customValues = defaultCustomValues(variableVariants);
-          if (Object.prototype.hasOwnProperty.call(variables, name)) {
+          if (Object.hasOwn(variables, name)) {
             showDuplicateVariableName(name);
             return false;
           }
-          if (Object.prototype.hasOwnProperty.call(customValues, name)) {
+          if (Object.hasOwn(customValues, name)) {
             showDuplicateVariableName(name);
             return false;
           }
@@ -613,14 +624,14 @@ export function createThreadStore(
           const existingCustomNames = customVariableNames(variableVariants);
           existingCustomNames.delete(oldName);
           if (
-            Object.prototype.hasOwnProperty.call(variables, newName) ||
-            existingCustomNames.has(newName)
+            Object.hasOwn(variables, newName)
+            || existingCustomNames.has(newName)
           ) {
             showDuplicateVariableName(newName);
             return false;
           }
           const customValues = defaultCustomValues(variableVariants);
-          if (!Object.prototype.hasOwnProperty.call(customValues, oldName)) {
+          if (!Object.hasOwn(customValues, oldName)) {
             return false;
           }
           const nextValues = { ...customValues };
@@ -632,11 +643,11 @@ export function createThreadStore(
               {
                 ...(get().thread.context ?? {}),
                 variables,
-                variableVariants: withDefaultCustomValues(nextValues),
+                variableVariants: withDefaultCustomValues(nextValues)
               },
               oldName,
               newName
-            ),
+            )
           });
           return true;
         },
@@ -664,20 +675,20 @@ export function createThreadStore(
             return;
           }
           patchThread({
-            model: { ...base, params: { ...base.params, ...params } },
+            model: { ...base, params: { ...base.params, ...params } }
           });
         },
         updateModel(model: Pick<ModelConfig, "id" | "provider">) {
           const current = get().thread.model;
           patchThread({
-            model: { ...current, provider: model.provider, id: model.id },
+            model: { ...current, provider: model.provider, id: model.id }
           });
         },
         updateMessageTextContent(id: string, text: string) {
           const context = get().thread.context ?? {};
           const messages = context.messages ?? [];
           let changed = false;
-          const nextMessages = messages.map((message) => {
+          const nextMessages = messages.map(message => {
             if (message.id !== id) {
               return message;
             }
@@ -686,7 +697,7 @@ export function createThreadStore(
             }
             changed = true;
             const content = [...message.content] as MessageContent[];
-            const index = content.findIndex((c) => c.type === "text");
+            const index = content.findIndex(c => c.type === "text");
             if (index === -1) {
               content.push({ type: "text", text });
             } else {
@@ -700,22 +711,22 @@ export function createThreadStore(
           patchContext({
             messages: nextMessages,
             snapshot: removePromptVariableSnapshotPlaces(context.snapshot, [
-              createMessagePromptVariablePlaceKey(id),
-            ]),
+              createMessagePromptVariablePlaceKey(id)
+            ])
           });
         },
         addMessageImageContent(id: string, mimeType: string, data: string) {
           if (getMessage(id)?.role !== "user") {
             return;
           }
-          updateMessage(id, (message) => {
+          updateMessage(id, message => {
             const user = message as UserMessage;
             return {
               ...user,
               content: partitionImagesFirst([
                 ...user.content,
-                { type: "image_data", mimeType, data },
-              ]),
+                { type: "image_data", mimeType, data }
+              ])
             };
           });
         },
@@ -727,21 +738,21 @@ export function createThreadStore(
           if (message.content[contentIndex]?.type !== "image_data") {
             return;
           }
-          updateMessage(id, (m) => {
+          updateMessage(id, m => {
             const user = m as UserMessage;
             return {
               ...user,
               content: partitionImagesFirst(
                 user.content.filter((_, index) => index !== contentIndex)
-              ),
+              )
             };
           });
         },
         addTool(tool) {
           const { thread } = get();
-          if (thread.context?.tools?.some((t) => t.name === tool.name)) {
+          if (thread.context?.tools?.some(t => t.name === tool.name)) {
             toast.error("Error", {
-              description: `Tool "${tool.name}" already exists`,
+              description: `Tool "${tool.name}" already exists`
             });
             return false;
           }
@@ -753,16 +764,16 @@ export function createThreadStore(
         },
         updateTool(name, tool) {
           const tools = get().thread.context?.tools ?? [];
-          const index = tools.findIndex((t) => t.name === name);
+          const index = tools.findIndex(t => t.name === name);
           if (index === -1) {
             return false;
           }
           if (!validateTool(tool)) {
             return false;
           }
-          if (tool.name !== name && tools.some((t) => t.name === tool.name)) {
+          if (tool.name !== name && tools.some(t => t.name === tool.name)) {
             toast.error("Error", {
-              description: `Tool "${tool.name}" already exists`,
+              description: `Tool "${tool.name}" already exists`
             });
             return false;
           }
@@ -773,44 +784,44 @@ export function createThreadStore(
         },
         removeTool(name) {
           patchContext({
-            tools: get().thread.context?.tools?.filter((t) => t.name !== name),
+            tools: get().thread.context?.tools?.filter(t => t.name !== name)
           });
         },
         markToolCallAttempt(messageId, toolCallId, at) {
           const context = get().thread.context ?? {};
           const messages = context.messages ?? [];
           let changed = false;
-          const nextMessages = messages.map((message) => {
+          const nextMessages = messages.map(message => {
             if (message.id !== messageId || message.role !== "assistant") {
               return message;
             }
             let messageChanged = false;
-            const toolCalls = message.toolCalls?.map((toolCall) => {
-              if (toolCall.id !== toolCallId) return toolCall;
+            const toolCalls = message.toolCalls?.map(toolCall => {
+              if (toolCall.id !== toolCallId) { return toolCall; }
               changed = true;
               messageChanged = true;
               return {
                 ...toolCall,
-                attempt: { status: "started" as const, at },
+                attempt: { status: "started" as const, at }
               };
             });
             return messageChanged ? { ...message, toolCalls } : message;
           });
-          if (changed) patchContext({ messages: nextMessages });
+          if (changed) { patchContext({ messages: nextMessages }); }
         },
         async continueAfterProjectToolResult(messageId) {
           if (
-            !options.runtimeOwnsToolLoop ||
-            !(options.getReactLoop?.() ?? false) ||
-            get().status === "running"
+            !options.runtimeOwnsToolLoop
+            || !(options.getReactLoop?.() ?? false)
+            || get().status === "running"
           ) {
             return false;
           }
           const message = getMessage(messageId);
           if (
-            message?.role !== "assistant" ||
-            !message.toolCalls?.length ||
-            message.toolCalls.some((toolCall) => !toolCall.output)
+            message?.role !== "assistant"
+            || !message.toolCalls?.length
+            || message.toolCalls.some(toolCall => !toolCall.output)
           ) {
             return false;
           }
@@ -822,33 +833,33 @@ export function createThreadStore(
           const messages = context.messages ?? [];
           let changed = false;
           let textChanged = false;
-          const nextMessages = messages.map((message) => {
+          const nextMessages = messages.map(message => {
             if (message.id !== messageId || message.role !== "assistant") {
               return message;
             }
             let toolCallChanged = false;
-            const toolCalls = message.toolCalls?.map((toolCall) => {
+            const toolCalls = message.toolCalls?.map(toolCall => {
               if (toolCall.id !== toolCallId) {
                 return toolCall;
               }
               const currentText =
-                toolCall.output?.content.map((item) => item.text).join("\n") ??
-                "";
+                toolCall.output?.content.map(item => item.text).join("\n")
+                ?? "";
               const nextIsError = isError ?? toolCall.output?.isError;
               if (
-                currentText === text &&
-                toolCall.output?.isError === nextIsError
+                currentText === text
+                && toolCall.output?.isError === nextIsError
               ) {
                 return toolCall;
               }
               toolCallChanged = true;
-              textChanged ||= currentText !== text;
+              textChanged = textChanged || currentText !== text;
               return {
                 ...toolCall,
                 output: {
                   content: [{ type: "text" as const, text }],
-                  isError: nextIsError,
-                },
+                  isError: nextIsError
+                }
               };
             });
             if (!toolCallChanged) {
@@ -864,26 +875,26 @@ export function createThreadStore(
             messages: nextMessages,
             ...(textChanged
               ? {
-                  snapshot: removePromptVariableSnapshotPlaces(
-                    context.snapshot,
-                    [
-                      createToolResultPromptVariablePlaceKey(
-                        messageId,
-                        toolCallId
-                      ),
-                    ]
-                  ),
-                }
-              : {}),
+                snapshot: removePromptVariableSnapshotPlaces(
+                  context.snapshot,
+                  [
+                    createToolResultPromptVariablePlaceKey(
+                      messageId,
+                      toolCallId
+                    )
+                  ]
+                )
+              }
+              : {})
           });
         },
         toggleMessageRole(id: string) {
           updateMessage(
             id,
-            (message) =>
+            message =>
               ({
                 ...message,
-                role: message.role === "user" ? "assistant" : "user",
+                role: message.role === "user" ? "assistant" : "user"
               }) as Message
           );
         },
@@ -891,8 +902,8 @@ export function createThreadStore(
           const { collapsedMessageIds } = get();
           set({
             collapsedMessageIds: collapsedMessageIds.includes(id)
-              ? collapsedMessageIds.filter((i) => i !== id)
-              : [...collapsedMessageIds, id],
+              ? collapsedMessageIds.filter(i => i !== id)
+              : [...collapsedMessageIds, id]
           });
         },
         async run(fromMessageId?: string) {
@@ -914,7 +925,7 @@ export function createThreadStore(
           let messages = [...(get().thread.context?.messages ?? [])];
           let truncated = false;
           if (fromMessageId) {
-            const index = messages.findIndex((m) => m.id === fromMessageId);
+            const index = messages.findIndex(m => m.id === fromMessageId);
             if (index !== -1 && index !== messages.length - 1) {
               messages = messages.slice(0, index + 1);
               truncated = true;
@@ -930,7 +941,7 @@ export function createThreadStore(
           try {
             const rendered = await renderThreadPromptVariables({
               context: { ...get().thread.context, messages },
-              loadSkills: listEnabledPromptVariableSkills,
+              loadSkills: listEnabledPromptVariableSkills
             });
             preparedContext = rendered.context;
             promptSnapshot = rendered.snapshot;
@@ -939,7 +950,7 @@ export function createThreadStore(
               description:
                 error instanceof PromptVariableError || error instanceof Error
                   ? error.message
-                  : "Please check the system prompt variables.",
+                  : "Please check the system prompt variables."
             });
             return;
           }
@@ -950,7 +961,7 @@ export function createThreadStore(
             status: "running",
             abortController,
             activeRunId: runId,
-            streamingMessage: null,
+            streamingMessage: null
           });
 
           // Commit the truncation while running so it folds into the run's
@@ -1006,7 +1017,7 @@ export function createThreadStore(
               streamingMessage: null,
               status: "idle",
               abortController: null,
-              activeRunId: null,
+              activeRunId: null
             });
             stopActiveRun = null;
 
@@ -1037,17 +1048,17 @@ export function createThreadStore(
               const thread = withRunMetadata(threadWithSnapshot, {
                 runHistory,
                 evaluations,
-                evaluationRubrics: get().evaluationRubrics,
+                evaluationRubrics: get().evaluationRubrics
               });
               set({
                 thread,
                 changeHistory: recordSnapshot(get().changeHistory, thread),
                 runHistory,
-                evaluations,
+                evaluations
               });
             } else {
               set({
-                changeHistory: recordSnapshot(get().changeHistory, finalThread),
+                changeHistory: recordSnapshot(get().changeHistory, finalThread)
               });
             }
           };
@@ -1072,7 +1083,7 @@ export function createThreadStore(
           // finished cleanly, was aborted, or failed — the auto-call loop only
           // continues after a clean turn.
           const streamTurn = async (): Promise<
-            "completed" | "aborted" | "failed"
+            "aborted" | "completed" | "failed"
           > => {
             streamingMessage = null;
             content = [];
@@ -1080,27 +1091,27 @@ export function createThreadStore(
               const context = preparedContext
                 ? preparedContext
                 : (
-                    await renderThreadPromptVariables({
-                      context: {
-                        ...get().thread.context,
-                        messages,
-                        snapshot: promptSnapshot,
-                      },
-                      loadSkills:
-                        options.loadPromptSkills ??
-                        listEnabledPromptVariableSkills,
-                    })
-                  ).context;
+                  await renderThreadPromptVariables({
+                    context: {
+                      ...get().thread.context,
+                      messages,
+                      snapshot: promptSnapshot
+                    },
+                    loadSkills:
+                        options.loadPromptSkills
+                        ?? listEnabledPromptVariableSkills
+                  })
+                ).context;
               preparedContext = null;
               promptSnapshot = context.snapshot;
               const response = streamThread(
                 {
                   context,
-                  model,
+                  model
                 },
                 {
                   signal: abortController.signal,
-                  transport: options.transport,
+                  transport: options.transport
                 }
               );
               for await (const chunk of response) {
@@ -1110,7 +1121,7 @@ export function createThreadStore(
                 sawEvent = true;
                 const reduced = reduceMessages(chunk, {
                   streamingMessage,
-                  content,
+                  content
                 });
                 if (!reduced) {
                   continue;
@@ -1148,9 +1159,9 @@ export function createThreadStore(
             } catch (error) {
               if (abortController.signal.aborted) {
                 if (
-                  isActiveRun() &&
-                  streamingMessage &&
-                  hasContent(streamingMessage)
+                  isActiveRun()
+                  && streamingMessage
+                  && hasContent(streamingMessage)
                 ) {
                   commit(streamingMessage);
                 }
@@ -1221,16 +1232,15 @@ export function createThreadStore(
           const thread = withRunMetadata(result.thread, {
             runHistory: get().runHistory,
             evaluations: get().evaluations,
-            evaluationRubrics: get().evaluationRubrics,
+            evaluationRubrics: get().evaluationRubrics
           });
           set({
             thread,
             changeHistory: {
               ...result.history,
               snapshots: result.history.snapshots.map((snapshot, index) =>
-                index === result.history.index ? thread : snapshot
-              ),
-            },
+                (index === result.history.index ? thread : snapshot))
+            }
           });
         },
         redo() {
@@ -1244,16 +1254,15 @@ export function createThreadStore(
           const thread = withRunMetadata(result.thread, {
             runHistory: get().runHistory,
             evaluations: get().evaluations,
-            evaluationRubrics: get().evaluationRubrics,
+            evaluationRubrics: get().evaluationRubrics
           });
           set({
             thread,
             changeHistory: {
               ...result.history,
               snapshots: result.history.snapshots.map((snapshot, index) =>
-                index === result.history.index ? thread : snapshot
-              ),
-            },
+                (index === result.history.index ? thread : snapshot))
+            }
           });
         },
         restoreThread(thread: Thread) {
@@ -1263,7 +1272,7 @@ export function createThreadStore(
           const next = withRunMetadata(thread, {
             runHistory: get().runHistory,
             evaluations: get().evaluations,
-            evaluationRubrics: get().evaluationRubrics,
+            evaluationRubrics: get().evaluationRubrics
           });
           if (next === get().thread) {
             return;
@@ -1271,7 +1280,7 @@ export function createThreadStore(
           // Replace the whole thread; recorded as a single undoable step.
           set({
             thread: next,
-            changeHistory: recordSnapshot(get().changeHistory, next),
+            changeHistory: recordSnapshot(get().changeHistory, next)
           });
         },
         removeRun(run: RunSnapshot) {
@@ -1279,7 +1288,7 @@ export function createThreadStore(
             return;
           }
           const current = get().runHistory;
-          const runHistory = current.filter((r) => r !== run);
+          const runHistory = current.filter(r => r !== run);
           if (runHistory.length === current.length) {
             return;
           }
@@ -1293,7 +1302,7 @@ export function createThreadStore(
           const thread = withRunMetadata(get().thread, {
             runHistory,
             evaluations,
-            evaluationRubrics: get().evaluationRubrics,
+            evaluationRubrics: get().evaluationRubrics
           });
           const history = get().changeHistory;
           set({
@@ -1303,9 +1312,8 @@ export function createThreadStore(
             changeHistory: {
               ...history,
               snapshots: history.snapshots.map((snapshot, index) =>
-                index === history.index ? thread : snapshot
-              ),
-            },
+                (index === history.index ? thread : snapshot))
+            }
           });
         },
         saveEvaluation(input) {
@@ -1323,7 +1331,7 @@ export function createThreadStore(
           const thread = withRunMetadata(get().thread, {
             runHistory: get().runHistory,
             evaluations,
-            evaluationRubrics: get().evaluationRubrics,
+            evaluationRubrics: get().evaluationRubrics
           });
           // Evaluation records are durable run metadata, not a text-edit undo
           // step; replace the current history tip so undo stays content-focused.
@@ -1334,9 +1342,8 @@ export function createThreadStore(
             changeHistory: {
               ...changeHistory,
               snapshots: changeHistory.snapshots.map((snapshot, index) =>
-                index === changeHistory.index ? thread : snapshot
-              ),
-            },
+                (index === changeHistory.index ? thread : snapshot))
+            }
           });
           return true;
         },
@@ -1345,7 +1352,7 @@ export function createThreadStore(
             return;
           }
           const current = get().evaluations;
-          const evaluations = current.filter((e) => e.id !== evaluation.id);
+          const evaluations = current.filter(e => e.id !== evaluation.id);
           if (evaluations.length === current.length) {
             return;
           }
@@ -1355,7 +1362,7 @@ export function createThreadStore(
           const thread = withRunMetadata(get().thread, {
             runHistory: get().runHistory,
             evaluations,
-            evaluationRubrics: get().evaluationRubrics,
+            evaluationRubrics: get().evaluationRubrics
           });
           const changeHistory = get().changeHistory;
           set({
@@ -1364,9 +1371,8 @@ export function createThreadStore(
             changeHistory: {
               ...changeHistory,
               snapshots: changeHistory.snapshots.map((snapshot, index) =>
-                index === changeHistory.index ? thread : snapshot
-              ),
-            },
+                (index === changeHistory.index ? thread : snapshot))
+            }
           });
         },
         saveEvaluationRubric(input) {
@@ -1380,7 +1386,7 @@ export function createThreadStore(
           const thread = withRunMetadata(get().thread, {
             runHistory: get().runHistory,
             evaluations: get().evaluations,
-            evaluationRubrics: result.rubrics,
+            evaluationRubrics: result.rubrics
           });
           const changeHistory = get().changeHistory;
           set({
@@ -1389,9 +1395,8 @@ export function createThreadStore(
             changeHistory: {
               ...changeHistory,
               snapshots: changeHistory.snapshots.map((snapshot, index) =>
-                index === changeHistory.index ? thread : snapshot
-              ),
-            },
+                (index === changeHistory.index ? thread : snapshot))
+            }
           });
           return result.rubric;
         },
@@ -1401,7 +1406,7 @@ export function createThreadStore(
           }
           const current = get().evaluationRubrics;
           const evaluationRubrics = current.filter(
-            (rubric) => rubric.id !== id
+            rubric => rubric.id !== id
           );
           if (evaluationRubrics.length === current.length) {
             return false;
@@ -1409,7 +1414,7 @@ export function createThreadStore(
           const thread = withRunMetadata(get().thread, {
             runHistory: get().runHistory,
             evaluations: get().evaluations,
-            evaluationRubrics,
+            evaluationRubrics
           });
           const changeHistory = get().changeHistory;
           set({
@@ -1418,9 +1423,8 @@ export function createThreadStore(
             changeHistory: {
               ...changeHistory,
               snapshots: changeHistory.snapshots.map((snapshot, index) =>
-                index === changeHistory.index ? thread : snapshot
-              ),
-            },
+                (index === changeHistory.index ? thread : snapshot))
+            }
           });
           return true;
         },
@@ -1430,7 +1434,7 @@ export function createThreadStore(
             return;
           }
           stopActiveRun?.();
-        },
+        }
       };
     })
   );
@@ -1440,7 +1444,7 @@ export const ThreadStoreContext = createContext<ThreadStore | null>(null);
 
 function useThreadStoreApi(): ThreadStore {
   const store = useContext(ThreadStoreContext);
-  if (!store) throw new Error("hooks must be used within <ThreadPlayground>");
+  if (!store) { throw new Error("hooks must be used within <ThreadPlayground>"); }
   return store;
 }
 
@@ -1485,7 +1489,7 @@ const selectActions = (s: ThreadState) => ({
   updateTool: s.updateTool,
   removeTool: s.removeTool,
   toggleMessageRole: s.toggleMessageRole,
-  toggleMessageCollapsed: s.toggleMessageCollapsed,
+  toggleMessageCollapsed: s.toggleMessageCollapsed
 });
 export function useThreadStoreActions() {
   return useStore(useThreadStoreApi(), useShallow(selectActions));

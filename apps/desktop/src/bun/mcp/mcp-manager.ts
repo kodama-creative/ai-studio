@@ -1,45 +1,44 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-
 import { uuid } from "@llm-space/core";
 import { getSettingsDir } from "@llm-space/core/server";
+import {
+  flattenMcpToolResult,
+  RemoteMcpClient
+} from "@llm-space/runtime/node";
 import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SseError } from "@modelcontextprotocol/sdk/client/sse.js";
 import {
   getDefaultEnvironment,
-  StdioClientTransport,
+  StdioClientTransport
 } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPError } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import {
-  CompatibilityCallToolResultSchema,
   type CallToolResult,
-  type Tool as SdkMcpTool,
+  CompatibilityCallToolResultSchema,
+  type Tool as SdkMcpTool
 } from "@modelcontextprotocol/sdk/types.js";
-import {
-  flattenMcpToolResult,
-  RemoteMcpClient,
-} from "@llm-space/runtime/node";
 import { z } from "zod";
 
 import {
   buildMcpToolName,
-  normalizeMcpName,
   type McpCallToolResponse,
   type McpDiagnosticCategory,
   type McpDiagnosticOutcome,
   type McpDiagnosticStep,
   type McpDiagnosticStepStatus,
   type McpRemoteTransportType,
-  type McpServerDiagnostic,
-  type McpServerReadiness,
   type McpServerConfig,
+  type McpServerDiagnostic,
   type McpServerDraft,
+  type McpServerReadiness,
   type McpServersConfig,
   type McpServerToolsResponse,
   type McpServerView,
   type McpToolSummary,
   type McpToolView,
+  normalizeMcpName
 } from "../../shared/mcp";
 
 const CONNECT_TIMEOUT_MS = 10_000;
@@ -58,7 +57,7 @@ const toolSummarySchema = z.object({
   requiredFields: z.array(z.string()).optional(),
   topLevelProperties: z.array(z.string()).optional(),
   available: z.boolean(),
-  disabledReason: z.string().optional(),
+  disabledReason: z.string().optional()
 });
 const diagnosticStepSchema = z.object({
   id: z.string(),
@@ -66,10 +65,10 @@ const diagnosticStepSchema = z.object({
   status: z.union([
     z.literal("passed"),
     z.literal("failed"),
-    z.literal("skipped"),
+    z.literal("skipped")
   ]),
   message: z.string(),
-  detail: z.string().optional(),
+  detail: z.string().optional()
 });
 const diagnosticSchema = z.object({
   outcome: z.union([z.literal("passed"), z.literal("failed")]),
@@ -84,31 +83,31 @@ const diagnosticSchema = z.object({
     z.literal("transportMismatch"),
     z.literal("protocol"),
     z.literal("listTools"),
-    z.literal("unknown"),
+    z.literal("unknown")
   ]),
   checkedAt: z.number(),
   transport: z.union([
     z.literal("stdio"),
     z.literal("streamableHttp"),
-    z.literal("sse"),
+    z.literal("sse")
   ]),
   endpoint: z.string().optional(),
   headline: z.string(),
   steps: z.array(diagnosticStepSchema),
-  summary: z.string(),
+  summary: z.string()
 });
 const readinessSchema = z.object({
   status: z.union([
     z.literal("untested"),
     z.literal("ready"),
     z.literal("error"),
-    z.literal("stale"),
+    z.literal("stale")
   ]),
   testedAt: z.number().optional(),
   toolCount: z.number().nullable(),
   lastError: z.string().optional(),
   tools: z.array(toolSummarySchema).optional(),
-  diagnostic: diagnosticSchema.optional(),
+  diagnostic: diagnosticSchema.optional()
 });
 
 const serverConfigSchema = z.object({
@@ -118,7 +117,7 @@ const serverConfigSchema = z.object({
   transport: z.union([
     z.literal("stdio"),
     z.literal("streamableHttp"),
-    z.literal("sse"),
+    z.literal("sse")
   ]),
   command: z.string().optional(),
   args: z.array(z.string()).optional(),
@@ -128,11 +127,11 @@ const serverConfigSchema = z.object({
   headers: stringRecordSchema.optional(),
   createdAt: z.number().optional(),
   updatedAt: z.number().optional(),
-  readiness: readinessSchema.optional(),
+  readiness: readinessSchema.optional()
 });
 
 const serversConfigSchema = z.object({
-  servers: z.array(serverConfigSchema),
+  servers: z.array(serverConfigSchema)
 });
 
 interface McpClientEntry {
@@ -169,7 +168,7 @@ export class McpManager {
   }
 
   listServers(): McpServerView[] {
-    return this._config.servers.map((server) => this._toServerView(server));
+    return this._config.servers.map(server => this._toServerView(server));
   }
 
   addServer(draft: McpServerDraft): McpServerView[] {
@@ -177,7 +176,7 @@ export class McpManager {
     const server = this._normalizeServerDraft(draft, {
       id: uuid(),
       createdAt: now,
-      updatedAt: now,
+      updatedAt: now
     });
     this._assertUniqueServerName(server);
     this._config = { servers: [...this._config.servers, server] };
@@ -193,20 +192,19 @@ export class McpManager {
     const server = this._normalizeServerDraft(draft, {
       id: current.id,
       createdAt: current.createdAt,
-      updatedAt: Date.now(),
+      updatedAt: Date.now()
     });
     this._assertUniqueServerName(server, serverId);
     this._config = {
-      servers: this._config.servers.map((item) =>
-        item.id === serverId
+      servers: this._config.servers.map(item =>
+        (item.id === serverId
           ? {
-              ...server,
-              readiness: current.readiness
-                ? _markReadinessStale(current.readiness, server.serverName)
-                : undefined,
-            }
-          : item
-      ),
+            ...server,
+            readiness: current.readiness
+              ? _markReadinessStale(current.readiness, server.serverName)
+              : undefined
+          }
+          : item))
     };
     await this._closeServer(serverId);
     this._status.delete(serverId);
@@ -216,7 +214,7 @@ export class McpManager {
 
   async removeServer(serverId: string): Promise<McpServerView[]> {
     this._config = {
-      servers: this._config.servers.filter((server) => server.id !== serverId),
+      servers: this._config.servers.filter(server => server.id !== serverId)
     };
     await this._closeServer(serverId);
     this._status.delete(serverId);
@@ -235,10 +233,10 @@ export class McpManager {
   async shutdown(): Promise<void> {
     const serverIds = new Set([
       ...this._clients.keys(),
-      ...this._connecting.keys(),
+      ...this._connecting.keys()
     ]);
     await Promise.all(
-      [...serverIds].map((serverId) => this._closeServer(serverId))
+      [...serverIds].map(async serverId => this._closeServer(serverId))
     );
     this._status.clear();
   }
@@ -262,22 +260,22 @@ export class McpManager {
       const toolViews = this._toToolViews(server, tools);
       const result = diagnostic
         ? _finishDiagnostic(diagnostic, {
-            outcome: "passed",
-            category: "success",
-            headline: `${toolViews.length} MCP tool${toolViews.length === 1 ? "" : "s"} discovered.`,
-          })
+          outcome: "passed",
+          category: "success",
+          headline: `${toolViews.length} MCP tool${toolViews.length === 1 ? "" : "s"} discovered.`
+        })
         : undefined;
       const updatedServer = this._setServerReadiness(serverId, {
         status: "ready",
         testedAt: Date.now(),
         toolCount: toolViews.length,
         tools: toolViews.map(_toToolSummary),
-        diagnostic: result,
+        diagnostic: result
       });
       this._status.set(serverId, { toolCount: toolViews.length });
       return {
         server: this._toServerView(updatedServer),
-        tools: toolViews,
+        tools: toolViews
       };
     } catch (error) {
       const category =
@@ -286,10 +284,10 @@ export class McpManager {
           : _classifyMcpError(error);
       const result = diagnostic
         ? _finishDiagnostic(diagnostic, {
-            outcome: "failed",
-            category,
-            headline: _diagnosticHeadline(error, server, category),
-          })
+          outcome: "failed",
+          category,
+          headline: _diagnosticHeadline(error, server, category)
+        })
         : undefined;
       const message = result?.headline ?? _safeErrorMessage(error, server);
       const previous = server.readiness;
@@ -299,11 +297,11 @@ export class McpManager {
         toolCount: previous?.toolCount ?? null,
         lastError: message,
         tools: previous?.tools ?? [],
-        diagnostic: result,
+        diagnostic: result
       });
       this._status.set(serverId, {
         toolCount: updatedServer.readiness?.toolCount ?? null,
-        lastError: message,
+        lastError: message
       });
       await this._closeServer(serverId);
       throw new Error(message, { cause: error });
@@ -313,11 +311,11 @@ export class McpManager {
   async callTool({
     serverId,
     toolName,
-    arguments: args,
+    arguments: args
   }: {
+    arguments: Record<string, unknown>;
     serverId: string;
     toolName: string;
-    arguments: Record<string, unknown>;
   }): Promise<McpCallToolResponse> {
     const server = this._getServer(serverId);
     try {
@@ -335,7 +333,7 @@ export class McpManager {
       const message = _safeErrorMessage(error, server);
       this._status.set(serverId, {
         toolCount: this._status.get(serverId)?.toolCount ?? null,
-        lastError: message,
+        lastError: message
       });
       throw new Error(message, { cause: error });
     }
@@ -402,7 +400,7 @@ export class McpManager {
     }
     const client = new Client({
       name: "llm-space",
-      version: "1.0.0",
+      version: "1.0.0"
     });
     const transport = this._createTransport(server, diagnostic);
     try {
@@ -439,14 +437,14 @@ export class McpManager {
     try {
       endpoint = new URL(server.url ?? "");
     } catch (error) {
-      if (diagnostic) _markInvalidConfigFailure(diagnostic, error, server);
+      if (diagnostic) { _markInvalidConfigFailure(diagnostic, error, server); }
       throw error;
     }
     let headers: Record<string, string>;
     try {
       headers = this._resolveValueMap(server.headers ?? {});
     } catch (error) {
-      if (diagnostic) _markSecretFailure(diagnostic, error, server);
+      if (diagnostic) { _markSecretFailure(diagnostic, error, server); }
       throw error;
     }
     if (diagnostic) {
@@ -462,7 +460,7 @@ export class McpManager {
       const client = await RemoteMcpClient.connect({
         transport: server.transport === "sse" ? "sse" : "streamableHttp",
         url: endpoint.href,
-        headers,
+        headers
       });
       if (diagnostic) {
         _passDiagnosticStep(diagnostic, "transport", "Connection opened.");
@@ -476,7 +474,7 @@ export class McpManager {
       this._clients.set(server.id, entry);
       return entry;
     } catch (error) {
-      if (diagnostic) _markConnectFailure(diagnostic, error, server);
+      if (diagnostic) { _markConnectFailure(diagnostic, error, server); }
       throw error;
     }
   }
@@ -508,9 +506,9 @@ export class McpManager {
         cwd: server.cwd || undefined,
         env: {
           ...getDefaultEnvironment(),
-          ...env,
+          ...env
         },
-        stderr: "ignore",
+        stderr: "ignore"
       });
     }
 
@@ -540,7 +538,7 @@ export class McpManager {
     } catch (error) {
       if (diagnostic) {
         _failDiagnosticStep(diagnostic, "listTools", "Tool listing failed.", {
-          detail: _safeErrorMessage(error, server),
+          detail: _safeErrorMessage(error, server)
         });
       }
       throw error;
@@ -560,7 +558,7 @@ export class McpManager {
     tools: SdkMcpTool[]
   ): McpToolView[] {
     const normalizedCounts = new Map<string, number>();
-    const normalizedNames = tools.map((tool) => normalizeMcpName(tool.name));
+    const normalizedNames = tools.map(tool => normalizeMcpName(tool.name));
     for (const name of normalizedNames) {
       normalizedCounts.set(name, (normalizedCounts.get(name) ?? 0) + 1);
     }
@@ -577,7 +575,7 @@ export class McpManager {
         normalizedToolName,
         directName: buildMcpToolName({
           serverName: server.serverName,
-          toolName: normalizedToolName,
+          toolName: normalizedToolName
         }),
         description: tool.description ?? "",
         inputSchema: tool.inputSchema,
@@ -588,7 +586,7 @@ export class McpManager {
             ? "Tool name normalizes to an empty string"
             : collision
               ? "Tool name collides after normalization"
-              : undefined,
+              : undefined
       };
     });
   }
@@ -599,13 +597,13 @@ export class McpManager {
   ): McpServerConfig {
     let updated: McpServerConfig | null = null;
     this._config = {
-      servers: this._config.servers.map((server) => {
+      servers: this._config.servers.map(server => {
         if (server.id !== serverId) {
           return server;
         }
         updated = { ...server, readiness };
         return updated;
-      }),
+      })
     };
     if (!updated) {
       throw new Error(`MCP server not configured: ${serverId}`);
@@ -619,20 +617,20 @@ export class McpManager {
     const readiness = server.readiness ?? {
       status: "untested",
       toolCount: null,
-      tools: [],
+      tools: []
     };
     return {
       ...server,
       readiness,
       connected: this._clients.has(server.id),
       toolCount: status?.toolCount ?? readiness.toolCount,
-      lastError: status?.lastError ?? readiness.lastError,
+      lastError: status?.lastError ?? readiness.lastError
     };
   }
 
   private _normalizeServerDraft(
     draft: McpServerDraft,
-    metadata: Pick<McpServerConfig, "id" | "createdAt" | "updatedAt">
+    metadata: Pick<McpServerConfig, "createdAt" | "id" | "updatedAt">
   ): McpServerConfig {
     const name = draft.name.trim();
     if (!name) {
@@ -653,9 +651,9 @@ export class McpManager {
         serverName,
         transport: "stdio",
         command,
-        args: (draft.args ?? []).map((arg) => arg.trim()).filter(Boolean),
+        args: (draft.args ?? []).map(arg => arg.trim()).filter(Boolean),
         cwd: draft.cwd?.trim() || null,
-        env: _cleanRecord(draft.env),
+        env: _cleanRecord(draft.env)
       };
     }
 
@@ -674,13 +672,13 @@ export class McpManager {
       serverName,
       transport: draft.transport,
       url,
-      headers: _cleanRecord(draft.headers),
+      headers: _cleanRecord(draft.headers)
     };
   }
 
   private _assertUniqueServerName(server: McpServerConfig, exceptId?: string) {
     const existing = this._config.servers.find(
-      (item) => item.id !== exceptId && item.serverName === server.serverName
+      item => item.id !== exceptId && item.serverName === server.serverName
     );
     if (existing) {
       throw new Error(`MCP server name "${server.serverName}" already exists.`);
@@ -688,7 +686,7 @@ export class McpManager {
   }
 
   private _getServer(serverId: string): McpServerConfig {
-    const server = this._config.servers.find((item) => item.id === serverId);
+    const server = this._config.servers.find(item => item.id === serverId);
     if (!server) {
       throw new Error(`MCP server not configured: ${serverId}`);
     }
@@ -754,19 +752,19 @@ export class McpManager {
         JSON.parse(readFileSync(this._configPath, "utf8"))
       );
       return {
-        servers: parsed.servers.map((server) => ({
+        servers: parsed.servers.map(server => ({
           ...server,
           createdAt: server.createdAt ?? Date.now(),
           updatedAt: server.updatedAt ?? Date.now(),
           readiness: server.readiness
             ? _normalizeReadiness(server.readiness)
-            : undefined,
-        })),
+            : undefined
+        }))
       };
     } catch (error) {
       if (!(
-        error instanceof z.ZodError ||
-        (error as NodeJS.ErrnoException).code === "ENOENT"
+        error instanceof z.ZodError
+        || (error as NodeJS.ErrnoException).code === "ENOENT"
       )) {
         throw error;
       }
@@ -790,7 +788,7 @@ const DIAGNOSTIC_STEP_LABELS: Record<string, string> = {
   transport: "Open remote transport",
   initialize: "Initialize MCP session",
   listTools: "List tools",
-  result: "Result",
+  result: "Result"
 };
 
 /**
@@ -811,8 +809,8 @@ function _createDiagnosticDraft(server: McpServerConfig): McpDiagnosticDraft {
       id,
       label,
       status: "skipped",
-      message: "Not reached.",
-    })),
+      message: "Not reached."
+    }))
   };
 }
 
@@ -824,12 +822,12 @@ function _passDiagnosticStep(
   diagnostic: McpDiagnosticDraft,
   id: string,
   message: string,
-  options: { detail?: string } = {}
+  options: { detail?: string; } = {}
 ): void {
   _setDiagnosticStep(diagnostic, id, {
     status: "passed",
     message,
-    detail: options.detail,
+    detail: options.detail
   });
 }
 
@@ -841,12 +839,12 @@ function _failDiagnosticStep(
   diagnostic: McpDiagnosticDraft,
   id: string,
   message: string,
-  options: { detail?: string } = {}
+  options: { detail?: string; } = {}
 ): void {
   _setDiagnosticStep(diagnostic, id, {
     status: "failed",
     message,
-    detail: options.detail,
+    detail: options.detail
   });
 }
 
@@ -870,14 +868,13 @@ function _setDiagnosticStep(
   diagnostic: McpDiagnosticDraft,
   id: string,
   patch: {
-    status: McpDiagnosticStepStatus;
-    message: string;
     detail?: string;
+    message: string;
+    status: McpDiagnosticStepStatus;
   }
 ): void {
-  diagnostic.steps = diagnostic.steps.map((step) =>
-    step.id === id ? { ...step, ...patch } : step
-  );
+  diagnostic.steps = diagnostic.steps.map(step =>
+    (step.id === id ? { ...step, ...patch } : step));
 }
 
 /**
@@ -889,7 +886,7 @@ function _diagnosticFailedStep(
   id: string
 ): boolean {
   return diagnostic.steps.some(
-    (step) => step.id === id && step.status === "failed"
+    step => step.id === id && step.status === "failed"
   );
 }
 
@@ -904,7 +901,7 @@ function _markSecretFailure(
 ): void {
   const message = _safeErrorMessage(error, server);
   _failDiagnosticStep(diagnostic, "secrets", "Secret resolution failed.", {
-    detail: message,
+    detail: message
   });
   _skipDiagnosticStep(diagnostic, "transport", "Skipped after secret failure.");
   _skipDiagnosticStep(
@@ -980,7 +977,7 @@ function _markConnectFailure(
       "transport",
       "Transport connection failed.",
       {
-        detail,
+        detail
       }
     );
     _skipDiagnosticStep(
@@ -1003,14 +1000,14 @@ function _markConnectFailure(
 function _finishDiagnostic(
   diagnostic: McpDiagnosticDraft,
   options: {
-    outcome: McpDiagnosticOutcome;
     category: McpDiagnosticCategory;
     headline: string;
+    outcome: McpDiagnosticOutcome;
   }
 ) {
   _setDiagnosticStep(diagnostic, "result", {
     status: options.outcome,
-    message: options.headline,
+    message: options.headline
   });
   const result = {
     outcome: options.outcome,
@@ -1020,11 +1017,11 @@ function _finishDiagnostic(
     endpoint: diagnostic.endpoint,
     headline: options.headline,
     steps: diagnostic.steps,
-    summary: "",
+    summary: ""
   };
   return {
     ...result,
-    summary: _diagnosticSummary(result),
+    summary: _diagnosticSummary(result)
   };
 }
 
@@ -1033,19 +1030,19 @@ function _finishDiagnostic(
  * already be redacted; this helper adds no raw headers or request bodies.
  */
 function _diagnosticSummary(diagnostic: {
-  outcome: McpDiagnosticOutcome;
   category: McpDiagnosticCategory;
   checkedAt: number;
-  transport: McpRemoteTransportType;
   endpoint?: string;
   headline: string;
+  outcome: McpDiagnosticOutcome;
   steps: McpDiagnosticStep[];
+  transport: McpRemoteTransportType;
 }): string {
   const lines = [
     `MCP diagnostic: ${diagnostic.headline}`,
     `Outcome: ${diagnostic.outcome}`,
     `Category: ${diagnostic.category}`,
-    `Transport: ${_transportLabel(diagnostic.transport)}`,
+    `Transport: ${_transportLabel(diagnostic.transport)}`
   ];
   if (diagnostic.endpoint) {
     lines.push(`Endpoint: ${diagnostic.endpoint}`);
@@ -1111,9 +1108,9 @@ function _classifyMcpError(error: unknown): McpDiagnosticCategory {
     return "missingSecret";
   }
   if (
-    text.includes("invalid url") ||
-    text.includes("url is invalid") ||
-    text.includes("failed to parse url")
+    text.includes("invalid url")
+    || text.includes("url is invalid")
+    || text.includes("failed to parse url")
   ) {
     return "invalidConfig";
   }
@@ -1126,13 +1123,13 @@ function _classifyMcpError(error: unknown): McpDiagnosticCategory {
     }
   }
   if (
-    text.includes("json-rpc") ||
-    text.includes("initialize") ||
-    text.includes("unexpected content type") ||
-    text.includes("unsupported content-type") ||
-    text.includes("invalid content-type") ||
-    text.includes("not valid json") ||
-    text.includes("unexpected token")
+    text.includes("json-rpc")
+    || text.includes("initialize")
+    || text.includes("unexpected content type")
+    || text.includes("unsupported content-type")
+    || text.includes("invalid content-type")
+    || text.includes("not valid json")
+    || text.includes("unexpected token")
   ) {
     return "protocol";
   }
@@ -1142,20 +1139,20 @@ function _classifyMcpError(error: unknown): McpDiagnosticCategory {
     }
   }
   if (
-    text.includes("timed out") ||
-    text.includes("timeout") ||
-    text.includes("aborted")
+    text.includes("timed out")
+    || text.includes("timeout")
+    || text.includes("aborted")
   ) {
     return "timeout";
   }
   if (
-    text.includes("fetch failed") ||
-    text.includes("failed to fetch") ||
-    text.includes("econnrefused") ||
-    text.includes("enotfound") ||
-    text.includes("econnreset") ||
-    text.includes("network") ||
-    text.includes("unable to connect")
+    text.includes("fetch failed")
+    || text.includes("failed to fetch")
+    || text.includes("econnrefused")
+    || text.includes("enotfound")
+    || text.includes("econnreset")
+    || text.includes("network")
+    || text.includes("unable to connect")
   ) {
     return "unreachable";
   }
@@ -1199,11 +1196,11 @@ function _categoryGuidance(
  */
 function _errorCode(error: unknown): number | undefined {
   if (
-    error &&
-    typeof error === "object" &&
-    typeof (error as { code?: unknown }).code === "number"
+    error
+    && typeof error === "object"
+    && typeof (error as { code?: unknown; }).code === "number"
   ) {
-    return (error as { code: number }).code;
+    return (error as { code: number; }).code;
   }
   return undefined;
 }
@@ -1218,7 +1215,7 @@ function _errorText(error: unknown): string {
   for (let depth = 0; depth < 4 && current; depth++) {
     parts.push(_errorMessage(current));
     if (typeof current === "object" && current !== null && "cause" in current) {
-      current = (current as { cause?: unknown }).cause;
+      current = (current as { cause?: unknown; }).cause;
     } else {
       break;
     }
@@ -1272,13 +1269,13 @@ function _normalizeReadiness(
     testedAt: readiness.testedAt,
     toolCount: readiness.toolCount,
     lastError: readiness.lastError,
-    tools: (readiness.tools ?? []).map((tool) => ({
+    tools: (readiness.tools ?? []).map(tool => ({
       ...tool,
       inputSchema: tool.inputSchema as McpToolSummary["inputSchema"],
       requiredFields: tool.requiredFields ?? [],
-      topLevelProperties: tool.topLevelProperties ?? [],
+      topLevelProperties: tool.topLevelProperties ?? []
     })),
-    diagnostic: _normalizeDiagnostic(readiness.diagnostic),
+    diagnostic: _normalizeDiagnostic(readiness.diagnostic)
   };
 }
 
@@ -1294,7 +1291,7 @@ function _normalizeDiagnostic(
   }
   return {
     ...diagnostic,
-    transport: diagnostic.transport,
+    transport: diagnostic.transport
   };
 }
 
@@ -1307,13 +1304,13 @@ function _markReadinessStale(
     status: "stale",
     lastError: undefined,
     diagnostic: undefined,
-    tools: readiness.tools.map((tool) => ({
+    tools: readiness.tools.map(tool => ({
       ...tool,
       directName: buildMcpToolName({
         serverName,
-        toolName: tool.normalizedToolName,
-      }),
-    })),
+        toolName: tool.normalizedToolName
+      })
+    }))
   };
 }
 
@@ -1327,7 +1324,7 @@ function _toToolSummary(tool: McpToolView): McpToolSummary {
     requiredFields: tool.requiredFields,
     topLevelProperties: tool.topLevelProperties,
     available: tool.available,
-    disabledReason: tool.disabledReason,
+    disabledReason: tool.disabledReason
   };
 }
 
@@ -1339,8 +1336,8 @@ function _summarizeInputSchema(inputSchema: unknown): {
     return { requiredFields: [], topLevelProperties: [] };
   }
   const schema = inputSchema as {
-    required?: unknown;
     properties?: unknown;
+    required?: unknown;
   };
   const requiredFields = Array.isArray(schema.required)
     ? schema.required.filter((item): item is string => typeof item === "string")
@@ -1392,9 +1389,9 @@ function _safeErrorMessage(
 ): string {
   const secrets = server
     ? _secretCandidates([
-        ...Object.values(server.env ?? {}),
-        ...Object.values(server.headers ?? {}),
-      ])
+      ...Object.values(server.env ?? {}),
+      ...Object.values(server.headers ?? {})
+    ])
     : [];
   return _redactErrorMessage(_errorMessage(error), secrets);
 }
@@ -1427,7 +1424,7 @@ function _redactErrorMessage(message: string, secrets: string[]): string {
     }
     result = result.split(secret).join("[redacted]");
   }
-  result = result.replace(/https?:\/\/[^\s?#]+(?:\?[^\s#]*)?/g, (urlText) => {
+  result = result.replace(/https?:\/\/[^\s?#]+(?:\?[^\s#]*)?/g, urlText => {
     try {
       const url = new URL(urlText);
       return `${url.origin}${url.pathname}`;

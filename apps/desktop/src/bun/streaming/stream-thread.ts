@@ -1,31 +1,33 @@
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import {
-  isDangerousBashCommand,
   type BuiltinTool,
   type CustomModel,
+  isDangerousBashCommand,
   type McpTool,
   type ProjectTool,
-  type Tool,
+  type Tool
 } from "@llm-space/core";
 import { streamAgent } from "@llm-space/core/server";
 import { agentModelMatchesDefinition } from "@llm-space/runtime";
+
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { PreparedAgentTool } from "@llm-space/runtime/node";
+
+import { agentDefinitionFingerprint } from "../external-projects/agent-definition-fingerprint";
 
 import type {
   AbortStreamThreadPayload,
   StreamThreadRequestPayload,
-  StreamThreadResponsePayload,
+  StreamThreadResponsePayload
 } from "../../shared/rpc";
 import type { Analytics } from "../analytics";
 import type { ExternalAgentProjectManager } from "../external-projects";
-import { agentDefinitionFingerprint } from "../external-projects/agent-definition-fingerprint";
 import type { McpManager } from "../mcp";
 import type { ModelManager } from "../models";
 import type { ToolRegistry } from "../tools/tool-registry";
 
 /** Process-scoped agent streaming and model-connection controller. */
 export class StreamThreadController {
-  private readonly _activeStreams = new Map<string, { abort(): void }>();
+  private readonly _activeStreams = new Map<string, { abort(): void; }>();
 
   constructor(
     private readonly _modelManager: ModelManager,
@@ -47,10 +49,10 @@ export class StreamThreadController {
       abort() {
         aborted = true;
         abortController.abort();
-      },
+      }
     });
     const startedAt = Date.now();
-    let outcome: "completed" | "error" | "aborted" = "error";
+    let outcome: "aborted" | "completed" | "error" = "error";
     try {
       if (payload.runtime?.type === "agentProject") {
         await this._runAgentProject(payload, send, () => {
@@ -62,7 +64,7 @@ export class StreamThreadController {
           getApiKey: this._modelManager.getApiKey.bind(this._modelManager),
           getBaseUrl: this._modelManager.getBaseUrl.bind(this._modelManager),
           getHeaders: this._modelManager.getHeaders.bind(this._modelManager),
-          signal: abortController.signal,
+          signal: abortController.signal
         })) {
           send({ streamId, type: "event", event });
         }
@@ -81,7 +83,7 @@ export class StreamThreadController {
       send({
         streamId,
         type: "error",
-        message: error instanceof Error ? error.message : "Internal error",
+        message: error instanceof Error ? error.message : "Internal error"
       });
     } finally {
       this._activeStreams.delete(streamId);
@@ -91,7 +93,7 @@ export class StreamThreadController {
         durationMs: Date.now() - startedAt,
         messageCount: request.context.messages.length,
         toolCount: request.context.tools.length,
-        hasSystemPrompt: Boolean(request.context.systemPrompt),
+        hasSystemPrompt: Boolean(request.context.systemPrompt)
       });
     }
   }
@@ -112,33 +114,33 @@ export class StreamThreadController {
       projectSnapshot === undefined
         ? new Set<string>()
         : this._externalAgentProjects.getActiveRemoteToolNames(
-            payload.runtime.projectId,
-            payload.runtime.threadId,
-            projectSnapshot
-          );
+          payload.runtime.projectId,
+          payload.runtime.threadId,
+          projectSnapshot
+        );
     const activeSourceTools = sourceTools.filter(
-      (tool) =>
-        tool.type !== "project" ||
-        !tool.connectionName ||
-        activeRemoteToolNames.has(tool.name)
+      tool =>
+        tool.type !== "project"
+        || !tool.connectionName
+        || activeRemoteToolNames.has(tool.name)
     );
     const extraTools = activeSourceTools
-      .filter((tool) => tool.type !== "project")
-      .map((tool) => this._runtimeTool(tool));
+      .filter(tool => tool.type !== "project")
+      .map(tool => this._runtimeTool(tool));
     extraTools.push(
       ...activeSourceTools
         .filter(
           (tool): tool is ProjectTool =>
             tool.type === "project" && Boolean(tool.connectionName)
         )
-        .map((tool) => ({
+        .map(tool => ({
           kind: "deferred" as const,
           definition: {
             name: tool.name,
             label: tool.name,
             description: tool.description,
-            parameters: tool.parameters,
-          },
+            parameters: tool.parameters
+          }
         }))
     );
     const session = await this._externalAgentProjects.createRuntimeSession(
@@ -149,7 +151,7 @@ export class StreamThreadController {
         reasoning: payload.request.config?.model?.reasoning,
         initialMessages: payload.request.context.messages as AgentMessage[],
         extraTools,
-        activeToolNames: activeSourceTools.map((tool) => tool.name),
+        activeToolNames: activeSourceTools.map(tool => tool.name),
         systemPrompt: payload.request.context.systemPrompt,
         executionMode: payload.runtime.executionMode,
         streamFn: async (model, context, options) => {
@@ -161,21 +163,20 @@ export class StreamThreadController {
             context,
             headers
               ? {
-                  ...options,
-                  headers: { ...headers, ...options?.headers },
-                }
+                ...options,
+                headers: { ...headers, ...options?.headers }
+              }
               : options
           );
-        },
+        }
       }
     );
     const definition = session.project.definition;
-    if (!definition)
-      throw new Error("Agent runtime definition is unavailable.");
+    if (!definition) { throw new Error("Agent runtime definition is unavailable."); }
     const matchesDefinition = agentModelMatchesDefinition({
       model: session.model,
       reasoning: session.reasoning,
-      definition,
+      definition
     });
     send({
       streamId: payload.streamId,
@@ -187,21 +188,21 @@ export class StreamThreadController {
         modelSource:
           payload.runtime.modelSource === "threadOverride" || !matchesDefinition
             ? "threadOverride"
-            : "agent",
-      },
+            : "agent"
+      }
     });
     this._activeStreams.set(payload.streamId, {
       abort() {
         onAbort();
         session.abort();
-      },
+      }
     });
-    const unsubscribe = session.subscribe((event) => {
+    const unsubscribe = session.subscribe(event => {
       if (event.type !== "tool_calls_deferred") {
         send({
           streamId: payload.streamId,
           type: "event",
-          event,
+          event
         });
       }
     });
@@ -213,13 +214,13 @@ export class StreamThreadController {
   }
 
   private _runtimeTool(
-    tool: Exclude<Tool, { type: "project" }>
+    tool: Exclude<Tool, { type: "project"; }>
   ): PreparedAgentTool {
     const definition = {
       name: tool.name,
       label: tool.name,
       description: tool.description,
-      parameters: tool.parameters,
+      parameters: tool.parameters
     } satisfies PreparedAgentTool["definition"];
     if (tool.type === "function" || _requiresHumanResult(tool)) {
       return { kind: "deferred", definition };
@@ -235,7 +236,7 @@ export class StreamThreadController {
           const result = await this._mcpManager!.callTool({
             serverId: tool.serverId,
             toolName: tool.toolName,
-            arguments: args as Record<string, unknown>,
+            arguments: args as Record<string, unknown>
           });
           if (result.isError) {
             throw new Error(
@@ -246,10 +247,10 @@ export class StreamThreadController {
             type: "completed",
             result: {
               content: [{ type: "text", text: result.contentText }],
-              details: undefined,
-            },
+              details: undefined
+            }
           };
-        },
+        }
       };
     }
     if (!this._tools) {
@@ -260,10 +261,10 @@ export class StreamThreadController {
       definition,
       execute: async (_toolCallId, args) => {
         const command =
-          tool.name === "bash" &&
-          args &&
-          typeof args === "object" &&
-          "command" in args
+          tool.name === "bash"
+          && args
+          && typeof args === "object"
+          && "command" in args
             ? args.command
             : undefined;
         if (typeof command === "string" && isDangerousBashCommand(command)) {
@@ -271,16 +272,16 @@ export class StreamThreadController {
         }
         const result = await this._tools!.call({
           name: tool.name,
-          arguments: args as Record<string, unknown>,
+          arguments: args as Record<string, unknown>
         });
         return {
           type: "completed",
           result: {
             content: [{ type: "text", text: result.contentText }],
-            details: undefined,
-          },
+            details: undefined
+          }
         };
-      },
+      }
     };
   }
 
@@ -301,11 +302,11 @@ export class StreamThreadController {
   async testModelConnection({
     providerId,
     modelId,
-    candidate,
+    candidate
   }: {
-    providerId: string;
-    modelId: string;
     candidate?: CustomModel;
+    modelId: string;
+    providerId: string;
   }): Promise<void> {
     const models = candidate
       ? this._modelManager.buildModelsWithCandidate(providerId, candidate)
@@ -322,18 +323,18 @@ export class StreamThreadController {
               {
                 role: "user",
                 content: [{ type: "text", text: 'Reply with "ok".' }],
-                timestamp: Date.now(),
-              },
+                timestamp: Date.now()
+              }
             ],
-            tools: [],
-          },
+            tools: []
+          }
         },
         {
           models,
           getApiKey: this._modelManager.getApiKey.bind(this._modelManager),
           getBaseUrl: this._modelManager.getBaseUrl.bind(this._modelManager),
           getHeaders: this._modelManager.getHeaders.bind(this._modelManager),
-          signal: abortController.signal,
+          signal: abortController.signal
         }
       )) {
         if (event.type === "agent_end") {
@@ -347,16 +348,16 @@ export class StreamThreadController {
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       throw new Error(
-        detail.trim() ||
-          `Could not reach ${providerId}/${targetId}. Check the Base URL and API key.`,
+        detail.trim()
+        || `Could not reach ${providerId}/${targetId}. Check the Base URL and API key.`,
         { cause: error }
       );
     }
   }
 
-  private _scrubModelForTelemetry(model: { provider: string; id: string }): {
-    provider: string;
+  private _scrubModelForTelemetry(model: { id: string; provider: string; }): {
     model: string;
+    provider: string;
   } {
     return {
       provider: this._modelManager.isBuiltin(model.provider)
@@ -364,7 +365,7 @@ export class StreamThreadController {
         : "custom",
       model: this._modelManager.isBuiltinCatalogModel(model.provider, model.id)
         ? model.id
-        : "custom",
+        : "custom"
     };
   }
 }

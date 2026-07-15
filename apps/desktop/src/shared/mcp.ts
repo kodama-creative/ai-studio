@@ -1,6 +1,6 @@
 import type { JSONSchema } from "@llm-space/core";
 
-export type McpTransportType = "stdio" | "streamableHttp" | "sse";
+export type McpTransportType = "sse" | "stdio" | "streamableHttp";
 export type McpRemoteTransportType = Exclude<McpTransportType, "stdio">;
 
 export interface McpServerDraft {
@@ -14,21 +14,21 @@ export interface McpServerDraft {
   headers?: Record<string, string>;
 }
 
-export type McpReadinessStatus = "untested" | "ready" | "error" | "stale";
-export type McpDiagnosticOutcome = "passed" | "failed";
-export type McpDiagnosticStepStatus = "passed" | "failed" | "skipped";
+export type McpReadinessStatus = "error" | "ready" | "stale" | "untested";
+export type McpDiagnosticOutcome = "failed" | "passed";
+export type McpDiagnosticStepStatus = "failed" | "passed" | "skipped";
 export type McpDiagnosticCategory =
-  | "success"
-  | "invalidConfig"
-  | "missingSecret"
-  | "unreachable"
-  | "timeout"
-  | "unauthorized"
   | "httpStatus"
-  | "transportMismatch"
-  | "protocol"
+  | "invalidConfig"
   | "listTools"
-  | "unknown";
+  | "missingSecret"
+  | "protocol"
+  | "success"
+  | "timeout"
+  | "transportMismatch"
+  | "unauthorized"
+  | "unknown"
+  | "unreachable";
 
 export interface McpDiagnosticStep {
   id: string;
@@ -126,7 +126,7 @@ export function normalizeMcpName(value: string): string {
 
 export function buildMcpToolName({
   serverName,
-  toolName,
+  toolName
 }: {
   serverName: string;
   toolName: string;

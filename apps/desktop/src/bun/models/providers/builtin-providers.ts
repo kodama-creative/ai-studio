@@ -1,4 +1,3 @@
-import { type Provider } from "@earendil-works/pi-ai";
 import { amazonBedrockProvider } from "@earendil-works/pi-ai/providers/amazon-bedrock";
 import { antLingProvider } from "@earendil-works/pi-ai/providers/ant-ling";
 import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
@@ -19,6 +18,8 @@ import { xaiProvider } from "@earendil-works/pi-ai/providers/xai";
 import { xiaomiProvider } from "@earendil-works/pi-ai/providers/xiaomi";
 import { zaiProvider } from "@earendil-works/pi-ai/providers/zai";
 import { zaiCodingCnProvider } from "@earendil-works/pi-ai/providers/zai-coding-cn";
+
+import type { Provider } from "@earendil-works/pi-ai";
 
 import { arkProvider } from "./ark";
 import { arkCodingPlanProvider } from "./ark-coding-plan";
@@ -45,11 +46,11 @@ export const BUILTIN_PROVIDER_META: Record<string, BuiltinProviderMeta> = {
   ark: { websiteLink: "https://www.volcengine.com/product/ark" },
   "ark-coding-plan": {
     websiteLink:
-      "https://www.volcengine.com/activity/codingplan?utm_campaign=deer_flow&utm_content=deer_flow&utm_medium=devrel&utm_source=OWO&utm_term=deer_flow",
+      "https://www.volcengine.com/activity/codingplan?utm_campaign=deer_flow&utm_content=deer_flow&utm_medium=devrel&utm_source=OWO&utm_term=deer_flow"
   },
   "azure-openai-responses": {
     websiteLink:
-      "https://azure.microsoft.com/en-us/products/ai-services/openai-service",
+      "https://azure.microsoft.com/en-us/products/ai-services/openai-service"
   },
   deepseek: { websiteLink: "https://www.deepseek.com" },
   google: { websiteLink: "https://ai.google.dev" },
@@ -67,7 +68,7 @@ export const BUILTIN_PROVIDER_META: Record<string, BuiltinProviderMeta> = {
   xai: { websiteLink: "https://x.ai" },
   xiaomi: { websiteLink: "https://mimo.xiaomi.com/zh" },
   zai: { websiteLink: "https://z.ai" },
-  "zai-coding-cn": { websiteLink: "https://z.ai/subscribe" },
+  "zai-coding-cn": { websiteLink: "https://z.ai/subscribe" }
 };
 
 /**
@@ -96,5 +97,5 @@ export const BUILTIN_PROVIDERS: Record<string, Provider> = {
   xai: xaiProvider(),
   xiaomi: xiaomiProvider(),
   zai: zaiProvider(),
-  "zai-coding-cn": zaiCodingCnProvider(),
+  "zai-coding-cn": zaiCodingCnProvider()
 };

@@ -1,15 +1,15 @@
 import {
   Tooltip as _Tooltip,
   TooltipContent,
-  TooltipTrigger,
+  TooltipTrigger
 } from "./ui/tooltip";
 
 export function Tooltip({
   children,
-  content,
+  content
 }: {
-  children: React.ReactNode;
-  content: React.ReactNode;
+  readonly children: React.ReactNode;
+  readonly content: React.ReactNode;
 }) {
   return (
     <_Tooltip delayDuration={800}>

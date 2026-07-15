@@ -2,11 +2,10 @@ import { PencilIcon } from "lucide-react";
 import { memo, useCallback, useMemo, useRef, useState } from "react";
 
 import {
-  validateThreadFileStem,
   type FileStemValidationResult,
+  validateThreadFileStem
 } from "@/lib/thread-file";
 import { cn } from "@/lib/utils";
-
 import { Tooltip } from "../../tooltip";
 import { Button } from "../../ui/button";
 import { Input } from "../../ui/input";
@@ -18,13 +17,13 @@ function _TitleEditor({
   title,
   readonly,
   onRename,
-  validateTitle = validateThreadFileStem,
+  validateTitle = validateThreadFileStem
 }: {
-  className?: string;
-  title: string;
-  readonly?: boolean;
-  onRename?: (title: string) => Promise<boolean>;
-  validateTitle?: TitleValidator;
+  readonly className?: string;
+  readonly onRename?: (title: string) => Promise<boolean>;
+  readonly readonly?: boolean;
+  readonly title: string;
+  readonly validateTitle?: TitleValidator;
 }) {
   const [editing, setEditing] = useState(false);
   const [draftTitle, setDraftTitle] = useState("");
@@ -99,24 +98,20 @@ function _TitleEditor({
     return (
       <div className={cn("relative", className)}>
         <Input
-          ref={inputRef}
-          autoFocus
-          aria-label="Thread title"
-          aria-invalid={!validation.valid || !!error}
           aria-describedby="thread-title-error"
+          aria-invalid={!validation.valid || !!error}
+          aria-label="Thread title"
+          autoFocus
           className="h-8 border-transparent bg-transparent! text-sm font-medium shadow-none focus-visible:ring-0"
-          readOnly={committing}
-          value={draftTitle}
-          placeholder="untitled"
           onBlur={handleBlur}
-          onChange={(event) => {
+          onChange={event => {
             setDraftTitle(event.target.value);
             setError(null);
           }}
-          onFocus={(event) => {
+          onFocus={event => {
             event.currentTarget.select();
           }}
-          onKeyDown={(event) => {
+          onKeyDown={event => {
             if (event.key === "Enter") {
               event.preventDefault();
               void commitEditing();
@@ -126,15 +121,21 @@ function _TitleEditor({
               cancelEditing();
             }
           }}
+          placeholder="untitled"
+          readOnly={committing}
+          ref={inputRef}
+          value={draftTitle}
         />
-        {(!validation.valid || error) && (
-          <div
-            id="thread-title-error"
-            className="text-destructive absolute top-full left-2 z-10 mt-1 text-xs"
-          >
-            {error ?? validation.error}
-          </div>
-        )}
+        {(!validation.valid || error)
+          ? (
+            <div
+              className="text-destructive absolute top-full left-2 z-10 mt-1 text-xs"
+              id="thread-title-error"
+            >
+              {error ?? validation.error}
+            </div>
+          )
+          : null}
       </div>
     );
   }
@@ -142,33 +143,35 @@ function _TitleEditor({
   return (
     <div className={cn("group flex w-full items-center gap-1", className)}>
       <div
-        className="min-w-0 truncate text-sm font-medium"
-        role="button"
-        tabIndex={0}
         aria-label="Edit thread title"
+        className="min-w-0 truncate text-sm font-medium"
         onClick={startEditing}
-        onKeyDown={(event) => {
+        onKeyDown={event => {
           if (event.key === "Enter" || event.key === " ") {
             event.preventDefault();
             startEditing();
           }
         }}
+        role="button"
+        tabIndex={0}
       >
         <Tooltip content="Click to edit title">
-          {title ? (
-            <span>{title}</span>
-          ) : (
-            <span className="text-muted-foreground">untitled</span>
-          )}
+          {title
+            ? (
+              <span>{title}</span>
+            )
+            : (
+              <span className="text-muted-foreground">untitled</span>
+            )}
         </Tooltip>
       </div>
       <div className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100">
         <Tooltip content="Edit title">
           <Button
-            variant="ghost"
-            size="icon-xs"
             aria-label="Edit thread title"
             onClick={startEditing}
+            size="icon-xs"
+            variant="ghost"
           >
             <PencilIcon className="size-3" />
           </Button>

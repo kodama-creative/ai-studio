@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import {
   defineMcpClientConnection,
-  isMcpClientConnectionDefinition,
+  isMcpClientConnectionDefinition
 } from "./mcp";
 
 describe("defineMcpClientConnection", () => {
@@ -16,9 +16,9 @@ describe("defineMcpClientConnection", () => {
         return { token: `${connectionName}-token` };
       },
       headers: async ({ connectionName }) => ({
-        "X-Connection": connectionName,
+        "X-Connection": connectionName
       }),
-      tools: { allow: ["search", "get_item"] },
+      tools: { allow: ["search", "get_item"] }
     });
 
     expect(isMcpClientConnectionDefinition(definition)).toBe(true);
@@ -28,7 +28,7 @@ describe("defineMcpClientConnection", () => {
       await definition.auth?.({
         abortSignal: new AbortController().signal,
         connectionName: "project",
-        url: definition.url,
+        url: definition.url
       })
     ).toEqual({ token: "project-token" });
     expect(callbackCount).toBe(1);
@@ -39,8 +39,7 @@ describe("defineMcpClientConnection", () => {
       defineMcpClientConnection({
         url: "https://example.com/mcp",
         description: "Example project data.",
-        tools: { allow: [] },
-      })
-    ).toThrow("tools.allow must contain at least one tool name");
+        tools: { allow: [] }
+      })).toThrow("tools.allow must contain at least one tool name");
   });
 });

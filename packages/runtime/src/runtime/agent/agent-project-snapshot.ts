@@ -1,12 +1,8 @@
-import type {
-  AgentHarnessResources,
-  AgentTool,
-  Skill,
-} from "@earendil-works/pi-agent-core";
+import type { AgentHarnessResources, AgentTool } from "@earendil-works/pi-agent-core";
 
+import type { McpClientConnectionDefinition } from "../../public/definitions/connections/mcp";
 import type { CompiledAgentDefinition } from "../../shared/agent-definition";
 import type { AgentProjectDiagnostic } from "../../shared/agent-project";
-import type { McpClientConnectionDefinition } from "../../public/definitions/connections/mcp";
 
 export interface CompiledMcpConnection {
   readonly name: string;
@@ -24,7 +20,7 @@ export interface AgentProjectSnapshot {
   readonly instructions: string;
   readonly tools: readonly CompiledProjectTool[];
   readonly connections: readonly CompiledMcpConnection[];
-  readonly resources: Readonly<AgentHarnessResources<Skill>>;
+  readonly resources: Readonly<AgentHarnessResources>;
   readonly diagnostics: readonly AgentProjectDiagnostic[];
   readonly fingerprint: string;
 }

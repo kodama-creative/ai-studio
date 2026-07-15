@@ -10,7 +10,7 @@ export function convertToPiContext(context: ThreadContext): PiThreadContext {
     systemPrompt: context.systemPrompt,
     messages: context.messages ? _convertToPiMessages(context.messages) : [],
     tools: context.tools ? _convertToPiTools(context.tools) : [],
-    sourceTools: context.tools ? [...context.tools] : [],
+    sourceTools: context.tools ? [...context.tools] : []
   };
   return result;
 }
@@ -21,37 +21,33 @@ function _convertToPiMessages(messages: Message[]) {
     if (message.role === "user") {
       const piMessage: pi.UserMessage = {
         role: "user",
-        content: _convertMessageContents(message) as (
-          pi.TextContent | pi.ImageContent
-        )[],
-        timestamp: Date.now(),
+        content: _convertMessageContents(message) as Array<pi.ImageContent | pi.TextContent>,
+        timestamp: Date.now()
       };
       result.push(piMessage);
     } else if (message.role === "assistant") {
       const piMessage: pi.AssistantMessage = {
         role: "assistant",
-        content: _convertMessageContents(message) as (
-          pi.TextContent | pi.ThinkingContent | pi.ToolCall
-        )[],
+        content: _convertMessageContents(message) as Array<pi.TextContent | pi.ThinkingContent | pi.ToolCall>,
         api: "",
         model: "",
         provider: "",
         stopReason: "stop",
         timestamp: Date.now(),
-        usage: _convertUsage(message.usage),
+        usage: _convertUsage(message.usage)
       };
       result.push(piMessage);
     }
     if (message.role === "assistant" && message.toolCalls) {
       for (const toolCall of message.toolCalls) {
-        if (!toolCall.output) continue;
+        if (!toolCall.output) { continue; }
         result.push({
           role: "toolResult",
           toolCallId: toolCall.id,
           toolName: toolCall.input.name,
           content: toolCall.output.content,
           isError: toolCall.output.isError ?? false,
-          timestamp: Date.now(),
+          timestamp: Date.now()
         });
       }
     }
@@ -73,37 +69,35 @@ function _convertUsage(messageUsage: ModelUsage | undefined): pi.Usage {
         output: 0,
         cacheRead: 0,
         cacheWrite: 0,
-        total: 0,
-      },
+        total: 0
+      }
     }
   );
 }
 
 function _convertMessageContents(
   message: Message
-): (pi.TextContent | pi.ImageContent | pi.ThinkingContent | pi.ToolCall)[] {
+): Array<pi.ImageContent | pi.TextContent | pi.ThinkingContent | pi.ToolCall> {
   if (message.role === "user") {
-    return message.content.map((content) => {
+    return message.content.map(content => {
       if (content.type === "text") {
         return { ...content } satisfies pi.TextContent;
       } else if (content.type === "image_data") {
         return {
           type: "image",
           mimeType: content.mimeType,
-          data: content.data,
+          data: content.data
         } satisfies pi.ImageContent;
       } else {
         throw new Error(`Unsupported content type: ${JSON.stringify(content)}`);
       }
     });
   } else if (message.role === "assistant") {
-    const contents: (
-      pi.TextContent | pi.ImageContent | pi.ThinkingContent | pi.ToolCall
-    )[] = [];
+    const contents: Array<pi.ImageContent | pi.TextContent | pi.ThinkingContent | pi.ToolCall> = [];
     if (message.thinking) {
       contents.push({
         type: "thinking",
-        thinking: message.thinking,
+        thinking: message.thinking
       } satisfies pi.ThinkingContent);
     }
     for (const content of message.content) {
@@ -118,7 +112,7 @@ function _convertMessageContents(
         type: "toolCall",
         id: toolCall.id,
         name: toolCall.input.name,
-        arguments: toolCall.input.arguments,
+        arguments: toolCall.input.arguments
       } satisfies pi.ToolCall);
     }
     return contents;
@@ -131,11 +125,11 @@ function _convertToPiTools(tools: Tool[]): pi.Tool[] {
   if (!tools) {
     return [];
   }
-  return tools.map((tool) => {
+  return tools.map(tool => {
     return {
       name: tool.name,
       description: tool.description,
-      parameters: tool.parameters,
+      parameters: tool.parameters
     };
   });
 }

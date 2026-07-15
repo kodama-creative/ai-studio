@@ -5,12 +5,12 @@ import { defineToolRuntime } from "../../internal/authored-action-definitions";
 const TOOL_DEFINITION_BRAND = Symbol.for("llm-space.tool-definition");
 
 export type JsonValue =
-  | null
+  | { [key: string]: JsonValue; }
   | boolean
+  | JsonValue[]
   | number
   | string
-  | JsonValue[]
-  | { [key: string]: JsonValue };
+  | null;
 
 export interface ToolContext {
   readonly abortSignal: AbortSignal;
@@ -20,7 +20,7 @@ export interface ToolContext {
 
 export interface ToolDefinition<
   TInputSchema extends TSchema = TSchema,
-  TOutput extends JsonValue = JsonValue,
+  TOutput extends JsonValue = JsonValue
 > {
   readonly description: string;
   readonly inputSchema: TInputSchema;
@@ -34,15 +34,15 @@ export interface ToolDefinition<
 
 type ToolDefinitionInput<
   TInputSchema extends TSchema,
-  TOutput extends JsonValue,
-> = Omit<ToolDefinition<TInputSchema, TOutput>, typeof TOOL_DEFINITION_BRAND> & {
-  readonly name?: never;
+  TOutput extends JsonValue
+> = {
   readonly label?: never;
-};
+  readonly name?: never;
+} & Omit<ToolDefinition<TInputSchema, TOutput>, typeof TOOL_DEFINITION_BRAND>;
 
 export function defineTool<
   TInputSchema extends TSchema,
-  TOutput extends JsonValue,
+  TOutput extends JsonValue
 >(
   definition: ToolDefinitionInput<TInputSchema, TOutput>
 ): ToolDefinition<TInputSchema, TOutput> {
@@ -54,8 +54,8 @@ export function defineTool<
 
 export function isToolDefinition(value: unknown): value is ToolDefinition {
   return Boolean(
-    value &&
-      typeof value === "object" &&
-      (value as Partial<ToolDefinition>)[TOOL_DEFINITION_BRAND] === true
+    value
+    && typeof value === "object"
+    && (value as Partial<ToolDefinition>)[TOOL_DEFINITION_BRAND] === true
   );
 }

@@ -1,3 +1,11 @@
+import {
+  type FunctionTool,
+  type LegacyMcpToolSource,
+  normalizeTool
+} from "../types/tools";
+import { parseJSON, uuid } from "../utils";
+
+import type { ThreadParseContext } from "./thread-parser";
 import type {
   AssistantMessage,
   ImageDataContent,
@@ -10,16 +18,8 @@ import type {
   Tool,
   ToolCall,
   UserMessage,
-  UserMessageContent,
+  UserMessageContent
 } from "../types";
-import {
-  normalizeTool,
-  type FunctionTool,
-  type LegacyMcpToolSource,
-} from "../types/tools";
-import { parseJSON, uuid } from "../utils";
-
-import type { ThreadParseContext } from "./thread-parser";
 
 /**
  * Best-effort resolution of a message's `content` field. A single walk collects
@@ -100,7 +100,7 @@ export function normalizeToThread(
         }
         const content: UserMessageContent[] = [
           ...resolved.text,
-          ...resolved.images,
+          ...resolved.images
         ];
         if (content.length) {
           const message: UserMessage = { id: _id(m), role: "user", content };
@@ -201,7 +201,7 @@ function _resolveAssistant(
   for (const use of resolved.toolUses) {
     const toolCall: ToolCall = {
       id: use.id,
-      input: { name: use.name, arguments: use.arguments },
+      input: { name: use.name, arguments: use.arguments }
     };
     toolCalls.push(toolCall);
     toolCallsById.set(toolCall.id, toolCall);
@@ -230,7 +230,7 @@ function _resolveAssistant(
   const message: AssistantMessage = {
     id: _id(m),
     role: "assistant",
-    content: resolved.text,
+    content: resolved.text
   };
   if (thinking) {
     message.thinking = thinking;
@@ -251,7 +251,7 @@ function _resolveContent(content: unknown): ResolvedContent {
     images: [],
     thinking: [],
     toolUses: [],
-    toolResults: [],
+    toolResults: []
   };
 
   if (content == null) {
@@ -308,7 +308,7 @@ function _resolveContent(content: unknown): ResolvedContent {
         result.toolUses.push({
           id: typeof b.id === "string" && b.id ? b.id : uuid(),
           name: typeof b.name === "string" ? b.name : "",
-          arguments: _asRecord(b.input) ?? {},
+          arguments: _asRecord(b.input) ?? {}
         });
         break;
       }
@@ -317,7 +317,7 @@ function _resolveContent(content: unknown): ResolvedContent {
         result.toolResults.push({
           toolUseId:
             typeof b.tool_use_id === "string" ? b.tool_use_id : undefined,
-          content: _resolveContent(b.content).text,
+          content: _resolveContent(b.content).text
         });
         break;
       }
@@ -382,7 +382,7 @@ function _resolveOpenAiToolCalls(toolCalls: unknown): ToolCall[] {
     }
     result.push({
       id: typeof tc.id === "string" && tc.id ? tc.id : uuid(),
-      input,
+      input
     });
   }
   return result;
@@ -455,7 +455,7 @@ function _resolveTools(tools: unknown): Tool[] {
     const base: Omit<FunctionTool, "type"> = {
       name,
       description,
-      parameters,
+      parameters
     };
     if (typeof src.strict === "boolean") {
       base.strict = src.strict;
@@ -463,16 +463,16 @@ function _resolveTools(tools: unknown): Tool[] {
     if (src.type === "mcp") {
       const { serverId, serverName, toolName } = src;
       if (
-        typeof serverId === "string" &&
-        typeof serverName === "string" &&
-        typeof toolName === "string"
+        typeof serverId === "string"
+        && typeof serverName === "string"
+        && typeof toolName === "string"
       ) {
         result.push({
           ...base,
           type: "mcp",
           serverId,
           serverName,
-          toolName,
+          toolName
         });
       }
       continue;
@@ -490,9 +490,9 @@ function _resolveToolSource(source: unknown): LegacyMcpToolSource | undefined {
   }
   const { serverId, serverName, toolName } = raw;
   if (
-    typeof serverId !== "string" ||
-    typeof serverName !== "string" ||
-    typeof toolName !== "string"
+    typeof serverId !== "string"
+    || typeof serverName !== "string"
+    || typeof toolName !== "string"
   ) {
     return undefined;
   }
@@ -508,9 +508,9 @@ function _resolveAnthropicImage(
     return undefined;
   }
   if (
-    source.type === "base64" &&
-    typeof source.media_type === "string" &&
-    typeof source.data === "string"
+    source.type === "base64"
+    && typeof source.media_type === "string"
+    && typeof source.data === "string"
   ) {
     return _imageData(source.media_type, source.data);
   }
@@ -597,7 +597,7 @@ function _firstString(...values: unknown[]): string | undefined {
 }
 
 function _joinText(text: TextContent[]): string {
-  return text.map((t) => t.text).join("\n");
+  return text.map(t => t.text).join("\n");
 }
 
 function _asRecord(value: unknown): Record<string, unknown> | undefined {

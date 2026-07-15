@@ -1,6 +1,3 @@
-import { describe, expect, test } from "bun:test";
-
-import type { ModelUsage, Thread } from "@llm-space/core";
 import {
   aggregateMessageUsage,
   normalizePromptVariableState,
@@ -9,8 +6,11 @@ import {
   snapshotEvaluationRubric,
   upsertEvaluation,
   upsertEvaluationRubric,
-  withPromptVariableSnapshot,
+  withPromptVariableSnapshot
 } from "@llm-space/core/thread";
+import { describe, expect, test } from "bun:test";
+
+import type { ModelUsage, Thread } from "@llm-space/core";
 
 const USAGE: ModelUsage = {
   input: 10,
@@ -23,8 +23,8 @@ const USAGE: ModelUsage = {
     output: 0.02,
     cacheRead: 0.001,
     cacheWrite: 0,
-    total: 0.031,
-  },
+    total: 0.031
+  }
 };
 
 describe("public headless thread workflow", () => {
@@ -39,34 +39,34 @@ describe("public headless thread workflow", () => {
             type: "skills",
             skillNames: ["deep-research"],
             format: "markdown-list",
-            indent: 0,
-          },
+            indent: 0
+          }
         },
         variableVariants: {
           active: "default",
-          variants: { default: { customer: "Acme" } },
+          variants: { default: { customer: "Acme" } }
         },
         messages: [
           {
             id: "user-1",
             role: "user",
-            content: [{ type: "text", text: "Research {{customer}}" }],
-          },
-        ],
-      },
+            content: [{ type: "text", text: "Research {{customer}}" }]
+          }
+        ]
+      }
     };
 
     const rendered = await renderThreadPromptVariables({
       context: template.context!,
       now: () => new Date(2026, 6, 12, 9, 30),
-      loadSkills: () =>
+      loadSkills: async () =>
         Promise.resolve([
           {
             name: "deep-research",
             description: "Research deeply",
-            path: "/skills/deep-research",
-          },
-        ]),
+            path: "/skills/deep-research"
+          }
+        ])
     });
 
     expect(rendered.context.systemPrompt).toBe(
@@ -74,14 +74,14 @@ describe("public headless thread workflow", () => {
     );
     expect(rendered.context.messages?.[0]?.content[0]).toEqual({
       type: "text",
-      text: "Research Acme",
+      text: "Research Acme"
     });
     expect(rendered.snapshot?.variables).toEqual({
       systemPrompt: {
         current_date: "2026-07-12",
-        available_skills: "- **deep-research**: Research deeply",
+        available_skills: "- **deep-research**: Research deeply"
       },
-      "message:user-1:text": { customer: "Acme" },
+      "message:user-1:text": { customer: "Acme" }
     });
 
     const completedThread = withPromptVariableSnapshot(
@@ -95,10 +95,10 @@ describe("public headless thread workflow", () => {
               id: "assistant-1",
               role: "assistant",
               content: [{ type: "text", text: "Result A" }],
-              usage: USAGE,
-            },
-          ],
-        },
+              usage: USAGE
+            }
+          ]
+        }
       },
       rendered.snapshot
     );
@@ -109,11 +109,11 @@ describe("public headless thread workflow", () => {
 
     const firstRun = recordRun([], completedThread, 1000, {
       id: "run-a",
-      usage,
+      usage
     });
     const runs = recordRun(firstRun, completedThread, 2000, {
       id: "run-b",
-      usage,
+      usage
     });
     const rubricResult = upsertEvaluationRubric(
       [],
@@ -121,8 +121,8 @@ describe("public headless thread workflow", () => {
         name: "Quality",
         criteria: [
           { id: "accuracy", name: "Accuracy" },
-          { id: "clarity", name: "Clarity" },
-        ],
+          { id: "clarity", name: "Clarity" }
+        ]
       },
       3000,
       { id: "rubric-1" }
@@ -143,17 +143,17 @@ describe("public headless thread workflow", () => {
             runId: "run-a",
             scores: [
               { criterionId: "accuracy", score: 3 },
-              { criterionId: "clarity", score: 4 },
-            ],
+              { criterionId: "clarity", score: 4 }
+            ]
           },
           {
             runId: "run-b",
             scores: [
               { criterionId: "accuracy", score: 5 },
-              { criterionId: "clarity", score: 5 },
-            ],
-          },
-        ],
+              { criterionId: "clarity", score: 5 }
+            ]
+          }
+        ]
       },
       4000
     );
@@ -164,7 +164,7 @@ describe("public headless thread workflow", () => {
       leftRunId: "run-a",
       rightRunId: "run-b",
       verdict: "rightBetter",
-      rubric: { id: "rubric-1", revision: 1 },
+      rubric: { id: "rubric-1", revision: 1 }
     });
     expect(runs[0]?.thread.context?.systemPrompt).toBe(
       "Today: {{current_date}}\n{{available_skills}}"
@@ -176,16 +176,16 @@ describe("public headless thread workflow", () => {
     const context: NonNullable<Thread["context"]> = {
       systemPrompt: "Date: {{current_date}}",
       variables: {
-        current_date: { type: "currentDate", format: "iso-date" },
-      },
+        current_date: { type: "currentDate", format: "iso-date" }
+      }
     };
     const first = await renderThreadPromptVariables({
       context,
-      now: () => new Date(2026, 6, 12, 9, 30),
+      now: () => new Date(2026, 6, 12, 9, 30)
     });
     const second = await renderThreadPromptVariables({
       context: { ...context, snapshot: first.snapshot },
-      now: () => new Date(2027, 0, 1, 9, 30),
+      now: () => new Date(2027, 0, 1, 9, 30)
     });
 
     expect(first.context.systemPrompt).toBe("Date: 2026-07-12");
@@ -200,13 +200,13 @@ describe("public headless thread workflow", () => {
           type: "skills",
           skillNames: ["one", 2, "two"],
           format: "legacy",
-          indent: 3,
-        },
+          indent: 3
+        }
       },
       variableVariants: {
         active: "scenario",
-        variants: { scenario: { customer: "Acme", invalid: 42 } },
-      },
+        variants: { scenario: { customer: "Acme", invalid: 42 } }
+      }
     } as unknown as NonNullable<Thread["context"]>);
 
     expect(state).toEqual({
@@ -216,13 +216,13 @@ describe("public headless thread workflow", () => {
           type: "skills",
           skillNames: ["one", "two"],
           format: "xml",
-          indent: 0,
-        },
+          indent: 0
+        }
       },
       variableVariants: {
         active: "default",
-        variants: { default: { customer: "Acme" } },
-      },
+        variants: { default: { customer: "Acme" } }
+      }
     });
   });
 
@@ -232,13 +232,13 @@ describe("public headless thread workflow", () => {
         systemPrompt: "System {{value}}",
         variableVariants: {
           active: "default",
-          variants: { default: { value: "frozen" } },
+          variants: { default: { value: "frozen" } }
         },
         messages: [
           {
             id: "user-1",
             role: "user",
-            content: [{ type: "text", text: "User {{value}}" }],
+            content: [{ type: "text", text: "User {{value}}" }]
           },
           {
             id: "assistant-1",
@@ -249,19 +249,19 @@ describe("public headless thread workflow", () => {
                 id: "tool-1",
                 input: { name: "lookup", arguments: {} },
                 output: {
-                  content: [{ type: "text", text: "Tool {{value}}" }],
-                },
-              },
-            ],
-          },
-        ],
-      },
+                  content: [{ type: "text", text: "Tool {{value}}" }]
+                }
+              }
+            ]
+          }
+        ]
+      }
     });
 
     expect(rendered.snapshot?.variables).toEqual({
       systemPrompt: { value: "frozen" },
       "message:user-1:text": { value: "frozen" },
-      "toolResult:assistant-1:tool-1:text": { value: "frozen" },
+      "toolResult:assistant-1:tool-1:text": { value: "frozen" }
     });
   });
 
@@ -274,11 +274,11 @@ describe("public headless thread workflow", () => {
             type: "skills",
             skillNames: ["missing-skill"],
             format: "xml",
-            indent: 0,
-          },
-        },
+            indent: 0
+          }
+        }
       },
-      loadSkills: () => Promise.resolve([]),
+      loadSkills: async () => Promise.resolve([])
     });
 
     const error = await render.then(

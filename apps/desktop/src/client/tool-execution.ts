@@ -3,9 +3,9 @@ import type { BuiltinTool, McpTool, ProjectTool } from "@llm-space/core";
 import { callBuiltInTool } from "@/client/built-in-tools";
 import { callMcpTool } from "@/client/mcp";
 import { electrobun } from "@/lib/electrobun";
-import type { RemoteToolCallAttempt } from "@/shared/external-agent-project";
-
 import { ProjectToolCallRejectedError } from "./project-tool-call-rejected-error";
+
+import type { RemoteToolCallAttempt } from "@/shared/external-agent-project";
 
 /**
  * A tool call's result, normalized across the two backends. MCP surfaces
@@ -23,7 +23,7 @@ export interface ToolExecutionContext {
 }
 
 export type ToolExecutor = (
-  tool: McpTool | BuiltinTool | ProjectTool,
+  tool: BuiltinTool | McpTool | ProjectTool,
   args: Record<string, unknown>,
   context?: ToolExecutionContext
 ) => Promise<ToolCallResult>;
@@ -33,23 +33,23 @@ export type ToolExecutor = (
  * {@link isExecutableTool} so `function` tools never reach here.
  */
 export async function executeTool(
-  tool: McpTool | BuiltinTool | ProjectTool,
+  tool: BuiltinTool | McpTool | ProjectTool,
   args: Record<string, unknown>,
-  context: ToolExecutionContext & { threadId?: string } = {}
+  context: { threadId?: string; } & ToolExecutionContext = {}
 ): Promise<ToolCallResult> {
   if (tool.type === "mcp") {
     const result = await callMcpTool({
       serverId: tool.serverId,
       toolName: tool.toolName,
-      arguments: args,
+      arguments: args
     });
     return {
       contentText: result.contentText,
-      isError: result.isError ?? false,
+      isError: result.isError ?? false
     };
   }
   if (tool.type === "project") {
-    if (!electrobun.rpc) throw new Error("Desktop RPC is not available.");
+    if (!electrobun.rpc) { throw new Error("Desktop RPC is not available."); }
     if (!context.callId) {
       throw new Error("Project tool calls require the model tool-call id.");
     }
@@ -60,7 +60,7 @@ export async function executeTool(
       name: tool.name,
       callId: context.callId,
       arguments: args,
-      attempt: context.attempt,
+      attempt: context.attempt
     });
     if ("rejected" in result) {
       throw new ProjectToolCallRejectedError(result.message);

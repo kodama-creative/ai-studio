@@ -1,12 +1,12 @@
 "use client";
 
-import { type ModelConfig } from "@llm-space/core";
 import { SettingsIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import type { ModelConfig } from "@llm-space/core";
+
 import { useCommands } from "@/commands";
 import { cn } from "@/lib/utils";
-
 import { useModels, useRefreshModels } from "../../model-provider";
 import {
   Combobox,
@@ -18,7 +18,7 @@ import {
   ComboboxItem,
   ComboboxLabel,
   ComboboxList,
-  ComboboxSeparator,
+  ComboboxSeparator
 } from "../../ui/combobox";
 import { ModelAvatar } from "../model-avatar";
 import { ProviderAvatar } from "../provider-avatar";
@@ -35,19 +35,19 @@ function parseModelKey(key: string) {
   }
   return {
     provider: key.slice(0, separatorIndex),
-    id: key.slice(separatorIndex + 1),
+    id: key.slice(separatorIndex + 1)
   };
 }
 
 export function ModelSelector({
   value,
   readonly,
-  onOpenChange,
+  onOpenChange
 }: {
-  value: ModelConfig | null;
-  readonly?: boolean;
+  readonly readonly?: boolean;
+  readonly value: ModelConfig | null;
 
-  onOpenChange?: (open: boolean) => void;
+  readonly onOpenChange?: (open: boolean) => void;
 }) {
   const providers = useModels();
   const refreshModels = useRefreshModels();
@@ -59,47 +59,47 @@ export function ModelSelector({
   const items = useMemo(() => {
     const groups = [...providers]
       .sort((a, b) => a.name.localeCompare(b.name))
-      .map((group) => {
+      .map(group => {
         const disabled = new Set(group.disabledModels ?? []);
         return {
           id: group.id,
           name: group.name,
           icon: group.icon,
           items: group.models
-            .filter((model) => !disabled.has(model.id))
-            .map((model) => toModelKey(model)),
+            .filter(model => !disabled.has(model.id))
+            .map(model => toModelKey(model))
         };
       })
-      .filter((group) => group.items.length > 0);
+      .filter(group => group.items.length > 0);
     if (
-      selectedValue &&
-      !groups.some((group) => group.items.includes(selectedValue))
+      selectedValue
+      && !groups.some(group => group.items.includes(selectedValue))
     ) {
       groups.unshift({
         id: "unavailable",
         name: "Unavailable",
         icon: undefined,
-        items: [selectedValue],
+        items: [selectedValue]
       });
     }
     return groups;
   }, [providers, selectedValue]);
 
   const modelMeta = useMemo(() => {
-    const meta = new Map<string, { id: string; name: string; icon?: string }>();
+    const meta = new Map<string, { icon?: string; id: string; name: string; }>();
     for (const group of providers) {
       for (const model of group.models) {
         meta.set(toModelKey(model), {
           id: model.id,
           name: model.name,
-          icon: model.icon,
+          icon: model.icon
         });
       }
     }
     if (value && !meta.has(selectedValue)) {
       meta.set(selectedValue, {
         id: value.id,
-        name: `${value.provider}/${value.id}`,
+        name: `${value.provider}/${value.id}`
       });
     }
     return meta;
@@ -142,16 +142,13 @@ export function ModelSelector({
 
   return (
     <Combobox
-      items={items}
-      value={selectedValue}
       disabled={readonly}
-      itemToStringLabel={(itemValue) =>
-        modelMeta.get(itemValue)?.name ?? itemValue
-      }
       filter={filterItems}
-      open={open}
+      items={items}
+      itemToStringLabel={itemValue =>
+        modelMeta.get(itemValue)?.name ?? itemValue}
       onOpenChange={handleOpenChange}
-      onValueChange={(nextValue) => {
+      onValueChange={nextValue => {
         if (!nextValue || readonly) {
           return;
         }
@@ -161,37 +158,39 @@ export function ModelSelector({
         }
         updateModel(parsed);
       }}
+      open={open}
+      value={selectedValue}
     >
       <ComboboxInput
-        ref={inputRef}
         aria-label="Model selector"
         className={cn(
           "hover:bg-secondary! group/model-select h-6! w-75 border-0 bg-transparent! font-mono",
           !readonly && "cursor:pointer hover:bg-secondary"
         )}
-        triggerClassName="opacity-0! group-hover/model-select:opacity-100"
-        placeholder="(No model selected)"
         disabled={readonly}
+        placeholder="(No model selected)"
+        ref={inputRef}
+        triggerClassName="opacity-0! group-hover/model-select:opacity-100"
       />
       <ComboboxContent className="w-96">
         <ComboboxEmpty>No models found.</ComboboxEmpty>
         <ComboboxList>
           {(provider: {
-            id: string;
-            name: string;
             icon?: string;
+            id: string;
             items: string[];
+            name: string;
           }) => (
             <ComboboxGroup
               className="mb-2"
-              key={provider.name}
               items={provider.items}
+              key={provider.name}
             >
               <ComboboxLabel className="flex items-center gap-1.5">
                 <ProviderAvatar
+                  icon={provider.icon}
                   id={provider.id}
                   name={provider.name}
-                  icon={provider.icon}
                   size={14}
                 />
                 {provider.name}
@@ -206,9 +205,9 @@ export function ModelSelector({
                       value={modelKey}
                     >
                       <ModelAvatar
+                        icon={meta?.icon}
                         id={meta?.id ?? modelKey}
                         name={meta?.name ?? modelKey}
-                        icon={meta?.icon}
                         size={16}
                       />
                       {meta?.name ?? modelKey}
@@ -222,10 +221,10 @@ export function ModelSelector({
         <ComboboxSeparator className="mx-1 my-0" />
         <div className="w-full p-1">
           <button
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={configureModels}
             className="hover:bg-accent hover:text-accent-foreground text-muted-foreground flex min-h-7 w-full cursor-default items-center gap-2 rounded-md px-2 py-1 text-xs/relaxed outline-hidden select-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5"
+            onClick={configureModels}
+            onMouseDown={e => { e.preventDefault(); }}
+            type="button"
           >
             <SettingsIcon />
             Configure models...

@@ -1,14 +1,14 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { defineConfig } from "vite";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const CODEMIRROR_SINGLETON_DEPS = [
   "@codemirror/language",
   "@codemirror/state",
-  "@codemirror/view",
+  "@codemirror/view"
 ];
 
 export default defineConfig({
@@ -16,12 +16,12 @@ export default defineConfig({
   root: "src/mainview",
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "src"),
+      "@": path.resolve(__dirname, "src")
     },
     // CodeMirror extensions carry identity-sensitive values from these packages.
     // Bun may keep older nested copies in transitive package folders, so force
     // Vite to resolve every editor package against the desktop app's copy.
-    dedupe: CODEMIRROR_SINGLETON_DEPS,
+    dedupe: CODEMIRROR_SINGLETON_DEPS
   },
   build: {
     outDir: "../../dist",
@@ -49,7 +49,7 @@ export default defineConfig({
           ) {
             return "react-vendor";
           }
-          if (/[\\/]@lobehub[\\/]/.test(id)) return "icons-vendor";
+          if (/[\\/]@lobehub[\\/]/.test(id)) { return "icons-vendor"; }
           if (/[\\/](radix-ui|@radix-ui|@base-ui|@floating-ui)[\\/]/.test(id)) {
             return "ui-vendor";
           }
@@ -57,12 +57,12 @@ export default defineConfig({
           // can't tell a statically-imported dep from a dynamically-imported one,
           // so a blanket rule would force CodeMirror (and its grammars) back into
           // an eager chunk, undoing the lazy split above.
-        },
-      },
-    },
+        }
+      }
+    }
   },
   server: {
     port: 5173,
-    strictPort: true,
-  },
+    strictPort: true
+  }
 });

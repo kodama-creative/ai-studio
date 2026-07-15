@@ -1,14 +1,13 @@
 import {
   createDefaultThreadParserRegistry,
-  type ModelProviderGroup,
+  type ModelProviderGroup
 } from "@llm-space/core";
 
 import { localFs } from "@/client";
-
 import {
   importStemFromFileName,
   joinPath,
-  uniqueThreadFileName,
+  uniqueThreadFileName
 } from "./thread-file";
 
 export interface ThreadImportFile {
@@ -28,16 +27,16 @@ export async function importThreadFileRecords(
   parent: string,
   files: ThreadImportFile[],
   availableModels: readonly ModelProviderGroup[]
-): Promise<{ created: string[]; total: number }> {
+): Promise<{ created: string[]; total: number; }> {
   const registry = createDefaultThreadParserRegistry();
   // Snapshot the directory once; grow it as we write so a batch import can't
   // collide with itself.
-  const existing = new Set((await localFs.ls(parent)).map((n) => n.name));
+  const existing = new Set((await localFs.ls(parent)).map(n => n.name));
   const created: string[] = [];
 
   for (const file of files) {
     const thread = await registry.parse(file.name, file.text, { availableModels });
-    if (!thread) continue;
+    if (!thread) { continue; }
 
     const name = uniqueThreadFileName(existing, importStemFromFileName(file.name));
     existing.add(name);
@@ -56,7 +55,7 @@ export async function importThreadFiles(
   parent: string,
   files: File[],
   availableModels: readonly ModelProviderGroup[]
-): Promise<{ created: string[]; total: number }> {
+): Promise<{ created: string[]; total: number; }> {
   const records: ThreadImportFile[] = [];
   for (const file of files) {
     records.push({ name: file.name, text: await file.text() });

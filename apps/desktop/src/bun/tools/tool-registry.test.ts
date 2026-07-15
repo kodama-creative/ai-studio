@@ -14,10 +14,10 @@ describe("ToolRegistry", () => {
         type: "object" as const,
         required: ["value"],
         properties: {
-          value: { type: "string" as const },
+          value: { type: "string" as const }
         },
-        additionalProperties: false,
-      },
+        additionalProperties: false
+      }
     };
 
     registry.register({
@@ -25,9 +25,9 @@ describe("ToolRegistry", () => {
       entries: [
         {
           tool,
-          execute: (args) => Promise.resolve({ echoed: args.value }),
-        },
-      ],
+          execute: async args => Promise.resolve({ echoed: args.value })
+        }
+      ]
     });
     registry.freeze();
 
@@ -44,9 +44,8 @@ describe("ToolRegistry", () => {
     expect(() =>
       registry.register({
         id: "fixture.late",
-        entries: [],
-      })
-    ).toThrow('Tool contribution "fixture.late" registered after freeze.');
+        entries: []
+      })).toThrow('Tool contribution "fixture.late" registered after freeze.');
   });
 
   test("rejects duplicate tool names with contribution context", () => {
@@ -59,25 +58,24 @@ describe("ToolRegistry", () => {
       parameters: {
         type: "object" as const,
         properties: {},
-        additionalProperties: false,
-      },
+        additionalProperties: false
+      }
     };
     const entry = {
       tool,
-      execute: () => Promise.resolve("ok"),
+      execute: async () => Promise.resolve("ok")
     };
 
     registry.register({
       id: "fixture.first",
-      entries: [entry],
+      entries: [entry]
     });
 
     expect(() =>
       registry.register({
         id: "fixture.second",
-        entries: [entry],
-      })
-    ).toThrow(
+        entries: [entry]
+      })).toThrow(
       'Tool contribution "fixture.second" duplicates tool "fixture_echo" from "fixture.first".'
     );
   });
@@ -92,17 +90,16 @@ describe("ToolRegistry", () => {
       parameters: {
         type: "object" as const,
         properties: {},
-        additionalProperties: false,
-      },
+        additionalProperties: false
+      }
     };
-    const entry = { tool, execute: () => Promise.resolve("ok") };
+    const entry = { tool, execute: async () => Promise.resolve("ok") };
 
     expect(() =>
       registry.register({
         id: "fixture.duplicate",
-        entries: [entry, entry],
-      })
-    ).toThrow(
+        entries: [entry, entry]
+      })).toThrow(
       'Tool contribution "fixture.duplicate" duplicates tool "fixture_echo" within itself.'
     );
     expect(registry.listTools()).toEqual([]);
@@ -113,8 +110,7 @@ describe("ToolRegistry", () => {
     registry.register({ id: "fixture.same", entries: [] });
 
     expect(() =>
-      registry.register({ id: "fixture.same", entries: [] })
-    ).toThrow('Duplicate tool contribution id "fixture.same".');
+      registry.register({ id: "fixture.same", entries: [] })).toThrow('Duplicate tool contribution id "fixture.same".');
   });
 
   test("snapshots contributions before freeze", async () => {
@@ -127,30 +123,29 @@ describe("ToolRegistry", () => {
       parameters: {
         type: "object" as const,
         properties: {},
-        additionalProperties: false,
-      },
+        additionalProperties: false
+      }
     };
-    const entry = { tool, execute: () => Promise.resolve("original") };
+    const entry = { tool, execute: async () => Promise.resolve("original") };
     const entries = [entry];
     registry.register({ id: "fixture.immutable", entries });
     registry.freeze();
 
     tool.name = "fixture_mutated";
     tool.description = "Mutated description.";
-    entry.execute = () => Promise.resolve("mutated");
+    entry.execute = async () => Promise.resolve("mutated");
     entries.length = 0;
 
     expect(
       registry.listTools().map(({ name, description }) => ({
         name,
-        description,
+        description
       }))
     ).toEqual([{ name: "fixture_echo", description: "Original description." }]);
     expect(
       await registry.call({ name: "fixture_echo", arguments: {} })
     ).toEqual({ contentText: "original" });
-    expect(() =>
-      registry.call({ name: "fixture_mutated", arguments: {} })
-    ).toThrow("Built-in tool not found: fixture_mutated");
+    expect(async () =>
+      registry.call({ name: "fixture_mutated", arguments: {} })).toThrow("Built-in tool not found: fixture_mutated");
   });
 });

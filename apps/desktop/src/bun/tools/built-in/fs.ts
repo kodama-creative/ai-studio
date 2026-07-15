@@ -1,12 +1,13 @@
 import { spawn } from "node:child_process";
-import type { Dirent } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 
+import type { Dirent } from "node:fs";
 import type { BuiltinTool } from "@llm-space/core";
 
-import type { SkillContent } from "../../../shared/skills";
 import { openPath, revealInFileManager } from "../../fs";
+
+import type { SkillContent } from "../../../shared/skills";
 import type { ToolEntry } from "../tool-registry";
 
 export interface FsBuiltInToolsDependencies {
@@ -40,7 +41,7 @@ const DEFAULT_IGNORES = [
   ".pytest_cache",
   ".mypy_cache",
   ".venv",
-  "venv",
+  "venv"
 ];
 
 const IGNORED_NAMES = new Set(DEFAULT_IGNORES);
@@ -54,7 +55,7 @@ function _isIgnored(name: string): boolean {
 function _hasIgnoredSegment(relativePath: string): boolean {
   return relativePath
     .split(/[/\\]/)
-    .some((segment) => IGNORED_NAMES.has(segment));
+    .some(segment => IGNORED_NAMES.has(segment));
 }
 
 // -- read ---------------------------------------------------------------------
@@ -67,7 +68,7 @@ const IMAGE_EXTENSIONS = new Set([
   ".webp",
   ".bmp",
   ".svg",
-  ".ico",
+  ".ico"
 ]);
 
 /**
@@ -91,25 +92,25 @@ export const readTool: BuiltinTool = {
       description: {
         type: "string",
         description:
-          "Must be the first parameter in the tool call. A short human-readable summary explaining why this file is being read",
+          "Must be the first parameter in the tool call. A short human-readable summary explaining why this file is being read"
       },
       path: {
         type: "string",
-        description: "Absolute path to the file to read",
+        description: "Absolute path to the file to read"
       },
       offset: {
         type: "number",
         description:
-          "1-based line number to start reading from. Defaults to 1 (the first line).",
+          "1-based line number to start reading from. Defaults to 1 (the first line)."
       },
       limit: {
         type: "number",
         description:
-          "Maximum number of lines to read from offset. Defaults to unlimited (the rest of the file), still capped by the 256KB output limit.",
-      },
+          "Maximum number of lines to read from offset. Defaults to unlimited (the rest of the file), still capped by the 256KB output limit."
+      }
     },
-    additionalProperties: false,
-  },
+    additionalProperties: false
+  }
 };
 
 export async function read(
@@ -170,19 +171,19 @@ export const writeTool: BuiltinTool = {
       description: {
         type: "string",
         description:
-          "Must be the first parameter in the tool call. A short human-readable summary explaining what is being written and why",
+          "Must be the first parameter in the tool call. A short human-readable summary explaining what is being written and why"
       },
       path: {
         type: "string",
-        description: "Absolute path to the file to write",
+        description: "Absolute path to the file to write"
       },
       contents: {
         type: "string",
-        description: "The full text content to write to the file",
-      },
+        description: "The full text content to write to the file"
+      }
     },
-    additionalProperties: false,
-  },
+    additionalProperties: false
+  }
 };
 
 export async function write(
@@ -210,29 +211,29 @@ export const editTool: BuiltinTool = {
       description: {
         type: "string",
         description:
-          "Must be the first parameter in the tool call. A short human-readable summary explaining the edit being made",
+          "Must be the first parameter in the tool call. A short human-readable summary explaining the edit being made"
       },
       path: {
         type: "string",
-        description: "Absolute path to the file to edit",
+        description: "Absolute path to the file to edit"
       },
       old_string: {
         type: "string",
         description:
-          "The exact text to replace (must be unique within the file unless replace_all is true)",
+          "The exact text to replace (must be unique within the file unless replace_all is true)"
       },
       new_string: {
         type: "string",
-        description: "The replacement text (must differ from old_string)",
+        description: "The replacement text (must differ from old_string)"
       },
       replace_all: {
         type: "boolean",
         description:
-          "Replace all occurrences of old_string. Defaults to false (first match only).",
-      },
+          "Replace all occurrences of old_string. Defaults to false (first match only)."
+      }
     },
-    additionalProperties: false,
-  },
+    additionalProperties: false
+  }
 };
 
 export async function edit(
@@ -278,23 +279,23 @@ export const lsTool: BuiltinTool = {
       description: {
         type: "string",
         description:
-          "Must be the first parameter in the tool call. A short human-readable summary explaining why this directory is being listed",
+          "Must be the first parameter in the tool call. A short human-readable summary explaining why this directory is being listed"
       },
       path: {
         type: "string",
-        description: "Absolute path to the directory to list",
-      },
+        description: "Absolute path to the directory to list"
+      }
     },
-    additionalProperties: false,
-  },
+    additionalProperties: false
+  }
 };
 
 export async function ls(dirPath: string): Promise<string> {
   const entries = (await fs.readdir(dirPath, { withFileTypes: true })).filter(
-    (entry) => !_isIgnored(entry.name)
+    entry => !_isIgnored(entry.name)
   );
   const withMtime = await Promise.all(
-    entries.map(async (entry) => {
+    entries.map(async entry => {
       const full = path.join(dirPath, entry.name);
       let mtimeMs = 0;
       try {
@@ -304,7 +305,7 @@ export async function ls(dirPath: string): Promise<string> {
       }
       return {
         name: entry.isDirectory() ? `${entry.name}/` : entry.name,
-        mtimeMs,
+        mtimeMs
       };
     })
   );
@@ -313,7 +314,7 @@ export async function ls(dirPath: string): Promise<string> {
   }
   return withMtime
     .sort((a, b) => b.mtimeMs - a.mtimeMs)
-    .map((entry) => entry.name)
+    .map(entry => entry.name)
     .join("\n");
 }
 
@@ -337,19 +338,19 @@ export const treeTool: BuiltinTool = {
       description: {
         type: "string",
         description:
-          "Must be the first parameter in the tool call. A short human-readable summary explaining why this tree is being generated",
+          "Must be the first parameter in the tool call. A short human-readable summary explaining why this tree is being generated"
       },
       path: {
         type: "string",
-        description: "Absolute path to the directory to print as a tree",
+        description: "Absolute path to the directory to print as a tree"
       },
       max_depth: {
         type: "number",
-        description: `Maximum directory depth to descend. Defaults to ${TREE_DEFAULT_DEPTH}, capped at ${TREE_MAX_DEPTH}.`,
-      },
+        description: `Maximum directory depth to descend. Defaults to ${TREE_DEFAULT_DEPTH}, capped at ${TREE_MAX_DEPTH}.`
+      }
     },
-    additionalProperties: false,
-  },
+    additionalProperties: false
+  }
 };
 
 export async function tree(
@@ -395,7 +396,7 @@ async function _buildTree(
     return;
   }
   const visible = entries
-    .filter((entry) => !_isIgnored(entry.name))
+    .filter(entry => !_isIgnored(entry.name))
     .sort((a, b) => {
       const aDir = a.isDirectory() ? 0 : 1;
       const bDir = b.isDirectory() ? 0 : 1;
@@ -436,34 +437,34 @@ export const grepTool: BuiltinTool = {
       description: {
         type: "string",
         description:
-          "Must be the first parameter in the tool call. A short human-readable summary explaining what is being searched for",
+          "Must be the first parameter in the tool call. A short human-readable summary explaining what is being searched for"
       },
       pattern: {
         type: "string",
         description:
-          "Regular expression pattern to search for in file contents",
+          "Regular expression pattern to search for in file contents"
       },
       path: {
         type: "string",
-        description: "Absolute path to a file or directory to search in",
+        description: "Absolute path to a file or directory to search in"
       },
       glob: {
         type: "string",
         description:
-          'Glob filter for files (e.g. "*.ts", "**/*.tsx") — maps to rg --glob',
+          'Glob filter for files (e.g. "*.ts", "**/*.tsx") — maps to rg --glob'
       },
       case_insensitive: {
         type: "boolean",
-        description: "Case insensitive search",
+        description: "Case insensitive search"
       },
       context_lines: {
         type: "number",
         description:
-          "Number of context lines to show before and after each match (maps to rg -C). Defaults to 0.",
-      },
+          "Number of context lines to show before and after each match (maps to rg -C). Defaults to 0."
+      }
     },
-    additionalProperties: false,
-  },
+    additionalProperties: false
+  }
 };
 
 export async function grep(
@@ -515,20 +516,20 @@ export const globTool: BuiltinTool = {
       description: {
         type: "string",
         description:
-          "Must be the first parameter in the tool call. A short human-readable summary explaining what files are being searched for",
+          "Must be the first parameter in the tool call. A short human-readable summary explaining what files are being searched for"
       },
       glob_pattern: {
         type: "string",
-        description: 'Glob pattern to match (e.g. "*.ts", "**/test_*.ts")',
+        description: 'Glob pattern to match (e.g. "*.ts", "**/test_*.ts")'
       },
       target_directory: {
         type: "string",
         description:
-          "Absolute path to the directory to search in. Defaults to the workspace root if omitted.",
-      },
+          "Absolute path to the directory to search in. Defaults to the workspace root if omitted."
+      }
     },
-    additionalProperties: false,
-  },
+    additionalProperties: false
+  }
 };
 
 export async function glob(
@@ -538,7 +539,7 @@ export async function glob(
 ): Promise<string> {
   const root = targetDirectory ?? workspaceRoot;
   const scanner = new Bun.Glob(globPattern);
-  const matches: { path: string; mtimeMs: number }[] = [];
+  const matches: Array<{ mtimeMs: number; path: string; }> = [];
   for await (const relative of scanner.scan({ cwd: root, dot: true })) {
     if (_hasIgnoredSegment(relative)) {
       continue;
@@ -555,7 +556,7 @@ export async function glob(
   }
   return matches
     .sort((a, b) => b.mtimeMs - a.mtimeMs)
-    .map((match) => match.path)
+    .map(match => match.path)
     .join("\n");
 }
 
@@ -575,21 +576,21 @@ export const bashTool: BuiltinTool = {
       description: {
         type: "string",
         description:
-          "Must be the first parameter in the tool call. A short human-readable summary explaining the purpose of the command",
+          "Must be the first parameter in the tool call. A short human-readable summary explaining the purpose of the command"
       },
       command: {
         type: "string",
         description:
-          "The bash command to execute. Must be self-contained — include cd, export, and any other setup inline, because prior invocations leave no lasting shell state.",
+          "The bash command to execute. Must be self-contained — include cd, export, and any other setup inline, because prior invocations leave no lasting shell state."
       },
       timeout: {
         type: "number",
         description:
-          "Timeout in milliseconds (max 600000ms, 120000ms by default).",
-      },
+          "Timeout in milliseconds (max 600000ms, 120000ms by default)."
+      }
     },
-    additionalProperties: false,
-  },
+    additionalProperties: false
+  }
 };
 
 const BASH_DEFAULT_TIMEOUT_MS = 120_000;
@@ -599,9 +600,9 @@ export async function bash(
   command: string,
   timeout?: number
 ): Promise<{
-  stdout: string;
-  stderr: string;
   exitCode: number;
+  stderr: string;
+  stdout: string;
 }> {
   const timeoutMs = Math.min(
     timeout ?? BASH_DEFAULT_TIMEOUT_MS,
@@ -630,11 +631,11 @@ export const skillTool: BuiltinTool = {
     properties: {
       name: {
         type: "string",
-        description: "The name of the skill to load (its SKILL.md `name`).",
-      },
+        description: "The name of the skill to load (its SKILL.md `name`)."
+      }
     },
-    additionalProperties: false,
-  },
+    additionalProperties: false
+  }
 };
 
 export function skill(
@@ -664,18 +665,18 @@ export const presentFilesTool: BuiltinTool = {
       description: {
         type: "string",
         description:
-          "Must be the first parameter in the tool call. A short human-readable summary explaining what files are being presented and why",
+          "Must be the first parameter in the tool call. A short human-readable summary explaining what files are being presented and why"
       },
       paths: {
         type: "array",
         items: {
-          type: "string",
+          type: "string"
         },
-        description: "Absolute paths to the files to present to the user",
-      },
+        description: "Absolute paths to the files to present to the user"
+      }
     },
-    additionalProperties: false,
-  },
+    additionalProperties: false
+  }
 };
 
 /**
@@ -686,7 +687,7 @@ export const presentFilesTool: BuiltinTool = {
  * Finder" action.
  */
 export async function present_files(paths: string[]): Promise<"OK"> {
-  const reveals: Promise<void>[] = [];
+  const reveals: Array<Promise<void>> = [];
   for (const p of paths) {
     if (_isHtmlFile(p)) {
       openPath(p);
@@ -707,7 +708,7 @@ function _isHtmlFile(filePath: string): boolean {
 
 export function createFsBuiltInTools({
   workspaceRoot,
-  findSkill,
+  findSkill
 }: FsBuiltInToolsDependencies): ToolEntry[] {
   return [
     {
@@ -718,7 +719,7 @@ export function createFsBuiltInTools({
           _optionalNumber(args, "offset"),
           _optionalNumber(args, "limit")
         );
-      },
+      }
     },
     {
       tool: writeTool,
@@ -727,13 +728,13 @@ export function createFsBuiltInTools({
           _requireString(args, "path"),
           _requireString(args, "contents")
         );
-      },
+      }
     },
     {
       tool: skillTool,
-      execute(args: Record<string, unknown>) {
+      async execute(args: Record<string, unknown>) {
         return Promise.resolve(skill(_requireString(args, "name"), findSkill));
-      },
+      }
     },
     {
       tool: editTool,
@@ -744,13 +745,13 @@ export function createFsBuiltInTools({
           _requireStringAllowEmpty(args, "new_string"),
           _optionalBoolean(args, "replace_all") ?? false
         );
-      },
+      }
     },
     {
       tool: lsTool,
       async execute(args: Record<string, unknown>) {
         return ls(_requireString(args, "path"));
-      },
+      }
     },
     {
       tool: treeTool,
@@ -759,7 +760,7 @@ export function createFsBuiltInTools({
           _requireString(args, "path"),
           _optionalNumber(args, "max_depth")
         );
-      },
+      }
     },
     {
       tool: grepTool,
@@ -771,7 +772,7 @@ export function createFsBuiltInTools({
           _optionalBoolean(args, "case_insensitive") ?? false,
           _optionalNumber(args, "context_lines")
         );
-      },
+      }
     },
     {
       tool: globTool,
@@ -781,7 +782,7 @@ export function createFsBuiltInTools({
           _optionalString(args, "target_directory"),
           workspaceRoot
         );
-      },
+      }
     },
     {
       tool: bashTool,
@@ -790,24 +791,24 @@ export function createFsBuiltInTools({
           _requireString(args, "command"),
           _optionalNumber(args, "timeout")
         );
-      },
+      }
     },
     {
       tool: presentFilesTool,
       async execute(args: Record<string, unknown>) {
         return present_files(_requireStringArray(args, "paths"));
-      },
-    },
+      }
+    }
   ];
 }
 
 // -- helpers ------------------------------------------------------------------
 
-function _run(
+async function _run(
   command: string,
   args: string[],
   timeoutMs?: number
-): Promise<{ stdout: string; stderr: string; code: number }> {
+): Promise<{ code: number; stderr: string; stdout: string; }> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
@@ -817,21 +818,21 @@ function _run(
       timeoutMs === undefined
         ? undefined
         : setTimeout(() => {
-            timedOut = true;
-            child.kill("SIGKILL");
-          }, timeoutMs);
-    child.stdout.on("data", (chunk) => {
+          timedOut = true;
+          child.kill("SIGKILL");
+        }, timeoutMs);
+    child.stdout.on("data", chunk => {
       stdout += chunk;
     });
-    child.stderr.on("data", (chunk) => {
+    child.stderr.on("data", chunk => {
       stderr += chunk;
     });
-    child.on("error", (error) => {
-      if (timer) clearTimeout(timer);
+    child.on("error", error => {
+      if (timer) { clearTimeout(timer); }
       reject(error);
     });
-    child.on("close", (code) => {
-      if (timer) clearTimeout(timer);
+    child.on("close", code => {
+      if (timer) { clearTimeout(timer); }
       if (timedOut) {
         reject(new Error(`Command timed out after ${timeoutMs}ms`));
         return;
@@ -860,9 +861,9 @@ function _requireStringArray(
 ): string[] {
   const value = args[key];
   if (
-    !Array.isArray(value) ||
-    value.length === 0 ||
-    !value.every((item): item is string => typeof item === "string")
+    !Array.isArray(value)
+    || value.length === 0
+    || !value.every((item): item is string => typeof item === "string")
   ) {
     throw new Error(`${key} must be a non-empty array of strings.`);
   }

@@ -1,21 +1,27 @@
-import type { DraggableProvidedDragHandleProps } from "@hello-pangea/dnd";
 import {
   getMessageText,
-  isExecutableTool,
   type ImageDataContent,
+  isExecutableTool,
   type Message,
   type ThreadContext,
-  type ToolCall,
+  type ToolCall
 } from "@llm-space/core";
 import { createMessagePromptVariablePlaceKey } from "@llm-space/core/thread";
 import { PlusIcon } from "lucide-react";
 import { memo, useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
 
+import type { DraggableProvidedDragHandleProps } from "@hello-pangea/dnd";
+
 import { openFirecrawlLimitDialog } from "@/components/firecrawl-limit-dialog";
 import { useRenderingFidelity } from "@/components/theme-provider";
 import { cn } from "@/lib/utils";
-
+import { ImageContentList } from "./image-content-view";
+import { MessageListItemHeader } from "./message-list-item-header";
+import { ThinkingView } from "./thinking-view";
+import { ToolCallListItem } from "./tool-call-list-item";
+import { isToolCallPending, summarizeToolCalls } from "./tool-call-status";
+import { useToolCallRunner } from "./use-tool-call-runner";
 import { CodeEditor } from "../../code-editor";
 import { Tooltip } from "../../tooltip";
 import { Button } from "../../ui/button";
@@ -25,13 +31,6 @@ import { ShineBorder } from "../../ui/shine-border";
 import { Skeleton } from "../../ui/skeleton";
 import { useThreadStore, useThreadStoreActions } from "../stores";
 import { usePromptVariableExtensionForContext } from "../variable/use-prompt-variable-extension";
-
-import { ImageContentList } from "./image-content-view";
-import { MessageListItemHeader } from "./message-list-item-header";
-import { ThinkingView } from "./thinking-view";
-import { ToolCallListItem } from "./tool-call-list-item";
-import { isToolCallPending, summarizeToolCalls } from "./tool-call-status";
-import { useToolCallRunner } from "./use-tool-call-runner";
 
 function _MessageListItem({
   className,
@@ -43,19 +42,20 @@ function _MessageListItem({
   streaming,
   collapsed,
   autoFocus = false,
-  dragHandleProps,
+  dragHandleProps
 }: {
-  className?: string;
-  context?: ThreadContext;
-  message: Message;
-  placeholder?: string;
-  readonly?: boolean;
-  runDisabled?: boolean;
-  streaming?: boolean;
-  collapsed?: boolean;
+  readonly className?: string;
+  readonly collapsed?: boolean;
+  readonly context?: ThreadContext;
+  readonly message: Message;
+  readonly placeholder?: string;
+  readonly readonly?: boolean;
+  readonly runDisabled?: boolean;
+  readonly streaming?: boolean;
+
   /** Focus this message's editor on mount. Set only for a freshly-added message. */
-  autoFocus?: boolean;
-  dragHandleProps?: DraggableProvidedDragHandleProps | null;
+  readonly autoFocus?: boolean;
+  readonly dragHandleProps?: DraggableProvidedDragHandleProps | null;
 }) {
   const { fidelity } = useRenderingFidelity();
   const variableExtension = usePromptVariableExtensionForContext(
@@ -64,7 +64,7 @@ function _MessageListItem({
   );
   const text = useMemo(() => getMessageText(message), [message]);
   const imageContents = useMemo(() => {
-    const result: { content: ImageDataContent; contentIndex: number }[] = [];
+    const result: Array<{ content: ImageDataContent; contentIndex: number; }> = [];
     message.content.forEach((content, contentIndex) => {
       if (content.type === "image_data") {
         result.push({ content, contentIndex });
@@ -74,24 +74,24 @@ function _MessageListItem({
   }, [message.content]);
   const toolCallSummary = useMemo(
     () =>
-      message.role === "assistant" && message.toolCalls?.length
+      (message.role === "assistant" && message.toolCalls?.length
         ? summarizeToolCalls(message.toolCalls)
-        : null,
+        : null),
     [message]
   );
   const toolCallsOnlyBody = useMemo(
     () =>
-      message.role === "assistant" &&
-      !message.thinking &&
-      message.content.length === 0 &&
-      (message.toolCalls?.length ?? 0) > 0,
+      message.role === "assistant"
+      && !message.thinking
+      && message.content.length === 0
+      && (message.toolCalls?.length ?? 0) > 0,
     [message]
   );
   const {
     addMessageImageContent,
     insertMessageBefore,
     run,
-    updateMessageTextContent,
+    updateMessageTextContent
   } = useThreadStoreActions();
   const handleRun = useCallback(async () => {
     if (readonly || runDisabled) {
@@ -166,84 +166,85 @@ function _MessageListItem({
           readonly && "invisible"
         )}
       >
-        <div className="insert-line absolute top-1.5 right-2 left-0 border-b border-dashed opacity-0 transition-[opacity,border-color,border-style] group-hover:opacity-100"></div>
+        <div className="insert-line absolute top-1.5 right-2 left-0 border-b border-dashed opacity-0 transition-[opacity,border-color,border-style] group-hover:opacity-100" />
         <Tooltip content="Insert Message Here">
           <Button
-            className="text-muted-foreground hover:border-primary hover:bg-primary! hover:text-primary-foreground absolute -top-0.5 -right-3 z-10 size-4 rounded-full opacity-0 transition-[opacity,background-color,color,border-color] group-hover:opacity-100"
-            variant="outline"
-            size="icon-xs"
             aria-label="Insert message before this message"
-            onClick={() => insertMessageBefore(message.id)}
+            className="text-muted-foreground hover:border-primary hover:bg-primary! hover:text-primary-foreground absolute -top-0.5 -right-3 z-10 size-4 rounded-full opacity-0 transition-[opacity,background-color,color,border-color] group-hover:opacity-100"
+            onClick={() => { insertMessageBefore(message.id); }}
+            size="icon-xs"
+            variant="outline"
           >
             <PlusIcon className="size-3" />
           </Button>
         </Tooltip>
       </div>
-      {streaming && fidelity !== "lite" && (
-        <ShineBorder
-          shineColor={["#A07CFE", "#FE8FB5", "#FFBE7B"]}
-          duration={8}
-          borderWidth={3}
-        />
-      )}
+      {streaming && fidelity !== "lite"
+        ? (
+          <ShineBorder
+            borderWidth={3}
+            duration={8}
+            shineColor={["#A07CFE", "#FE8FB5", "#FFBE7B"]}
+          />
+        )
+        : null}
       <MessageListItemHeader
         className={toolCallsOnlyBody ? "pb-2" : undefined}
+        collapsed={collapsed}
+        dragHandleProps={dragHandleProps}
         message={message}
         readonly={readonly}
         runDisabled={runDisabled}
-        collapsed={collapsed}
-        dragHandleProps={dragHandleProps}
       />
       <CollapsibleContent collapsed={collapsed}>
         <main className="flex w-full flex-col">
-          {message.role === "assistant" &&
-            streaming &&
-            !message.thinking &&
-            message.content.length === 0 &&
-            (!message.toolCalls || message.toolCalls.length === 0) && (
-              <StreamingMessageSkeleton className="mt-2" />
-            )}
-          {message.role === "assistant" && message.thinking && (
-            <ThinkingView className="mt-2" thinking={message.thinking} />
-          )}
+          {message.role === "assistant"
+            && streaming
+            && !message.thinking
+            && message.content.length === 0
+            && (!message.toolCalls || message.toolCalls.length === 0)
+            ? <StreamingMessageSkeleton className="mt-2" />
+            : null}
+          {message.role === "assistant" && message.thinking ? <ThinkingView className="mt-2" thinking={message.thinking} /> : null}
           <ImageContentList
-            messageId={message.id}
             images={imageContents}
+            messageId={message.id}
             readonly={readonly}
           />
           {message.content.length > 0 && (
             <CodeEditor
-              className="max-h-[40vh] min-h-9.5 w-full bg-transparent"
               autoFocus={autoFocus}
-              hideFocusRing
-              hideBorder
-              scrollOnFocus
-              plain={fidelity === "lite"}
-              placeholder={
-                placeholder ??
-                `Enter ${message.role === "user" ? "user" : "assistant"} message here`
-              }
-              streaming={streaming}
-              readonly={readonly}
-              value={text}
+              className="max-h-[40vh] min-h-9.5 w-full bg-transparent"
               extraExtensions={variableExtension}
+              hideBorder
+              hideFocusRing
               onChange={handleTextContentChange}
               onKeyDown={handleKeyDown}
               onPaste={handlePaste}
+              placeholder={
+                placeholder
+                ?? `Enter ${message.role === "user" ? "user" : "assistant"} message here`
+              }
+              plain={fidelity === "lite"}
+              readonly={readonly}
+              scrollOnFocus
+              streaming={streaming}
+              value={text}
             />
           )}
-          {message.role === "assistant" &&
-            message.toolCalls &&
-            message.toolCalls.length > 0 && (
+          {message.role === "assistant"
+            && message.toolCalls
+            && message.toolCalls.length > 0
+            ? (
               <div className="flex w-full flex-col gap-3 px-2 pb-2">
-                {message.toolCalls.map((toolCall) => (
+                {message.toolCalls.map(toolCall => (
                   <ToolCallListItem
-                    key={toolCall.id}
-                    context={context}
-                    messageId={message.id}
                     canContinue={
                       !runDisabled && (toolCallSummary?.canContinue ?? false)
                     }
+                    context={context}
+                    key={toolCall.id}
+                    messageId={message.id}
                     onContinue={handleContinue}
                     readonly={readonly}
                     toolCall={toolCall}
@@ -256,7 +257,8 @@ function _MessageListItem({
                   toolCalls={message.toolCalls}
                 />
               </div>
-            )}
+            )
+            : null}
         </main>
       </CollapsibleContent>
     </div>
@@ -267,20 +269,20 @@ function _ToolStepContinuation({
   messageId,
   toolCalls,
   readonly,
-  runDisabled,
+  runDisabled
 }: {
-  messageId: string;
-  toolCalls: ToolCall[];
-  readonly?: boolean;
-  runDisabled?: boolean;
+  readonly messageId: string;
+  readonly readonly?: boolean;
+  readonly runDisabled?: boolean;
+  readonly toolCalls: ToolCall[];
 }) {
-  const status = useThreadStore((state) => state.status);
+  const status = useThreadStore(state => state.status);
   const { run } = useThreadStoreActions();
   const { resolveTool, runToolCall } = useToolCallRunner(messageId);
   const callableToolCalls = useMemo(
     () =>
-      toolCalls.filter((toolCall) => {
-        if (!isToolCallPending(toolCall)) return false;
+      toolCalls.filter(toolCall => {
+        if (!isToolCallPending(toolCall)) { return false; }
         const tool = resolveTool(toolCall.input.name);
         return tool !== undefined && isExecutableTool(tool);
       }),
@@ -288,19 +290,19 @@ function _ToolStepContinuation({
   );
   const [callingTools, setCallingTools] = useState(false);
   const canCallTools =
-    !readonly &&
-    status !== "running" &&
-    !callingTools &&
-    callableToolCalls.length > 0;
+    !readonly
+    && status !== "running"
+    && !callingTools
+    && callableToolCalls.length > 0;
   // "Continue" runs the thread from this message (continuing past the tool
   // results), mirroring the header's run action — enabled only once every tool
   // call has a response.
   const canContinue =
-    !readonly &&
-    !runDisabled &&
-    status !== "running" &&
-    !callingTools &&
-    summarizeToolCalls(toolCalls).canContinue;
+    !readonly
+    && !runDisabled
+    && status !== "running"
+    && !callingTools
+    && summarizeToolCalls(toolCalls).canContinue;
   const handleContinue = useCallback(async () => {
     if (!canContinue) {
       return;
@@ -314,7 +316,7 @@ function _ToolStepContinuation({
     setCallingTools(true);
     try {
       const outcomes = await Promise.all(
-        callableToolCalls.map((toolCall) => runToolCall(toolCall))
+        callableToolCalls.map(async toolCall => runToolCall(toolCall))
       );
       let errorCount = 0;
       let firecrawlLimitCount = 0;
@@ -335,7 +337,7 @@ function _ToolStepContinuation({
         toast.error("Some tool calls failed", {
           description: `${errorCount}/${outcomes.length} tool call${
             outcomes.length === 1 ? "" : "s"
-          } failed.`,
+          } failed.`
         });
       }
     } finally {
@@ -344,37 +346,39 @@ function _ToolStepContinuation({
   }, [
     callableToolCalls,
     canCallTools,
-    runToolCall,
+    runToolCall
   ]);
 
   return (
     <div className="bg-foreground/4 flex min-w-0 items-center justify-between gap-3 rounded-md px-3 py-1">
-      <Marker role="status" className="min-w-0">
+      <Marker className="min-w-0" role="status">
         <MarkerContent className="truncate text-xs">
           {toolCalls.length} tool call{toolCalls.length === 1 ? "" : "s"}
         </MarkerContent>
       </Marker>
       <div className="flex shrink-0 items-center gap-2">
-        {callableToolCalls.length > 0 ? (
-          <Button
-            className="invisible shrink-0 group-hover/message:visible"
-            size="sm"
-            variant="outline"
-            disabled={!canCallTools}
-            aria-label="Call available MCP and built-in tools"
-            onClick={() => void handleCallTools()}
-          >
-            Call tools
-          </Button>
-        ) : null}
+        {callableToolCalls.length > 0
+          ? (
+            <Button
+              aria-label="Call available MCP and built-in tools"
+              className="invisible shrink-0 group-hover/message:visible"
+              disabled={!canCallTools}
+              onClick={() => void handleCallTools()}
+              size="sm"
+              variant="outline"
+            >
+              Call tools
+            </Button>
+          )
+          : null}
         <Tooltip content="Run from this message">
           <Button
+            aria-label="Run from this message"
             className="invisible shrink-0 group-hover/message:visible"
+            disabled={!canContinue}
+            onClick={() => void handleContinue()}
             size="sm"
             variant="default"
-            disabled={!canContinue}
-            aria-label="Run from this message"
-            onClick={() => void handleContinue()}
           >
             Continue
           </Button>
@@ -385,7 +389,7 @@ function _ToolStepContinuation({
 }
 const ToolStepContinuation = memo(_ToolStepContinuation);
 
-function StreamingMessageSkeleton({ className }: { className?: string }) {
+function StreamingMessageSkeleton({ className }: { readonly className?: string; }) {
   return (
     <div className={cn("px-1 pb-3", className)}>
       <div className="px-1.5">

@@ -1,13 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { lstat, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-
 import {
   AGENT_PROJECT_MANIFEST_FILE,
-  AGENT_PROJECT_MANIFEST_VERSION,
+  AGENT_PROJECT_MANIFEST_VERSION
 } from "@llm-space/runtime";
 
-export type AgentProjectTemplate = "starter" | "blank";
+export type AgentProjectTemplate = "blank" | "starter";
 
 export async function scaffoldAgentProject(options: {
   directory: string;
@@ -23,7 +22,7 @@ export async function scaffoldAgentProject(options: {
   try {
     await lstat(root);
   } catch (error) {
-    if (!_hasCode(error, "ENOENT")) throw error;
+    if (!_hasCode(error, "ENOENT")) { throw error; }
     await mkdir(root, { recursive: true });
     createdRoot = true;
   }
@@ -40,10 +39,10 @@ export async function scaffoldAgentProject(options: {
     await rm(stage, { recursive: true, force: true });
     return root;
   } catch (error) {
-    if (movedManifest) await rm(manifestPath, { force: true });
-    if (movedAgent) await rm(agentPath, { recursive: true, force: true });
+    if (movedManifest) { await rm(manifestPath, { force: true }); }
+    if (movedAgent) { await rm(agentPath, { recursive: true, force: true }); }
     await rm(stage, { recursive: true, force: true });
-    if (createdRoot) await rm(root, { recursive: true, force: true });
+    if (createdRoot) { await rm(root, { recursive: true, force: true }); }
     throw error;
   }
 }
@@ -57,11 +56,11 @@ async function _writeStage(
   await mkdir(path.join(agent, "skills"), { recursive: true });
   await writeFile(
     path.join(stage, AGENT_PROJECT_MANIFEST_FILE),
-    JSON.stringify(
+    `${JSON.stringify(
       { schemaVersion: AGENT_PROJECT_MANIFEST_VERSION, agent: "./agent" },
       null,
       2
-    ) + "\n",
+    )}\n`,
     "utf8"
   );
   await writeFile(
@@ -116,7 +115,7 @@ async function _assertMissing(target: string): Promise<void> {
   try {
     await lstat(target);
   } catch (error) {
-    if (_hasCode(error, "ENOENT")) return;
+    if (_hasCode(error, "ENOENT")) { return; }
     throw error;
   }
   throw new Error(`Refusing to overwrite existing path: ${target}`);

@@ -1,7 +1,7 @@
-import type { Thread } from "../types";
-
 import { JsonThreadParser } from "./json-thread-parser";
+
 import type { ThreadParseContext, ThreadParser } from "./thread-parser";
+import type { Thread } from "../types";
 
 /**
  * Dispatches raw file content to a registered {@link ThreadParser} based on the

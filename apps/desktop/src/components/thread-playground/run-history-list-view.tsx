@@ -1,8 +1,4 @@
 import {
-  type EvaluationRecord,
-  type RunSnapshot,
-} from "@llm-space/core/thread";
-import {
   ArrowLeftIcon,
   CheckIcon,
   ChevronLeftIcon,
@@ -11,62 +7,65 @@ import {
   GitCompareArrowsIcon,
   RotateCcwIcon,
   Trash2Icon,
-  XIcon,
+  XIcon
 } from "lucide-react";
 import {
+  type KeyboardEvent,
   memo,
+  type MouseEvent,
   useCallback,
   useEffect,
   useMemo,
-  useState,
-  type KeyboardEvent,
-  type MouseEvent,
+  useState
 } from "react";
 import { format } from "timeago.js";
 
-import { cn } from "@/lib/utils";
+import type {
+  EvaluationRecord,
+  RunSnapshot
+} from "@llm-space/core/thread";
 
+import { cn } from "@/lib/utils";
+import { RunEvaluationDialog } from "./run-evaluation-dialog";
+import {
+  averageScoreForRun,
+  evaluationScoreDelta,
+  findEvaluationForPair,
+  preferredEvaluationRubricId
+} from "./run-evaluation-utils";
+import {
+  runMessageCountLabel,
+  runModelLabel,
+  summarizeRun
+} from "./run-history-utils";
+import { RunTraceView } from "./run-trace-view";
+import { useThreadStore, useThreadStoreActions } from "./stores";
 import { useAutoAnimation } from "../../lib/use-auto-animation";
 import { ConfirmDialog } from "../confirm-dialog";
 import { Tooltip } from "../tooltip";
 import { Button } from "../ui/button";
 import { Item, ItemContent, ItemDescription, ItemGroup } from "../ui/item";
 
-import { RunEvaluationDialog } from "./run-evaluation-dialog";
-import {
-  averageScoreForRun,
-  evaluationScoreDelta,
-  findEvaluationForPair,
-  preferredEvaluationRubricId,
-} from "./run-evaluation-utils";
-import {
-  runMessageCountLabel,
-  runModelLabel,
-  summarizeRun,
-} from "./run-history-utils";
-import { RunTraceView } from "./run-trace-view";
-import { useThreadStore, useThreadStoreActions } from "./stores";
-
 const VERDICT_LABELS: Record<EvaluationRecord["verdict"], string> = {
   leftBetter: "Run A Better",
   rightBetter: "Run B Better",
   tie: "Tie",
   pass: "Pass",
-  fail: "Fail",
+  fail: "Fail"
 };
 
-function _RunHistoryListView({ onClose }: { onClose: () => void }) {
+function _RunHistoryListView({ onClose }: { readonly onClose: () => void; }) {
   const [containerRef] = useAutoAnimation();
-  const runHistory = useThreadStore((s) => s.runHistory);
-  const evaluations = useThreadStore((s) => s.evaluations);
-  const evaluationRubrics = useThreadStore((s) => s.evaluationRubrics);
+  const runHistory = useThreadStore(s => s.runHistory);
+  const evaluations = useThreadStore(s => s.evaluations);
+  const evaluationRubrics = useThreadStore(s => s.evaluationRubrics);
   const {
     restoreThread,
     removeRun,
     saveEvaluation,
     removeEvaluation,
     saveEvaluationRubric,
-    removeEvaluationRubric,
+    removeEvaluationRubric
   } = useThreadStoreActions();
   const [selectedRunIds, setSelectedRunIds] = useState<string[]>([]);
   const [evaluationOpen, setEvaluationOpen] = useState(false);
@@ -80,7 +79,7 @@ function _RunHistoryListView({ onClose }: { onClose: () => void }) {
     if (!inspectingRunId) {
       return -1;
     }
-    return runs.findIndex((run) => run.id === inspectingRunId);
+    return runs.findIndex(run => run.id === inspectingRunId);
   }, [inspectingRunId, runs]);
   const inspectingRun =
     inspectingRunIndex >= 0 ? runs[inspectingRunIndex] : null;
@@ -88,11 +87,11 @@ function _RunHistoryListView({ onClose }: { onClose: () => void }) {
   const canInspectNext =
     inspectingRunIndex >= 0 && inspectingRunIndex < runs.length - 1;
   const runById = useMemo(() => {
-    return new Map(runHistory.map((run) => [run.id, run]));
+    return new Map(runHistory.map(run => [run.id, run]));
   }, [runHistory]);
   const selectedRuns = useMemo(() => {
     return selectedRunIds
-      .map((id) => runById.get(id))
+      .map(id => runById.get(id))
       .filter((run): run is RunSnapshot => Boolean(run));
   }, [runById, selectedRunIds]);
   const comparisonRuns =
@@ -113,7 +112,7 @@ function _RunHistoryListView({ onClose }: { onClose: () => void }) {
   );
 
   useEffect(() => {
-    setSelectedRunIds((current) => current.filter((id) => runById.has(id)));
+    setSelectedRunIds(current => current.filter(id => runById.has(id)));
   }, [runById]);
   useEffect(() => {
     if (inspectingRunId && inspectingRunIndex === -1) {
@@ -122,9 +121,9 @@ function _RunHistoryListView({ onClose }: { onClose: () => void }) {
   }, [inspectingRunId, inspectingRunIndex]);
 
   const toggleRunSelection = useCallback((runId: string) => {
-    setSelectedRunIds((current) => {
+    setSelectedRunIds(current => {
       if (current.includes(runId)) {
-        return current.filter((id) => id !== runId);
+        return current.filter(id => id !== runId);
       }
       if (current.length >= 2) {
         return [current[1], runId];
@@ -174,10 +173,10 @@ function _RunHistoryListView({ onClose }: { onClose: () => void }) {
       <div className="flex size-full flex-col">
         <div className="text-muted-foreground flex h-12 shrink-0 items-center gap-1 border-b px-2 text-sm">
           <Button
-            variant="ghost"
-            size="sm"
             aria-label="Back to run history"
             onClick={handleBackToHistory}
+            size="sm"
+            variant="ghost"
           >
             <ArrowLeftIcon className="size-3" />
             Back
@@ -190,31 +189,31 @@ function _RunHistoryListView({ onClose }: { onClose: () => void }) {
           </div>
           <Tooltip content="Previous run">
             <Button
-              variant="ghost"
-              size="icon-sm"
               aria-label="Inspect previous run"
               disabled={!canInspectPrevious}
               onClick={inspectPreviousRun}
+              size="icon-sm"
+              variant="ghost"
             >
               <ChevronLeftIcon className="size-3" />
             </Button>
           </Tooltip>
           <Tooltip content="Next run">
             <Button
-              variant="ghost"
-              size="icon-sm"
               aria-label="Inspect next run"
               disabled={!canInspectNext}
               onClick={inspectNextRun}
+              size="icon-sm"
+              variant="ghost"
             >
               <ChevronRightIcon className="size-3" />
             </Button>
           </Tooltip>
           <Button
-            variant="ghost"
-            size="icon-sm"
             aria-label="Close run history"
             onClick={onClose}
+            size="icon-sm"
+            variant="ghost"
           >
             <XIcon className="size-3" />
           </Button>
@@ -230,10 +229,10 @@ function _RunHistoryListView({ onClose }: { onClose: () => void }) {
         <div>Run history</div>
         <div className="pr-2">
           <Button
-            variant="ghost"
-            size="icon-sm"
             aria-label="Close run history"
             onClick={onClose}
+            size="icon-sm"
+            variant="ghost"
           >
             <XIcon className="size-3" />
           </Button>
@@ -248,9 +247,9 @@ function _RunHistoryListView({ onClose }: { onClose: () => void }) {
             </div>
           </div>
           <Button
-            size="sm"
             disabled={!comparisonRuns}
             onClick={handleCompareSelected}
+            size="sm"
           >
             <GitCompareArrowsIcon className="size-3" />
             Compare
@@ -258,60 +257,55 @@ function _RunHistoryListView({ onClose }: { onClose: () => void }) {
         </div>
       </div>
       <div
-        ref={containerRef}
         className="min-h-0 grow overflow-y-auto px-3 py-3.5"
+        ref={containerRef}
       >
         <ItemGroup className="gap-3.5!">
-          {runs.length === 0 ? (
-            <div className="text-muted-foreground m-auto text-xs">
-              No runs yet
-            </div>
-          ) : (
-            runs.map((run, index) => (
-              <RunHistoryItem
-                key={run.id}
-                run={run}
-                newest={index === 0}
-                selected={selectedRunIds.includes(run.id)}
-                onToggleSelected={toggleRunSelection}
-                onInspectRun={inspectRunFromHistory}
-                onRestore={handleRestoreRun}
-                onRequestRemove={setRunPendingRemoval}
-              />
-            ))
-          )}
+          {runs.length === 0
+            ? (
+              <div className="text-muted-foreground m-auto text-xs">
+                No runs yet
+              </div>
+            )
+            : (
+              runs.map((run, index) => (
+                <RunHistoryItem
+                  key={run.id}
+                  newest={index === 0}
+                  onInspectRun={inspectRunFromHistory}
+                  onRequestRemove={setRunPendingRemoval}
+                  onRestore={handleRestoreRun}
+                  onToggleSelected={toggleRunSelection}
+                  run={run}
+                  selected={selectedRunIds.includes(run.id)}
+                />
+              ))
+            )}
         </ItemGroup>
         {evaluations.length > 0 && (
           <_EvaluationList
             evaluations={evaluations}
-            runById={runById}
             onOpenEvaluation={openEvaluation}
             onRequestRemove={setEvaluationPendingRemoval}
+            runById={runById}
           />
         )}
       </div>
       <RunEvaluationDialog
-        open={evaluationOpen}
-        leftRun={comparisonRuns?.[0] ?? null}
-        rightRun={comparisonRuns?.[1] ?? null}
         evaluation={selectedEvaluation}
-        rubrics={evaluationRubrics}
-        preferredRubricId={preferredRubricId}
+        leftRun={comparisonRuns?.[0] ?? null}
         onOpenChange={setEvaluationOpen}
+        onRemoveRubric={removeEvaluationRubric}
         onSave={saveEvaluation}
         onSaveRubric={saveEvaluationRubric}
-        onRemoveRubric={removeEvaluationRubric}
+        open={evaluationOpen}
+        preferredRubricId={preferredRubricId}
+        rightRun={comparisonRuns?.[1] ?? null}
+        rubrics={evaluationRubrics}
       />
       <ConfirmDialog
-        open={runPendingRemoval !== null}
-        onOpenChange={(open) => {
-          if (!open) {
-            setRunPendingRemoval(null);
-          }
-        }}
-        title="Remove Run?"
-        description="This removes the saved run from this thread and removes any evaluations that reference it."
         confirmLabel="Remove"
+        description="This removes the saved run from this thread and removes any evaluations that reference it."
         onConfirm={() => {
           const run = runPendingRemoval;
           setRunPendingRemoval(null);
@@ -319,17 +313,17 @@ function _RunHistoryListView({ onClose }: { onClose: () => void }) {
             removeRun(run);
           }
         }}
-      />
-      <ConfirmDialog
-        open={evaluationPendingRemoval !== null}
-        onOpenChange={(open) => {
+        onOpenChange={open => {
           if (!open) {
-            setEvaluationPendingRemoval(null);
+            setRunPendingRemoval(null);
           }
         }}
-        title="Remove Evaluation?"
-        description="This removes the saved evaluation from this thread. The compared runs are kept."
+        open={runPendingRemoval !== null}
+        title="Remove Run?"
+      />
+      <ConfirmDialog
         confirmLabel="Remove"
+        description="This removes the saved evaluation from this thread. The compared runs are kept."
         onConfirm={() => {
           const evaluation = evaluationPendingRemoval;
           setEvaluationPendingRemoval(null);
@@ -337,6 +331,13 @@ function _RunHistoryListView({ onClose }: { onClose: () => void }) {
             removeEvaluation(evaluation);
           }
         }}
+        onOpenChange={open => {
+          if (!open) {
+            setEvaluationPendingRemoval(null);
+          }
+        }}
+        open={evaluationPendingRemoval !== null}
+        title="Remove Evaluation?"
       />
     </div>
   );
@@ -351,15 +352,15 @@ function _RunHistoryItem({
   onToggleSelected,
   onInspectRun,
   onRestore,
-  onRequestRemove,
+  onRequestRemove
 }: {
-  run: RunSnapshot;
-  newest: boolean;
-  selected: boolean;
-  onToggleSelected: (runId: string) => void;
-  onInspectRun: (run: RunSnapshot) => void;
-  onRestore: (thread: RunSnapshot["thread"]) => void;
-  onRequestRemove: (run: RunSnapshot) => void;
+  readonly newest: boolean;
+  readonly onInspectRun: (run: RunSnapshot) => void;
+  readonly onRequestRemove: (run: RunSnapshot) => void;
+  readonly onRestore: (thread: RunSnapshot["thread"]) => void;
+  readonly onToggleSelected: (runId: string) => void;
+  readonly run: RunSnapshot;
+  readonly selected: boolean;
 }) {
   const summary = summarizeRun(run.thread);
   const modelLabel = runModelLabel(run.thread);
@@ -385,10 +386,6 @@ function _RunHistoryItem({
   }, []);
   return (
     <Item
-      size="sm"
-      variant="muted"
-      role="listitem"
-      tabIndex={0}
       aria-label={`Inspect run from ${time}: ${summary}`}
       className={cn(
         "group hover:bg-muted/70 focus-visible:ring-ring relative cursor-pointer flex-col items-start gap-1.5 focus-visible:ring-[3px]",
@@ -398,6 +395,10 @@ function _RunHistoryItem({
       )}
       onClick={handleInspect}
       onKeyDown={handleInspectKeyDown}
+      role="listitem"
+      size="sm"
+      tabIndex={0}
+      variant="muted"
     >
       <ItemContent className="flex w-full min-w-0 flex-row items-start gap-2">
         <ItemDescription className="text-foreground/60 group-hover:text-foreground line-clamp-2 min-w-0 flex-1 font-mono">
@@ -406,14 +407,14 @@ function _RunHistoryItem({
         <div className="shrink-0" onClick={stopInspectClick}>
           <Tooltip content="Remove run">
             <Button
-              variant="ghost"
-              size="icon-sm"
+              aria-label={`Remove run from ${time}`}
               className={cn(
                 "hover:text-destructive pointer-events-none opacity-0 transition-opacity",
                 "group-focus-within:pointer-events-auto group-focus-within:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100"
               )}
-              aria-label={`Remove run from ${time}`}
-              onClick={() => onRequestRemove(run)}
+              onClick={() => { onRequestRemove(run); }}
+              size="icon-sm"
+              variant="ghost"
             >
               <Trash2Icon className="size-3" />
             </Button>
@@ -435,49 +436,49 @@ function _RunHistoryItem({
         >
           <Tooltip content={selected ? "Remove from comparison" : "Select run"}>
             <Button
-              variant="ghost"
-              size="icon-sm"
-              className={cn(
-                "text-muted-foreground/70 hover:text-foreground opacity-70 transition-opacity",
-                "group-focus-within:opacity-100 group-hover:opacity-100 focus-visible:opacity-100",
-                selected && "text-primary opacity-100"
-              )}
               aria-label={
                 selected
                   ? `Remove run from comparison: ${summary}`
                   : `Select run for comparison: ${summary}`
               }
               aria-pressed={selected}
-              onClick={() => onToggleSelected(run.id)}
+              className={cn(
+                "text-muted-foreground/70 hover:text-foreground opacity-70 transition-opacity",
+                "group-focus-within:opacity-100 group-hover:opacity-100 focus-visible:opacity-100",
+                selected && "text-primary opacity-100"
+              )}
+              onClick={() => { onToggleSelected(run.id); }}
+              size="icon-sm"
+              variant="ghost"
             >
               <span
                 aria-hidden
                 className={cn(
                   "flex size-3 items-center justify-center rounded-[3px] border border-current",
-                  selected &&
-                    "border-primary bg-primary text-primary-foreground"
+                  selected
+                  && "border-primary bg-primary text-primary-foreground"
                 )}
               >
-                {selected && <CheckIcon className="size-2.5" />}
+                {selected ? <CheckIcon className="size-2.5" /> : null}
               </span>
             </Button>
           </Tooltip>
           <Tooltip content="Inspect run">
             <Button
-              variant="ghost"
-              size="icon-sm"
               aria-label={`Inspect run from ${time}: ${summary}. ${modelLabel}. ${messageCountLabel}`}
-              onClick={() => onInspectRun(run)}
+              onClick={() => { onInspectRun(run); }}
+              size="icon-sm"
+              variant="ghost"
             >
               <EyeIcon className="size-3" />
             </Button>
           </Tooltip>
           <Tooltip content="Restore run">
             <Button
-              variant="ghost"
-              size="icon-sm"
               aria-label={`Restore run from ${time}: ${summary}. ${modelLabel}. ${messageCountLabel}`}
-              onClick={() => onRestore(run.thread)}
+              onClick={() => { onRestore(run.thread); }}
+              size="icon-sm"
+              variant="ghost"
             >
               <RotateCcwIcon className="size-3" />
             </Button>
@@ -494,17 +495,17 @@ function _EvaluationList({
   evaluations,
   runById,
   onOpenEvaluation,
-  onRequestRemove,
+  onRequestRemove
 }: {
-  evaluations: EvaluationRecord[];
-  runById: Map<string, RunSnapshot>;
-  onOpenEvaluation: (leftRunId: string, rightRunId: string) => void;
-  onRequestRemove: (evaluation: EvaluationRecord) => void;
+  readonly evaluations: EvaluationRecord[];
+  readonly onOpenEvaluation: (leftRunId: string, rightRunId: string) => void;
+  readonly onRequestRemove: (evaluation: EvaluationRecord) => void;
+  readonly runById: Map<string, RunSnapshot>;
 }) {
   const visibleEvaluations = evaluations
     .slice()
     .reverse()
-    .flatMap((evaluation) => {
+    .flatMap(evaluation => {
       const leftRun = runById.get(evaluation.leftRunId);
       const rightRun = runById.get(evaluation.rightRunId);
       return leftRun && rightRun ? [{ evaluation, leftRun, rightRun }] : [];
@@ -522,12 +523,12 @@ function _EvaluationList({
       <ItemGroup className="gap-2!">
         {visibleEvaluations.map(({ evaluation, leftRun, rightRun }) => (
           <EvaluationListItem
-            key={evaluation.id}
             evaluation={evaluation}
+            key={evaluation.id}
             leftRun={leftRun}
-            rightRun={rightRun}
             onOpenEvaluation={onOpenEvaluation}
             onRequestRemove={onRequestRemove}
+            rightRun={rightRun}
           />
         ))}
       </ItemGroup>
@@ -540,13 +541,13 @@ function _EvaluationListItem({
   leftRun,
   rightRun,
   onOpenEvaluation,
-  onRequestRemove,
+  onRequestRemove
 }: {
-  evaluation: EvaluationRecord;
-  leftRun: RunSnapshot;
-  rightRun: RunSnapshot;
-  onOpenEvaluation: (leftRunId: string, rightRunId: string) => void;
-  onRequestRemove: (evaluation: EvaluationRecord) => void;
+  readonly evaluation: EvaluationRecord;
+  readonly leftRun: RunSnapshot;
+  readonly onOpenEvaluation: (leftRunId: string, rightRunId: string) => void;
+  readonly onRequestRemove: (evaluation: EvaluationRecord) => void;
+  readonly rightRun: RunSnapshot;
 }) {
   const verdictLabel = VERDICT_LABELS[evaluation.verdict];
   const leftAverage = averageScoreForRun(
@@ -580,14 +581,14 @@ function _EvaluationListItem({
   }, []);
   return (
     <Item
-      size="sm"
-      variant="outline"
-      role="listitem"
-      tabIndex={0}
       aria-label={`Open saved evaluation: ${verdictLabel}`}
       className="group hover:bg-foreground/5! focus-visible:ring-ring cursor-pointer flex-col items-start gap-1 focus-visible:ring-[3px]"
       onClick={handleOpen}
       onKeyDown={handleOpenKeyDown}
+      role="listitem"
+      size="sm"
+      tabIndex={0}
+      variant="outline"
     >
       <div className="flex w-full items-center justify-between gap-2">
         <span className="text-xs font-medium">{verdictLabel}</span>
@@ -598,14 +599,14 @@ function _EvaluationListItem({
           <div onClick={stopOpenClick}>
             <Tooltip content="Remove evaluation">
               <Button
-                variant="ghost"
-                size="icon-sm"
+                aria-label={`Remove evaluation: ${verdictLabel}`}
                 className={cn(
                   "hover:text-destructive pointer-events-none opacity-0 transition-opacity",
                   "group-focus-within:pointer-events-auto group-focus-within:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100"
                 )}
-                aria-label={`Remove evaluation: ${verdictLabel}`}
-                onClick={() => onRequestRemove(evaluation)}
+                onClick={() => { onRequestRemove(evaluation); }}
+                size="icon-sm"
+                variant="ghost"
               >
                 <Trash2Icon className="size-3" />
               </Button>
@@ -617,10 +618,11 @@ function _EvaluationListItem({
         A: {summarizeRun(leftRun.thread)}
         {"\n"}B: {summarizeRun(rightRun.thread)}
       </div>
-      {evaluation.rubric &&
-        leftAverage !== null &&
-        rightAverage !== null &&
-        delta !== null && (
+      {evaluation.rubric
+        && leftAverage !== null
+        && rightAverage !== null
+        && delta !== null
+        ? (
           <div className="w-full text-[0.625rem]">
             <div className="text-muted-foreground truncate">
               {evaluation.rubric.name} · v{evaluation.rubric.revision}
@@ -631,12 +633,15 @@ function _EvaluationListItem({
               {delta.toFixed(1)}
             </div>
           </div>
-        )}
-      {evaluation.note && (
-        <div className="text-foreground/70 line-clamp-2 w-full text-[0.625rem]">
-          {evaluation.note}
-        </div>
-      )}
+        )
+        : null}
+      {evaluation.note
+        ? (
+          <div className="text-foreground/70 line-clamp-2 w-full text-[0.625rem]">
+            {evaluation.note}
+          </div>
+        )
+        : null}
     </Item>
   );
 }

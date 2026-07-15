@@ -1,7 +1,6 @@
 import { mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-
 import { afterEach, describe, expect, test } from "bun:test";
 
 import { discoverAgentProject } from "./discover-agent-project";
@@ -12,7 +11,7 @@ afterEach(async () => {
   delete (globalThis as Record<string, unknown>)
     .__LLM_SPACE_DISCOVERY_EXECUTED__;
   await Promise.all(
-    ROOTS.splice(0).map((root) => rm(root, { recursive: true, force: true }))
+    ROOTS.splice(0).map(async root => rm(root, { recursive: true, force: true }))
   );
 });
 
@@ -44,10 +43,10 @@ describe("discoverAgentProject", () => {
     expect(discovered.definition?.logicalPath).toBe("agent.ts");
     expect(discovered.instructions?.logicalPath).toBe("instructions.md");
     expect(discovered.skillsRoot).toBe(path.join(root, "skills"));
-    expect(discovered.tools.map((tool) => tool.logicalPath)).toEqual([
-      "tools/danger.ts",
+    expect(discovered.tools.map(tool => tool.logicalPath)).toEqual([
+      "tools/danger.ts"
     ]);
-    expect(discovered.connections.map((connection) => connection.logicalPath))
+    expect(discovered.connections.map(connection => connection.logicalPath))
       .toEqual(["connections/project.ts"]);
     expect(discovered.diagnostics).toEqual([]);
   });
@@ -55,12 +54,12 @@ describe("discoverAgentProject", () => {
   test("reports missing and invalid source slots as diagnostics", async () => {
     const root = _root();
     await mkdir(path.join(root, "tools", "not-a-file.ts"), {
-      recursive: true,
+      recursive: true
     });
 
     const discovered = await discoverAgentProject(root);
 
-    expect(discovered.diagnostics.map((diagnostic) => diagnostic.code)).toEqual(
+    expect(discovered.diagnostics.map(diagnostic => diagnostic.code)).toEqual(
       ["definition_missing", "instructions_missing", "tool_import_failed"]
     );
     expect(discovered.tools).toEqual([]);
@@ -87,14 +86,14 @@ describe("discoverAgentProject", () => {
         severity: "error",
         code: "tool_import_failed",
         message: "The tools source directory cannot be a symbolic link",
-        path: path.join(root, "tools"),
+        path: path.join(root, "tools")
       },
       {
         severity: "error",
         code: "skill_invalid",
         message: "The skills source directory cannot be a symbolic link",
-        path: path.join(root, "skills"),
-      },
+        path: path.join(root, "skills")
+      }
     ]);
   });
 });

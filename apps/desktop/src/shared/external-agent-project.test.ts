@@ -1,10 +1,11 @@
-import type { Thread } from "@llm-space/core";
 import { describe, expect, test } from "bun:test";
 
+import type { Thread } from "@llm-space/core";
+
 import {
-  getExternalAgentProjectRunBlockReason,
   type ExternalAgentProjectThreadRecord,
   type ExternalAgentProjectView,
+  getExternalAgentProjectRunBlockReason
 } from "./external-agent-project";
 
 const PROJECT = {
@@ -18,7 +19,7 @@ const PROJECT = {
   instructions: "Test",
   definition: {
     model: { provider: "openai", id: "gpt-5.3-codex" },
-    reasoning: "high",
+    reasoning: "high"
   },
   definitionFingerprint: "definition",
   promptFingerprint: "prompt",
@@ -26,7 +27,7 @@ const PROJECT = {
   tools: [],
   skills: [],
   diagnostics: [],
-  sourceFiles: [],
+  sourceFiles: []
 } satisfies ExternalAgentProjectView;
 
 function _record(thread: Thread): ExternalAgentProjectThreadRecord {
@@ -35,7 +36,7 @@ function _record(thread: Thread): ExternalAgentProjectThreadRecord {
     promptFingerprint: "prompt",
     syncedPrompt: "Test",
     definitionFingerprint: "definition",
-    syncedDefinition: PROJECT.definition,
+    syncedDefinition: PROJECT.definition
   };
 }
 
@@ -51,17 +52,17 @@ describe("external Agent Project run gate", () => {
             toolCalls: [
               {
                 id: "call-1",
-                input: { name: "lookup", arguments: {} },
-              },
-            ],
+                input: { name: "lookup", arguments: {} }
+              }
+            ]
           },
           {
             id: "user-after-pending-call",
             role: "user",
-            content: [{ type: "text", text: "A later editable message" }],
-          },
-        ],
-      },
+            content: [{ type: "text", text: "A later editable message" }]
+          }
+        ]
+      }
     });
 
     expect(getExternalAgentProjectRunBlockReason(PROJECT, record)).toBe(
@@ -79,17 +80,17 @@ describe("external Agent Project run gate", () => {
             description: "Lookup",
             parameters: { type: "object", properties: {} },
             projectId: PROJECT.id,
-            snapshot: "snapshot-1",
-          },
-        ],
-      },
+            snapshot: "snapshot-1"
+          }
+        ]
+      }
     });
 
     expect(getExternalAgentProjectRunBlockReason(PROJECT, record)).toBe(
       "staleToolSnapshot"
     );
     const [tool] = record.thread.context!.tools!;
-    if (tool?.type !== "project") throw new Error("expected project tool");
+    if (tool?.type !== "project") { throw new Error("expected project tool"); }
     tool.snapshot = PROJECT.snapshot;
     expect(getExternalAgentProjectRunBlockReason(PROJECT, record)).toBeNull();
   });

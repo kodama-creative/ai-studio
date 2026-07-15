@@ -1,6 +1,6 @@
 import type { ToolCall } from "@llm-space/core";
 
-export type ToolCallStatus = "needsResponse" | "ready" | "error";
+export type ToolCallStatus = "error" | "needsResponse" | "ready";
 
 export interface ToolCallSummary {
   totalCount: number;
@@ -15,7 +15,7 @@ export interface ToolCallSummary {
  */
 export function getToolCallOutputText(toolCall: ToolCall): string {
   return (
-    toolCall.output?.content?.map((content) => content.text).join("\n") ?? ""
+    toolCall.output?.content?.map(content => content.text).join("\n") ?? ""
   );
 }
 
@@ -33,7 +33,7 @@ export function isToolCallOutcomeUnknown(toolCall: ToolCall): boolean {
  * Derive the user-facing state from existing thread data; no extra schema.
  */
 export function getToolCallStatus(toolCall: ToolCall): ToolCallStatus {
-  if (!toolCall.output) return "needsResponse";
+  if (!toolCall.output) { return "needsResponse"; }
   return toolCall.output.isError ? "error" : "ready";
 }
 
@@ -61,6 +61,6 @@ export function summarizeToolCalls(toolCalls: ToolCall[]): ToolCallSummary {
     readyCount,
     errorCount,
     needsResponseCount,
-    canContinue: toolCalls.length > 0 && needsResponseCount === 0,
+    canContinue: toolCalls.length > 0 && needsResponseCount === 0
   };
 }

@@ -7,7 +7,7 @@ describe("createDirtyAgentSourceCoordinator", () => {
     const requests: unknown[] = [];
     let actions = 0;
     const coordinator = createDirtyAgentSourceCoordinator({
-      sendRequest: (request) => requests.push(request),
+      sendRequest: request => requests.push(request)
     });
 
     coordinator.request("reload", () => actions++);
@@ -17,10 +17,10 @@ describe("createDirtyAgentSourceCoordinator", () => {
   });
 
   test("keeps dirty state after cancel and runs only after confirmation", () => {
-    const requests: { requestId: string; reason: "quit" | "reload" }[] = [];
+    const requests: Array<{ reason: "quit" | "reload"; requestId: string; }> = [];
     let actions = 0;
     const coordinator = createDirtyAgentSourceCoordinator({
-      sendRequest: (request) => requests.push(request),
+      sendRequest: request => requests.push(request)
     });
     coordinator.setDirty(true);
 

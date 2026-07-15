@@ -2,11 +2,11 @@
 
 import {
   createContext,
+  type ReactNode,
   useCallback,
   useContext,
   useMemo,
-  useState,
-  type ReactNode,
+  useState
 } from "react";
 
 /**
@@ -28,6 +28,7 @@ interface ExperimentalContextValue {
   /** Whether the tracing (beta) experiment is enabled. */
   tracingEnabled: boolean;
   setTracingEnabled: (enabled: boolean) => void;
+
   /** Whether the react-scan render overlay is enabled (applies on reload). */
   reactScanEnabled: boolean;
   setReactScanEnabled: (enabled: boolean) => void;
@@ -45,7 +46,7 @@ function _readStoredReactScanEnabled(): boolean {
   return localStorage.getItem(REACT_SCAN_ENABLED_STORAGE_KEY) === "true";
 }
 
-export function ExperimentalProvider({ children }: { children: ReactNode }) {
+export function ExperimentalProvider({ children }: { readonly children: ReactNode; }) {
   const [tracingEnabled, setTracingEnabledState] = useState<boolean>(
     _readStoredTracingEnabled
   );
@@ -68,7 +69,7 @@ export function ExperimentalProvider({ children }: { children: ReactNode }) {
       tracingEnabled,
       setTracingEnabled,
       reactScanEnabled,
-      setReactScanEnabled,
+      setReactScanEnabled
     }),
     [tracingEnabled, setTracingEnabled, reactScanEnabled, setReactScanEnabled]
   );

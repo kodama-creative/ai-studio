@@ -2,18 +2,19 @@
 
 import {
   createContext,
+  type ReactNode,
   useCallback,
   useContext,
   useEffect,
   useMemo,
-  useState,
-  type ReactNode,
+  useState
 } from "react";
 
 /** User-selectable appearance. `"system"` follows the OS color scheme. */
-export type Theme = "light" | "dark" | "system";
+export type Theme = "dark" | "light" | "system";
+
 /** The concrete scheme actually applied to the document. */
-export type ResolvedTheme = "light" | "dark";
+export type ResolvedTheme = "dark" | "light";
 
 /** Accent (as `#rrggbb`) used when nothing is stored — the base `--primary` blue. */
 export const DEFAULT_PRIMARY = "#5e80ee";
@@ -24,7 +25,7 @@ export const DEFAULT_PRIMARY = "#5e80ee";
  * to keep large threads scrollable on the native WebKit renderer, where mounting
  * one CodeMirror per message makes scroll cost scale with message count.
  */
-export type RenderingFidelity = "rich" | "lite";
+export type RenderingFidelity = "lite" | "rich";
 
 /**
  * localStorage keys for the persisted appearance. Kept in sync with the
@@ -93,9 +94,9 @@ function _primaryForeground(hex: string): string {
     return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
   };
   const luminance =
-    0.2126 * toLinear((n >> 16) & 255) +
-    0.7152 * toLinear((n >> 8) & 255) +
-    0.0722 * toLinear(n & 255);
+    0.2126 * toLinear((n >> 16) & 255)
+    + 0.7152 * toLinear((n >> 8) & 255)
+    + 0.0722 * toLinear(n & 255);
   // Dark ink on bright accents (yellows/ambers), near-white on the rest.
   return luminance > 0.45 ? "oklch(0.216 0.006 56)" : "oklch(0.985 0 0)";
 }
@@ -130,11 +131,10 @@ function _applyFidelity(fidelity: RenderingFidelity) {
   document.documentElement.classList.toggle("lite", fidelity === "lite");
 }
 
-export function ThemeProvider({ children }: { children: ReactNode }) {
+export function ThemeProvider({ children }: { readonly children: ReactNode; }) {
   const [theme, setThemeState] = useState<Theme>(_readStoredTheme);
   const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>(() =>
-    _resolve(_readStoredTheme())
-  );
+    _resolve(_readStoredTheme()));
 
   const [primaryColor, setPrimaryState] = useState<string>(_readStoredPrimary);
   const [hasPrimaryColorOverride, setHasPrimaryColorOverride] = useState(
@@ -168,7 +168,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem(PRIMARY_STORAGE_KEY);
     setHasPrimaryColorOverride(false);
     setPrimaryState(DEFAULT_PRIMARY);
-    setResetPrimaryColorVersion((version) => version + 1);
+    setResetPrimaryColorVersion(version => version + 1);
   }, []);
 
   useEffect(() => {
@@ -199,7 +199,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       _applyTheme(next);
     };
     media.addEventListener("change", onChange);
-    return () => media.removeEventListener("change", onChange);
+    return () => { media.removeEventListener("change", onChange); };
   }, [theme]);
 
   const themeValue = useMemo(
@@ -212,14 +212,14 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       hasPrimaryColorOverride,
       setPrimaryColor,
       resetPrimaryColor,
-      resetPrimaryColorVersion,
+      resetPrimaryColorVersion
     }),
     [
       primaryColor,
       hasPrimaryColorOverride,
       setPrimaryColor,
       resetPrimaryColor,
-      resetPrimaryColorVersion,
+      resetPrimaryColorVersion
     ]
   );
 

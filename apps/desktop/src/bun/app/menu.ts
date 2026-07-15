@@ -1,12 +1,12 @@
 import {
   ApplicationMenu,
   type ApplicationMenuItemConfig,
-  type BrowserWindow,
+  type BrowserWindow
 } from "electrobun/bun";
 
-import type { Command } from "../../shared/commands";
-
 import { isChineseLocale } from "./locales";
+
+import type { Command } from "../../shared/commands";
 
 /**
  * The app (first) submenu. Its update item is the one dynamic piece: normally
@@ -26,7 +26,7 @@ function _appSubmenu(updateReady: boolean): ApplicationMenuItemConfig {
       {
         label: "Settings...",
         action: "settings",
-        accelerator: "CommandOrControl+,",
+        accelerator: "CommandOrControl+,"
       },
       { type: "divider" },
       { role: "hide", accelerator: "CommandOrControl+H" },
@@ -36,9 +36,9 @@ function _appSubmenu(updateReady: boolean): ApplicationMenuItemConfig {
       {
         label: "Quit LLM Space",
         role: "quit",
-        accelerator: "CommandOrControl+Q",
-      },
-    ],
+        accelerator: "CommandOrControl+Q"
+      }
+    ]
   };
 }
 
@@ -51,14 +51,14 @@ function _buildMenu(updateReady: boolean): ApplicationMenuItemConfig[] {
         {
           label: "New File",
           action: "newThread",
-          accelerator: "CommandOrControl+N",
+          accelerator: "CommandOrControl+N"
         },
         { label: "New from Examples...", action: "newFromExamples" },
         { type: "divider" },
         {
           label: "New Folder",
           action: "newFolder",
-          accelerator: "CommandOrControl+Shift+N",
+          accelerator: "CommandOrControl+Shift+N"
         },
         { type: "divider" },
         { label: "Import from Files...", action: "importFiles" },
@@ -70,7 +70,7 @@ function _buildMenu(updateReady: boolean): ApplicationMenuItemConfig[] {
         {
           label: "Close Tab",
           action: "closeTab",
-          accelerator: "CommandOrControl+W",
+          accelerator: "CommandOrControl+W"
         },
         { label: "Close Others", action: "closeOtherTabs" },
         { label: "Close All Tabs", action: "closeAllTabs" },
@@ -78,9 +78,9 @@ function _buildMenu(updateReady: boolean): ApplicationMenuItemConfig[] {
         {
           label: "Reopen Closed Tabs",
           action: "reopenClosedTabs",
-          accelerator: "CommandOrControl+Shift+T",
-        },
-      ],
+          accelerator: "CommandOrControl+Shift+T"
+        }
+      ]
     },
     {
       label: "Edit",
@@ -93,8 +93,8 @@ function _buildMenu(updateReady: boolean): ApplicationMenuItemConfig[] {
         { role: "paste" },
         { role: "pasteAndMatchStyle" },
         { role: "delete" },
-        { role: "selectAll" },
-      ],
+        { role: "selectAll" }
+      ]
     },
     {
       label: "View",
@@ -102,37 +102,37 @@ function _buildMenu(updateReady: boolean): ApplicationMenuItemConfig[] {
         {
           label: "Command Palette...",
           action: "commandPalette",
-          accelerator: "CommandOrControl+Shift+P",
+          accelerator: "CommandOrControl+Shift+P"
         },
         { type: "divider" },
         {
           label: "Toggle Sidebar",
           action: "toggleSidebar",
-          accelerator: "CommandOrControl+B",
+          accelerator: "CommandOrControl+B"
         },
         { type: "divider" },
         {
           label: "Reload",
           action: "reload",
-          accelerator: "CommandOrControl+Shift+R",
+          accelerator: "CommandOrControl+Shift+R"
         },
         { type: "divider" },
         {
           label: "Zoom In",
           action: "zoomIn",
-          accelerator: "CommandOrControl+Plus",
+          accelerator: "CommandOrControl+Plus"
         },
         {
           label: "Zoom Out",
           action: "zoomOut",
-          accelerator: "CommandOrControl+-",
+          accelerator: "CommandOrControl+-"
         },
         {
           label: "Reset Zoom",
           action: "resetZoom",
-          accelerator: "CommandOrControl+0",
-        },
-      ],
+          accelerator: "CommandOrControl+0"
+        }
+      ]
     },
     {
       label: "Window",
@@ -144,16 +144,16 @@ function _buildMenu(updateReady: boolean): ApplicationMenuItemConfig[] {
         {
           label: "Select Previous Tab",
           action: "selectPreviousTab",
-          accelerator: "CommandOrControl+Option+Left",
+          accelerator: "CommandOrControl+Option+Left"
         },
         {
           label: "Select Next Tab",
           action: "selectNextTab",
-          accelerator: "CommandOrControl+Option+Right",
+          accelerator: "CommandOrControl+Option+Right"
         },
         { type: "divider" },
-        { role: "toggleFullScreen", accelerator: "CommandOrControl+Shift+F" },
-      ],
+        { role: "toggleFullScreen", accelerator: "CommandOrControl+Shift+F" }
+      ]
     },
     {
       label: "Help",
@@ -166,9 +166,9 @@ function _buildMenu(updateReady: boolean): ApplicationMenuItemConfig[] {
         { label: "Report Bug", action: "reportBugs" },
         { label: "Donate", action: "donate" },
         { type: "divider" },
-        { label: "Onboard", action: "onboard" },
-      ],
-    },
+        { label: "Onboard", action: "onboard" }
+      ]
+    }
   ];
 }
 
@@ -211,14 +211,14 @@ const MENU_ACTION_COMMANDS: Record<string, Command> = {
   openDocument: { type: "openDocument", args: {} },
   openGitHubProject: {
     type: "openLink",
-    args: { url: "https://github.com/deer-flow/llm-space/tree/main" },
+    args: { url: "https://github.com/deer-flow/llm-space/tree/main" }
   },
   reportBugs: { type: "reportBugs", args: {} },
   checkForUpdates: { type: "checkForUpdates", args: {} },
   restartToUpdate: { type: "applyUpdateAndRestart", args: {} },
   donate: {
     type: "openLink",
-    args: { url: "https://my.feishu.cn/wiki/OvLBwVuSkiCR1ik5wGEcBXZfnye" },
+    args: { url: "https://my.feishu.cn/wiki/OvLBwVuSkiCR1ik5wGEcBXZfnye" }
   },
   onboard: { type: "openOnboard", args: {} },
   openHarness101: {
@@ -226,9 +226,9 @@ const MENU_ACTION_COMMANDS: Record<string, Command> = {
     args: {
       url: isChineseLocale()
         ? "https://my.feishu.cn/wiki/L082wubkdie8uMkRUjgceKYQnIe?fromScene=spaceOverview"
-        : "https://my.feishu.cn/docx/G8CGdg2PQoGjsRxspKAc9XZYnKT",
-    },
-  },
+        : "https://my.feishu.cn/docx/G8CGdg2PQoGjsRxspKAc9XZYnKT"
+    }
+  }
 };
 
 /**
@@ -240,9 +240,9 @@ export function registerMenuActions(
   executeCommand: (command: Command, window: BrowserWindow) => void
 ) {
   ApplicationMenu.setApplicationMenu(_buildMenu(false));
-  ApplicationMenu.on("application-menu-clicked", (event) => {
-    const { action } = (event as { data: { action: string } }).data;
+  ApplicationMenu.on("application-menu-clicked", event => {
+    const { action } = (event as { data: { action: string; }; }).data;
     const command = MENU_ACTION_COMMANDS[action];
-    if (command) executeCommand(command, window);
+    if (command) { executeCommand(command, window); }
   });
 }

@@ -9,15 +9,14 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
+  SelectValue
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import {
   DEFAULT_SEARCH_SETTINGS,
   type SearchProviderId,
-  type SearchSettings,
+  type SearchSettings
 } from "@/shared/search";
-
 import { ApiKeyField } from "./api-key-field";
 import { SettingsPage } from "./settings-page";
 
@@ -29,7 +28,7 @@ export function SearchPage() {
   useEffect(() => {
     let cancelled = false;
     void getSearchSettings()
-      .then((loaded) => {
+      .then(loaded => {
         if (!cancelled) {
           setSettings(loaded);
         }
@@ -49,31 +48,30 @@ export function SearchPage() {
     } catch (error) {
       toast.error("Failed to save search settings", {
         description:
-          error instanceof Error ? error.message : "Please try again.",
+          error instanceof Error ? error.message : "Please try again."
       });
     }
   }, []);
 
   return (
     <SettingsPage
-      title="Search"
       description={
         <>
           These settings only apply to the built-in <code>web_search</code> and{" "}
           <code>web_fetch</code> tools.
         </>
       }
+      title="Search"
     >
       <div className="flex flex-col gap-4">
         <div className="flex h-14 items-center justify-between gap-4">
           <span className="text-sm">Search provider</span>
           <Select
+            onValueChange={value =>
+              void persist({ ...settings, provider: value as SearchProviderId })}
             value={settings.provider}
-            onValueChange={(value) =>
-              void persist({ ...settings, provider: value as SearchProviderId })
-            }
           >
-            <SelectTrigger className="w-40" aria-label="Search provider">
+            <SelectTrigger aria-label="Search provider" className="w-40">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -86,23 +84,19 @@ export function SearchPage() {
         <Separator />
 
         <ApiKeyField
-          label="Firecrawl API key"
-          value={settings.firecrawlApiKey}
           getKeyUrl="https://www.firecrawl.dev/app/api-keys"
-          onChange={(e) =>
-            setSettings({ ...settings, firecrawlApiKey: e.target.value })
-          }
+          label="Firecrawl API key"
           onBlur={() => void persist(settings)}
+          onChange={e => { setSettings({ ...settings, firecrawlApiKey: e.target.value }); }}
+          value={settings.firecrawlApiKey}
         />
 
         <ApiKeyField
-          label="Tavily API key"
-          value={settings.tavilyApiKey}
           getKeyUrl="https://app.tavily.com/home"
-          onChange={(e) =>
-            setSettings({ ...settings, tavilyApiKey: e.target.value })
-          }
+          label="Tavily API key"
           onBlur={() => void persist(settings)}
+          onChange={e => { setSettings({ ...settings, tavilyApiKey: e.target.value }); }}
+          value={settings.tavilyApiKey}
         />
 
         <p className="text-muted-foreground text-xs">

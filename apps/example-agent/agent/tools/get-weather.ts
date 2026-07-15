@@ -6,5 +6,5 @@ export default defineTool({
   inputSchema: Type.Object({ city: Type.String() }),
   execute({ city }) {
     return { city, mocked: true, weather: `${city}: Sunny, 22°C` };
-  },
+  }
 });

@@ -1,70 +1,71 @@
 "use client";
 
-import type {
-  ThreadCurrentDateVariable,
-  ThreadVariable,
-} from "@llm-space/core";
 import {
   DEFAULT_VARIABLE_VARIANT_NAME,
-  normalizePromptVariableState,
+  normalizePromptVariableState
 } from "@llm-space/core/thread";
 import {
   BracesIcon,
   CalendarDaysIcon,
   CopyIcon,
   PlusIcon,
-  SparklesIcon,
+  SparklesIcon
 } from "lucide-react";
 import { memo, useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
+
+import type {
+  ThreadCurrentDateVariable,
+  ThreadVariable
+} from "@llm-space/core";
 
 import { useCommands, useRegisterCommands } from "@/commands";
 import { Tooltip } from "@/components/tooltip";
 import { useAutoAnimation } from "@/lib/use-auto-animation";
 import { cn } from "@/lib/utils";
-
+import { PROMPT_DATE_FORMATS } from "./prompt-variable-options";
+import { PromptVariablesDialog } from "./prompt-variables-dialog";
 import { Button } from "../../ui/button";
 import { useThreadStore } from "../stores";
 
-import { PROMPT_DATE_FORMATS } from "./prompt-variable-options";
-import { PromptVariablesDialog } from "./prompt-variables-dialog";
 import type { PromptVariableSelection } from "./prompt-variables-panel";
 
 type VariableListItem =
   | {
-      kind: "builtIn";
-      name: string;
-      variable: ThreadVariable;
-      status: string;
-      warning?: boolean;
-    }
+    kind: "builtIn";
+    name: string;
+    status: string;
+    variable: ThreadVariable;
+    warning?: boolean;
+  }
   | {
-      kind: "custom";
-      name: string;
-      value: string;
-      status: string;
-      warning?: boolean;
-    };
+    kind: "custom";
+    name: string;
+    status: string;
+    value: string;
+    warning?: boolean;
+  };
 
 export function PromptVariablesListView({
   className,
   disabled,
-  active,
+  active
 }: {
-  className?: string;
-  disabled?: boolean;
+  readonly className?: string;
+  readonly disabled?: boolean;
+
   /** Whether this belongs to the active tab — gates the single-slot command. */
-  active?: boolean;
+  readonly active?: boolean;
 }) {
-  const rawVariables = useThreadStore((s) => s.thread.context?.variables);
+  const rawVariables = useThreadStore(s => s.thread.context?.variables);
   const rawVariableVariants = useThreadStore(
-    (s) => s.thread.context?.variableVariants
+    s => s.thread.context?.variableVariants
   );
   const { variables, variableVariants } = useMemo(
     () =>
       normalizePromptVariableState({
         variables: rawVariables,
-        variableVariants: rawVariableVariants,
+        variableVariants: rawVariableVariants
       }),
     [rawVariableVariants, rawVariables]
   );
@@ -77,7 +78,7 @@ export function PromptVariablesListView({
           kind: "builtIn" as const,
           name,
           variable,
-          status: _dateFormatLabel(variable.format),
+          status: _dateFormatLabel(variable.format)
         };
       }
       return {
@@ -87,14 +88,14 @@ export function PromptVariablesListView({
         status:
           variable.skillNames.length === 0
             ? "All skills"
-            : `${variable.skillNames.length} selected`,
+            : `${variable.skillNames.length} selected`
       };
     });
     const custom = Object.entries(customValues).map(([name, value]) => ({
       kind: "custom" as const,
       name,
       value,
-      status: value.trim() ? value : "(empty)",
+      status: value.trim() ? value : "(empty)"
     }));
     return [...builtIns, ...custom];
   }, [customValues, variables]);
@@ -114,11 +115,11 @@ export function PromptVariablesListView({
         } else {
           setInitialSelection({
             kind: variableName in variables ? "builtIn" : "custom",
-            name: variableName,
+            name: variableName
           });
         }
         setDialogOpen(true);
-      },
+      }
     },
     active
   );
@@ -127,7 +128,7 @@ export function PromptVariablesListView({
     (item: VariableListItem) => {
       executeCommand({
         type: "openVariables",
-        args: { variableName: item.name },
+        args: { variableName: item.name }
       });
     },
     [executeCommand]
@@ -138,56 +139,54 @@ export function PromptVariablesListView({
   };
 
   return (
-    <>
-      <div
-        ref={animationContainerRef}
-        className={cn("group flex min-w-0 grow flex-wrap gap-2.5", className)}
-      >
-        {items.map((item) => (
-          <VariableEntry
-            key={`${item.kind}:${item.name}`}
-            item={item}
-            disabled={disabled}
-            onOpen={openVariable}
-          />
-        ))}
-        <Button
-          className={cn(
-            "-ml-1 px-0 transition-opacity hover:bg-transparent!",
-            disabled ? "opacity-30!" : "opacity-50"
-          )}
-          variant="ghost"
-          size="sm"
+    <div
+      className={cn("group flex min-w-0 grow flex-wrap gap-2.5", className)}
+      ref={animationContainerRef}
+    >
+      {items.map(item => (
+        <VariableEntry
           disabled={disabled}
-          onClick={openManage}
-        >
-          <PlusIcon className="size-3" />
-          Add
-        </Button>
-        <PromptVariablesDialog
-          open={dialogOpen}
-          disabled={disabled}
-          initialSelection={initialSelection}
-          onOpenChange={(open) => {
-            setDialogOpen(open);
-            if (!open) {
-              setInitialSelection(null);
-            }
-          }}
+          item={item}
+          key={`${item.kind}:${item.name}`}
+          onOpen={openVariable}
         />
-      </div>
-    </>
+      ))}
+      <Button
+        className={cn(
+          "-ml-1 px-0 transition-opacity hover:bg-transparent!",
+          disabled ? "opacity-30!" : "opacity-50"
+        )}
+        disabled={disabled}
+        onClick={openManage}
+        size="sm"
+        variant="ghost"
+      >
+        <PlusIcon className="size-3" />
+        Add
+      </Button>
+      <PromptVariablesDialog
+        disabled={disabled}
+        initialSelection={initialSelection}
+        onOpenChange={open => {
+          setDialogOpen(open);
+          if (!open) {
+            setInitialSelection(null);
+          }
+        }}
+        open={dialogOpen}
+      />
+    </div>
   );
 }
 
 function _VariableEntry({
   item,
   disabled,
-  onOpen,
+  onOpen
 }: {
-  item: VariableListItem;
-  disabled?: boolean;
-  onOpen: (item: VariableListItem) => void;
+  readonly disabled?: boolean;
+  readonly item: VariableListItem;
+  readonly onOpen: (item: VariableListItem) => void;
 }) {
   const VariableIcon = _variableIcon(item);
   const token = `{{${item.name}}}`;
@@ -210,15 +209,15 @@ function _VariableEntry({
       >
         <span className="inline-flex h-full">
           <button
-            type="button"
+            aria-label={`Manage ${item.name} variable`}
             className={cn(
               "focus-visible:ring-ring/30 text-muted-foreground group-hover/variable:text-foreground inline-flex h-full items-center gap-1 rounded-l-md pl-2 outline-none focus-visible:ring-2 disabled:pointer-events-none disabled:opacity-50",
-              item.warning &&
-                "text-orange-300 group-hover/variable:text-orange-300"
+              item.warning
+              && "text-orange-300 group-hover/variable:text-orange-300"
             )}
-            aria-label={`Manage ${item.name} variable`}
             disabled={disabled}
-            onClick={() => onOpen(item)}
+            onClick={() => { onOpen(item); }}
+            type="button"
           >
             <VariableIcon className="size-3.5 shrink-0 opacity-70" />
             <span className="font-mono">{item.name}</span>
@@ -239,16 +238,16 @@ function _VariableEntry({
         }
       >
         <button
-          type="button"
           aria-label={`Copy ${token}`}
           className="text-muted-foreground hover:text-accent-foreground focus-visible:ring-ring/30 inline-flex h-full items-center rounded-r-md pr-1 pl-1 opacity-0 outline-none group-hover/variable:opacity-100 hover:opacity-100 focus-visible:ring-2"
           onClick={() => {
             void navigator.clipboard.writeText(token);
             toast.success(`Copied ${token}`, {
               description:
-                "Paste it into your prompt, messages, or tool results to reference this variable.",
+                "Paste it into your prompt, messages, or tool results to reference this variable."
             });
           }}
+          type="button"
         >
           <CopyIcon className="size-3" />
         </button>
@@ -268,6 +267,6 @@ function _variableIcon(item: VariableListItem) {
 
 function _dateFormatLabel(value: ThreadCurrentDateVariable["format"]): string {
   return (
-    PROMPT_DATE_FORMATS.find((format) => format.value === value)?.label ?? value
+    PROMPT_DATE_FORMATS.find(format => format.value === value)?.label ?? value
   );
 }

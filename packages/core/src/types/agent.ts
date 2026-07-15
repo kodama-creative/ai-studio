@@ -11,6 +11,7 @@ export interface PiThreadContext {
   systemPrompt?: string;
   messages: pi.Message[];
   tools: pi.Tool[];
+
   /** Original tool identities retained for trusted runtime execution hosts. */
   sourceTools?: Tool[];
 }
@@ -22,7 +23,7 @@ export interface PiThreadContext {
  * server side, where `streamAgent` runs the loop.
  */
 export interface AgentStreamRequest {
-  model: { provider: string; id: string };
-  config?: { model?: ModelConfigParams };
+  model: { id: string; provider: string; };
+  config?: { model?: ModelConfigParams; };
   context: PiThreadContext;
 }

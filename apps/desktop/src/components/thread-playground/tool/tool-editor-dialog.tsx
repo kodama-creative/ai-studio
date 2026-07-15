@@ -1,11 +1,11 @@
 "use client";
 
 import {
-  parseJSON,
-  normalizeTool,
-  uuid,
   type FunctionTool,
   type Message,
+  normalizeTool,
+  parseJSON,
+  uuid
 } from "@llm-space/core";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -14,10 +14,9 @@ import { CodeEditor } from "@/components/code-editor";
 import { GeneratePopoverButton } from "@/components/thread-playground/generate-popover-button";
 import {
   useThreadStore,
-  useThreadStoreActions,
+  useThreadStoreActions
 } from "@/components/thread-playground/stores/thread-store";
 import { useStreamText } from "@/components/thread-playground/use-stream-text";
-
 import { Button } from "../../ui/button";
 import {
   Dialog,
@@ -25,24 +24,24 @@ import {
   DialogDescription,
   DialogFooter,
   DialogHeader,
-  DialogTitle,
+  DialogTitle
 } from "../../ui/dialog";
+import { ExamplesMenu } from "../examples-menu";
 import metaToolPrompt from "../examples/meta-tool.md?raw";
 import { DEFAULT_TOOL, TOOL_EXAMPLES } from "../examples/tools";
-import { ExamplesMenu } from "../examples-menu";
 
 export function ToolEditorDialog({
   open,
   onOpenChange,
-  tool,
+  tool
 }: {
-  open: boolean;
+  readonly open: boolean;
 
-  onOpenChange: (open: boolean) => void;
-  tool: FunctionTool | null;
+  readonly onOpenChange: (open: boolean) => void;
+  readonly tool: FunctionTool | null;
 }) {
   const { addTool, updateTool } = useThreadStoreActions();
-  const threadModel = useThreadStore((s) => s.thread.model);
+  const threadModel = useThreadStore(s => s.thread.model);
   const [text, setText] = useState("");
   const [originalName, setOriginalName] = useState<string | null>(null);
   // Track the last (open, tool) we initialized from so we can reinitialize
@@ -65,14 +64,14 @@ export function ToolEditorDialog({
   const {
     text: generated,
     streaming,
-    run: generate,
+    run: generate
   } = useStreamText({
     systemPrompt: metaToolPrompt,
     reasoning: "off",
     // Use the thread's own model (id/provider only) when it has one.
     model: threadModel
       ? { id: threadModel.id, provider: threadModel.provider }
-      : undefined,
+      : undefined
   });
 
   // Stream the generated definition straight into the editor.
@@ -92,18 +91,18 @@ export function ToolEditorDialog({
     const original = text.trim();
     const messages: Message[] = original
       ? [
-          {
-            id: uuid(),
-            role: "assistant",
-            content: [
-              { type: "text", text: `<original>\n${original}\n</original>` },
-            ],
-          },
-        ]
+        {
+          id: uuid(),
+          role: "assistant",
+          content: [
+            { type: "text", text: `<original>\n${original}\n</original>` }
+          ]
+        }
+      ]
       : [];
     void generate({
       messages,
-      userPrompt: `<user-input>\n${prompt}\n</user-input>`,
+      userPrompt: `<user-input>\n${prompt}\n</user-input>`
     });
   };
 
@@ -113,7 +112,7 @@ export function ToolEditorDialog({
       const normalized = normalizeTool(parseJSON(text));
       if (normalized.type !== "function") {
         toast.error("Error", {
-          description: "MCP tools cannot be edited as function tools",
+          description: "MCP tools cannot be edited as function tools"
         });
         return;
       }
@@ -133,11 +132,11 @@ export function ToolEditorDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent
         className="flex h-[75vh]! w-full flex-col gap-4 sm:max-w-4xl"
-        onInteractOutside={(e) => e.preventDefault()}
-        onPointerDownOutside={(e) => e.preventDefault()}
+        onInteractOutside={e => { e.preventDefault(); }}
+        onPointerDownOutside={e => { e.preventDefault(); }}
       >
         <DialogHeader>
           <DialogTitle>
@@ -155,27 +154,27 @@ export function ToolEditorDialog({
             <div className="text-sm font-medium">Definition</div>
             <div className="flex items-center gap-2">
               <GeneratePopoverButton
-                placeholder="Describe what your function does (or paste your function declaration code), and we'll generate a definition."
                 onGenerate={handleGenerate}
+                placeholder="Describe what your function does (or paste your function declaration code), and we'll generate a definition."
               />
               <ExamplesMenu
                 items={TOOL_EXAMPLES}
-                onSelect={(example) => handleExampleSelect(example.tool)}
+                onSelect={example => { handleExampleSelect(example.tool); }}
               />
             </div>
           </div>
           <CodeEditor
+            autoFocus
             className="min-h-80 flex-1 font-mono text-sm"
             language="json"
-            value={text}
-            autoFocus
-            readonly={streaming}
             onChange={setText}
+            readonly={streaming}
+            value={text}
           />
         </div>
 
         <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>
+          <Button onClick={() => { onOpenChange(false); }} variant="ghost">
             Cancel
           </Button>
           <Button onClick={handleSave}>{tool ? "Save" : "Create"}</Button>

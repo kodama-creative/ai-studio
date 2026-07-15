@@ -1,9 +1,10 @@
+import { describe, expect, test } from "bun:test";
+
 import type {
   EvaluationRecord,
   EvaluationRubricRecord,
-  EvaluationRubricSnapshot,
+  EvaluationRubricSnapshot
 } from "@llm-space/core/thread";
-import { describe, expect, test } from "bun:test";
 
 import {
   averageScoreForRun,
@@ -13,7 +14,7 @@ import {
   initialRubricForEvaluation,
   preferredEvaluationRubricId,
   requiresScoreRemovalConfirmation,
-  scoreDraftForRubricChange,
+  scoreDraftForRubricChange
 } from "./run-evaluation-utils";
 const RUBRIC: EvaluationRubricSnapshot = {
   id: "rubric-1",
@@ -21,8 +22,8 @@ const RUBRIC: EvaluationRubricSnapshot = {
   revision: 1,
   criteria: [
     { id: "correctness", name: "Correctness" },
-    { id: "clarity", name: "Clarity" },
-  ],
+    { id: "clarity", name: "Clarity" }
+  ]
 };
 
 const EVALUATION: EvaluationRecord = {
@@ -36,25 +37,25 @@ const EVALUATION: EvaluationRecord = {
       runId: "run-a",
       scores: [
         { criterionId: "correctness", score: 5 },
-        { criterionId: "clarity", score: 3 },
-      ],
+        { criterionId: "clarity", score: 3 }
+      ]
     },
     {
       runId: "run-b",
       scores: [
         { criterionId: "correctness", score: 3 },
-        { criterionId: "clarity", score: 3 },
-      ],
-    },
+        { criterionId: "clarity", score: 3 }
+      ]
+    }
   ],
   createdAt: 1,
-  updatedAt: 1,
+  updatedAt: 1
 };
 
 const RUBRIC_RECORD: EvaluationRubricRecord = {
   ...RUBRIC,
   createdAt: 1,
-  updatedAt: 1,
+  updatedAt: 1
 };
 
 describe("evaluation orientation", () => {
@@ -63,7 +64,7 @@ describe("evaluation orientation", () => {
     expect(reversed).toMatchObject({
       leftRunId: "run-b",
       rightRunId: "run-a",
-      verdict: "rightBetter",
+      verdict: "rightBetter"
     });
     expect(reversed?.runScores).toBe(EVALUATION.runScores);
   });
@@ -88,7 +89,7 @@ describe("evaluation rubric selection", () => {
       rightRunId: "run-b",
       verdict: "tie",
       createdAt: 1,
-      updatedAt: 1,
+      updatedAt: 1
     };
     expect(initialRubricForEvaluation(legacy, RUBRIC)).toBeNull();
     expect(initialRubricForEvaluation(null, RUBRIC)).toBe(RUBRIC);
@@ -98,7 +99,7 @@ describe("evaluation rubric selection", () => {
     const other: EvaluationRubricRecord = {
       ...RUBRIC_RECORD,
       id: "rubric-2",
-      name: "Other rubric",
+      name: "Other rubric"
     };
     expect(
       preferredEvaluationRubricId(
@@ -108,8 +109,8 @@ describe("evaluation rubric selection", () => {
             ...EVALUATION,
             id: "evaluation-2",
             rubric: other,
-            updatedAt: 20,
-          },
+            updatedAt: 20
+          }
         ],
         [RUBRIC_RECORD, other]
       )
@@ -129,13 +130,13 @@ describe("evaluation score derivation", () => {
       RUBRIC,
       {
         "run-a": { correctness: 5, clarity: 3 },
-        "run-b": { correctness: 3, clarity: 3 },
+        "run-b": { correctness: 3, clarity: 3 }
       },
       ["run-a", "run-b"]
     );
     expect(averageScoreForRun(RUBRIC, scores ?? undefined, "run-a")).toBe(4);
     expect(averageScoreForRun(RUBRIC, scores ?? undefined, "run-b")).toBe(3);
-    if (!scores) throw new Error("score fixture failed");
+    if (!scores) { throw new Error("score fixture failed"); }
     expect(evaluationScoreDelta({ ...EVALUATION, runScores: scores })).toBe(-1);
   });
 
@@ -145,7 +146,7 @@ describe("evaluation score derivation", () => {
         RUBRIC,
         {
           "run-a": { correctness: 5, clarity: 3 },
-          "run-b": { correctness: 3 },
+          "run-b": { correctness: 3 }
         },
         ["run-a", "run-b"]
       )
@@ -158,14 +159,14 @@ describe("evaluation score derivation", () => {
       revision: 2,
       criteria: [
         { id: "correctness", name: "Factual correctness" },
-        { id: "completeness", name: "Completeness" },
-      ],
+        { id: "completeness", name: "Completeness" }
+      ]
     };
     expect(
       scoreDraftForRubricChange(
         {
           "run-a": { correctness: 5, clarity: 3 },
-          "run-b": { correctness: 3, clarity: 3 },
+          "run-b": { correctness: 3, clarity: 3 }
         },
         RUBRIC,
         nextRubric,
@@ -173,7 +174,7 @@ describe("evaluation score derivation", () => {
       )
     ).toEqual({
       "run-a": { correctness: 5 },
-      "run-b": { correctness: 3 },
+      "run-b": { correctness: 3 }
     });
   });
 
@@ -182,7 +183,7 @@ describe("evaluation score derivation", () => {
       scoreDraftForRubricChange(
         {
           "run-a": { correctness: 5 },
-          "run-b": { correctness: 3 },
+          "run-b": { correctness: 3 }
         },
         RUBRIC,
         { ...RUBRIC, id: "rubric-2", name: "Different meaning" },
@@ -202,7 +203,7 @@ describe("evaluation score derivation", () => {
       )
     ).toEqual({
       "run-a": { correctness: 5, clarity: 3 },
-      "run-b": { correctness: 3, clarity: 3 },
+      "run-b": { correctness: 3, clarity: 3 }
     });
   });
 
@@ -211,7 +212,7 @@ describe("evaluation score derivation", () => {
       scoreDraftForRubricChange(
         {
           "run-a": { correctness: 4, clarity: 3 },
-          "run-b": { correctness: 3, clarity: 3 },
+          "run-b": { correctness: 3, clarity: 3 }
         },
         RUBRIC,
         RUBRIC,
@@ -220,7 +221,7 @@ describe("evaluation score derivation", () => {
       )
     ).toEqual({
       "run-a": { correctness: 4, clarity: 3 },
-      "run-b": { correctness: 3, clarity: 3 },
+      "run-b": { correctness: 3, clarity: 3 }
     });
   });
 });

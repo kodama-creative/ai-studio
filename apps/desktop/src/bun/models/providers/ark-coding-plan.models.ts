@@ -15,14 +15,14 @@ export const ARK_CODING_PLAN_MODELS = {
     maxTokens: 131072,
     compat: {
       supportsDeveloperRole: false,
-      thinkingFormat: "deepseek",
+      thinkingFormat: "deepseek"
     },
     cost: {
       input: 0,
       output: 0,
       cacheRead: 0,
-      cacheWrite: 0,
-    },
+      cacheWrite: 0
+    }
   } satisfies Model<"openai-completions">,
   "doubao-seed-2.0-pro": {
     id: "doubao-seed-2.0-pro",
@@ -36,14 +36,14 @@ export const ARK_CODING_PLAN_MODELS = {
     maxTokens: 131072,
     compat: {
       supportsDeveloperRole: false,
-      thinkingFormat: "deepseek",
+      thinkingFormat: "deepseek"
     },
     cost: {
       input: 0,
       output: 0,
       cacheRead: 0,
-      cacheWrite: 0,
-    },
+      cacheWrite: 0
+    }
   } satisfies Model<"openai-completions">,
   "deepseek-v4-pro": {
     id: "deepseek-v4-pro",
@@ -57,21 +57,21 @@ export const ARK_CODING_PLAN_MODELS = {
     maxTokens: 384000,
     compat: {
       supportsDeveloperRole: false,
-      thinkingFormat: "deepseek",
+      thinkingFormat: "deepseek"
     },
     thinkingLevelMap: {
       minimal: null,
       low: null,
       medium: null,
       high: "high",
-      xhigh: "max",
+      xhigh: "max"
     },
     cost: {
       input: 0,
       output: 0,
       cacheRead: 0,
-      cacheWrite: 0,
-    },
+      cacheWrite: 0
+    }
   } satisfies Model<"openai-completions">,
   "deepseek-v4-flash": {
     id: "deepseek-v4-flash",
@@ -84,21 +84,21 @@ export const ARK_CODING_PLAN_MODELS = {
     contextWindow: 1000000,
     maxTokens: 384000,
     compat: {
-      supportsDeveloperRole: false,
+      supportsDeveloperRole: false
     },
     thinkingLevelMap: {
       minimal: null,
       low: null,
       medium: null,
       high: "high",
-      xhigh: "max",
+      xhigh: "max"
     },
     cost: {
       input: 0,
       output: 0,
       cacheRead: 0,
-      cacheWrite: 0,
-    },
+      cacheWrite: 0
+    }
   } satisfies Model<"openai-completions">,
   "glm-5.2": {
     id: "glm-5.2",
@@ -112,14 +112,14 @@ export const ARK_CODING_PLAN_MODELS = {
     maxTokens: 131072,
     compat: {
       supportsDeveloperRole: false,
-      thinkingFormat: "deepseek",
+      thinkingFormat: "deepseek"
     },
     cost: {
       input: 0,
       output: 0,
       cacheRead: 0,
-      cacheWrite: 0,
-    },
+      cacheWrite: 0
+    }
   } satisfies Model<"openai-completions">,
   "kimi-k2.7-code": {
     id: "kimi-k2.7-code",
@@ -133,14 +133,14 @@ export const ARK_CODING_PLAN_MODELS = {
     maxTokens: 131072,
     compat: {
       supportsDeveloperRole: false,
-      thinkingFormat: "deepseek",
+      thinkingFormat: "deepseek"
     },
     cost: {
       input: 0,
       output: 0,
       cacheRead: 0,
-      cacheWrite: 0,
-    },
+      cacheWrite: 0
+    }
   } satisfies Model<"openai-completions">,
   "minimax-m3": {
     id: "minimax-m3",
@@ -154,13 +154,13 @@ export const ARK_CODING_PLAN_MODELS = {
     maxTokens: 128000,
     compat: {
       supportsDeveloperRole: false,
-      thinkingFormat: "deepseek",
+      thinkingFormat: "deepseek"
     },
     cost: {
       input: 0,
       output: 0,
       cacheRead: 0,
-      cacheWrite: 0,
-    },
-  } satisfies Model<"openai-completions">,
+      cacheWrite: 0
+    }
+  } satisfies Model<"openai-completions">
 };

@@ -1,23 +1,22 @@
-import { usageForRun, type RunSnapshot } from "@llm-space/core/thread";
+import { type RunSnapshot, usageForRun } from "@llm-space/core/thread";
 import { memo } from "react";
 import { format } from "timeago.js";
 
 import { cn } from "@/lib/utils";
-
 import { SnapshotMessageListView } from "./message/message-list-view";
 import { TokenUsageSummary } from "./message/token-usage-summary";
 import {
   runMessageCountLabel,
   runModelLabel,
-  summarizeRun,
+  summarizeRun
 } from "./run-history-utils";
 
 function _RunTraceView({
   className,
-  run,
+  run
 }: {
-  className?: string;
-  run: RunSnapshot | null;
+  readonly className?: string;
+  readonly run: RunSnapshot | null;
 }) {
   if (!run) {
     return (
@@ -45,17 +44,19 @@ function _RunTraceView({
         </div>
         <div className="text-muted-foreground mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[0.625rem]">
           <span>{runModelLabel(run.thread)}</span>
-          {run.thread.agentRuntime ? (
-            <span>
-              {run.thread.agentRuntime.modelSource === "agent"
-                ? "From Agent"
-                : "Thread override"}
-            </span>
-          ) : null}
+          {run.thread.agentRuntime
+            ? (
+              <span>
+                {run.thread.agentRuntime.modelSource === "agent"
+                  ? "From Agent"
+                  : "Thread override"}
+              </span>
+            )
+            : null}
           <span>{runMessageCountLabel(run.thread)}</span>
           <span>{new Date(run.timestamp).toLocaleString()}</span>
         </div>
-        {usage && <TokenUsageSummary className="mt-2" usage={usage} />}
+        {usage ? <TokenUsageSummary className="mt-2" usage={usage} /> : null}
       </div>
       <details className="group shrink-0 border-b px-3 py-2">
         <summary className="text-muted-foreground hover:text-foreground cursor-pointer text-[0.625rem] font-medium">

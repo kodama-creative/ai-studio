@@ -1,17 +1,17 @@
+import { emptyModelUsage, isModelUsage } from "./usage";
+import { uuid } from "../utils";
+
 import type {
   ModelUsage,
   Thread,
-  ThreadEvaluationCriterion,
   ThreadEvaluation,
+  ThreadEvaluationCriterion,
   ThreadEvaluationRubric,
   ThreadEvaluationRubricSnapshot,
   ThreadEvaluationRunScores,
   ThreadRunSnapshot,
-  ThreadSnapshot,
+  ThreadSnapshot
 } from "../types";
-import { uuid } from "../utils";
-
-import { emptyModelUsage, isModelUsage } from "./usage";
 
 /** Maximum number of run snapshots retained in `runHistory`. */
 export const MAX_RUN_HISTORY = 20;
@@ -30,7 +30,7 @@ export const MAX_RUBRIC_NAME_LENGTH = 80;
 export const MAX_CRITERION_NAME_LENGTH = 80;
 export const MAX_CRITERION_DESCRIPTION_LENGTH = 240;
 
-export type RunSnapshot = ThreadRunSnapshot & { id: string };
+export type RunSnapshot = { id: string; } & ThreadRunSnapshot;
 export type EvaluationRecord = ThreadEvaluation;
 export type EvaluationCriterion = ThreadEvaluationCriterion;
 export type EvaluationRubricRecord = ThreadEvaluationRubric;
@@ -104,8 +104,8 @@ export function normalizeRunHistory(
         ? run.id
         : _fallbackRunId(run, index);
     const usage =
-      Object.prototype.hasOwnProperty.call(run, "usage") &&
-      isModelUsage(run.usage)
+      Object.hasOwn(run, "usage")
+      && isModelUsage(run.usage)
         ? run.usage
         : undefined;
     return [
@@ -113,8 +113,8 @@ export function normalizeRunHistory(
         id,
         timestamp: run.timestamp,
         thread: snapshotThread(run.thread),
-        ...(usage ? { usage } : {}),
-      },
+        ...(usage ? { usage } : {})
+      }
     ];
   });
   const lastIndexById = new Map(
@@ -141,11 +141,11 @@ function _normalizeCriterion(
   const name = _trimBounded(criterion.name, MAX_CRITERION_NAME_LENGTH);
   const normalizedName = name?.toLowerCase();
   if (
-    !id ||
-    !name ||
-    !normalizedName ||
-    seenIds.has(id) ||
-    seenNames.has(normalizedName)
+    !id
+    || !name
+    || !normalizedName
+    || seenIds.has(id)
+    || seenNames.has(normalizedName)
   ) {
     return null;
   }
@@ -184,11 +184,11 @@ function _normalizeRubricSnapshot(
   const name = _trimBounded(rubric.name, MAX_RUBRIC_NAME_LENGTH);
   const criteria = _normalizeCriteria(rubric.criteria);
   if (
-    !id ||
-    !name ||
-    !criteria ||
-    !Number.isSafeInteger(rubric.revision) ||
-    (rubric.revision as number) < 1
+    !id
+    || !name
+    || !criteria
+    || !Number.isSafeInteger(rubric.revision)
+    || (rubric.revision as number) < 1
   ) {
     return null;
   }
@@ -196,7 +196,7 @@ function _normalizeRubricSnapshot(
     id,
     name,
     criteria,
-    revision: rubric.revision as number,
+    revision: rubric.revision as number
   };
 }
 
@@ -206,17 +206,17 @@ function _normalizeEvaluationRubric(
   const rubric = _asRecord(value);
   const snapshot = _normalizeRubricSnapshot(value);
   if (
-    !rubric ||
-    !snapshot ||
-    !Number.isFinite(rubric.createdAt) ||
-    !Number.isFinite(rubric.updatedAt)
+    !rubric
+    || !snapshot
+    || !Number.isFinite(rubric.createdAt)
+    || !Number.isFinite(rubric.updatedAt)
   ) {
     return null;
   }
   return {
     ...snapshot,
     createdAt: rubric.createdAt as number,
-    updatedAt: rubric.updatedAt as number,
+    updatedAt: rubric.updatedAt as number
   };
 }
 
@@ -255,7 +255,7 @@ export function snapshotEvaluationRubric(
     id: rubric.id,
     name: rubric.name,
     revision: rubric.revision,
-    criteria: rubric.criteria.map((criterion) => ({ ...criterion })),
+    criteria: rubric.criteria.map(criterion => ({ ...criterion }))
   };
 }
 
@@ -264,13 +264,13 @@ function _sameCriteria(
   right: EvaluationCriterion[]
 ): boolean {
   return (
-    left.length === right.length &&
-    left.every((criterion, index) => {
+    left.length === right.length
+    && left.every((criterion, index) => {
       const other = right[index];
       return (
-        criterion.id === other?.id &&
-        criterion.name === other.name &&
-        criterion.description === other.description
+        criterion.id === other?.id
+        && criterion.name === other.name
+        && criterion.description === other.description
       );
     })
   );
@@ -281,7 +281,7 @@ export function upsertEvaluationRubric(
   rubrics: EvaluationRubricRecord[],
   input: EvaluationRubricInput,
   timestamp: number = Date.now(),
-  options: { id?: string } = {}
+  options: { id?: string; } = {}
 ): {
   rubric: EvaluationRubricRecord;
   rubrics: EvaluationRubricRecord[];
@@ -292,15 +292,15 @@ export function upsertEvaluationRubric(
   const requestedId =
     options.id === undefined ? undefined : _trimmed(options.id);
   if (
-    !name ||
-    criteria?.length !== input.criteria.length ||
-    !Number.isFinite(timestamp) ||
-    (options.id !== undefined && !requestedId)
+    !name
+    || criteria?.length !== input.criteria.length
+    || !Number.isFinite(timestamp)
+    || (options.id !== undefined && !requestedId)
   ) {
     return null;
   }
   const existingIndex = input.id
-    ? normalized.findIndex((rubric) => rubric.id === input.id)
+    ? normalized.findIndex(rubric => rubric.id === input.id)
     : -1;
   if (input.id && existingIndex === -1) {
     return null;
@@ -310,9 +310,9 @@ export function upsertEvaluationRubric(
   }
   const existing = existingIndex === -1 ? undefined : normalized[existingIndex];
   if (
-    !existing &&
-    requestedId &&
-    normalized.some((rubric) => rubric.id === requestedId)
+    !existing
+    && requestedId
+    && normalized.some(rubric => rubric.id === requestedId)
   ) {
     return null;
   }
@@ -328,14 +328,13 @@ export function upsertEvaluationRubric(
     criteria,
     revision: (existing?.revision ?? 0) + 1,
     createdAt: existing?.createdAt ?? timestamp,
-    updatedAt: timestamp,
+    updatedAt: timestamp
   };
   const next =
     existingIndex === -1
       ? [...normalized, rubric]
       : normalized.map((value, index) =>
-          index === existingIndex ? rubric : value
-        );
+        (index === existingIndex ? rubric : value));
   return { rubric, rubrics: next };
 }
 
@@ -354,12 +353,12 @@ function _normalizeRunScores(
     const runScores = _asRecord(rawRunScores);
     const runId = _trimmed(runScores?.runId);
     if (
-      !runScores ||
-      !runId ||
-      !allowedRunIds.has(runId) ||
-      scoreByRunId.has(runId) ||
-      !Array.isArray(runScores.scores) ||
-      runScores.scores.length !== rubric.criteria.length
+      !runScores
+      || !runId
+      || !allowedRunIds.has(runId)
+      || scoreByRunId.has(runId)
+      || !Array.isArray(runScores.scores)
+      || runScores.scores.length !== rubric.criteria.length
     ) {
       return null;
     }
@@ -368,12 +367,12 @@ function _normalizeRunScores(
       const score = _asRecord(rawScore);
       const criterionId = _trimmed(score?.criterionId);
       if (
-        !score ||
-        !criterionId ||
-        scores.has(criterionId) ||
-        !Number.isInteger(score.score) ||
-        (score.score as number) < 1 ||
-        (score.score as number) > 5
+        !score
+        || !criterionId
+        || scores.has(criterionId)
+        || !Number.isInteger(score.score)
+        || (score.score as number) < 1
+        || (score.score as number) > 5
       ) {
         return null;
       }
@@ -382,26 +381,26 @@ function _normalizeRunScores(
     scoreByRunId.set(runId, scores);
   }
   const criterionIds = new Set(
-    rubric.criteria.map((criterion) => criterion.id)
+    rubric.criteria.map(criterion => criterion.id)
   );
   if (
-    scoreByRunId.size !== 2 ||
-    [...scoreByRunId.values()].some(
-      (scores) =>
-        scores.size !== criterionIds.size ||
-        [...scores.keys()].some((criterionId) => !criterionIds.has(criterionId))
+    scoreByRunId.size !== 2
+    || [...scoreByRunId.values()].some(
+      scores =>
+        scores.size !== criterionIds.size
+        || [...scores.keys()].some(criterionId => !criterionIds.has(criterionId))
     )
   ) {
     return null;
   }
-  return [leftRunId, rightRunId].map((runId) => {
+  return [leftRunId, rightRunId].map(runId => {
     const scores = scoreByRunId.get(runId)!;
     return {
       runId,
-      scores: rubric.criteria.map((criterion) => ({
+      scores: rubric.criteria.map(criterion => ({
         criterionId: criterion.id,
-        score: scores.get(criterion.id)!,
-      })),
+        score: scores.get(criterion.id)!
+      }))
     };
   });
 }
@@ -411,11 +410,11 @@ function _isEvaluationVerdict(
   value: unknown
 ): value is EvaluationRecord["verdict"] {
   return (
-    value === "leftBetter" ||
-    value === "rightBetter" ||
-    value === "tie" ||
-    value === "pass" ||
-    value === "fail"
+    value === "leftBetter"
+    || value === "rightBetter"
+    || value === "tie"
+    || value === "pass"
+    || value === "fail"
   );
 }
 
@@ -430,20 +429,20 @@ export function normalizeEvaluations(
   if (!Array.isArray(evaluations)) {
     return [];
   }
-  const runIds = new Set(runHistory.map((run) => run.id));
+  const runIds = new Set(runHistory.map(run => run.id));
   const normalized = (evaluations as unknown[]).flatMap(
     (value, index): EvaluationRecord[] => {
       const evaluation = _asRecord(value);
       if (
-        !evaluation ||
-        typeof evaluation.leftRunId !== "string" ||
-        typeof evaluation.rightRunId !== "string" ||
-        evaluation.leftRunId === evaluation.rightRunId ||
-        !_isEvaluationVerdict(evaluation.verdict) ||
-        !Number.isFinite(evaluation.createdAt) ||
-        !Number.isFinite(evaluation.updatedAt) ||
-        !runIds.has(evaluation.leftRunId) ||
-        !runIds.has(evaluation.rightRunId)
+        !evaluation
+        || typeof evaluation.leftRunId !== "string"
+        || typeof evaluation.rightRunId !== "string"
+        || evaluation.leftRunId === evaluation.rightRunId
+        || !_isEvaluationVerdict(evaluation.verdict)
+        || !Number.isFinite(evaluation.createdAt)
+        || !Number.isFinite(evaluation.updatedAt)
+        || !runIds.has(evaluation.leftRunId)
+        || !runIds.has(evaluation.rightRunId)
       ) {
         return [];
       }
@@ -452,18 +451,18 @@ export function normalizeEvaluations(
           ? evaluation.id
           : `evaluation-${evaluation.leftRunId}-${evaluation.rightRunId}-${index}`;
       const hasStructuredPayload =
-        Object.prototype.hasOwnProperty.call(evaluation, "rubric") ||
-        Object.prototype.hasOwnProperty.call(evaluation, "runScores");
+        Object.hasOwn(evaluation, "rubric")
+        || Object.hasOwn(evaluation, "runScores");
       const rubric = hasStructuredPayload
         ? _normalizeRubricSnapshot(evaluation.rubric)
         : null;
       const runScores = rubric
         ? _normalizeRunScores(
-            evaluation.runScores,
-            rubric,
-            evaluation.leftRunId,
-            evaluation.rightRunId
-          )
+          evaluation.runScores,
+          rubric,
+          evaluation.leftRunId,
+          evaluation.rightRunId
+        )
         : null;
       const base = {
         id,
@@ -475,7 +474,7 @@ export function normalizeEvaluations(
             ? evaluation.note.trim()
             : undefined,
         createdAt: evaluation.createdAt as number,
-        updatedAt: evaluation.updatedAt as number,
+        updatedAt: evaluation.updatedAt as number
       };
       return rubric && runScores ? [{ ...base, rubric, runScores }] : [base];
     }
@@ -513,11 +512,11 @@ export function withRunMetadata(
       thread.evaluations,
       normalizeRunHistory(runHistory)
     ),
-    evaluationRubrics = normalizeEvaluationRubrics(thread.evaluationRubrics),
+    evaluationRubrics = normalizeEvaluationRubrics(thread.evaluationRubrics)
   }: {
-    runHistory: RunSnapshot[];
-    evaluations?: EvaluationRecord[];
     evaluationRubrics?: EvaluationRubricRecord[];
+    evaluations?: EvaluationRecord[];
+    runHistory: RunSnapshot[];
   }
 ): Thread {
   const normalized = normalizeRunHistory(runHistory);
@@ -545,7 +544,7 @@ export function recordRun(
   runHistory: RunSnapshot[],
   thread: Thread,
   timestamp: number = Date.now(),
-  options: { id?: string; usage?: ModelUsage | null } = {}
+  options: { id?: string; usage?: ModelUsage | null; } = {}
 ): RunSnapshot[] {
   const usage = options.usage ?? emptyModelUsage();
   const next = [
@@ -554,8 +553,8 @@ export function recordRun(
       id: options.id ?? uuid(),
       thread: snapshotThread(thread),
       timestamp,
-      usage,
-    },
+      usage
+    }
   ];
   return next.length > MAX_RUN_HISTORY
     ? next.slice(next.length - MAX_RUN_HISTORY)
@@ -570,8 +569,8 @@ function _isSameRunPair(
   otherRightRunId: string
 ): boolean {
   return (
-    (leftRunId === otherLeftRunId && rightRunId === otherRightRunId) ||
-    (leftRunId === otherRightRunId && rightRunId === otherLeftRunId)
+    (leftRunId === otherLeftRunId && rightRunId === otherRightRunId)
+    || (leftRunId === otherRightRunId && rightRunId === otherLeftRunId)
   );
 }
 
@@ -586,23 +585,23 @@ export function upsertEvaluation(
   input: {
     id?: string;
     leftRunId: string;
-    rightRunId: string;
-    verdict: EvaluationRecord["verdict"];
     note?: string;
+    rightRunId: string;
     rubric?: EvaluationRubricSnapshot;
     runScores?: EvaluationRunScores[];
+    verdict: EvaluationRecord["verdict"];
   },
   timestamp: number = Date.now()
 ): EvaluationRecord[] | null {
   const normalizedRunHistory = normalizeRunHistory(runHistory);
   const normalized = normalizeEvaluations(evaluations, normalizedRunHistory);
   const requestedId = input.id === undefined ? undefined : _trimmed(input.id);
-  const runIds = new Set(normalizedRunHistory.map((run) => run.id));
+  const runIds = new Set(normalizedRunHistory.map(run => run.id));
   if (
-    (input.id !== undefined && !requestedId) ||
-    input.leftRunId === input.rightRunId ||
-    !runIds.has(input.leftRunId) ||
-    !runIds.has(input.rightRunId)
+    (input.id !== undefined && !requestedId)
+    || input.leftRunId === input.rightRunId
+    || !runIds.has(input.leftRunId)
+    || !runIds.has(input.rightRunId)
   ) {
     return null;
   }
@@ -613,29 +612,28 @@ export function upsertEvaluation(
     : null;
   const runScores = rubric
     ? _normalizeRunScores(
-        input.runScores,
-        rubric,
-        input.leftRunId,
-        input.rightRunId
-      )
+      input.runScores,
+      rubric,
+      input.leftRunId,
+      input.rightRunId
+    )
     : null;
   if (hasStructuredPayload && (!rubric || !runScores)) {
     return null;
   }
-  const existingIndex = normalized.findIndex((evaluation) =>
+  const existingIndex = normalized.findIndex(evaluation =>
     _isSameRunPair(
       evaluation.leftRunId,
       evaluation.rightRunId,
       input.leftRunId,
       input.rightRunId
-    )
-  );
+    ));
   const existing = existingIndex === -1 ? undefined : normalized[existingIndex];
   if (
-    requestedId &&
-    (existing
+    requestedId
+    && (existing
       ? requestedId !== existing.id
-      : normalized.some((evaluation) => evaluation.id === requestedId))
+      : normalized.some(evaluation => evaluation.id === requestedId))
   ) {
     return null;
   }
@@ -646,7 +644,7 @@ export function upsertEvaluation(
     verdict: input.verdict,
     note: input.note?.trim() || undefined,
     createdAt: existing?.createdAt ?? timestamp,
-    updatedAt: timestamp,
+    updatedAt: timestamp
   };
   const nextEvaluation: EvaluationRecord =
     rubric && runScores
@@ -657,8 +655,7 @@ export function upsertEvaluation(
     existingIndex === -1
       ? [...normalized, nextEvaluation]
       : normalized.map((evaluation, index) =>
-          index === existingIndex ? nextEvaluation : evaluation
-        );
+        (index === existingIndex ? nextEvaluation : evaluation));
   return next.length > MAX_EVALUATIONS
     ? next.slice(next.length - MAX_EVALUATIONS)
     : next;

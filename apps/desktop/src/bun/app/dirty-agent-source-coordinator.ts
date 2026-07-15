@@ -1,15 +1,15 @@
 export type DirtyAgentSourceCloseReason = "quit" | "reload";
 
 export function createDirtyAgentSourceCoordinator({
-  sendRequest,
+  sendRequest
 }: {
   sendRequest: (request: {
-    requestId: string;
     reason: DirtyAgentSourceCloseReason;
+    requestId: string;
   }) => void;
 }) {
   let dirty = false;
-  let pending: { requestId: string; onDiscard: () => void } | undefined;
+  let pending: { onDiscard: () => void; requestId: string; } | undefined;
 
   return {
     get dirty(): boolean {
@@ -23,18 +23,18 @@ export function createDirtyAgentSourceCoordinator({
         onDiscard();
         return;
       }
-      if (pending) return;
+      if (pending) { return; }
       const requestId = crypto.randomUUID();
       pending = { requestId, onDiscard };
       sendRequest({ requestId, reason });
     },
     resolve(requestId: string, discard: boolean): void {
-      if (pending?.requestId !== requestId) return;
+      if (pending?.requestId !== requestId) { return; }
       const request = pending;
       pending = undefined;
-      if (!discard) return;
+      if (!discard) { return; }
       dirty = false;
       request.onDiscard();
-    },
+    }
   };
 }

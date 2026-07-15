@@ -1,67 +1,68 @@
 import { electrobun } from "@/lib/electrobun";
+
 import type {
-  ExternalAgentProjectPreview,
   ExternalAgentProjectConnectionActivation,
+  ExternalAgentProjectPreview,
   ExternalAgentProjectSummary,
   ExternalAgentProjectThreadRecord,
-  ExternalAgentProjectView,
+  ExternalAgentProjectView
 } from "@/shared/external-agent-project";
 
 function _rpc() {
-  if (!electrobun.rpc) throw new Error("Desktop RPC is not initialized.");
+  if (!electrobun.rpc) { throw new Error("Desktop RPC is not initialized."); }
   return electrobun.rpc;
 }
 
 export const externalAgentProjects = {
-  browse(): Promise<ExternalAgentProjectPreview | null> {
+  async browse(): Promise<ExternalAgentProjectPreview | null> {
     return _rpc().request.externalAgentProjectBrowse({});
   },
-  trustAndOpen(path: string): Promise<ExternalAgentProjectView> {
+  async trustAndOpen(path: string): Promise<ExternalAgentProjectView> {
     return _rpc().request.externalAgentProjectTrustAndOpen({ path });
   },
-  list(): Promise<ExternalAgentProjectSummary[]> {
+  async list(): Promise<ExternalAgentProjectSummary[]> {
     return _rpc().request.externalAgentProjectList({});
   },
-  inspect(projectId: string): Promise<ExternalAgentProjectView> {
+  async inspect(projectId: string): Promise<ExternalAgentProjectView> {
     return _rpc().request.externalAgentProjectInspect({ projectId });
   },
-  remove(projectId: string): Promise<null> {
+  async remove(projectId: string): Promise<null> {
     return _rpc().request.externalAgentProjectRemove({ projectId });
   },
-  refresh(projectId: string): Promise<ExternalAgentProjectView> {
+  async refresh(projectId: string): Promise<ExternalAgentProjectView> {
     return _rpc().request.externalAgentProjectRefresh({ projectId });
   },
-  createThread(projectId: string, title?: string) {
+  async createThread(projectId: string, title?: string) {
     return _rpc().request.externalAgentProjectCreateThread({
       projectId,
-      title,
+      title
     });
   },
-  readThread(
+  async readThread(
     projectId: string,
     threadId: string
   ): Promise<ExternalAgentProjectThreadRecord> {
     return _rpc().request.externalAgentProjectReadThread({
       projectId,
-      threadId,
+      threadId
     });
   },
-  activateConnections(
+  async activateConnections(
     projectId: string,
     threadId: string
   ): Promise<ExternalAgentProjectConnectionActivation> {
     return _rpc().request.externalAgentProjectActivateConnections({
       projectId,
-      threadId,
+      threadId
     });
   },
-  deactivateConnections(projectId: string, threadId: string): Promise<null> {
+  async deactivateConnections(projectId: string, threadId: string): Promise<null> {
     return _rpc().request.externalAgentProjectDeactivateConnections({
       projectId,
-      threadId,
+      threadId
     });
   },
-  writeThread(
+  async writeThread(
     projectId: string,
     threadId: string,
     record: ExternalAgentProjectThreadRecord
@@ -69,38 +70,38 @@ export const externalAgentProjects = {
     return _rpc().request.externalAgentProjectWriteThread({
       projectId,
       threadId,
-      record,
+      record
     });
   },
-  duplicateThread(projectId: string, threadId: string) {
+  async duplicateThread(projectId: string, threadId: string) {
     return _rpc().request.externalAgentProjectDuplicateThread({
       projectId,
-      threadId,
+      threadId
     });
   },
-  deleteThread(projectId: string, threadId: string): Promise<null> {
+  async deleteThread(projectId: string, threadId: string): Promise<null> {
     return _rpc().request.externalAgentProjectDeleteThread({
       projectId,
-      threadId,
+      threadId
     });
   },
-  syncThreadFromAgent(
+  async syncThreadFromAgent(
     projectId: string,
     threadId: string
   ): Promise<ExternalAgentProjectThreadRecord> {
     return _rpc().request.externalAgentProjectSyncThreadFromAgent({
       projectId,
-      threadId,
+      threadId
     });
   },
-  readSource(projectId: string, path: string): Promise<{ text: string }> {
+  async readSource(projectId: string, path: string): Promise<{ text: string; }> {
     return _rpc().request.externalAgentProjectReadSource({ projectId, path });
   },
-  writeSource(projectId: string, path: string, text: string): Promise<null> {
+  async writeSource(projectId: string, path: string, text: string): Promise<null> {
     return _rpc().request.externalAgentProjectWriteSource({
       projectId,
       path,
-      text,
+      text
     });
-  },
+  }
 };

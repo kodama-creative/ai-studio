@@ -1,18 +1,19 @@
 import { describe, expect, test } from "bun:test";
 
-import { defineMcpClientConnection } from "../../public/definitions/connections/mcp";
-import type { CompiledMcpConnection } from "../../runtime/agent/agent-project-snapshot";
+import { type ProjectMcpConnector, ProjectMcpSession } from "./project-mcp-session";
 import { ProjectMcpToolCallRejectedError } from "./project-mcp-tool-call-rejected-error";
-import { ProjectMcpSession, type ProjectMcpConnector } from "./project-mcp-session";
+import { defineMcpClientConnection } from "../../public/definitions/connections/mcp";
+
+import type { CompiledMcpConnection } from "../../runtime/agent/agent-project-snapshot";
 
 describe("ProjectMcpSession", () => {
   test("resolves credentials on activation and exposes only allowlisted tools", async () => {
     const callbacks: string[] = [];
     const calls: string[] = [];
-    const connector: ProjectMcpConnector = async (options) => {
+    const connector: ProjectMcpConnector = async options => {
       expect(options.headers).toEqual({
         Authorization: "Bearer secret-token",
-        "X-Project": "weather",
+        "X-Project": "weather"
       });
       return {
         async listTools() {
@@ -23,21 +24,21 @@ describe("ProjectMcpSession", () => {
               inputSchema: {
                 type: "object",
                 properties: { city: { type: "string" } },
-                required: ["city"],
-              },
+                required: ["city"]
+              }
             },
             {
               name: "admin",
               description: "Must stay hidden",
-              inputSchema: { type: "object" },
-            },
+              inputSchema: { type: "object" }
+            }
           ];
         },
         async callTool(name) {
           calls.push(name);
           return { contentText: "sunny", isError: false };
         },
-        async close() {},
+        async close() {}
       };
     };
     const connection = _connection({
@@ -48,20 +49,20 @@ describe("ProjectMcpSession", () => {
       headers: async () => {
         callbacks.push("headers");
         return { "X-Project": "weather" };
-      },
+      }
     });
 
     expect(callbacks).toEqual([]);
     const session = await ProjectMcpSession.activate([connection], {
-      connector,
+      connector
     });
 
     expect(callbacks).toEqual(["headers", "auth"]);
-    expect(session.tools.map((tool) => tool.name)).toEqual([
-      "weather__forecast",
+    expect(session.tools.map(tool => tool.name)).toEqual([
+      "weather__forecast"
     ]);
     expect(session.statuses).toEqual([
-      expect.objectContaining({ connectionName: "weather", state: "ready" }),
+      expect.objectContaining({ connectionName: "weather", state: "ready" })
     ]);
     expect(
       await session.callTool("weather__forecast", { city: "Shanghai" })
@@ -87,8 +88,8 @@ describe("ProjectMcpSession", () => {
         async callTool() {
           throw new Error("not called");
         },
-        async close() {},
-      }),
+        async close() {}
+      })
     });
 
     expect(session.tools).toEqual([]);
@@ -96,8 +97,8 @@ describe("ProjectMcpSession", () => {
       expect.objectContaining({
         connectionName: "weather",
         state: "unavailable",
-        missingTools: ["forecast"],
-      }),
+        missingTools: ["forecast"]
+      })
     ]);
   });
 
@@ -111,8 +112,8 @@ describe("ProjectMcpSession", () => {
           auth: () => {
             authCount += 1;
             return { token: `token-${authCount}` };
-          },
-        }),
+          }
+        })
       ],
       {
         connector: async () => {
@@ -127,17 +128,17 @@ describe("ProjectMcpSession", () => {
                 {
                   name: "forecast",
                   description: "Read a forecast",
-                  inputSchema: { type: "object" },
-                },
+                  inputSchema: { type: "object" }
+                }
               ];
             },
             async callTool() {
               callCount += 1;
               throw new Error("response interrupted");
             },
-            async close() {},
+            async close() {}
           };
-        },
+        }
       }
     );
 
@@ -158,20 +159,20 @@ describe("ProjectMcpSession", () => {
             {
               name: "forecast",
               description: "Read a forecast",
-              inputSchema: { type: "object" },
-            },
+              inputSchema: { type: "object" }
+            }
           ];
         },
-        callTool(_name, _input, signal) {
+        async callTool(_name, _input, signal) {
           observedSignal = signal;
           return new Promise((_resolve, reject) => {
-            signal?.addEventListener("abort", () => reject(signal.reason), {
-              once: true,
+            signal?.addEventListener("abort", () => { reject(signal.reason); }, {
+              once: true
             });
           });
         },
-        async close() {},
-      }),
+        async close() {}
+      })
     });
     const controller = new AbortController();
 
@@ -196,20 +197,20 @@ describe("ProjectMcpSession", () => {
             {
               name: "forecast",
               description: "Read a forecast",
-              inputSchema: { type: "object" },
-            },
+              inputSchema: { type: "object" }
+            }
           ];
         },
-        callTool(_name, _input, signal) {
+        async callTool(_name, _input, signal) {
           observedSignal = signal;
           return new Promise((_resolve, reject) => {
-            signal?.addEventListener("abort", () => reject(signal.reason), {
-              once: true,
+            signal?.addEventListener("abort", () => { reject(signal.reason); }, {
+              once: true
             });
           });
         },
-        async close() {},
-      }),
+        async close() {}
+      })
     });
 
     const call = session.callTool("weather__forecast", {});
@@ -230,7 +231,7 @@ function _connection(
       url: "https://mcp.example.test",
       description: "Weather service",
       tools: { allow: ["forecast"] },
-      ...overrides,
-    }),
+      ...overrides
+    })
   };
 }

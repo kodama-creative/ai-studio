@@ -24,7 +24,8 @@
  */
 export interface AnalyticsEventMap {
   /** The desktop app finished booting. */
-  app_opened: { isFirstOpen: boolean };
+  app_opened: { isFirstOpen: boolean; };
+
   /**
    * A single agent run finished. Carries only anonymous shape/outcome metadata —
    * the model selector, the run outcome, and coarse counts. Never any content.
@@ -32,22 +33,26 @@ export interface AnalyticsEventMap {
    * anything the user typed in themselves.
    */
   thread_run: {
-    provider: string;
-    model: string;
-    outcome: "completed" | "error" | "aborted";
     durationMs: number;
-    messageCount: number;
-    toolCount: number;
     hasSystemPrompt: boolean;
+    messageCount: number;
+    model: string;
+    outcome: "aborted" | "completed" | "error";
+    provider: string;
+    toolCount: number;
   };
+
   /** The user configured a model provider. */
-  provider_added: { providerId: string; kind: "builtin" | "custom" };
+  provider_added: { kind: "builtin" | "custom"; providerId: string; };
+
   /** The user added an MCP server. */
   mcp_server_added: Record<string, never>;
+
   /** The user opened the settings dialog. */
   settings_opened: Record<string, never>;
+
   /** The user made a choice on the first-run onboarding screen. */
-  onboarding_choice: { choice: string };
+  onboarding_choice: { choice: string; };
 }
 
 export type AnalyticsEventName = keyof AnalyticsEventMap;
@@ -77,5 +82,5 @@ export interface AnalyticsStatus extends AnalyticsSettings {
 
 /** A single, self-describing analytics event: a name plus its typed payload. */
 export type AnalyticsEvent = {
-  [K in AnalyticsEventName]: { event: K; properties: AnalyticsEventMap[K] };
+  [K in AnalyticsEventName]: { event: K; properties: AnalyticsEventMap[K]; };
 }[AnalyticsEventName];

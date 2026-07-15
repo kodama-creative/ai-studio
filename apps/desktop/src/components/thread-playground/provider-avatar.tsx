@@ -1,7 +1,6 @@
 import { memo, useMemo } from "react";
 
 import { PROVIDER_ICON_ALIASES, resolveProviderIcon } from "@/lib/brand-icons";
-
 import { BrandAvatar } from "./brand-avatar";
 
 function _ProviderAvatar({
@@ -9,14 +8,16 @@ function _ProviderAvatar({
   name,
   icon,
   size = 18,
-  className,
+  className
 }: {
-  id: string;
-  name: string;
+  readonly id: string;
+  readonly name: string;
+
+  readonly className?: string;
+
   /** A `@lobehub/icons` keyword overriding the auto-resolved brand icon. */
-  icon?: string;
-  size?: number;
-  className?: string;
+  readonly icon?: string;
+  readonly size?: number;
 }) {
   // An explicit `icon` wins; otherwise fall back to a known builtin alias, then
   // auto-resolving from the id and display name.
@@ -28,12 +29,12 @@ function _ProviderAvatar({
   return (
     <BrandAvatar
       brand={brand}
+      className={className}
+      colorClassName="text-foreground/80"
+      fallbackClassName="rounded-md text-[9px]"
       id={id}
       name={name}
       size={size}
-      colorClassName="text-foreground/80"
-      fallbackClassName="rounded-md text-[9px]"
-      className={className}
     />
   );
 }

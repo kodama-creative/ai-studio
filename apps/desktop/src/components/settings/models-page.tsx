@@ -1,6 +1,5 @@
 "use client";
 
-import type { CustomModel, ModelProviderGroup } from "@llm-space/core";
 import {
   Ban,
   CableIcon,
@@ -12,10 +11,12 @@ import {
   Pencil,
   Plus,
   Search,
-  Trash2,
+  Trash2
 } from "lucide-react";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+
+import type { CustomModel, ModelProviderGroup } from "@llm-space/core";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -25,14 +26,14 @@ import {
   CommandInput,
   CommandItem,
   CommandList,
-  CommandSeparator,
+  CommandSeparator
 } from "@/components/ui/command";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
-  DropdownMenuTrigger,
+  DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import {
@@ -40,24 +41,31 @@ import {
   ItemActions,
   ItemContent,
   ItemMedia,
-  ItemTitle,
+  ItemTitle
 } from "@/components/ui/item";
 import {
   Popover,
   PopoverContent,
-  PopoverTrigger,
+  PopoverTrigger
 } from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
+  SelectValue
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { useAutoAnimation } from "@/lib/use-auto-animation";
 import { cn } from "@/lib/utils";
-
+import { ApiKeyField } from "./api-key-field";
+import {
+  CUSTOM_PROVIDER_API_TYPES,
+  type CustomProviderApi,
+  DEFAULT_CUSTOM_PROVIDER_API
+} from "./custom-provider-api";
+import { ModelEditorDialog } from "./model-editor-dialog";
+import { SettingsPage } from "./settings-page";
 import { ConfirmDialog } from "../confirm-dialog";
 import { Link } from "../link";
 import {
@@ -70,21 +78,12 @@ import {
   useSetAllModelsEnabled,
   useSetModelEnabled,
   useTestModelConnection,
-  useUpdateProvider,
+  useUpdateProvider
 } from "../model-provider";
 import { ModelAvatar } from "../thread-playground/model-avatar";
 import { ProviderAvatar } from "../thread-playground/provider-avatar";
 import { Tooltip } from "../tooltip";
 import { ScrollArea } from "../ui/scroll-area";
-
-import { ApiKeyField } from "./api-key-field";
-import {
-  CUSTOM_PROVIDER_API_TYPES,
-  DEFAULT_CUSTOM_PROVIDER_API,
-  type CustomProviderApi,
-} from "./custom-provider-api";
-import { ModelEditorDialog } from "./model-editor-dialog";
-import { SettingsPage } from "./settings-page";
 
 /**
  * Base-URL guidance for the Anthropic Messages API. Its SDK appends `/v1/...`
@@ -109,27 +108,27 @@ export function ModelsPage() {
 
   useEffect(() => {
     if (
-      !selectedId ||
-      !providers.some((provider) => provider.id === selectedId)
+      !selectedId
+      || !providers.some(provider => provider.id === selectedId)
     ) {
       setSelectedId(firstProviderId);
     }
   }, [firstProviderId, providers, selectedId]);
 
   const selected =
-    providers.find((provider) => provider.id === selectedId) ?? null;
+    providers.find(provider => provider.id === selectedId) ?? null;
 
   return (
     <SettingsPage
       className="flex size-full min-h-0"
-      title="Models"
       description="LLM Space supports various model providers and their custom models, from OpenAI, Anthropic and Google compatible to Codex."
+      title="Models"
     >
       <ProviderList
+        onAdd={setSelectedId}
+        onSelect={setSelectedId}
         providers={providers}
         selectedId={selectedId}
-        onSelect={setSelectedId}
-        onAdd={setSelectedId}
       />
       <ProviderEditor key={selected?.id} provider={selected} />
     </SettingsPage>
@@ -140,12 +139,12 @@ function ProviderList({
   providers,
   selectedId,
   onSelect,
-  onAdd,
+  onAdd
 }: {
-  providers: ModelProviderGroup[];
-  selectedId: string | null;
-  onSelect: (id: string) => void;
-  onAdd: (id: string) => void;
+  readonly onAdd: (id: string) => void;
+  readonly onSelect: (id: string) => void;
+  readonly providers: ModelProviderGroup[];
+  readonly selectedId: string | null;
 }) {
   const [query, setQuery] = useState("");
   const [listRef] = useAutoAnimation<HTMLDivElement>();
@@ -153,7 +152,7 @@ function ProviderList({
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     const matched = q
-      ? providers.filter((provider) => provider.name.toLowerCase().includes(q))
+      ? providers.filter(provider => provider.name.toLowerCase().includes(q))
       : providers;
     return sortProviders(matched);
   }, [providers, query]);
@@ -163,36 +162,40 @@ function ProviderList({
       <div className="relative">
         <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2" />
         <Input
-          className="h-8 pl-7"
           aria-label="Search providers"
+          className="h-8 pl-7"
+          onChange={e => { setQuery(e.target.value); }}
           placeholder="Search providers"
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
         />
       </div>
 
       <ScrollArea className="min-h-0 grow">
-        {providers.length === 0 ? (
-          <div className="text-muted-foreground px-2 py-6 text-center text-xs text-balance">
-            No providers yet. Click the &quot;Add provider&quot; button below to
-            get started.
-          </div>
-        ) : filtered.length === 0 ? (
-          <div className="text-muted-foreground px-2 py-6 text-center text-xs text-balance">
-            No provider matches &quot;{query.trim()}&quot;.
-          </div>
-        ) : (
-          <div ref={listRef} className="flex flex-col gap-1 pr-2">
-            {filtered.map((provider) => (
-              <ProviderListItem
-                key={provider.id}
-                provider={provider}
-                selected={provider.id === selectedId}
-                onSelect={() => onSelect(provider.id)}
-              />
-            ))}
-          </div>
-        )}
+        {providers.length === 0
+          ? (
+            <div className="text-muted-foreground px-2 py-6 text-center text-xs text-balance">
+              No providers yet. Click the &quot;Add provider&quot; button below to
+              get started.
+            </div>
+          )
+          : filtered.length === 0
+            ? (
+              <div className="text-muted-foreground px-2 py-6 text-center text-xs text-balance">
+                No provider matches &quot;{query.trim()}&quot;.
+              </div>
+            )
+            : (
+              <div className="flex flex-col gap-1 pr-2" ref={listRef}>
+                {filtered.map(provider => (
+                  <ProviderListItem
+                    key={provider.id}
+                    onSelect={() => { onSelect(provider.id); }}
+                    provider={provider}
+                    selected={provider.id === selectedId}
+                  />
+                ))}
+              </div>
+            )}
       </ScrollArea>
 
       <AddProviderMenu onAdd={onAdd} />
@@ -210,7 +213,7 @@ const RECOMMENDED_PROVIDER_IDS = new Set([
   "openai",
   "anthropic",
   "google",
-  "deepseek",
+  "deepseek"
 ]);
 
 /**
@@ -220,7 +223,7 @@ const RECOMMENDED_PROVIDER_IDS = new Set([
  * qualifies for; empty groups are omitted. Already-configured providers are
  * checked.
  */
-function AddProviderMenu({ onAdd }: { onAdd: (id: string) => void }) {
+function AddProviderMenu({ onAdd }: { readonly onAdd: (id: string) => void; }) {
   const configured = useModels();
   const addProvider = useAddProvider();
   const addCustomProvider = useAddCustomProvider();
@@ -229,7 +232,7 @@ function AddProviderMenu({ onAdd }: { onAdd: (id: string) => void }) {
   const [builtins, setBuiltins] = useState<ModelProviderGroup[] | null>(null);
 
   const configuredIds = useMemo(
-    () => new Set(configured.map((provider) => provider.id)),
+    () => new Set(configured.map(provider => provider.id)),
     [configured]
   );
 
@@ -238,7 +241,7 @@ function AddProviderMenu({ onAdd }: { onAdd: (id: string) => void }) {
     if (next) {
       void fetchBuiltins()
         .then(setBuiltins)
-        .catch((error) => console.error("Failed to load providers", error));
+        .catch(error => { console.error("Failed to load providers", error); });
     }
   };
 
@@ -276,14 +279,14 @@ function AddProviderMenu({ onAdd }: { onAdd: (id: string) => void }) {
             </div>
           </div>
         ),
-        items: discovered,
+        items: discovered
       });
     }
     if (recommended.length > 0) {
       groups.push({
         id: "recommended",
         label: "Recommended",
-        items: recommended,
+        items: recommended
       });
     }
     if (rest.length > 0) {
@@ -293,63 +296,63 @@ function AddProviderMenu({ onAdd }: { onAdd: (id: string) => void }) {
   }, [builtins, configuredIds]);
 
   return (
-    <Popover open={open} onOpenChange={handleOpenChange} modal>
+    <Popover modal onOpenChange={handleOpenChange} open={open}>
       <PopoverTrigger asChild>
-        <Button variant="outline" className="w-full">
+        <Button className="w-full" variant="outline">
           <Plus />
           Add provider
         </Button>
       </PopoverTrigger>
-      <PopoverContent side="top" align="start" className="w-72 p-0">
+      <PopoverContent align="start" className="w-72 p-0" side="top">
         <Command>
           <CommandInput placeholder="Search providers..." />
           <CommandList className="max-h-72">
             <CommandEmpty>No providers found.</CommandEmpty>
             <CommandGroup heading="Customized">
               <CommandItem
-                value="Add custom provider"
                 onSelect={() => {
                   setOpen(false);
                   void addCustomProvider("Custom provider", "").then(onAdd);
                 }}
+                value="Add custom provider"
               >
                 <ProviderAvatar id="custom-provider" name="Custom provider" />
                 <span className="line-clamp-1 grow">Add custom provider</span>
               </CommandItem>
             </CommandGroup>
-            {groups.map((group) => (
+            {groups.map(group => (
               <Fragment key={group.id}>
                 <CommandSeparator />
                 <CommandGroup heading={group.label}>
-                  {group.items.map((provider) => (
+                  {group.items.map(provider => (
                     <CommandItem
                       key={provider.id}
-                      value={`${provider.name} ${provider.id}`}
                       onSelect={() => {
                         setOpen(false);
-                        void addProvider(provider.id).then(() =>
-                          onAdd(provider.id)
-                        );
+                        void addProvider(provider.id).then(() => { onAdd(provider.id); });
                       }}
+                      value={`${provider.name} ${provider.id}`}
                     >
                       <ProviderAvatar
+                        icon={provider.icon}
                         id={provider.id}
                         name={provider.name}
-                        icon={provider.icon}
                       />
                       <span className="line-clamp-1 grow">{provider.name}</span>
-                      {provider.websiteURL && (
-                        <Link
-                          href={provider.websiteURL}
-                          aria-label={`Open ${provider.name} website`}
-                          className="text-muted-foreground/80 hover:text-foreground shrink-0"
-                          onClick={(event) => event.stopPropagation()}
-                          onMouseDown={(event) => event.stopPropagation()}
-                          onPointerDown={(event) => event.stopPropagation()}
-                        >
-                          <ExternalLink className="size-2.5" />
-                        </Link>
-                      )}
+                      {provider.websiteURL
+                        ? (
+                          <Link
+                            aria-label={`Open ${provider.name} website`}
+                            className="text-muted-foreground/80 hover:text-foreground shrink-0"
+                            href={provider.websiteURL}
+                            onClick={event => { event.stopPropagation(); }}
+                            onMouseDown={event => { event.stopPropagation(); }}
+                            onPointerDown={event => { event.stopPropagation(); }}
+                          >
+                            <ExternalLink className="size-2.5" />
+                          </Link>
+                        )
+                        : null}
                     </CommandItem>
                   ))}
                 </CommandGroup>
@@ -365,11 +368,11 @@ function AddProviderMenu({ onAdd }: { onAdd: (id: string) => void }) {
 function ProviderListItem({
   provider,
   selected,
-  onSelect,
+  onSelect
 }: {
-  provider: ModelProviderGroup;
-  selected: boolean;
-  onSelect: () => void;
+  readonly onSelect: () => void;
+  readonly provider: ModelProviderGroup;
+  readonly selected: boolean;
 }) {
   const removeProvider = useRemoveProvider();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -377,50 +380,50 @@ function ProviderListItem({
 
   return (
     <div
-      role="button"
-      tabIndex={0}
       aria-label={`Select ${provider.name} provider`}
+      className={cn(
+        "group flex cursor-pointer items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs transition-colors",
+        selected ? "bg-muted font-medium" : "hover:bg-muted/50"
+      )}
       onClick={onSelect}
-      onKeyDown={(e) => {
+      onKeyDown={e => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           onSelect();
         }
       }}
-      className={cn(
-        "group flex cursor-pointer items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs transition-colors",
-        selected ? "bg-muted font-medium" : "hover:bg-muted/50"
-      )}
+      role="button"
+      tabIndex={0}
     >
       <ProviderAvatar
+        icon={provider.icon}
         id={provider.id}
         name={provider.name}
-        icon={provider.icon}
       />
       <span className="line-clamp-1 grow">{provider.name}</span>
 
-      <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+      <DropdownMenu onOpenChange={setMenuOpen} open={menuOpen}>
         <DropdownMenuTrigger asChild>
           <span
-            role="button"
-            tabIndex={0}
             aria-label={`${provider.name} provider actions`}
-            title={`${provider.name} provider actions`}
             className={cn(
               "text-muted-foreground hover:bg-accent hover:text-foreground inline-flex size-5 shrink-0 items-center justify-center rounded",
               menuOpen
                 ? "opacity-100"
                 : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
             )}
-            onClick={(e) => e.stopPropagation()}
+            onClick={e => { e.stopPropagation(); }}
+            role="button"
+            tabIndex={0}
+            title={`${provider.name} provider actions`}
           >
             <MoreHorizontal className="size-4" />
           </span>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+        <DropdownMenuContent align="end" onClick={e => { e.stopPropagation(); }}>
           <DropdownMenuItem
+            onSelect={() => { setConfirmOpen(true); }}
             variant="destructive"
-            onSelect={() => setConfirmOpen(true)}
           >
             <Trash2 />
             Remove {provider.name}
@@ -429,22 +432,22 @@ function ProviderListItem({
       </DropdownMenu>
 
       <ConfirmDialog
-        open={confirmOpen}
-        onOpenChange={setConfirmOpen}
-        title={`Remove ${provider.name}?`}
-        description={`This removes ${provider.name} from your configured providers. You can add it back later.`}
         confirmLabel="Remove"
+        description={`This removes ${provider.name} from your configured providers. You can add it back later.`}
         dimBackground={false}
         onConfirm={() => {
           setConfirmOpen(false);
           void removeProvider(provider.id);
         }}
+        onOpenChange={setConfirmOpen}
+        open={confirmOpen}
+        title={`Remove ${provider.name}?`}
       />
     </div>
   );
 }
 
-function ProviderEditor({ provider }: { provider: ModelProviderGroup | null }) {
+function ProviderEditor({ provider }: { readonly provider: ModelProviderGroup | null; }) {
   const updateProvider = useUpdateProvider();
   const setModelEnabled = useSetModelEnabled();
   const setAllModelsEnabled = useSetAllModelsEnabled();
@@ -452,7 +455,7 @@ function ProviderEditor({ provider }: { provider: ModelProviderGroup | null }) {
   const [baseUrlEnabled, setBaseUrlEnabled] = useState(
     Boolean(provider?.baseUrl)
   );
-  const [modelView, setModelView] = useState<"all" | "enabled" | "disabled">(
+  const [modelView, setModelView] = useState<"all" | "disabled" | "enabled">(
     "all"
   );
   const [apiValue, setApiValue] = useState<CustomProviderApi>(
@@ -490,7 +493,7 @@ function ProviderEditor({ provider }: { provider: ModelProviderGroup | null }) {
   // Persist on blur, but only when the value actually changed. An empty field
   // clears the key (stored as `null`).
   const handleApiKeyBlur = (event: React.FocusEvent<HTMLInputElement>) => {
-    if (!provider) return;
+    if (!provider) { return; }
     const value = event.target.value.trim();
     const next = value === "" ? null : value;
     const current = provider.apiKey ?? null;
@@ -500,7 +503,7 @@ function ProviderEditor({ provider }: { provider: ModelProviderGroup | null }) {
   };
 
   const handleNameBlur = (event: React.FocusEvent<HTMLInputElement>) => {
-    if (!provider) return;
+    if (!provider) { return; }
     const value = event.target.value.trim();
     if (value === "" || value === provider.name) {
       return;
@@ -517,18 +520,18 @@ function ProviderEditor({ provider }: { provider: ModelProviderGroup | null }) {
     if (api === previous) {
       return;
     }
-    void updateProvider(provider.id, { api }).catch((error) => {
+    void updateProvider(provider.id, { api }).catch(error => {
       setApiValue(previous);
       toast.error("Failed to update API type", {
         description:
-          error instanceof Error ? error.message : "Please try again.",
+          error instanceof Error ? error.message : "Please try again."
       });
     });
   };
 
   // Persist the icon override on blur when changed. Empty ⇒ auto-resolve.
   const handleIconBlur = () => {
-    if (!provider) return;
+    if (!provider) { return; }
     const value = iconDraft.trim();
     const next = value === "" ? null : value;
     const current = provider.icon ?? null;
@@ -539,7 +542,7 @@ function ProviderEditor({ provider }: { provider: ModelProviderGroup | null }) {
 
   // Persist the custom base URL on blur when changed. Empty ⇒ use the default.
   const handleBaseUrlBlur = (event: React.FocusEvent<HTMLInputElement>) => {
-    if (!provider) return;
+    if (!provider) { return; }
     const value = event.target.value.trim();
     const next = value === "" ? null : value;
     const current = provider.baseUrl ?? null;
@@ -567,12 +570,12 @@ function ProviderEditor({ provider }: { provider: ModelProviderGroup | null }) {
 
   const totalModels = provider.models.length;
   const enabledModels = provider.models.filter(
-    (model) => !disabledModels.has(model.id)
+    model => !disabledModels.has(model.id)
   ).length;
 
-  const visibleModels = provider.models.filter((model) => {
-    if (modelView === "enabled") return !disabledModels.has(model.id);
-    if (modelView === "disabled") return disabledModels.has(model.id);
+  const visibleModels = provider.models.filter(model => {
+    if (modelView === "enabled") { return !disabledModels.has(model.id); }
+    if (modelView === "disabled") { return disabledModels.has(model.id); }
     return true;
   });
   const isBuiltin = provider.builtin === true;
@@ -581,7 +584,7 @@ function ProviderEditor({ provider }: { provider: ModelProviderGroup | null }) {
   // providers are recognized by their models' API; custom providers follow the
   // live API type selection.
   const usesAnthropicApi = isBuiltin
-    ? provider.models.some((model) => model.api === "anthropic-messages")
+    ? provider.models.some(model => model.api === "anthropic-messages")
     : apiValue === "anthropic-messages";
   const baseUrlPlaceholder = usesAnthropicApi
     ? "https://api.example.com"
@@ -592,24 +595,26 @@ function ProviderEditor({ provider }: { provider: ModelProviderGroup | null }) {
       <ScrollArea className="min-h-0 grow">
         <div className="flex flex-col gap-6 pr-4 pl-6">
           <div className="flex items-center gap-2">
-            {isBuiltin && provider.websiteLink ? (
-              <Tooltip content={`Learn more about ${provider.name}`}>
-                <Link
-                  href={provider.websiteLink}
-                  aria-label={`Open ${provider.name} website`}
-                  className="group/provider-link text-foreground hover:text-foreground flex items-center gap-2"
-                >
-                  <h3 className="font-heading text-lg font-medium">
-                    {provider.name}
-                  </h3>
-                  <ExternalLink className="text-muted-foreground group-hover/provider-link:text-foreground size-4 transition-colors" />
-                </Link>
-              </Tooltip>
-            ) : (
-              <h3 className="font-heading text-lg font-medium">
-                {provider.name}
-              </h3>
-            )}
+            {isBuiltin && provider.websiteLink
+              ? (
+                <Tooltip content={`Learn more about ${provider.name}`}>
+                  <Link
+                    aria-label={`Open ${provider.name} website`}
+                    className="group/provider-link text-foreground hover:text-foreground flex items-center gap-2"
+                    href={provider.websiteLink}
+                  >
+                    <h3 className="font-heading text-lg font-medium">
+                      {provider.name}
+                    </h3>
+                    <ExternalLink className="text-muted-foreground group-hover/provider-link:text-foreground size-4 transition-colors" />
+                  </Link>
+                </Tooltip>
+              )
+              : (
+                <h3 className="font-heading text-lg font-medium">
+                  {provider.name}
+                </h3>
+              )}
           </div>
 
           {!isBuiltin && (
@@ -617,29 +622,27 @@ function ProviderEditor({ provider }: { provider: ModelProviderGroup | null }) {
               <div className="flex flex-col gap-2">
                 <span className="text-sm font-medium">Name</span>
                 <Input
-                  defaultValue={provider.name}
-                  placeholder="Custom provider"
                   aria-label="Custom provider name"
+                  defaultValue={provider.name}
                   onBlur={handleNameBlur}
+                  placeholder="Custom provider"
                 />
               </div>
 
               <div className="flex flex-col gap-2">
                 <span className="text-sm font-medium">API type</span>
                 <Select
+                  onValueChange={value => { handleApiChange(value as CustomProviderApi); }}
                   value={apiValue}
-                  onValueChange={(value) =>
-                    handleApiChange(value as CustomProviderApi)
-                  }
                 >
                   <SelectTrigger
-                    className="w-full"
                     aria-label={`${provider.name} API type`}
+                    className="w-full"
                   >
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {CUSTOM_PROVIDER_API_TYPES.map((type) => (
+                    {CUSTOM_PROVIDER_API_TYPES.map(type => (
                       <SelectItem key={type.value} value={type.value}>
                         {type.label}
                       </SelectItem>
@@ -655,23 +658,23 @@ function ProviderEditor({ provider }: { provider: ModelProviderGroup | null }) {
               <span className="text-sm font-medium">Icon</span>
               <div className="flex items-center gap-2">
                 <ProviderAvatar
+                  icon={iconDraft.trim() || undefined}
                   id={provider.id}
                   name={provider.name}
-                  icon={iconDraft.trim() || undefined}
                 />
                 <Input
-                  value={iconDraft}
-                  placeholder="Auto (e.g. openai, anthropic, google)"
                   aria-label={`${provider.name} icon`}
-                  onChange={(e) => setIconDraft(e.target.value)}
                   onBlur={handleIconBlur}
+                  onChange={e => { setIconDraft(e.target.value); }}
+                  placeholder="Auto (e.g. openai, anthropic, google)"
+                  value={iconDraft}
                 />
               </div>
               <div className="text-muted-foreground text-xs">
                 A{" "}
                 <Link
-                  href="https://icons.lobehub.com"
                   className="underline underline-offset-2"
+                  href="https://icons.lobehub.com"
                 >
                   @lobehub/icons
                 </Link>{" "}
@@ -682,12 +685,8 @@ function ProviderEditor({ provider }: { provider: ModelProviderGroup | null }) {
 
           {provider.id !== "openai-codex" && (
             <ApiKeyField
-              label="API key"
-              getKeyUrl={provider.websiteLink}
-              defaultValue={provider.apiKey ?? ""}
-              placeholder={`Input API Key for ${provider.name}.`}
               aria-label={`${provider.name} API key`}
-              onBlur={handleApiKeyBlur}
+              defaultValue={provider.apiKey ?? ""}
               description={
                 <div className="text-muted-foreground pl-5 text-xs">
                   <div className="list-item">
@@ -701,55 +700,65 @@ function ProviderEditor({ provider }: { provider: ModelProviderGroup | null }) {
                   </div>
                 </div>
               }
+              getKeyUrl={provider.websiteLink}
+              label="API key"
+              onBlur={handleApiKeyBlur}
+              placeholder={`Input API Key for ${provider.name}.`}
             />
           )}
 
-          {isBuiltin ? (
-            <div className="flex flex-col gap-2">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium">Custom base URL</span>
-                <Switch
-                  aria-label={
-                    baseUrlEnabled
-                      ? `Disable custom base URL for ${provider.name}`
-                      : `Enable custom base URL for ${provider.name}`
-                  }
-                  checked={baseUrlEnabled}
-                  onCheckedChange={handleBaseUrlToggle}
-                />
-              </div>
-              {baseUrlEnabled && (
-                <>
-                  <Input
-                    defaultValue={provider.baseUrl ?? ""}
-                    placeholder={baseUrlPlaceholder}
-                    aria-label={`${provider.name} custom base URL`}
-                    onBlur={handleBaseUrlBlur}
+          {isBuiltin
+            ? (
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium">Custom base URL</span>
+                  <Switch
+                    aria-label={
+                      baseUrlEnabled
+                        ? `Disable custom base URL for ${provider.name}`
+                        : `Enable custom base URL for ${provider.name}`
+                    }
+                    checked={baseUrlEnabled}
+                    onCheckedChange={handleBaseUrlToggle}
                   />
-                  <div className="text-muted-foreground text-xs">
-                    Leave empty to use the default endpoint.
-                    {usesAnthropicApi ? ` ${ANTHROPIC_BASE_URL_HINT}` : null}
-                  </div>
-                </>
-              )}
-            </div>
-          ) : (
-            <div className="flex flex-col gap-2">
-              <span className="text-sm font-medium">Base URL</span>
-              <Input
-                required
-                defaultValue={provider.baseUrl ?? ""}
-                placeholder={baseUrlPlaceholder}
-                aria-label={`${provider.name} base URL`}
-                onBlur={handleBaseUrlBlur}
-              />
-              {usesAnthropicApi && (
-                <div className="text-muted-foreground text-xs">
-                  {ANTHROPIC_BASE_URL_HINT}
                 </div>
-              )}
-            </div>
-          )}
+                {baseUrlEnabled
+                  ? (
+                    <>
+                      <Input
+                        aria-label={`${provider.name} custom base URL`}
+                        defaultValue={provider.baseUrl ?? ""}
+                        onBlur={handleBaseUrlBlur}
+                        placeholder={baseUrlPlaceholder}
+                      />
+                      <div className="text-muted-foreground text-xs">
+                        Leave empty to use the default endpoint.
+                        {usesAnthropicApi ? ` ${ANTHROPIC_BASE_URL_HINT}` : null}
+                      </div>
+                    </>
+                  )
+                  : null}
+              </div>
+            )
+            : (
+              <div className="flex flex-col gap-2">
+                <span className="text-sm font-medium">Base URL</span>
+                <Input
+                  aria-label={`${provider.name} base URL`}
+                  defaultValue={provider.baseUrl ?? ""}
+                  onBlur={handleBaseUrlBlur}
+                  placeholder={baseUrlPlaceholder}
+                  required
+                />
+                {usesAnthropicApi
+                  ? (
+                    <div className="text-muted-foreground text-xs">
+                      {ANTHROPIC_BASE_URL_HINT}
+                    </div>
+                  )
+                  : null}
+              </div>
+            )}
 
           {!isBuiltin && <ProviderHeadersEditor provider={provider} />}
 
@@ -764,10 +773,10 @@ function ProviderEditor({ provider }: { provider: ModelProviderGroup | null }) {
               <div className="ml-auto flex items-center gap-1">
                 <Tooltip content="Add custom model">
                   <button
-                    type="button"
                     aria-label="Add custom model"
-                    onClick={openCreateModel}
                     className="text-muted-foreground hover:bg-accent hover:text-foreground inline-flex size-6 items-center justify-center rounded transition-colors"
+                    onClick={openCreateModel}
+                    type="button"
                   >
                     <Plus className="size-4" />
                   </button>
@@ -775,9 +784,9 @@ function ProviderEditor({ provider }: { provider: ModelProviderGroup | null }) {
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <button
-                      type="button"
                       aria-label={`Model list actions for ${provider.name}`}
                       className="text-muted-foreground hover:bg-accent hover:text-foreground inline-flex size-6 items-center justify-center rounded transition-colors"
+                      type="button"
                     >
                       <MoreHorizontal className="size-4" />
                     </button>
@@ -785,16 +794,14 @@ function ProviderEditor({ provider }: { provider: ModelProviderGroup | null }) {
                   <DropdownMenuContent align="end" className="w-44">
                     <DropdownMenuItem
                       onSelect={() =>
-                        void setAllModelsEnabled(provider.id, false)
-                      }
+                        void setAllModelsEnabled(provider.id, false)}
                     >
                       <Ban />
                       Disable All
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       onSelect={() =>
-                        void setAllModelsEnabled(provider.id, true)
-                      }
+                        void setAllModelsEnabled(provider.id, true)}
                     >
                       <CheckCheck />
                       Enable All
@@ -804,12 +811,12 @@ function ProviderEditor({ provider }: { provider: ModelProviderGroup | null }) {
                       [
                         ["enabled", "Show Enabled Only"],
                         ["disabled", "Show Disabled Only"],
-                        ["all", "Show All"],
+                        ["all", "Show All"]
                       ] as const
                     ).map(([value, label]) => (
                       <DropdownMenuItem
                         key={value}
-                        onSelect={() => setModelView(value)}
+                        onSelect={() => { setModelView(value); }}
                       >
                         <Check
                           className={cn(
@@ -824,38 +831,39 @@ function ProviderEditor({ provider }: { provider: ModelProviderGroup | null }) {
                 </DropdownMenu>
               </div>
             </div>
-            <div ref={modelListRef} className="flex flex-col gap-1.5">
-              {visibleModels.length === 0 ? (
-                <div className="text-muted-foreground px-1 py-2 text-xs">
-                  No models to show.
-                </div>
-              ) : (
-                visibleModels.map((model) => (
-                  <ModelListItem
-                    key={model.id}
-                    providerId={provider.id}
-                    providerName={provider.name}
-                    model={model}
-                    enabled={!disabledModels.has(model.id)}
-                    isCustom={customModels.has(model.id)}
-                    onToggle={(next) =>
-                      void setModelEnabled(provider.id, model.id, next)
-                    }
-                    onEdit={() => openEditModel(model)}
-                  />
-                ))
-              )}
+            <div className="flex flex-col gap-1.5" ref={modelListRef}>
+              {visibleModels.length === 0
+                ? (
+                  <div className="text-muted-foreground px-1 py-2 text-xs">
+                    No models to show.
+                  </div>
+                )
+                : (
+                  visibleModels.map(model => (
+                    <ModelListItem
+                      enabled={!disabledModels.has(model.id)}
+                      isCustom={customModels.has(model.id)}
+                      key={model.id}
+                      model={model}
+                      onEdit={() => { openEditModel(model); }}
+                      onToggle={next =>
+                        void setModelEnabled(provider.id, model.id, next)}
+                      providerId={provider.id}
+                      providerName={provider.name}
+                    />
+                  ))
+                )}
             </div>
           </div>
         </div>
       </ScrollArea>
 
       <ModelEditorDialog
-        open={editorOpen}
-        onOpenChange={setEditorOpen}
-        providerId={provider.id}
-        providerApi={isBuiltin ? undefined : apiValue}
         model={editingModel}
+        onOpenChange={setEditorOpen}
+        open={editorOpen}
+        providerApi={isBuiltin ? undefined : apiValue}
+        providerId={provider.id}
       />
     </div>
   );
@@ -866,35 +874,34 @@ function ProviderEditor({ provider }: { provider: ModelProviderGroup | null }) {
  * local state so half-typed entries survive re-renders; only rows with a
  * non-empty name are persisted, on blur or row removal.
  */
-function ProviderHeadersEditor({ provider }: { provider: ModelProviderGroup }) {
+function ProviderHeadersEditor({ provider }: { readonly provider: ModelProviderGroup; }) {
   const updateProvider = useUpdateProvider();
-  const [rows, setRows] = useState<{ key: string; value: string }[]>(() =>
+  const [rows, setRows] = useState<Array<{ key: string; value: string; }>>(() =>
     Object.entries(provider.headers ?? {}).map(([key, value]) => ({
       key,
-      value,
-    }))
-  );
+      value
+    })));
 
-  const setRow = (index: number, row: { key: string; value: string }) => {
-    setRows((prev) => prev.map((r, i) => (i === index ? row : r)));
+  const setRow = (index: number, row: { key: string; value: string; }) => {
+    setRows(prev => prev.map((r, i) => (i === index ? row : r)));
   };
 
   // Persist the named rows when they differ from the stored headers. An empty
   // set clears the field (stored as `null`).
-  const persist = (nextRows: { key: string; value: string }[]) => {
+  const persist = (nextRows: Array<{ key: string; value: string; }>) => {
     const headers: Record<string, string> = {};
     for (const row of nextRows) {
       const key = row.key.trim();
-      if (key !== "") headers[key] = row.value;
+      if (key !== "") { headers[key] = row.value; }
     }
     const current = provider.headers ?? {};
     const currentKeys = Object.keys(current);
     const same =
-      Object.keys(headers).length === currentKeys.length &&
-      currentKeys.every((key) => headers[key] === current[key]);
-    if (same) return;
+      Object.keys(headers).length === currentKeys.length
+      && currentKeys.every(key => headers[key] === current[key]);
+    if (same) { return; }
     void updateProvider(provider.id, {
-      headers: Object.keys(headers).length > 0 ? headers : null,
+      headers: Object.keys(headers).length > 0 ? headers : null
     });
   };
 
@@ -908,27 +915,27 @@ function ProviderHeadersEditor({ provider }: { provider: ModelProviderGroup }) {
     <div className="flex flex-col gap-2">
       <span className="text-sm font-medium">Custom headers</span>
       {rows.map((row, index) => (
-        <div key={index} className="flex items-center gap-2">
+        <div className="flex items-center gap-2" key={index}>
           <Input
-            value={row.key}
-            placeholder="X-Header-Name"
             aria-label={`${provider.name} header ${index + 1} name`}
-            onChange={(e) => setRow(index, { ...row, key: e.target.value })}
-            onBlur={() => persist(rows)}
+            onBlur={() => { persist(rows); }}
+            onChange={e => { setRow(index, { ...row, key: e.target.value }); }}
+            placeholder="X-Header-Name"
+            value={row.key}
           />
           <Input
-            value={row.value}
-            placeholder="Value"
             aria-label={`${provider.name} header ${index + 1} value`}
-            onChange={(e) => setRow(index, { ...row, value: e.target.value })}
-            onBlur={() => persist(rows)}
+            onBlur={() => { persist(rows); }}
+            onChange={e => { setRow(index, { ...row, value: e.target.value }); }}
+            placeholder="Value"
+            value={row.value}
           />
           <Tooltip content="Remove header">
             <button
-              type="button"
               aria-label={`Remove header ${index + 1}`}
-              onClick={() => removeRow(index)}
               className="text-muted-foreground hover:bg-accent hover:text-foreground inline-flex size-6 shrink-0 items-center justify-center rounded transition-colors"
+              onClick={() => { removeRow(index); }}
+              type="button"
             >
               <Trash2 className="size-4" />
             </button>
@@ -936,11 +943,11 @@ function ProviderHeadersEditor({ provider }: { provider: ModelProviderGroup }) {
         </div>
       ))}
       <Button
+        className="self-start"
+        onClick={() => { setRows(prev => [...prev, { key: "", value: "" }]); }}
+        size="sm"
         type="button"
         variant="ghost"
-        size="sm"
-        className="self-start"
-        onClick={() => setRows((prev) => [...prev, { key: "", value: "" }])}
       >
         <Plus /> Add header
       </Button>
@@ -963,15 +970,15 @@ function ModelListItem({
   enabled,
   isCustom,
   onToggle,
-  onEdit,
+  onEdit
 }: {
-  providerId: string;
-  providerName: string;
-  model: ModelProviderGroup["models"][number];
-  enabled: boolean;
-  isCustom: boolean;
-  onToggle: (enabled: boolean) => void;
-  onEdit: () => void;
+  readonly enabled: boolean;
+  readonly isCustom: boolean;
+  readonly model: ModelProviderGroup["models"][number];
+  readonly onEdit: () => void;
+  readonly onToggle: (enabled: boolean) => void;
+  readonly providerId: string;
+  readonly providerName: string;
 }) {
   const removeCustomModel = useRemoveCustomModel();
   const testModelConnection = useTestModelConnection();
@@ -983,12 +990,12 @@ function ModelListItem({
     try {
       await testModelConnection(providerId, model.id);
       toast.success("Model connected successfully", {
-        description: model.name,
+        description: model.name
       });
     } catch (error) {
       toast.error("Failed to connect to model", {
         description:
-          error instanceof Error ? error.message : "Please try again.",
+          error instanceof Error ? error.message : "Please try again."
       });
     } finally {
       setTesting(false);
@@ -996,12 +1003,12 @@ function ModelListItem({
   };
 
   return (
-    <Item variant="muted" size="sm" className="group">
+    <Item className="group" size="sm" variant="muted">
       <ItemMedia>
         <ModelAvatar
+          icon={model.icon}
           id={model.id}
           name={model.name}
-          icon={model.icon}
           size={20}
         />
       </ItemMedia>
@@ -1012,63 +1019,69 @@ function ModelListItem({
         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100">
           <Tooltip content="Test connection">
             <button
-              type="button"
               aria-label={`Test connection for ${model.name}`}
+              className="text-muted-foreground hover:bg-accent hover:text-foreground inline-flex size-6 items-center justify-center rounded transition-colors"
               disabled={testing}
               onClick={() => void handleTestConnection()}
-              className="text-muted-foreground hover:bg-accent hover:text-foreground inline-flex size-6 items-center justify-center rounded transition-colors"
+              type="button"
             >
-              {testing ? (
-                <Loader2 className="size-3.5 animate-spin" />
-              ) : (
-                <CableIcon className="size-3.5" />
-              )}
+              {testing
+                ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                )
+                : (
+                  <CableIcon className="size-3.5" />
+                )}
             </button>
           </Tooltip>
-          {isCustom && (
-            <>
-              <button
-                type="button"
-                aria-label={`Edit ${model.name}`}
-                onClick={onEdit}
-                className="text-muted-foreground hover:bg-accent hover:text-foreground inline-flex size-6 items-center justify-center rounded transition-colors"
-              >
-                <Pencil className="size-3.5" />
-              </button>
-              <button
-                type="button"
-                aria-label={`Delete ${model.name}`}
-                onClick={() => setConfirmOpen(true)}
-                className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive inline-flex size-6 items-center justify-center rounded transition-colors"
-              >
-                <Trash2 className="size-3.5" />
-              </button>
-            </>
-          )}
+          {isCustom
+            ? (
+              <>
+                <button
+                  aria-label={`Edit ${model.name}`}
+                  className="text-muted-foreground hover:bg-accent hover:text-foreground inline-flex size-6 items-center justify-center rounded transition-colors"
+                  onClick={onEdit}
+                  type="button"
+                >
+                  <Pencil className="size-3.5" />
+                </button>
+                <button
+                  aria-label={`Delete ${model.name}`}
+                  className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive inline-flex size-6 items-center justify-center rounded transition-colors"
+                  onClick={() => { setConfirmOpen(true); }}
+                  type="button"
+                >
+                  <Trash2 className="size-3.5" />
+                </button>
+              </>
+            )
+            : null}
         </div>
         <Switch
-          size="sm"
-          checked={enabled}
-          onCheckedChange={onToggle}
           aria-label={
             enabled ? `Disable ${model.name}` : `Enable ${model.name}`
           }
+          checked={enabled}
+          onCheckedChange={onToggle}
+          size="sm"
         />
       </ItemActions>
-      {isCustom && (
-        <ConfirmDialog
-          open={confirmOpen}
-          onOpenChange={setConfirmOpen}
-          title={`Delete ${model.name}?`}
-          description={`This permanently removes the custom model "${model.name}" from ${providerName}.`}
-          confirmLabel="Delete"
-          dimBackground={false}
-          onConfirm={() => {
-            setConfirmOpen(false);
-            void removeCustomModel(providerId, model.id);
-          }}
-        />
-      )}
+      {isCustom
+        ? (
+          <ConfirmDialog
+            confirmLabel="Delete"
+            description={`This permanently removes the custom model "${model.name}" from ${providerName}.`}
+            dimBackground={false}
+            onConfirm={() => {
+              setConfirmOpen(false);
+              void removeCustomModel(providerId, model.id);
+            }}
+            onOpenChange={setConfirmOpen}
+            open={confirmOpen}
+            title={`Delete ${model.name}?`}
+          />
+        )
+        : null}
     </Item>
   );
 }

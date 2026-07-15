@@ -1,6 +1,6 @@
 import type {
   TraceLangfuseSearchInput,
-  TraceRemoteTraceSummary,
+  TraceRemoteTraceSummary
 } from "../../shared/traces";
 
 export type LangfuseObservation = Record<string, unknown>;
@@ -39,29 +39,29 @@ interface LangfuseTraceRow {
 
 type LangfuseTraceFilter =
   | {
-      type: "string";
-      column: "id" | "name" | "userId" | "sessionId" | "version" | "release";
-      operator: "=" | "contains";
-      value: string;
-    }
+    column: "environment";
+    operator: "any of";
+    type: "stringOptions";
+    value: string[];
+  }
   | {
-      type: "datetime";
-      column: "timestamp";
-      operator: ">=" | "<";
-      value: string;
-    }
+    column: "id" | "name" | "release" | "sessionId" | "userId" | "version";
+    operator: "=" | "contains";
+    type: "string";
+    value: string;
+  }
   | {
-      type: "arrayOptions";
-      column: "tags";
-      operator: "all of";
-      value: string[];
-    }
+    column: "tags";
+    operator: "all of";
+    type: "arrayOptions";
+    value: string[];
+  }
   | {
-      type: "stringOptions";
-      column: "environment";
-      operator: "any of";
-      value: string[];
-    };
+    column: "timestamp";
+    operator: "<" | ">=";
+    type: "datetime";
+    value: string;
+  };
 
 const OBSERVATION_FIELDS =
   "core,basic,time,io,model,usage,trace_context,metrics";
@@ -77,7 +77,7 @@ const TRACE_SEARCH_QUERY_COLUMNS = [
   "id",
   "name",
   "userId",
-  "sessionId",
+  "sessionId"
 ] as const;
 const TRACE_ORDER_FIELDS = [
   "id",
@@ -88,7 +88,7 @@ const TRACE_ORDER_FIELDS = [
   "version",
   "public",
   "bookmarked",
-  "sessionId",
+  "sessionId"
 ] as const;
 const TRACE_ORDER_DIRECTIONS = ["asc", "desc"] as const;
 
@@ -113,7 +113,7 @@ export class LangfuseClient {
     const first = _firstDataRecord(body);
     return {
       projectId: _firstString(first?.id, first?.projectId),
-      projectName: _firstString(first?.name, first?.projectName),
+      projectName: _firstString(first?.name, first?.projectName)
     };
   }
 
@@ -130,20 +130,19 @@ export class LangfuseClient {
     const query = filters.query;
     const queryFilters = query
       ? TRACE_SEARCH_QUERY_COLUMNS.map((column): LangfuseTraceFilter => ({
-          type: "string",
-          column,
-          operator: "contains",
-          value: query,
-        }))
+        type: "string",
+        column,
+        operator: "contains",
+        value: query
+      }))
       : [null];
     const results = await Promise.all(
-      queryFilters.map((queryFilter) =>
+      queryFilters.map(async queryFilter =>
         this._listTraces({
           filters: queryFilter ? [...baseFilters, queryFilter] : baseFilters,
           limit: filters.limit ?? DEFAULT_REMOTE_TRACE_LIMIT,
-          orderBy: filters.orderBy,
-        })
-      )
+          orderBy: filters.orderBy
+        }))
     );
     return _sortTraceSummaries(
       _dedupeTraceSummaries(results.flat()),
@@ -154,7 +153,7 @@ export class LangfuseClient {
   private async _listTraces({
     filters,
     limit,
-    orderBy,
+    orderBy
   }: {
     filters: LangfuseTraceFilter[];
     limit: number;
@@ -172,7 +171,7 @@ export class LangfuseClient {
       ? (_asRecord(body)?.data as unknown[])
       : [];
     return rows
-      .map((row) => _traceSummaryFromRow(_asRecord(row)))
+      .map(row => _traceSummaryFromRow(_asRecord(row)))
       .filter((row): row is TraceRemoteTraceSummary => row !== null);
   }
 
@@ -214,7 +213,7 @@ export class LangfuseClient {
       rows,
       truncated: Boolean(cursor),
       pageCount,
-      maxPages: MAX_OBSERVATION_PAGES,
+      maxPages: MAX_OBSERVATION_PAGES
     };
   }
 
@@ -225,8 +224,8 @@ export class LangfuseClient {
       response = await fetch(url, {
         headers: {
           accept: "application/json",
-          authorization: this._authorization,
-        },
+          authorization: this._authorization
+        }
       });
     } catch (error) {
       throw new Error(_redactedFetchError(error), { cause: error });
@@ -271,8 +270,8 @@ export function previewSecret(value: string): string {
 
 function _normalizeTraceSearchInput(
   input: TraceLangfuseSearchInput
-): Required<Pick<TraceLangfuseSearchInput, "limit" | "orderBy">> &
-  Omit<TraceLangfuseSearchInput, "limit" | "orderBy"> {
+): Omit<TraceLangfuseSearchInput, "limit" | "orderBy">
+  & Required<Pick<TraceLangfuseSearchInput, "limit" | "orderBy">> {
   return {
     ...(_cleanString(input.id) ? { id: _cleanString(input.id) } : {}),
     ...(_cleanString(input.query) ? { query: _cleanString(input.query) } : {}),
@@ -297,14 +296,14 @@ function _normalizeTraceSearchInput(
       : {}),
     ...(_cleanTimestamp(input.fromTimestamp, "From timestamp")
       ? {
-          fromTimestamp: _cleanTimestamp(input.fromTimestamp, "From timestamp"),
-        }
+        fromTimestamp: _cleanTimestamp(input.fromTimestamp, "From timestamp")
+      }
       : {}),
     ...(_cleanTimestamp(input.toTimestamp, "To timestamp")
       ? { toTimestamp: _cleanTimestamp(input.toTimestamp, "To timestamp") }
       : {}),
     limit: _boundedTraceLimit(input.limit),
-    orderBy: _cleanOrderBy(input.orderBy),
+    orderBy: _cleanOrderBy(input.orderBy)
   };
 }
 
@@ -323,7 +322,7 @@ function _traceFiltersFromSearchInput(
       type: "arrayOptions",
       column: "tags",
       operator: "all of",
-      value: input.tags,
+      value: input.tags
     });
   }
   if (input.environment && input.environment.length > 0) {
@@ -331,7 +330,7 @@ function _traceFiltersFromSearchInput(
       type: "stringOptions",
       column: "environment",
       operator: "any of",
-      value: input.environment,
+      value: input.environment
     });
   }
   if (input.fromTimestamp) {
@@ -339,7 +338,7 @@ function _traceFiltersFromSearchInput(
       type: "datetime",
       column: "timestamp",
       operator: ">=",
-      value: input.fromTimestamp,
+      value: input.fromTimestamp
     });
   }
   if (input.toTimestamp) {
@@ -347,7 +346,7 @@ function _traceFiltersFromSearchInput(
       type: "datetime",
       column: "timestamp",
       operator: "<",
-      value: input.toTimestamp,
+      value: input.toTimestamp
     });
   }
   return filters;
@@ -355,7 +354,7 @@ function _traceFiltersFromSearchInput(
 
 function _pushStringFilter(
   filters: LangfuseTraceFilter[],
-  column: Extract<LangfuseTraceFilter, { type: "string" }>["column"],
+  column: Extract<LangfuseTraceFilter, { type: "string"; }>["column"],
   value: string | undefined
 ): void {
   if (!value) {
@@ -393,8 +392,8 @@ function _compareTraceSummaryField(
 ): number {
   if (field === "timestamp") {
     return (
-      _timestampMs(left.timestamp) - _timestampMs(right.timestamp) ||
-      left.id.localeCompare(right.id)
+      _timestampMs(left.timestamp) - _timestampMs(right.timestamp)
+      || left.id.localeCompare(right.id)
     );
   }
   const leftValue = _traceSummaryStringField(left, field);
@@ -477,8 +476,8 @@ function _cleanOrderBy(value: unknown): string {
   const trimmed = _cleanString(value) ?? "timestamp.desc";
   const [field, direction] = trimmed.split(".");
   if (
-    TRACE_ORDER_FIELDS.some((candidate) => candidate === field) &&
-    TRACE_ORDER_DIRECTIONS.some((candidate) => candidate === direction)
+    TRACE_ORDER_FIELDS.some(candidate => candidate === field)
+    && TRACE_ORDER_DIRECTIONS.some(candidate => candidate === direction)
   ) {
     return trimmed;
   }
@@ -529,7 +528,7 @@ function _traceSummaryFromRow(
     ...(observations > 0 ? { observationCount: observations } : {}),
     ...(_finiteNumber(row?.totalCost) > 0
       ? { totalCost: _finiteNumber(row?.totalCost) }
-      : {}),
+      : {})
   };
 }
 

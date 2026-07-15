@@ -1,7 +1,6 @@
 import { memo, useMemo } from "react";
 
 import { resolveModelIcon } from "@/lib/brand-icons";
-
 import { BrandAvatar } from "./brand-avatar";
 
 function _ModelAvatar({
@@ -9,14 +8,16 @@ function _ModelAvatar({
   name,
   icon,
   size = 24,
-  className,
+  className
 }: {
-  id: string;
-  name: string;
+  readonly id: string;
+  readonly name: string;
+
+  readonly className?: string;
+
   /** A `@lobehub/icons` keyword overriding the auto-resolved brand icon. */
-  icon?: string;
-  size?: number;
-  className?: string;
+  readonly icon?: string;
+  readonly size?: number;
 }) {
   // An explicit `icon` wins; otherwise fall back to auto-resolving from the id
   // and display name.
@@ -28,12 +29,12 @@ function _ModelAvatar({
   return (
     <BrandAvatar
       brand={brand}
+      className={className}
+      colorClassName="text-foreground/90"
+      fallbackClassName="rounded-full text-xs"
       id={id}
       name={name}
       size={size}
-      colorClassName="text-foreground/90"
-      fallbackClassName="rounded-full text-xs"
-      className={className}
     />
   );
 }

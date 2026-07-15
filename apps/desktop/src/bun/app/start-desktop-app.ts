@@ -1,13 +1,14 @@
 import path from "node:path";
-
 import { getLlmSpaceHomePath } from "@llm-space/core/server";
 import Electrobun, {
   app,
   type BrowserWindow,
-  type ElectrobunEvent,
+  type ElectrobunEvent
 } from "electrobun/bun";
 
-import type { Command } from "../../shared/commands";
+import { createDirtyAgentSourceCoordinator } from "./dirty-agent-source-coordinator";
+import { createShutdownCoordinator } from "./shutdown-coordinator";
+import { createMainWindow } from "./window";
 import { Analytics } from "../analytics";
 import { executeCommandInBun } from "../commands";
 import { ExternalAgentProjectManager } from "../external-projects";
@@ -23,9 +24,7 @@ import { createBuiltInToolsModule } from "../tools/built-in";
 import { TraceManager } from "../traces";
 import { UpdaterService } from "../updates";
 
-import { createDirtyAgentSourceCoordinator } from "./dirty-agent-source-coordinator";
-import { createShutdownCoordinator } from "./shutdown-coordinator";
-import { createMainWindow } from "./window";
+import type { Command } from "../../shared/commands";
 
 export interface DesktopAppRuntime {
   stop(): Promise<void>;
@@ -40,7 +39,7 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
   const externalAgentProjects = new ExternalAgentProjectManager({
     homePath,
     workspaceRoot: workspacePath,
-    getModels: () => modelManager.getAvailableModels(),
+    getModels: async () => modelManager.getAvailableModels()
   });
   const mcpManager = new McpManager();
   const searchSettings = new SearchSettingsManager();
@@ -53,9 +52,9 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
         env: process.env,
         findSkill: skillsManager.findSkill.bind(skillsManager),
         getSearchSettings: searchSettings.get.bind(searchSettings),
-        workspaceRoot: workspacePath,
-      }),
-    ],
+        workspaceRoot: workspacePath
+      })
+    ]
   });
   await host.start();
   const streaming = new StreamThreadController(
@@ -81,22 +80,17 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
     return mainWindow;
   };
   const dirtyAgentSources = createDirtyAgentSourceCoordinator({
-    sendRequest: (request) =>
-      getRpc().send.requestDiscardDirtyAgentSources(request),
+    sendRequest: request => { getRpc().send.requestDiscardDirtyAgentSources(request); }
   });
-  const updater = new UpdaterService((message) =>
-    getRpc().send.updateStatusChanged(message)
-  );
+  const updater = new UpdaterService(message => { getRpc().send.updateStatusChanged(message); });
   const commandDependencies = {
-    sendToWebview: (command: Command) => getRpc().send.executeCommand(command),
+    sendToWebview: (command: Command) => { getRpc().send.executeCommand(command); },
     updater,
-    workspacePath,
+    workspacePath
   };
   const executeCommand = (command: Command, window: BrowserWindow): void => {
     if (command.type === "reload" && dirtyAgentSources.dirty) {
-      dirtyAgentSources.request("reload", () =>
-        executeCommandInBun(command, window, commandDependencies)
-      );
+      dirtyAgentSources.request("reload", () => { executeCommandInBun(command, window, commandDependencies); });
       return;
     }
     executeCommandInBun(command, window, commandDependencies);
@@ -104,29 +98,28 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
 
   let stopPromise: Promise<void> | null = null;
   const runtime: DesktopAppRuntime = {
-    stop() {
-      stopPromise ??= _stopDesktopApp([
-        ["updater", () => updater.stop()],
-        ["external agent projects", () => externalAgentProjects.shutdown()],
-        ["streaming", () => streaming.shutdown()],
-        ["desktop host", () => host.stop()],
-        ["MCP manager", () => mcpManager.shutdown()],
-        ["analytics", () => analytics.shutdown()],
+    async stop() {
+      stopPromise = stopPromise ?? _stopDesktopApp([
+        ["updater", () => { updater.stop(); }],
+        ["external agent projects", async () => externalAgentProjects.shutdown()],
+        ["streaming", () => { streaming.shutdown(); }],
+        ["desktop host", async () => host.stop()],
+        ["MCP manager", async () => mcpManager.shutdown()],
+        ["analytics", async () => analytics.shutdown()]
       ]);
       return stopPromise;
-    },
+    }
   };
 
   try {
     rpc = createMainWindowRPC({
       analytics,
       externalAgentProjects,
-      onAgentSourceDirtyStateChanged: (dirty) => {
+      onAgentSourceDirtyStateChanged: dirty => {
         dirtyAgentSources.setDirty(dirty);
       },
-      onDiscardDirtyAgentSourcesResolved: (requestId, discard) =>
-        dirtyAgentSources.resolve(requestId, discard),
-      executeCommand: (command) => executeCommand(command, getMainWindow()),
+      onDiscardDirtyAgentSourcesResolved: (requestId, discard) => { dirtyAgentSources.resolve(requestId, discard); },
+      executeCommand: command => { executeCommand(command, getMainWindow()); },
       getMainWindow,
       homePath,
       localFs,
@@ -137,7 +130,7 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
       streaming,
       tools: host.tools,
       traceManager,
-      updater,
+      updater
     });
     mainWindow = await createMainWindow({ rpc, executeCommand });
 
@@ -145,15 +138,15 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
     void updater.start();
 
     const handleBeforeQuit = createShutdownCoordinator({
-      quit: () => app.quit(),
-      stop: () => runtime.stop(),
+      quit: () => { app.quit(); },
+      stop: async () => runtime.stop()
     });
     Electrobun.events.on(
       "before-quit",
-      (event: ElectrobunEvent<{}, { allow: boolean }>) => {
+      (event: ElectrobunEvent<{}, { allow: boolean; }>) => {
         if (dirtyAgentSources.dirty) {
           event.response = { allow: false };
-          dirtyAgentSources.request("quit", () => app.quit());
+          dirtyAgentSources.request("quit", () => { app.quit(); });
           return;
         }
         handleBeforeQuit(event);
@@ -168,7 +161,7 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
 }
 
 async function _stopDesktopApp(
-  cleanups: readonly [name: string, cleanup: () => Promise<void> | void][]
+  cleanups: ReadonlyArray<[name: string, cleanup: () => Promise<void> | void]>
 ): Promise<void> {
   for (const [name, cleanup] of cleanups) {
     try {

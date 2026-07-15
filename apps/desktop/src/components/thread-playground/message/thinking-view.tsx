@@ -2,19 +2,18 @@ import { ChevronDownIcon } from "lucide-react";
 import React, { useCallback, useState } from "react";
 
 import { cn } from "@/lib/utils";
-
 import { CollapsibleContent } from "../../ui/collapsible-content";
 
 function _ThinkingView({
   className,
-  thinking,
+  thinking
 }: {
-  className?: string;
-  thinking: string;
+  readonly className?: string;
+  readonly thinking: string;
 }) {
   const [collapsed, setCollapsed] = useState(true);
   const handleToggleCollapsed = useCallback(() => {
-    setCollapsed((collapsed) => !collapsed);
+    setCollapsed(collapsed => !collapsed);
   }, []);
   return (
     <div
@@ -33,14 +32,16 @@ function _ThinkingView({
             )}
           />
           <div className="font-semibold">Thinking{collapsed ? ":" : ""}</div>
-          {collapsed && (
-            <div className="text-muted-foreground overflow-hidden text-ellipsis whitespace-nowrap">
-              {thinking}
-            </div>
-          )}
+          {collapsed
+            ? (
+              <div className="text-muted-foreground overflow-hidden text-ellipsis whitespace-nowrap">
+                {thinking}
+              </div>
+            )
+            : null}
         </div>
       </header>
-      <CollapsibleContent collapsed={collapsed} className="pl-1.5">
+      <CollapsibleContent className="pl-1.5" collapsed={collapsed}>
         <main>
           <div className="text-muted-foreground whitespace-pre-wrap border-l pl-3 text-sm">
             {thinking}

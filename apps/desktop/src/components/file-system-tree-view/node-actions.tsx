@@ -1,6 +1,5 @@
 "use client";
 
-import type { FileNode } from "@llm-space/core";
 import {
   ClipboardCopy,
   ClipboardPaste,
@@ -14,9 +13,11 @@ import {
   RefreshCw,
   SettingsIcon,
   TextCursorInput,
-  Trash2,
+  Trash2
 } from "lucide-react";
 import { toast } from "sonner";
+
+import type { FileNode } from "@llm-space/core";
 
 import { localFs } from "@/client";
 import { useCommands } from "@/commands";
@@ -24,8 +25,8 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuTrigger,
   DropdownMenuSeparator,
+  DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 
@@ -59,32 +60,32 @@ const actionClass = cn(
 function IconAction({
   label,
   onClick,
-  children,
+  children
 }: {
-  label: string;
-  onClick: () => void;
-  children: React.ReactNode;
+  readonly children: React.ReactNode;
+  readonly label: string;
+  readonly onClick: () => void;
 }) {
   return (
     <span
-      role="button"
-      tabIndex={0}
       aria-label={label}
-      title={label}
       className={actionClass}
-      onPointerDown={(e) => e.stopPropagation()}
-      onClick={(e) => {
+      onClick={e => {
         e.stopPropagation();
         e.preventDefault();
         onClick();
       }}
-      onKeyDown={(e) => {
+      onKeyDown={e => {
         if (e.key === "Enter" || e.key === " ") {
           e.stopPropagation();
           e.preventDefault();
           onClick();
         }
       }}
+      onPointerDown={e => { e.stopPropagation(); }}
+      role="button"
+      tabIndex={0}
+      title={label}
     >
       {children}
     </span>
@@ -97,17 +98,17 @@ function IconAction({
  * trigger, and stops pointer/click propagation so opening the menu doesn't drag
  * or toggle the row. Default behavior is left intact so Radix can open the menu.
  */
-function MoreActionsTrigger({ label }: { label: string }) {
+function MoreActionsTrigger({ label }: { readonly label: string; }) {
   return (
     <DropdownMenuTrigger asChild>
       <span
+        aria-label={label}
+        className={actionClass}
+        onClick={e => { e.stopPropagation(); }}
+        onPointerDown={e => { e.stopPropagation(); }}
         role="button"
         tabIndex={0}
-        aria-label={label}
         title={label}
-        className={actionClass}
-        onPointerDown={(e) => e.stopPropagation()}
-        onClick={(e) => e.stopPropagation()}
       >
         <MoreHorizontal className="size-4" />
       </span>
@@ -123,11 +124,11 @@ function MoreActionsTrigger({ label }: { label: string }) {
 export function NodeActions({
   node,
   menuOpen,
-  onMenuOpenChange,
+  onMenuOpenChange
 }: {
-  node: FileNode;
-  menuOpen?: boolean;
-  onMenuOpenChange?: (open: boolean) => void;
+  readonly menuOpen?: boolean;
+  readonly node: FileNode;
+  readonly onMenuOpenChange?: (open: boolean) => void;
 }) {
   const { executeCommand } = useCommands();
   const isDir = node.type === "directory";
@@ -143,73 +144,75 @@ export function NodeActions({
   };
   return (
     <span className="flex items-center gap-0.5">
-      {isDir && (
-        <>
-          <IconAction
-            label={`New from Examples in ${node.name}`}
-            onClick={() =>
-              executeCommand({
-                type: "openStartFromExample",
-                args: { parent: node.path },
-              })
-            }
-          >
-            <FilePlus className="size-4" />
-          </IconAction>
-          <IconAction
-            label={`New folder in ${node.name}`}
-            onClick={() =>
-              executeCommand({
-                type: "newFolder",
-                args: { parent: node.path },
-              })
-            }
-          >
-            <FolderPlus className="size-4" />
-          </IconAction>
-        </>
-      )}
-      <DropdownMenu open={menuOpen} onOpenChange={onMenuOpenChange}>
+      {isDir
+        ? (
+          <>
+            <IconAction
+              label={`New from Examples in ${node.name}`}
+              onClick={() => {
+                executeCommand({
+                  type: "openStartFromExample",
+                  args: { parent: node.path }
+                });
+              }}
+            >
+              <FilePlus className="size-4" />
+            </IconAction>
+            <IconAction
+              label={`New folder in ${node.name}`}
+              onClick={() => {
+                executeCommand({
+                  type: "newFolder",
+                  args: { parent: node.path }
+                });
+              }}
+            >
+              <FolderPlus className="size-4" />
+            </IconAction>
+          </>
+        )
+        : null}
+      <DropdownMenu onOpenChange={onMenuOpenChange} open={menuOpen}>
         <MoreActionsTrigger label={`More actions for ${node.name}`} />
         <DropdownMenuContent
           align="end"
-          onClick={(e) => e.stopPropagation()}
-          onPointerDown={(e) => e.stopPropagation()}
+          onClick={e => { e.stopPropagation(); }}
+          onPointerDown={e => { e.stopPropagation(); }}
         >
           <DropdownMenuItem
-            onSelect={() =>
-              executeCommand({ type: "revealFile", args: { path: node.path } })
-            }
+            onSelect={() => { executeCommand({ type: "revealFile", args: { path: node.path } }); }}
           >
             <FolderOpen />
             {REVEAL_LABEL}
           </DropdownMenuItem>
-          {isDir && (
-            <>
-              <DropdownMenuItem
-                onSelect={() =>
-                  executeCommand({
-                    type: "importFiles",
-                    args: { parent: node.path },
-                  })
-                }
-              >
-                <Import />
-                Import from Files...
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onSelect={() =>
-                  executeCommand({
-                    type: "importFromClipboard",
-                    args: { parent: node.path },
-                  })
-                }
-              >
-                <ClipboardPaste />
-                Import from Clipboard
-              </DropdownMenuItem>
-            </>
-          )}
+          {isDir
+            ? (
+              <>
+                <DropdownMenuItem
+                  onSelect={() => {
+                    executeCommand({
+                      type: "importFiles",
+                      args: { parent: node.path }
+                    });
+                  }}
+                >
+                  <Import />
+                  Import from Files...
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={() => {
+                    executeCommand({
+                      type: "importFromClipboard",
+                      args: { parent: node.path }
+                    });
+                  }}
+                >
+                  <ClipboardPaste />
+                  Import from Clipboard
+                </DropdownMenuItem>
+              </>
+            )
+            : null}
           <DropdownMenuSeparator />
           {!isDir && (
             <DropdownMenuItem onSelect={() => void copyToClipboard()}>
@@ -218,30 +221,26 @@ export function NodeActions({
             </DropdownMenuItem>
           )}
           <DropdownMenuItem
-            onSelect={() =>
+            onSelect={() => {
               executeCommand({
                 type: "duplicateFile",
-                args: { path: node.path },
-              })
-            }
+                args: { path: node.path }
+              });
+            }}
           >
             {isDir ? <FoldersIcon /> : <FilesIcon />}
             Duplicate
           </DropdownMenuItem>
           <DropdownMenuItem
-            onSelect={() =>
-              executeCommand({ type: "renameFile", args: { path: node.path } })
-            }
+            onSelect={() => { executeCommand({ type: "renameFile", args: { path: node.path } }); }}
           >
             <TextCursorInput />
             Rename
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
+            onSelect={() => { executeCommand({ type: "deleteFile", args: { path: node.path } }); }}
             variant="destructive"
-            onSelect={() =>
-              executeCommand({ type: "deleteFile", args: { path: node.path } })
-            }
           >
             <Trash2 />
             {MOVE_TO_TRASH_LABEL}
@@ -259,72 +258,66 @@ export function NodeActions({
  */
 export function RootActions({
   menuOpen,
-  onMenuOpenChange,
+  onMenuOpenChange
 }: {
-  menuOpen?: boolean;
-  onMenuOpenChange?: (open: boolean) => void;
+  readonly menuOpen?: boolean;
+  readonly onMenuOpenChange?: (open: boolean) => void;
 }) {
   const { executeCommand } = useCommands();
   return (
     <span className="flex items-center gap-1">
       <IconAction
         label="New from Examples"
-        onClick={() =>
+        onClick={() => {
           executeCommand({
             type: "openStartFromExample",
-            args: { parent: "" },
-          })
-        }
+            args: { parent: "" }
+          });
+        }}
       >
         <FilePlus className="size-4" />
       </IconAction>
       <IconAction
         label="New folder in workspace root"
-        onClick={() =>
-          executeCommand({ type: "newFolder", args: { parent: "" } })
-        }
+        onClick={() => { executeCommand({ type: "newFolder", args: { parent: "" } }); }}
       >
         <FolderPlus className="size-4" />
       </IconAction>
       <IconAction
         label="Settings"
-        onClick={() => executeCommand({ type: "openSettings", args: {} })}
+        onClick={() => { executeCommand({ type: "openSettings", args: {} }); }}
       >
         <SettingsIcon className="size-4" />
       </IconAction>
-      <DropdownMenu open={menuOpen} onOpenChange={onMenuOpenChange}>
+      <DropdownMenu onOpenChange={onMenuOpenChange} open={menuOpen}>
         <MoreActionsTrigger label="More actions for workspace root" />
         <DropdownMenuContent align="end">
           <DropdownMenuItem
-            onSelect={() =>
-              executeCommand({ type: "revealFile", args: { path: "" } })
-            }
+            onSelect={() => { executeCommand({ type: "revealFile", args: { path: "" } }); }}
           >
             <FolderOpen />
             {REVEAL_LABEL}
           </DropdownMenuItem>
           <DropdownMenuItem
-            onSelect={() =>
-              executeCommand({ type: "importFiles", args: { parent: "" } })
-            }
+            onSelect={() => { executeCommand({ type: "importFiles", args: { parent: "" } }); }}
           >
             <Import />
             Import from Files...
           </DropdownMenuItem>
           <DropdownMenuItem
-            onSelect={() =>
+            onSelect={() => {
               executeCommand({
                 type: "importFromClipboard",
-                args: { parent: "" },
-              })
-            }
+                args: { parent: "" }
+              });
+            }}
           >
             <ClipboardPaste />
             Import from Clipboard
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
-            onSelect={() => executeCommand({ type: "refreshTree", args: {} })}
+            onSelect={() => { executeCommand({ type: "refreshTree", args: {} }); }}
           >
             <RefreshCw />
             Refresh

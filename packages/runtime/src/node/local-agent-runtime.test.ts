@@ -1,15 +1,14 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-
 import {
-  createAssistantMessageEventStream,
-  createModels,
-  createProvider,
   type Api,
   type AssistantMessage,
   type Context,
-  type Model,
+  createAssistantMessageEventStream,
+  createModels,
+  createProvider,
+  type Model
 } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, test } from "bun:test";
 
@@ -19,7 +18,7 @@ const ROOTS: string[] = [];
 
 afterEach(async () => {
   await Promise.all(
-    ROOTS.splice(0).map((root) => rm(root, { recursive: true }))
+    ROOTS.splice(0).map(async root => rm(root, { recursive: true }))
   );
 });
 
@@ -44,7 +43,7 @@ describe("LocalAgentRuntime", () => {
       agentRoot,
       models: _fakeModels(() => {
         executions += 1;
-      }),
+      })
     });
 
     const session = await runtime.createSession({ id: "thread-one" });
@@ -52,13 +51,13 @@ describe("LocalAgentRuntime", () => {
 
     expect(runtime.project.definition).toEqual({
       model: { provider: "fake", id: "fake-model" },
-      reasoning: "high",
+      reasoning: "high"
     });
-    expect(session.messages.map((message) => message.role)).toEqual([
+    expect(session.messages.map(message => message.role)).toEqual([
       "user",
       "assistant",
       "toolResult",
-      "assistant",
+      "assistant"
     ]);
     expect(executions).toBe(2);
   });
@@ -87,7 +86,7 @@ function _fakeModels(onStream: () => void) {
     input: ["text"],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: 128_000,
-    maxTokens: 4_096,
+    maxTokens: 4_096
   };
   const api = {
     stream: (_model: Model<Api>, context: Context) => {
@@ -97,18 +96,18 @@ function _fakeModels(onStream: () => void) {
     streamSimple: (_model: Model<Api>, context: Context) => {
       onStream();
       return _fakeStream(context);
-    },
+    }
   };
   const provider = createProvider({
     id: "fake",
     auth: {
       apiKey: {
         name: "Fake",
-        resolve: () => Promise.resolve({ auth: {} }),
-      },
+        resolve: async () => Promise.resolve({ auth: {} })
+      }
     },
     models: [model],
-    api,
+    api
   });
   const models = createModels();
   models.setProvider(provider);
@@ -123,13 +122,13 @@ function _fakeStream(context: Context) {
     content: hasToolResult
       ? [{ type: "text", text: "done" }]
       : [
-          {
-            type: "toolCall",
-            id: "call-one",
-            name: "echo",
-            arguments: { text: "hello" },
-          },
-        ],
+        {
+          type: "toolCall",
+          id: "call-one",
+          name: "echo",
+          arguments: { text: "hello" }
+        }
+      ],
     api: "fake",
     provider: "fake",
     model: "fake-model",
@@ -139,17 +138,17 @@ function _fakeStream(context: Context) {
       cacheRead: 0,
       cacheWrite: 0,
       totalTokens: 2,
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
     },
     stopReason: hasToolResult ? "stop" : "toolUse",
-    timestamp: Date.now(),
+    timestamp: Date.now()
   };
   queueMicrotask(() => {
     stream.push({ type: "start", partial: message });
     stream.push({
       type: "done",
       reason: hasToolResult ? "stop" : "toolUse",
-      message,
+      message
     });
   });
   return stream;
