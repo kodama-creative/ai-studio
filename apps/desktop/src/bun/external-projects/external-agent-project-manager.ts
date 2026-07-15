@@ -33,6 +33,7 @@ import {
   AgentRuntime,
   loadAgentProject,
   loadAgentProjectManifest,
+  ProjectMcpToolCallRejectedError,
   ProjectMcpSession,
   type AgentSession,
   type CreateAgentSessionOptions,
@@ -48,6 +49,7 @@ import type {
   ExternalAgentProjectSummary,
   ExternalAgentProjectThreadRecord,
   ExternalAgentProjectThreadSummary,
+  ExternalAgentProjectToolCallResponse,
   ExternalAgentProjectView,
   RemoteToolCallAttempt,
 } from "../../shared/external-agent-project";
@@ -77,6 +79,7 @@ interface LoadedProject {
   connectionSessions: Map<string, ProjectConnectionSession>;
   connectionActivationEpochs: Map<string, number>;
   connectionActivationTails: Map<string, Promise<void>>;
+  connectionReloadCount: number;
 }
 
 interface ProjectConnectionSession {
@@ -406,12 +409,16 @@ export class ExternalAgentProjectManager {
       attempt?: RemoteToolCallAttempt;
     },
     abortSignal?: AbortSignal
-  ): Promise<{ contentText: string; isError: boolean }> {
-    await this._ensureProject(input.projectId);
+  ): Promise<ExternalAgentProjectToolCallResponse> {
+    try {
+      await this._ensureProject(input.projectId);
+    } catch (error) {
+      return _rejectedToolCall(_message(error));
+    }
     const loaded = this._state(input.projectId);
     const snapshot = loaded.snapshots.get(input.snapshot);
     if (!snapshot) {
-      throw new Error(
+      return _rejectedToolCall(
         "This Agent Project snapshot is no longer available. Refresh the Thread and run again."
       );
     }
@@ -420,28 +427,45 @@ export class ExternalAgentProjectManager {
     );
     if (!tool) {
       if (!input.threadId) {
-        throw new Error(`Project tool not found: ${input.name}`);
+        return _rejectedToolCall(`Project tool not found: ${input.name}`);
       }
       const active = loaded.connectionSessions.get(input.threadId);
       if (!active || active.snapshot !== input.snapshot) {
-        throw new Error(
+        return _rejectedToolCall(
           "This Project MCP connection is not active. Reopen the Thread and retry manually."
         );
       }
       if (active.blockedToolNames.has(input.name)) {
-        throw new Error(
+        return _rejectedToolCall(
           "Remote action schema changed. Sync from Agent before calling it."
         );
       }
       if (!input.attempt) {
-        throw new Error("Project MCP calls require a durable attempt marker.");
+        return _rejectedToolCall(
+          "Project MCP calls require a durable attempt marker."
+        );
       }
-      await this._markToolCallAttempt(
-        input.projectId,
-        input.threadId,
-        input.attempt
-      );
-      return active.session.callTool(input.name, input.arguments, abortSignal);
+      try {
+        await this._markToolCallAttempt(
+          input.projectId,
+          input.threadId,
+          input.attempt
+        );
+      } catch (error) {
+        return _rejectedToolCall(_message(error));
+      }
+      try {
+        return await active.session.callTool(
+          input.name,
+          input.arguments,
+          abortSignal
+        );
+      } catch (error) {
+        if (error instanceof ProjectMcpToolCallRejectedError) {
+          return _rejectedToolCall(error.message);
+        }
+        throw error;
+      }
     }
     const result = await tool.execute(randomUUID(), input.arguments);
     const text = result.content
@@ -457,6 +481,9 @@ export class ExternalAgentProjectManager {
   ): Promise<ExternalAgentProjectConnectionActivation> {
     await this._ensureProject(projectId);
     const loaded = this._state(projectId);
+    if (loaded.connectionReloadCount > 0) {
+      return _emptyConnectionActivation();
+    }
     const activationEpoch = loaded.connectionActivationEpochs.get(threadId) ?? 0;
     loaded.connectionActivationEpochs.set(threadId, activationEpoch);
     const previousActivation = loaded.connectionActivationTails.get(threadId);
@@ -768,9 +795,11 @@ export class ExternalAgentProjectManager {
         connectionSessions: new Map(),
         connectionActivationEpochs: new Map(),
         connectionActivationTails: new Map(),
+        connectionReloadCount: 0,
       };
       this._loaded.set(projectId, state);
     }
+    let releaseConnectionReload: (() => void) | undefined;
     try {
       await lstat(entry.path);
       const resolved =
@@ -780,6 +809,13 @@ export class ExternalAgentProjectManager {
       }
       const snapshot = await loadAgentProject(resolved.agentRoot);
       if (state.snapshot?.fingerprint !== snapshot.fingerprint) {
+        state.connectionReloadCount += 1;
+        let released = false;
+        releaseConnectionReload = () => {
+          if (released) return;
+          released = true;
+          state!.connectionReloadCount -= 1;
+        };
         for (const [threadId, epoch] of state.connectionActivationEpochs) {
           state.connectionActivationEpochs.set(threadId, epoch + 1);
         }
@@ -795,6 +831,7 @@ export class ExternalAgentProjectManager {
       }
       state.resolved = resolved;
       state.snapshot = snapshot;
+      releaseConnectionReload?.();
       state.missing = false;
       state.error = snapshot.diagnostics.some(
         (diagnostic) => diagnostic.severity === "error"
@@ -815,6 +852,7 @@ export class ExternalAgentProjectManager {
       state.snapshots.set(snapshot.fingerprint, snapshot);
       this._ensureWatcher(projectId, state, resolved.projectRoot);
     } catch (error) {
+      releaseConnectionReload?.();
       state.error = _message(error);
       state.missing = _hasCode(error, "ENOENT");
       if (_hasCode(error, "ENOENT")) {
@@ -1226,6 +1264,12 @@ function _connectionStatusWithDrift(
 
 function _emptyConnectionActivation(): ExternalAgentProjectConnectionActivation {
   return { tools: [], statuses: [], hasSchemaDrift: false };
+}
+
+function _rejectedToolCall(
+  message: string
+): ExternalAgentProjectToolCallResponse {
+  return { rejected: true, message };
 }
 
 async function _discoverAgentProjects(root: string): Promise<string[]> {

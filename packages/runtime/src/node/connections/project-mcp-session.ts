@@ -5,6 +5,7 @@ import type { Tool as McpTool } from "@modelcontextprotocol/sdk/types.js";
 import type { CompiledMcpConnection } from "../../runtime/agent/agent-project-snapshot";
 import { qualifyProjectMcpToolName } from "../../internal/project-mcp-tool-name";
 
+import { ProjectMcpToolCallRejectedError } from "./project-mcp-tool-call-rejected-error";
 import {
   RemoteMcpClient,
   type RemoteMcpCallResult,
@@ -118,9 +119,15 @@ export class ProjectMcpSession {
     signal?: AbortSignal
   ): Promise<RemoteMcpCallResult> {
     const active = this._activeTools.get(name);
-    if (!active) throw new Error(`Project MCP tool is unavailable: ${name}`);
+    if (!active) {
+      throw new ProjectMcpToolCallRejectedError(
+        `Project MCP tool is unavailable: ${name}`
+      );
+    }
     if (!_checkJsonSchema(active.inputSchema, input)) {
-      throw new TypeError(`Invalid input for project MCP tool "${name}"`);
+      throw new ProjectMcpToolCallRejectedError(
+        `Invalid input for project MCP tool "${name}"`
+      );
     }
     // Deliberately one attempt: tools/call may have completed remotely even
     // when its response is interrupted, so automatic retry is unsafe.

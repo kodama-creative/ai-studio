@@ -1,6 +1,7 @@
 import { isExecutableTool, type Tool, type ToolCall } from "@llm-space/core";
 import { useCallback, useMemo } from "react";
 
+import { ProjectToolCallRejectedError } from "@/client/project-tool-call-rejected-error";
 import { isFirecrawlLimitError } from "@/lib/firecrawl";
 
 import { useThreadStore, useThreadStoreActions } from "../stores";
@@ -69,6 +70,17 @@ export function useToolCallRunner(messageId: string) {
         };
       } catch (error) {
         const text = error instanceof Error ? error.message : "Tool call failed";
+        if (
+          isRemoteProjectTool &&
+          error instanceof ProjectToolCallRejectedError
+        ) {
+          updateToolCallOutputText(messageId, toolCall.id, text, true);
+          await continueAfterProjectToolResult(messageId);
+          return {
+            isError: true,
+            isFirecrawlLimit: isFirecrawlLimitError(text),
+          };
+        }
         if (isRemoteProjectTool) {
           // A transport failure does not prove the remote side effect failed.
           // Keep only the durable pre-call marker so recovery renders Outcome

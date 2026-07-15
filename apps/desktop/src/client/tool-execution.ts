@@ -5,6 +5,8 @@ import { callMcpTool } from "@/client/mcp";
 import { electrobun } from "@/lib/electrobun";
 import type { RemoteToolCallAttempt } from "@/shared/external-agent-project";
 
+import { ProjectToolCallRejectedError } from "./project-tool-call-rejected-error";
+
 /**
  * A tool call's result, normalized across the two backends. MCP surfaces
  * `isError` on the response; built-in tools signal failure by throwing, so a
@@ -47,7 +49,7 @@ export async function executeTool(
   }
   if (tool.type === "project") {
     if (!electrobun.rpc) throw new Error("Desktop RPC is not available.");
-    return electrobun.rpc.request.externalAgentProjectCallTool({
+    const result = await electrobun.rpc.request.externalAgentProjectCallTool({
       projectId: tool.projectId,
       threadId: context.threadId,
       snapshot: tool.snapshot,
@@ -55,6 +57,10 @@ export async function executeTool(
       arguments: args,
       attempt: context.attempt,
     });
+    if ("rejected" in result) {
+      throw new ProjectToolCallRejectedError(result.message);
+    }
+    return result;
   }
   const result = await callBuiltInTool({ name: tool.name, arguments: args });
   return { contentText: result.contentText, isError: false };

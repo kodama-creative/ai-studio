@@ -66,6 +66,10 @@ export interface RemoteToolCallAttempt {
   readonly at: string;
 }
 
+export type ExternalAgentProjectToolCallResponse =
+  | { contentText: string; isError: boolean }
+  | { rejected: true; message: string };
+
 export interface ExternalAgentProjectThreadRecord {
   thread: Thread;
   promptFingerprint: string;

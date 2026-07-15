@@ -473,6 +473,75 @@ export default defineMcpClientConnection({
     expect(closeCount).toBe(1);
   });
 
+  test("source reload blocks activation until old clients are disposed", async () => {
+    let clientCount = 0;
+    let signalFirstCloseStarted!: () => void;
+    const firstCloseStarted = new Promise<void>((resolve) => {
+      signalFirstCloseStarted = resolve;
+    });
+    let releaseFirstClose!: () => void;
+    const firstCloseReleased = new Promise<void>((resolve) => {
+      releaseFirstClose = resolve;
+    });
+    const { manager, project } = await _fixture({
+      connector: async () => {
+        clientCount += 1;
+        const clientNumber = clientCount;
+        return {
+          async listTools() {
+            return [
+              {
+                name: "forecast",
+                description: "Read a forecast",
+                inputSchema: { type: "object" },
+              },
+            ];
+          },
+          async callTool() {
+            return { contentText: "sunny", isError: false };
+          },
+          async close() {
+            if (clientNumber !== 1) return;
+            signalFirstCloseStarted();
+            await firstCloseReleased;
+          },
+        };
+      },
+    });
+    await _writeWeatherConnection(project);
+    const opened = await manager.trustAndOpen(project);
+    const threadId = opened.threads[0]!.id;
+    await manager.activateConnections(opened.id, threadId);
+    await writeFile(
+      path.join(project, "agent", "instructions.md"),
+      "Updated while a connection is active.\n",
+      "utf8"
+    );
+
+    const refresh = manager.refresh(opened.id);
+    await firstCloseStarted;
+    const activationDuringReload = manager.activateConnections(
+      opened.id,
+      threadId
+    );
+    await Bun.sleep(0);
+    expect(clientCount).toBe(1);
+    releaseFirstClose();
+    const [, blockedActivation] = await Promise.all([
+      refresh,
+      activationDuringReload,
+    ]);
+
+    expect(blockedActivation.tools).toEqual([]);
+    expect(clientCount).toBe(1);
+    const refreshed = await manager.inspect(opened.id);
+    await manager.activateConnections(opened.id, threadId);
+    expect(clientCount).toBe(2);
+    expect(
+      manager.getActiveRemoteToolNames(opened.id, threadId, refreshed.snapshot)
+    ).toEqual(new Set(["weather__forecast"]));
+  });
+
   test("shutdown waits for Project MCP client disposal", async () => {
     let signalCloseStarted!: () => void;
     const closeStarted = new Promise<void>((resolve) => {
@@ -646,8 +715,8 @@ export default defineMcpClientConnection({
     const drifted = await manager.activateConnections(opened.id, threadId);
     expect(drifted.hasSchemaDrift).toBe(true);
     expect(drifted.statuses[0]?.state).toBe("drift");
-    await expect(
-      manager.callTool({
+    expect(
+      await manager.callTool({
         projectId: opened.id,
         threadId,
         snapshot: opened.snapshot,
@@ -659,7 +728,10 @@ export default defineMcpClientConnection({
           at: "2026-07-15T00:01:00.000Z",
         },
       })
-    ).rejects.toThrow("Sync from Agent");
+    ).toEqual({
+      rejected: true,
+      message: "Remote action schema changed. Sync from Agent before calling it.",
+    });
     expect(
       (await manager.readThread(opened.id, threadId)).thread.context?.tools?.find(
         (tool): tool is ProjectTool =>

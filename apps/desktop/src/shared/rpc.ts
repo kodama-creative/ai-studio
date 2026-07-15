@@ -20,6 +20,7 @@ import type {
   ExternalAgentProjectPreview,
   ExternalAgentProjectSummary,
   ExternalAgentProjectThreadRecord,
+  ExternalAgentProjectToolCallResponse,
   ExternalAgentProjectView,
   RemoteToolCallAttempt,
 } from "./external-agent-project";
@@ -283,7 +284,7 @@ export interface DesktopRPCType {
           arguments: Record<string, unknown>;
           attempt?: RemoteToolCallAttempt;
         };
-        response: { contentText: string; isError: boolean };
+        response: ExternalAgentProjectToolCallResponse;
       };
       mcpListServers: {
         params: Record<string, never>;

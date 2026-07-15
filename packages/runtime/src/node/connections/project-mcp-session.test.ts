@@ -2,10 +2,8 @@ import { describe, expect, test } from "bun:test";
 
 import { defineMcpClientConnection } from "../../public/definitions/connections/mcp";
 import type { CompiledMcpConnection } from "../../runtime/agent/agent-project-snapshot";
-import {
-  ProjectMcpSession,
-  type ProjectMcpConnector,
-} from "./project-mcp-session";
+import { ProjectMcpToolCallRejectedError } from "./project-mcp-tool-call-rejected-error";
+import { ProjectMcpSession, type ProjectMcpConnector } from "./project-mcp-session";
 
 describe("ProjectMcpSession", () => {
   test("resolves credentials on activation and exposes only allowlisted tools", async () => {
@@ -69,9 +67,13 @@ describe("ProjectMcpSession", () => {
       await session.callTool("weather__forecast", { city: "Shanghai" })
     ).toEqual({ contentText: "sunny", isError: false });
     expect(calls).toEqual(["forecast"]);
-    await expect(
-      session.callTool("weather__forecast", { city: 42 })
-    ).rejects.toThrow('Invalid input for project MCP tool "weather__forecast"');
+    const invalidInputCall = session.callTool("weather__forecast", { city: 42 });
+    await expect(invalidInputCall).rejects.toBeInstanceOf(
+      ProjectMcpToolCallRejectedError
+    );
+    await expect(invalidInputCall).rejects.toThrow(
+      'Invalid input for project MCP tool "weather__forecast"'
+    );
     expect(calls).toEqual(["forecast"]);
     await session.close();
   });

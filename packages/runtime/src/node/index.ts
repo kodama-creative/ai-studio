@@ -9,6 +9,7 @@ export {
   type RemoteMcpCallResult,
   type RemoteMcpClientOptions,
 } from "./connections/remote-mcp-client";
+export { ProjectMcpToolCallRejectedError } from "./connections/project-mcp-tool-call-rejected-error";
 export {
   ProjectMcpSession,
   type ProjectMcpConnectionStatus,
