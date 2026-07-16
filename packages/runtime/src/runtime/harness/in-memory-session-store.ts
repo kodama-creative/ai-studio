@@ -1,6 +1,9 @@
+import { immutableSnapshot } from "./immutable-snapshot";
 import {
   isTerminalRuntimeRunState,
+  RUNTIME_RUN_STATES,
   type RuntimeRunSnapshot,
+  type RuntimeRunState,
   transitionRuntimeRun
 } from "./runtime-run";
 import {
@@ -25,6 +28,7 @@ const CHECKPOINT_STATES = new Set([
   "superseded",
   "outcomeUnknown"
 ]);
+const RUN_STATES = new Set<string>(RUNTIME_RUN_STATES);
 
 export class InMemorySessionStore implements SessionStore {
   private readonly _sessions = new Map<string, StoredRuntimeSession>();
@@ -37,14 +41,14 @@ export class InMemorySessionStore implements SessionStore {
           `Session ${session.snapshot.id} was hydrated more than once`
         );
       }
-      this._sessions.set(session.snapshot.id, _snapshot(session));
+      this._sessions.set(session.snapshot.id, immutableSnapshot(session));
     }
   }
 
   async load(sessionId: string): Promise<StoredRuntimeSession | null> {
     _assertId("Session", sessionId);
     const stored = this._sessions.get(sessionId);
-    return Promise.resolve(stored ? _snapshot(stored) : null);
+    return Promise.resolve(stored ? immutableSnapshot(stored) : null);
   }
 
   async commit(input: SessionStoreCommit): Promise<StoredRuntimeSession> {
@@ -95,14 +99,14 @@ export class InMemorySessionStore implements SessionStore {
       });
     }
 
-    const stored = _snapshot({
+    const stored = immutableSnapshot({
       version: nextVersion,
       snapshot,
       configurations: [...configurations.values()],
       journal
     });
     this._sessions.set(input.sessionId, stored);
-    return Promise.resolve(_snapshot(stored));
+    return Promise.resolve(immutableSnapshot(stored));
   }
 }
 
@@ -359,6 +363,11 @@ function _assertStoredSession(session: StoredRuntimeSession): void {
   let activeRunCount = 0;
   for (const run of session.snapshot.runs) {
     _assertId("Runtime Run", run.id);
+    if (!RUN_STATES.has(run.state)) {
+      throw new SessionStoreInvariantError(
+        `Runtime Run ${run.id} has invalid state ${run.state}`
+      );
+    }
     if (run.sessionId !== session.snapshot.id) {
       throw new SessionStoreInvariantError(
         `Runtime Run ${run.id} belongs to Session ${run.sessionId}, not ${session.snapshot.id}`
@@ -421,6 +430,7 @@ function _assertStoredSession(session: StoredRuntimeSession): void {
     );
   }
 
+  let previousSessionVersion = 0;
   for (const [index, entry] of session.journal.entries()) {
     if (entry.sequence !== index + 1) {
       throw new SessionStoreInvariantError(
@@ -436,6 +446,15 @@ function _assertStoredSession(session: StoredRuntimeSession): void {
         `Run Journal entry ${entry.sequence} has an invalid Session version`
       );
     }
+    if (
+      entry.sessionVersion < previousSessionVersion
+      || entry.sessionVersion > previousSessionVersion + 1
+    ) {
+      throw new SessionStoreInvariantError(
+        `Run Journal entry ${entry.sequence} has non-contiguous Session version ${entry.sessionVersion}`
+      );
+    }
+    previousSessionVersion = entry.sessionVersion;
     if (!runIds.has(entry.runId)) {
       throw new SessionStoreInvariantError(
         `Run Journal entry ${entry.sequence} references missing Runtime Run ${entry.runId}`
@@ -450,18 +469,117 @@ function _assertStoredSession(session: StoredRuntimeSession): void {
       );
     }
   }
+  if (previousSessionVersion !== session.version) {
+    throw new SessionStoreInvariantError(
+      `Run Journal ends at Session version ${previousSessionVersion}, expected ${session.version}`
+    );
+  }
+  _assertJournalReconstructsSnapshot(session);
 }
 
-function _snapshot<T>(value: T): T {
-  return _deepFreeze(structuredClone(value));
-}
+function _assertJournalReconstructsSnapshot(
+  session: StoredRuntimeSession
+): void {
+  const replayed = new Map<string, {
+    checkpoint?: RuntimeRunSnapshot["checkpoint"];
+    configurationId: string;
+    state: RuntimeRunState;
+  }>();
+  for (const entry of session.journal) {
+    if (entry.type === "runStarted") {
+      const startedState = (entry as { readonly state: unknown; }).state;
+      if (startedState !== "runningModel") {
+        throw new SessionStoreInvariantError(
+          `Run Journal starts Runtime Run ${entry.runId} in ${String(startedState)}`
+        );
+      }
+      if (replayed.has(entry.runId)) {
+        throw new SessionStoreInvariantError(
+          `Run Journal starts Runtime Run ${entry.runId} more than once`
+        );
+      }
+      replayed.set(entry.runId, {
+        configurationId: entry.configurationId,
+        state: "runningModel"
+      });
+      continue;
+    }
+    const current = replayed.get(entry.runId);
+    if (!current) {
+      throw new SessionStoreInvariantError(
+        `Run Journal references Runtime Run ${entry.runId} before it starts`
+      );
+    }
+    if (entry.type === "runStateChanged") {
+      if (entry.from !== current.state) {
+        throw new SessionStoreInvariantError(
+          `Run Journal entry ${entry.sequence} expected ${current.state}, found ${entry.from}`
+        );
+      }
+      try {
+        transitionRuntimeRun({
+          id: entry.runId,
+          sessionId: session.snapshot.id,
+          configurationId: current.configurationId,
+          state: current.state
+        }, entry.to);
+      } catch {
+        throw new SessionStoreInvariantError(
+          `Run Journal entry ${entry.sequence} has illegal transition ${entry.from} -> ${entry.to}`
+        );
+      }
+      current.state = entry.to;
+      continue;
+    }
+    if (entry.state !== current.state) {
+      throw new SessionStoreInvariantError(
+        `Run Journal checkpoint ${entry.sequence} records ${entry.state} while Run is ${current.state}`
+      );
+    }
+    _assertId(
+      "Continuation fingerprint",
+      entry.continuationFingerprint
+    );
+    const expectedOrder = (current.checkpoint?.order ?? 0) + 1;
+    if (entry.order !== expectedOrder) {
+      throw new SessionStoreInvariantError(
+        `Run Journal checkpoint ${entry.sequence} has order ${entry.order}, expected ${expectedOrder}`
+      );
+    }
+    current.checkpoint = {
+      order: entry.order,
+      state: entry.state,
+      continuationFingerprint: entry.continuationFingerprint
+    };
+  }
 
-function _deepFreeze<T>(value: T): T {
-  if (value && typeof value === "object" && !Object.isFrozen(value)) {
-    Object.freeze(value);
-    for (const child of Object.values(value)) {
-      _deepFreeze(child);
+  for (const run of session.snapshot.runs) {
+    const reconstructed = replayed.get(run.id);
+    if (!reconstructed) {
+      throw new SessionStoreInvariantError(
+        `Run Journal does not reconstruct Runtime Run ${run.id}`
+      );
+    }
+    if (
+      reconstructed.configurationId !== run.configurationId
+      || reconstructed.state !== run.state
+      || !_sameCheckpoint(reconstructed.checkpoint, run.checkpoint)
+    ) {
+      throw new SessionStoreInvariantError(
+        `Run Journal does not reconstruct Runtime Run ${run.id}`
+      );
     }
   }
-  return value;
+}
+
+function _sameCheckpoint(
+  left: RuntimeRunSnapshot["checkpoint"],
+  right: RuntimeRunSnapshot["checkpoint"]
+): boolean {
+  if (!left || !right) {
+    return left === right;
+  }
+  return left.order === right.order
+    && left.state === right.state
+    && left.continuationFingerprint === right.continuationFingerprint;
 }

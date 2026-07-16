@@ -70,7 +70,10 @@ import {
   redo as redoHistory,
   undo as undoHistory
 } from "./thread-history";
-import { ThreadRuntimeSession } from "./thread-runtime-session";
+import {
+  ThreadRuntimeOutcomeUnknownError,
+  ThreadRuntimeSession
+} from "./thread-runtime-session";
 import { PREVIEW_THROTTLE_MS } from "../streaming-preview";
 import { listEnabledPromptVariableSkills } from "../variable/prompt-variable-skills";
 
@@ -227,6 +230,28 @@ export function createThreadStore(
       // --- internal helpers ---------------------------------------------------
 
       let stopActiveRun: (() => void) | null = null;
+
+      const applyRuntimeSession = (
+        session: Thread["runtimeSession"]
+      ): Thread => {
+        const thread = { ...get().thread, runtimeSession: session };
+        const changeHistory = get().changeHistory;
+        set({
+          thread,
+          changeHistory: {
+            ...changeHistory,
+            snapshots: changeHistory.snapshots.map((snapshot, index) =>
+              (index === changeHistory.index ? thread : snapshot))
+          }
+        });
+        return thread;
+      };
+
+      const persistRuntimeSession = async (
+        session: Thread["runtimeSession"]
+      ): Promise<void> => {
+        await options.persistSettledThread?.(applyRuntimeSession(session));
+      };
 
       const patchThread = (partial: Partial<Thread>) => {
         const next = { ...get().thread, ...partial };
@@ -856,22 +881,31 @@ export function createThreadStore(
               executionMode,
               model
             });
-            const thread = {
-              ...get().thread,
-              runtimeSession: begun.session
-            };
-            const changeHistory = get().changeHistory;
-            set({
-              thread,
-              changeHistory: {
-                ...changeHistory,
-                snapshots: changeHistory.snapshots.map((snapshot, index) =>
-                  (index === changeHistory.index ? thread : snapshot))
-              }
-            });
-            await options.persistSettledThread?.(thread);
+            await persistRuntimeSession(begun.session);
           } catch (error) {
+            if (error instanceof ThreadRuntimeOutcomeUnknownError) {
+              try {
+                await persistRuntimeSession(error.session);
+              } catch (persistError) {
+                runtimeSession = new ThreadRuntimeSession(
+                  previousRuntimeSession
+                );
+                applyRuntimeSession(previousRuntimeSession);
+                toast.error("Unable to persist Runtime recovery", {
+                  description:
+                    persistError instanceof Error
+                      ? persistError.message
+                      : "Runtime Session recovery failed"
+                });
+                return;
+              }
+              toast.error("Runtime Run outcome unknown", {
+                description: error.message
+              });
+              return;
+            }
             runtimeSession = new ThreadRuntimeSession(previousRuntimeSession);
+            applyRuntimeSession(previousRuntimeSession);
             toast.error("Unable to start Runtime Run", {
               description:
                 error instanceof Error ? error.message : "Runtime Session failed"

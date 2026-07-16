@@ -4,6 +4,8 @@ import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { AgentEvent, AgentTransport, Thread } from "@llm-space/core";
 import type { StoredRuntimeSession } from "@llm-space/runtime/harness";
 
+import { ThreadRuntimeSession } from "./thread-runtime-session";
+
 void mock.module("@/lib/electrobun", () => ({ electrobun: { rpc: null } }));
 globalThis.requestAnimationFrame = callback =>
   setTimeout(() => { callback(performance.now()); }, 0) as unknown as number;
@@ -76,6 +78,81 @@ describe("Thread store Runtime Harness integration", () => {
     const session = persisted.runtimeSession as StoredRuntimeSession;
     expect(session.snapshot.runs).toHaveLength(1);
     expect(session.snapshot.runs[0]?.state).toBe("completed");
+  });
+
+  test("persists outcome unknown before refusing to replay interrupted work", async () => {
+    const { createThreadStore } = await import("./thread-store");
+    let persisted: Thread = _initialThread();
+    const interrupted = new ThreadRuntimeSession(undefined);
+    const begun = await interrupted.begin({
+      thread: persisted,
+      context: persisted.context ?? {},
+      executionMode: "react",
+      model: persisted.model!
+    });
+    persisted = { ...persisted, runtimeSession: begun.session };
+    let transportCalls = 0;
+    const interruptedTransport = _transport();
+    const store = createThreadStore(persisted, {
+      transport: (...args) => {
+        transportCalls += 1;
+        return interruptedTransport(...args);
+      },
+      resolveModel: saved => saved ?? null,
+      getAutoRunTools: () => true,
+      getReactLoop: () => true,
+      runtimeOwnsToolLoop: true,
+      persistSettledThread: async thread => {
+        persisted = structuredClone(thread);
+      }
+    });
+
+    await store.getState().run();
+
+    expect(transportCalls).toBe(0);
+    expect(persisted.runtimeSession).toMatchObject({
+      snapshot: {
+        activeRunId: null,
+        runs: [{ id: begun.runId, state: "outcomeUnknown" }]
+      }
+    });
+    expect(persisted.runHistory ?? []).toHaveLength(0);
+  });
+
+  test("does not publish recovered state when durable persistence fails", async () => {
+    const { createThreadStore } = await import("./thread-store");
+    const persisted = _initialThread();
+    const interrupted = new ThreadRuntimeSession(undefined);
+    const begun = await interrupted.begin({
+      thread: persisted,
+      context: persisted.context ?? {},
+      executionMode: "react",
+      model: persisted.model!
+    });
+    const interruptedThread = {
+      ...persisted,
+      runtimeSession: begun.session
+    };
+    let transportCalls = 0;
+    const interruptedTransport = _transport();
+    const store = createThreadStore(interruptedThread, {
+      transport: (...args) => {
+        transportCalls += 1;
+        return interruptedTransport(...args);
+      },
+      resolveModel: saved => saved ?? null,
+      getAutoRunTools: () => true,
+      getReactLoop: () => true,
+      runtimeOwnsToolLoop: true,
+      persistSettledThread: async () => {
+        throw new Error("fixture write failed");
+      }
+    });
+
+    await store.getState().run();
+
+    expect(transportCalls).toBe(0);
+    expect(store.getState().thread.runtimeSession).toEqual(begun.session);
   });
 });
 

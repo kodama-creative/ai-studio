@@ -5,6 +5,7 @@ import type { Thread } from "@llm-space/core";
 import {
   threadContinuationFingerprint,
   type ThreadRuntimeExecutionInput,
+  ThreadRuntimeOutcomeUnknownError,
   ThreadRuntimeSession
 } from "./thread-runtime-session";
 
@@ -155,6 +156,30 @@ describe("ThreadRuntimeSession", () => {
       outcome: "cancelled"
     });
     expect(abortedSettled.checkpoint?.state).toBe("cancelled");
+  });
+
+  test("terminalizes a persisted in-flight invocation instead of replaying it", async () => {
+    const interrupted = new ThreadRuntimeSession(undefined);
+    const started = await interrupted.begin(
+      _input(_threadWithUser(), "react")
+    );
+    const freshProcess = new ThreadRuntimeSession(started.session);
+    let error: unknown;
+    try {
+      await freshProcess.begin(_input(_threadWithUser(), "react"));
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toBeInstanceOf(ThreadRuntimeOutcomeUnknownError);
+    expect(error).toMatchObject({
+      session: {
+        snapshot: {
+          activeRunId: null,
+          runs: [{ id: started.runId, state: "outcomeUnknown" }]
+        }
+      }
+    });
   });
 
   test("blocks malformed persisted metadata without replacing it", async () => {

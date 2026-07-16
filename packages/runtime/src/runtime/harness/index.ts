@@ -9,6 +9,21 @@ export {
   transitionRuntimeRun
 } from "./runtime-run";
 export {
+  replayRuntimeRunEvents,
+  RUNTIME_RUN_REPLAY_CURSOR_SCHEMA_VERSION,
+  type RuntimeRunReplayAuthorization,
+  type RuntimeRunReplayCursor,
+  type RuntimeRunReplayEvent
+} from "./runtime-run-replay";
+export {
+  claimRuntimeRunResume,
+  type RuntimeRunResumeClaim
+} from "./runtime-run-resume";
+export {
+  recoverRuntimeSession,
+  type RuntimeSessionRecoveryResult
+} from "./runtime-session-recovery";
+export {
   RUNTIME_SESSION_SCHEMA_VERSION,
   type RuntimeRunConfigurationSnapshot,
   type RuntimeRunJournalEntry,

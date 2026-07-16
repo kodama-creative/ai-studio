@@ -213,5 +213,47 @@ new immutable Run Configuration Snapshot, and appends ordered Run Journal
 entries. Expected versions provide compare-and-swap protection: stale or
 simultaneous writers cannot silently overwrite each other. Runtime Run state
 persists across model, tool, and durable-wait boundaries; terminal states never
-transition again. Desktop and Server adapters are intentionally later roadmap
-work.
+transition again. Desktop Threads persist this record as their Session Store;
+future Server repositories implement the same boundary.
+
+Fresh processes recover only from durable control-plane boundaries:
+
+```ts
+import {
+  claimRuntimeRunResume,
+  recoverRuntimeSession,
+  replayRuntimeRunEvents,
+} from "@llm-space/runtime/harness";
+
+const recovery = await recoverRuntimeSession(store, "session-one");
+if (recovery.status === "resumable") {
+  // The Host first validates/persists any required tool results.
+  await claimRuntimeRunResume(store, {
+    sessionId: recovery.session.snapshot.id,
+    runId: recovery.run.id,
+    expectedVersion: recovery.session.version,
+  });
+}
+
+if (recovery.status !== "missing") {
+  const events = replayRuntimeRunEvents(recovery.session, {
+    sessionId: recovery.session.snapshot.id,
+    runId: "run-one",
+  });
+  const after = events.at(-1)?.cursor;
+  // Passing `after` later is exclusive, so that event is not duplicated.
+}
+```
+
+`waitingForToolResults` and `waitingForContinue` retain the same Runtime Run
+identity. A resume claim uses the recovered Session version, so concurrent
+claimants cannot both win. Persisted `runningModel` or `runningTools` work is
+atomically terminalized as `outcomeUnknown`: the Harness cannot know whether an
+external effect began or completed and never replays it automatically.
+
+Replay projects the existing control-plane Run Journal in stable sequence
+order. A cursor is accepted only when it identifies a real prior entry inside
+the Host-authorized Session/Run scope, and replay starts strictly after it.
+Principal and transport authorization remain Host responsibilities; this seam
+does not add a Server protocol, retry/idempotency policy, exactly-once claim,
+distributed lease, or canonical observability Trace.

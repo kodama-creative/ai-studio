@@ -1,6 +1,8 @@
 import { uuid } from "@llm-space/core";
 import {
+  claimRuntimeRunResume,
   InMemorySessionStore,
+  recoverRuntimeSession,
   type RuntimeRunConfigurationSnapshot,
   type RuntimeRunState,
   SessionStoreInvariantError,
@@ -31,6 +33,20 @@ export interface BegunThreadRuntimeRun {
 export interface SettledThreadRuntimeRun {
   readonly checkpoint: ThreadRuntimeCheckpoint | null;
   readonly session: StoredRuntimeSession;
+}
+
+export class ThreadRuntimeOutcomeUnknownError extends Error {
+  readonly runId: string;
+  readonly session: StoredRuntimeSession;
+
+  constructor(runId: string, session: StoredRuntimeSession) {
+    super(
+      `Runtime Run ${runId} was interrupted during model or tool work; its outcome is unknown and automatic replay is disabled`
+    );
+    this.name = "ThreadRuntimeOutcomeUnknownError";
+    this.runId = runId;
+    this.session = session;
+  }
 }
 
 /**
@@ -70,7 +86,14 @@ export class ThreadRuntimeSession {
 
   async begin(input: ThreadRuntimeExecutionInput): Promise<BegunThreadRuntimeRun> {
     this._assertLoaded();
-    const current = await this._store.load(this._sessionId);
+    const recovery = await recoverRuntimeSession(this._store, this._sessionId);
+    if (recovery.status === "outcomeUnknown") {
+      throw new ThreadRuntimeOutcomeUnknownError(
+        recovery.run.id,
+        recovery.session
+      );
+    }
+    const current = recovery.status === "missing" ? null : recovery.session;
     const continuationFingerprint = await threadContinuationFingerprint(input);
     const configuration = await _configuration(input);
     const activeRunId = current?.snapshot.activeRunId ?? null;
@@ -87,7 +110,7 @@ export class ThreadRuntimeSession {
         && active.state !== "waitingForContinue"
       ) {
         throw new SessionStoreInvariantError(
-          `Runtime Run ${active.id} cannot resume from ${active.state}; safe-boundary recovery belongs to roadmap item 04`
+          `Runtime Run ${active.id} cannot resume from ${active.state}`
         );
       }
       if (
@@ -101,20 +124,12 @@ export class ThreadRuntimeSession {
             "Complete every pending tool result before continuing this Runtime Run"
           );
         }
-        const mutations = active.state === "waitingForToolResults"
-          ? [
-            { type: "transitionRun" as const, runId: active.id, to: "waitingForContinue" as const },
-            { type: "transitionRun" as const, runId: active.id, to: "runningModel" as const }
-          ]
-          : [
-            { type: "transitionRun" as const, runId: active.id, to: "runningModel" as const }
-          ];
         return {
           runId: active.id,
-          session: await this._store.commit({
+          session: await claimRuntimeRunResume(this._store, {
             sessionId: this._sessionId,
             expectedVersion: current.version,
-            mutations
+            runId: active.id
           })
         };
       }
