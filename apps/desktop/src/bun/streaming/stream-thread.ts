@@ -29,6 +29,7 @@ import type {
 } from "../../shared/rpc";
 import type { Analytics } from "../analytics";
 import type { ExternalAgentProjectManager } from "../external-projects";
+import type { EmbeddedLocalServerManager } from "../local-server";
 import type { McpManager } from "../mcp";
 import type { ModelManager } from "../models";
 import type { ToolRegistry } from "../tools/tool-registry";
@@ -42,7 +43,8 @@ export class StreamThreadController {
     private readonly _analytics: Analytics,
     private readonly _externalAgentProjects?: ExternalAgentProjectManager,
     private readonly _mcpManager?: McpManager,
-    private readonly _tools?: ToolRegistry
+    private readonly _tools?: ToolRegistry,
+    private readonly _localServers?: EmbeddedLocalServerManager
   ) {}
 
   /** Run an agent stream and push each event back through the caller's sender. */
@@ -62,7 +64,9 @@ export class StreamThreadController {
     const startedAt = Date.now();
     let outcome: "aborted" | "completed" | "error" = "error";
     try {
-      if (payload.runtime?.type === "agentProject") {
+      if (payload.runtime?.type === "localServerAgentProject") {
+        await this._runLocalServer(payload, send, abortController.signal);
+      } else if (payload.runtime?.type === "agentProject") {
         await this._runAgentProject(payload, send, () => {
           aborted = true;
         });
@@ -108,6 +112,55 @@ export class StreamThreadController {
         hasSystemPrompt: Boolean(request.context.systemPrompt)
       });
     }
+  }
+
+  private async _runLocalServer(
+    payload: StreamThreadRequestPayload,
+    send: (message: StreamThreadResponsePayload) => void,
+    signal: AbortSignal
+  ): Promise<void> {
+    if (
+      payload.runtime?.type !== "localServerAgentProject"
+      || !this._localServers
+    ) {
+      throw new Error("Local Server runtime is unavailable.");
+    }
+    const text = _localServerText(payload.request.context.messages.at(-1));
+    await this._localServers.run(
+      {
+        projectId: payload.runtime.projectId,
+        threadId: payload.runtime.threadId,
+        signal,
+        text
+      },
+      {
+        onEvent: event => {
+          send({ streamId: payload.streamId, type: "event", event });
+        },
+        onLineage: lineage => {
+          send({
+            streamId: payload.streamId,
+            type: "localServerLineage",
+            lineage
+          });
+        },
+        onStatus: status => {
+          send({
+            streamId: payload.streamId,
+            type: "localServerStatus",
+            status
+          });
+        },
+        onTerminal: (lineage, terminalOutcome) => {
+          send({
+            streamId: payload.streamId,
+            type: "localServerLineage",
+            lineage,
+            terminalOutcome
+          });
+        }
+      }
+    );
   }
 
   private async _runDesktopThread(
@@ -455,6 +508,27 @@ export class StreamThreadController {
         : "custom"
     };
   }
+}
+
+function _localServerText(message: AgentMessage | undefined): string {
+  if (message?.role !== "user") {
+    throw new Error("Local Server requires one trailing user text message.");
+  }
+  if (typeof message.content === "string") {
+    if (!message.content.trim()) {
+      throw new Error("Local Server user text cannot be empty.");
+    }
+    return message.content;
+  }
+  if (
+    !Array.isArray(message.content)
+    || message.content.length !== 1
+    || message.content[0]?.type !== "text"
+    || !message.content[0].text.trim()
+  ) {
+    throw new Error("Local Server accepts one pure-text user Turn only.");
+  }
+  return message.content[0].text;
 }
 
 function _requiresHumanResult(tool: BuiltinTool | McpTool): boolean {

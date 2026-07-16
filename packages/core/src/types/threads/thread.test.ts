@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { Compile } from "typebox/compile";
 
-import { Thread } from "./thread";
+import {
+  getThreadRuntimeProfile,
+  normalizeThread,
+  Thread
+} from "./thread";
 
 const validator = Compile(Thread);
 
@@ -166,5 +170,44 @@ describe("Thread evaluation schema", () => {
         ]
       })
     ).toBe(false);
+  });
+});
+
+describe("Thread Runtime Profile schema", () => {
+  test("defaults old Threads to Desktop direct and preserves valid Server binding", () => {
+    expect(getThreadRuntimeProfile({})).toEqual({
+      version: 1,
+      type: "desktopDirect"
+    });
+    const thread = normalizeThread({
+      runtimeProfile: {
+        version: 1,
+        type: "localServer",
+        artifactFingerprint: " artifact-one ",
+        serverSessionId: " session-one "
+      }
+    });
+    expect(thread.runtimeProfile).toEqual({
+      version: 1,
+      type: "localServer",
+      artifactFingerprint: "artifact-one",
+      serverSessionId: "session-one"
+    });
+    expect(validator.Check(thread)).toBe(true);
+  });
+
+  test("drops malformed persisted profile metadata", () => {
+    const thread = normalizeThread({
+      runtimeProfile: {
+        version: 1,
+        type: "localServer",
+        artifactFingerprint: ""
+      }
+    } as never);
+    expect(thread).not.toHaveProperty("runtimeProfile");
+    expect(getThreadRuntimeProfile(thread)).toEqual({
+      version: 1,
+      type: "desktopDirect"
+    });
   });
 });

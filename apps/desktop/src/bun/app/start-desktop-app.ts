@@ -13,6 +13,10 @@ import { Analytics } from "../analytics";
 import { executeCommandInBun } from "../commands";
 import { ExternalAgentProjectManager } from "../external-projects";
 import { DesktopHost } from "../host/desktop-host";
+import {
+  createEmbeddedLocalServerModule,
+  EmbeddedLocalServerManager
+} from "../local-server";
 import { McpManager } from "../mcp";
 import { ModelManager } from "../models";
 import { createMainWindowRPC, type MainWindowRPC } from "../rpc";
@@ -41,6 +45,10 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
     workspaceRoot: workspacePath,
     getModels: async () => modelManager.getAvailableModels()
   });
+  const localServers = new EmbeddedLocalServerManager({
+    externalAgentProjects,
+    homePath
+  });
   const mcpManager = new McpManager();
   const searchSettings = new SearchSettingsManager();
   const skillsManager = new SkillsManager();
@@ -53,7 +61,8 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
         findSkill: skillsManager.findSkill.bind(skillsManager),
         getSearchSettings: searchSettings.get.bind(searchSettings),
         workspaceRoot: workspacePath
-      })
+      }),
+      createEmbeddedLocalServerModule(localServers)
     ]
   });
   await host.start();
@@ -62,7 +71,8 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
     analytics,
     externalAgentProjects,
     mcpManager,
-    host.tools
+    host.tools,
+    localServers
   );
 
   let mainWindow: BrowserWindow | null = null;
@@ -101,9 +111,9 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
     async stop() {
       stopPromise = stopPromise ?? _stopDesktopApp([
         ["updater", () => { updater.stop(); }],
-        ["external agent projects", async () => externalAgentProjects.shutdown()],
         ["streaming", () => { streaming.shutdown(); }],
         ["desktop host", async () => host.stop()],
+        ["external agent projects", async () => externalAgentProjects.shutdown()],
         ["MCP manager", async () => mcpManager.shutdown()],
         ["analytics", async () => analytics.shutdown()]
       ]);
@@ -123,6 +133,7 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
       getMainWindow,
       homePath,
       localFs,
+      localServers,
       mcpManager,
       modelManager,
       searchSettings,

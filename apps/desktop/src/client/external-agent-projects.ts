@@ -3,6 +3,7 @@ import { electrobun } from "@/lib/electrobun";
 import type {
   ExternalAgentProjectConnectionActivation,
   ExternalAgentProjectPreview,
+  ExternalAgentProjectRuntimeStatus,
   ExternalAgentProjectSummary,
   ExternalAgentProjectThreadRecord,
   ExternalAgentProjectView
@@ -32,10 +33,15 @@ export const externalAgentProjects = {
   async refresh(projectId: string): Promise<ExternalAgentProjectView> {
     return _rpc().request.externalAgentProjectRefresh({ projectId });
   },
-  async createThread(projectId: string, title?: string) {
+  async createThread(
+    projectId: string,
+    title?: string,
+    runtimeProfileType?: "desktopDirect" | "localServer"
+  ) {
     return _rpc().request.externalAgentProjectCreateThread({
       projectId,
-      title
+      ...(title ? { title } : {}),
+      ...(runtimeProfileType ? { runtimeProfileType } : {})
     });
   },
   async readThread(
@@ -43,6 +49,15 @@ export const externalAgentProjects = {
     threadId: string
   ): Promise<ExternalAgentProjectThreadRecord> {
     return _rpc().request.externalAgentProjectReadThread({
+      projectId,
+      threadId
+    });
+  },
+  async runtimeStatus(
+    projectId: string,
+    threadId: string
+  ): Promise<ExternalAgentProjectRuntimeStatus> {
+    return _rpc().request.externalAgentProjectRuntimeStatus({
       projectId,
       threadId
     });

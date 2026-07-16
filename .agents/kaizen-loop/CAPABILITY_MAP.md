@@ -1,7 +1,7 @@
 # LLM Space Capability Map
 
 - Last updated: 2026-07-17
-- Map status: refreshed for roadmap item 07 discovery. Local Server execution and Desktop Run History inspection are confirmed, but Studio has no Runtime Profile model or sandbox implementation. Connecting them requires explicit Thread/Server authority, continuation-secret custody, lineage persistence, and artifact-drift decisions before product code changes.
+- Map status: refreshed after roadmap item 07. Studio now binds Agent Project Threads to explicit Desktop Direct or Local Server authority and hands Server lineage into existing Run History; Desktop Sandbox remains visibly unavailable until the later sandbox capability ships.
 - Evidence rule: entries marked `confirmed` cite current rendered-product or current-code evidence. Entries marked `stale` rely on previous logs or code paths not fully re-inspected in this loop. Entries marked `unknown` need a future product-surface check before they can drive a recommendation.
 
 ## First-Run Model Setup
@@ -206,22 +206,25 @@
   - Final non-packaging validation passes 195 repository tests with 729 assertions, all six TypeScript projects, repository lint, a 12.42 KB browser client bundle, a 6.39 MB Bun Server bundle, renderer-only Vite, and `git diff --check`.
 - Boundary: one Bun deployment loads one compiled Agent artifact and serves many principal-owned isolated Runtime Sessions through fail-closed authenticated HTTP/SSE, Runtime-owned Session/Run IDs, Channel-owned continuation credentials, ordered Pi plus terminal events, explicit abort, restart recovery, and authorized exclusive-cursor reconnect. Server source/configuration remains Host-owned and immutable for the process lifetime.
 - Explicit non-goals: anonymous production fallback, vendor Channel adapters, hosted identity/OAuth, attachments or caller model overrides, remote agents, schedules, multi-project loading, distributed storage, OCI/container/cloud control plane, sandbox claims, exactly-once effects, canonical Trace, or Studio Runtime Profile UI.
-- Visible gaps: Studio has no Local Server Runtime Profile or shared Trace handoff; OCI packaging, vendor Channel normalization/delivery, approval/attachment semantics, richer authenticators, external-effect idempotency, distributed storage, and sandboxing remain later roadmap items.
+- Visible gaps: OCI packaging, vendor Channel normalization/delivery, approval/attachment semantics, richer authenticators, external-effect idempotency, distributed storage, actual sandboxing, and canonical cross-host Trace remain later roadmap items.
 
 ## Studio Runtime Profiles And Server Trace Handoff
 
-- Status: blocked before V1 implementation
+- Status: shipped V1
 - Freshness: confirmed
 - Last checked: 2026-07-17
 - Evidence:
-  - Current Electrobun CEF at 1280×800 shows Agent Project Threads exposing Agent/model provenance, Run controls, editable prompt/messages, and the existing Run History inspector, but no execution-location or Runtime Profile control. The renderer has no application console errors or document overflow in the inspected states.
-  - `ThreadTabPane` and the Agent Project Thread pane inject only the Desktop RPC transport. `ThreadRuntimeSession` begins and settles a Desktop-owned Runtime Run before/after transport, while the Local Server creates its own authoritative Session and Run IDs; naively swapping transports would create two Runtime Run authorities.
-  - The current Run History `RunTraceView` already inspects normal persisted `RunSnapshot` records. The experimental Traces sidebar is a separate Langfuse import/sync workbench and is not the item-07 handoff target; canonical cross-host instrumentation remains roadmap item 32.
-  - Local Server V1 accepts one text input into a Server-owned transcript, freezes artifact/model authority, and stores only continuation hashes. An editable Desktop Thread cannot switch an existing transcript into that authority without a declared migration/switch rule and Desktop custody for the raw continuation credential.
-  - No Desktop sandbox profile or Pi `ExecutionEnv` sandbox provider exists. The original roadmap defers the actual sandbox/workspace/attachment implementation; required sandbox unavailability must never silently fall back to direct host execution.
-- Boundary: item 07 may select and explain execution location, launch/connect one protected local Server per Agent artifact, project authorized Pi events into the existing Thread/Run History experience, and preserve non-secret Server Session/Run lineage. It must not invent canonical Trace item 32, remote fleet operations, cloud deployment UI, or a fake sandbox.
+  - ADR 0003 fixes Thread-scoped immutable Runtime Profile authority, Bun-only continuation-secret custody, stable Desktop principal identity, per-artifact embedded Server lifecycle, Server-owned Run identity, non-secret lineage, and artifact-drift rules.
+  - Core Thread and Run History schemas default legacy Threads to Desktop Direct, persist only artifact/Server Session/Run lineage, and reject inconsistent duplicated Server Run IDs.
+  - The Desktop Bun composition lazily owns one protected loopback Server per artifact through `DesktopHost`; `LocalServerCredentialStore` persists raw continuation credentials separately under `LLM_SPACE_HOME/credentials/` with private permissions and atomic writes. Deletion revokes through the active Server or an exclusive Server-owned offline repository command, including full restart plus artifact drift, before deleting the Desktop credential.
+  - Local Server execution remains on the existing typed RPC stream and version-pinned Pi event projection. The transport supplies authoritative Server Run identity, so the Desktop store creates no second `runtimeSession` or Runtime Run.
+  - Agent Project Threads expose Desktop Direct, unavailable Desktop Sandbox, and Local Server with explicit differences and lifecycle state. Local Server locks Agent configuration/history, permits one trailing pure-text user draft, makes stale Threads transcript-read-only, and creates a new empty Thread for a new authority or latest artifact.
+  - Terminal Server Runs open in existing Run History and `RunTraceView`, which displays non-secret artifact/Session/Run lineage. The experimental Langfuse Trace sidebar remains separate; canonical cross-host instrumentation remains roadmap item 32.
+  - Focused parity/authority/restart/credential/schema fixtures pass 60 tests with 213 assertions. Full validation passes 204 repository tests with 778 assertions, six TypeScript projects, repository lint, browser and Bun Server bundles, renderer-only Vite, and diff checks.
+  - Current real Electrobun CEF evidence under `audits/2026-07-17-060917-studio-server-runtime-profile/` covers Ready, profile explanation, disabled Sandbox, pure-text draft, stale recovery, Run History, Server lineage, keyboard/focus, 1280×800 and 900×700 overflow, and a clean application console.
+- Boundary: users may bind one Agent Project Thread to Desktop Direct or one protected Local Server artifact/Session authority, understand the unavailable Sandbox boundary, submit Server-owned text Turns, recover from artifact drift through a new Thread, and inspect projected Server Runs in existing Run History.
 - Explicit non-goals: remote Server URL/token management, production fleet lifecycle, cloud control plane, sandbox implementation, raw provider payload retention, caller-supplied Server history/configuration, or copying secrets into Agent source, Thread JSON, Run snapshots, Trace data, or analytics.
-- Visible gaps: human decisions are required for per-Thread profile immutability and switching, raw continuation-secret storage, stable local principal/restart behavior, Server lineage schema, artifact-source drift, and the unavailable Desktop-sandbox presentation.
+- Visible gaps: actual Desktop Sandbox execution, remote/fleet Server management, Keychain-backed credentials, transcript migration, raw event inspection, canonical item-32 Trace, and cloud lifecycle remain later roadmap capabilities.
 
 ## Agent Action Authoring
 

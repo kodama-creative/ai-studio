@@ -12,6 +12,7 @@ import type { Command } from "../../shared/commands";
 import type { DesktopRPCType } from "../../shared/rpc";
 import type { Analytics } from "../analytics";
 import type { ExternalAgentProjectManager } from "../external-projects";
+import type { EmbeddedLocalServerManager } from "../local-server";
 import type { McpManager } from "../mcp";
 import type { ModelManager } from "../models";
 import type { SearchSettingsManager } from "../search";
@@ -62,6 +63,7 @@ export interface MainWindowRPCDependencies {
   getMainWindow: () => BrowserWindow;
   homePath: string;
   localFs: LocalFileSystem;
+  localServers: EmbeddedLocalServerManager;
   mcpManager: McpManager;
   modelManager: ModelManager;
   searchSettings: SearchSettingsManager;
@@ -83,6 +85,7 @@ export function createMainWindowRPC({
   getMainWindow,
   homePath,
   localFs,
+  localServers,
   mcpManager,
   modelManager,
   searchSettings,
@@ -269,10 +272,20 @@ export function createMainWindowRPC({
         },
         externalAgentProjectRefresh: async ({ projectId }) =>
           externalAgentProjects.refresh(projectId),
-        externalAgentProjectCreateThread: async ({ projectId, title }) =>
-          externalAgentProjects.createThread(projectId, title),
+        externalAgentProjectCreateThread: async ({
+          projectId,
+          title,
+          runtimeProfileType
+        }) =>
+          externalAgentProjects.createThread(
+            projectId,
+            title,
+            runtimeProfileType
+          ),
         externalAgentProjectReadThread: async ({ projectId, threadId }) =>
           externalAgentProjects.readThread(projectId, threadId),
+        externalAgentProjectRuntimeStatus: async ({ projectId, threadId }) =>
+          localServers.status(projectId, threadId),
         externalAgentProjectActivateConnections: async ({ projectId, threadId }) =>
           externalAgentProjects.activateConnections(projectId, threadId),
         externalAgentProjectDeactivateConnections: async ({
@@ -296,6 +309,7 @@ export function createMainWindowRPC({
         externalAgentProjectDuplicateThread: async ({ projectId, threadId }) =>
           externalAgentProjects.duplicateThread(projectId, threadId),
         externalAgentProjectDeleteThread: async ({ projectId, threadId }) => {
+          await localServers.detachThread(projectId, threadId);
           await externalAgentProjects.deleteThread(projectId, threadId);
           return null;
         },

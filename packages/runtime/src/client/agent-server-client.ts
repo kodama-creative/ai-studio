@@ -68,6 +68,9 @@ export interface AgentServerClient {
   streamRun(options: {
     readonly afterSequence?: number;
     readonly continuationToken: string;
+    readonly onConnectionStateChange?: (
+      state: "connected" | "reconnecting"
+    ) => void;
     readonly runId: string;
     readonly sessionId: string;
     readonly signal?: AbortSignal;
@@ -233,6 +236,9 @@ async function* _streamRun(input: {
   readonly baseUrl: string;
   readonly continuationToken: string;
   readonly fetchImplementation: typeof globalThis.fetch;
+  readonly onConnectionStateChange?: (
+    state: "connected" | "reconnecting"
+  ) => void;
   readonly retryCapMs: number;
   readonly runId: string;
   readonly sessionId: string;
@@ -261,11 +267,13 @@ async function* _streamRun(input: {
       if (input.signal?.aborted) {
         return;
       }
+      input.onConnectionStateChange?.("reconnecting");
       await _retryDelay(++retry, input.retryCapMs, input.signal);
       continue;
     }
     if (!response.ok) {
       if (response.status >= 500 || response.status === 429) {
+        input.onConnectionStateChange?.("reconnecting");
         await _retryDelay(
           ++retry,
           input.retryCapMs,
@@ -276,6 +284,7 @@ async function* _streamRun(input: {
       }
       throw await _clientError(response, lastSequence);
     }
+    input.onConnectionStateChange?.("connected");
     let retryAfterMs = 0;
     try {
       for await (const event of _parseSse(response)) {
@@ -326,6 +335,7 @@ async function* _streamRun(input: {
       if (error instanceof AgentServerClientError) {
         throw error;
       }
+      input.onConnectionStateChange?.("reconnecting");
       await _retryDelay(
         ++retry,
         input.retryCapMs,
@@ -334,6 +344,7 @@ async function* _streamRun(input: {
       );
       continue;
     }
+    input.onConnectionStateChange?.("reconnecting");
     await _retryDelay(
       ++retry,
       input.retryCapMs,

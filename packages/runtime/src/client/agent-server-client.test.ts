@@ -24,12 +24,17 @@ describe("Agent Server browser client", () => {
     });
     const startedAt = Date.now();
     const events = [];
-    for await (const event of client.streamRun(_streamInput())) {
+    const connectionStates: string[] = [];
+    for await (const event of client.streamRun({
+      ..._streamInput(),
+      onConnectionStateChange: state => { connectionStates.push(state); }
+    })) {
       events.push(event);
     }
     expect(calls).toBe(2);
     expect(Date.now() - startedAt).toBeGreaterThanOrEqual(15);
     expect(events).toHaveLength(1);
+    expect(connectionStates).toEqual(["reconnecting", "connected"]);
   });
 
   test("uses serverShutdown retry hints without advancing the cursor", async () => {

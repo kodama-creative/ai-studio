@@ -175,6 +175,55 @@ describe("evaluation rubrics", () => {
   });
 });
 
+describe("Local Server Run lineage", () => {
+  test("keeps exact non-secret Server authority on a valid checkpoint", () => {
+    const [run] = normalizeRunHistory([{
+      id: "snapshot-one",
+      thread: {},
+      timestamp: 1,
+      runtime: {
+        runId: "run-server",
+        state: "completed",
+        checkpointOrder: 1,
+        continuationFingerprint: "local-server:artifact:session:run",
+        server: {
+          profile: "localServer",
+          artifactFingerprint: "artifact-one",
+          sessionId: "session-one",
+          runId: "run-server"
+        }
+      }
+    }]);
+    expect(run?.runtime?.server).toEqual({
+      profile: "localServer",
+      artifactFingerprint: "artifact-one",
+      sessionId: "session-one",
+      runId: "run-server"
+    });
+  });
+
+  test("rejects a checkpoint whose duplicated Server Run ID disagrees", () => {
+    const [run] = normalizeRunHistory([{
+      id: "snapshot-one",
+      thread: {},
+      timestamp: 1,
+      runtime: {
+        runId: "run-authoritative",
+        state: "completed",
+        checkpointOrder: 1,
+        continuationFingerprint: "fingerprint",
+        server: {
+          profile: "localServer",
+          artifactFingerprint: "artifact-one",
+          sessionId: "session-one",
+          runId: "run-other"
+        }
+      }
+    } as never]);
+    expect(run?.runtime).toBeUndefined();
+  });
+});
+
 describe("run history persistence", () => {
   test("backfills stable ids and retains only the newest runs", () => {
     const raw = Array.from({ length: MAX_RUN_HISTORY + 2 }, (_, index) => ({

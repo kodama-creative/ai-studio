@@ -62,13 +62,13 @@ Runtime architecture follows [ADR 0001](./docs/adr/0001-runtime-harness-over-pi-
   - Boundary: one Agent Project per deployment; no vendor channels, cloud control plane, remote agents, schedules, or multi-project loading.
   - Metric: protected streaming completion with lossless reconnect.
 
-- [ ] **07 — Studio Server Runtime Profile and Trace handoff**
+- [x] **07 — Studio Server Runtime Profile and Trace handoff**
   - Depends on: 06.
   - Run: `$kaizen-loop Let Studio run and debug the same Agent through a Local Server Runtime Profile.`
   - Done when: Studio exposes Desktop-direct, Desktop-sandbox, and Local-Server profiles, explains capability differences, and opens Server runs in the same Trace inspector.
   - Boundary: no remote fleet or cloud deployment management UI.
   - Metric: equivalent fixture outcome and trace lineage across Desktop and Local Server profiles.
-  - Blocker (2026-07-17): current contracts do not decide whether profile authority is immutable per Thread, where Desktop-owned continuation secrets live, how Server Session/Run lineage persists without creating a second Runtime Run authority, or how the not-yet-shipped sandbox profile is represented. Human approval is required before product-code changes.
+  - Decision (2026-07-17): ADR 0003 makes Runtime Profile authority immutable per Thread after first Run, keeps continuation credentials in a private Bun-only registry, preserves only non-secret Server lineage, represents Desktop Sandbox as unavailable without fallback, and requires a new empty Thread for another profile or artifact.
 
 - [ ] **08 — OCI deployment V1**
   - Depends on: 06.

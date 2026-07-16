@@ -14,6 +14,59 @@ globalThis.cancelAnimationFrame = handle => {
 };
 
 describe("Thread store Runtime Harness integration", () => {
+  test("projects a transport-owned Server Run without creating Desktop authority", async () => {
+    const { createThreadStore } = await import("./thread-store");
+    let persisted: Thread = {
+      ..._initialThread(),
+      runtimeProfile: {
+        version: 1,
+        type: "localServer",
+        artifactFingerprint: "artifact-one",
+        serverSessionId: "session-server"
+      }
+    };
+    const store = createThreadStore(persisted, {
+      transport: _finalTransport(),
+      resolveModel: saved => saved ?? null,
+      runtimeOwnsToolLoop: true,
+      transportOwnsRuntimeRun: true,
+      resolveTransportRuntimeCheckpoint: () => ({
+        runId: "run-server",
+        state: "completed",
+        checkpointOrder: 1,
+        continuationFingerprint:
+          "local-server:artifact-one:session-server:run-server",
+        server: {
+          profile: "localServer",
+          artifactFingerprint: "artifact-one",
+          sessionId: "session-server",
+          runId: "run-server"
+        }
+      }),
+      persistSettledThread: async thread => {
+        persisted = structuredClone(thread);
+      }
+    });
+
+    await store.getState().run();
+
+    expect(persisted.runtimeSession).toBeUndefined();
+    expect(persisted.runtimeProfile).toMatchObject({
+      type: "localServer",
+      serverSessionId: "session-server"
+    });
+    expect(persisted.runHistory).toHaveLength(1);
+    expect(persisted.runHistory?.[0]?.runtime).toMatchObject({
+      runId: "run-server",
+      state: "completed",
+      server: {
+        artifactFingerprint: "artifact-one",
+        sessionId: "session-server",
+        runId: "run-server"
+      }
+    });
+  });
+
   test("persists a manual wait and reloads the same Run for prompt-free continuation", async () => {
     const { createThreadStore } = await import("./thread-store");
     let persisted: Thread = _initialThread();
@@ -214,6 +267,18 @@ function _transport(): AgentTransport {
     }
     yield { type: "message_end", message: assistant };
     yield { type: "agent_end", messages: [...request.context.messages, assistant] };
+  };
+}
+
+function _finalTransport(): AgentTransport {
+  return async function* transport(request): AsyncGenerator<AgentEvent> {
+    const assistant = _finalAssistant();
+    yield { type: "message_start", message: assistant };
+    yield { type: "message_end", message: assistant };
+    yield {
+      type: "agent_end",
+      messages: [...request.context.messages, assistant]
+    };
   };
 }
 

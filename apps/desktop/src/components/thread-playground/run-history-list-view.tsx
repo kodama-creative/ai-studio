@@ -73,7 +73,13 @@ const RUNTIME_STATE_LABELS: Record<ThreadRuntimeRunState, string> = {
   outcomeUnknown: "Outcome unknown"
 };
 
-const _RunHistoryListView = function RunHistoryListView({ onClose }: { readonly onClose: () => void; }) {
+const _RunHistoryListView = function RunHistoryListView({
+  inspectRunRequest,
+  onClose
+}: {
+  readonly inspectRunRequest?: { revision: number; runId: string; };
+  readonly onClose: () => void;
+}) {
   const [containerRef] = useAutoAnimation();
   const runHistory = useThreadStore(s => s.runHistory);
   const evaluations = useThreadStore(s => s.evaluations);
@@ -151,6 +157,11 @@ const _RunHistoryListView = function RunHistoryListView({ onClose }: { readonly 
       setInspectingRunId(null);
     }
   }, [inspectingRunId, inspectingRunIndex]);
+  useEffect(() => {
+    if (inspectRunRequest && runById.has(inspectRunRequest.runId)) {
+      setInspectingRunId(inspectRunRequest.runId);
+    }
+  }, [inspectRunRequest, runById]);
 
   const toggleRunSelection = useCallback((runId: string) => {
     setSelectedRunIds(current => {

@@ -12,19 +12,26 @@ import {
 } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, test } from "bun:test";
 
+import type { AgentEvent } from "@earendil-works/pi-agent-core";
 import type {
   BuiltinTool,
   McpTool,
-  ThreadAgentRuntimeProvenance
+  ThreadAgentRuntimeProvenance,
+  ThreadServerRunLineage
 } from "@llm-space/core";
 
 import { StreamThreadController } from "./stream-thread";
 import { ExternalAgentProjectManager } from "../external-projects";
+import { EmbeddedLocalServerManager } from "../local-server";
 
 const roots: string[] = [];
 const managers: ExternalAgentProjectManager[] = [];
+const LOCAL_SERVER_MANAGERS: EmbeddedLocalServerManager[] = [];
 
 afterEach(async () => {
+  await Promise.all(
+    LOCAL_SERVER_MANAGERS.splice(0).map(async manager => manager.shutdown())
+  );
   await Promise.all(managers.splice(0).map(async manager => manager.shutdown()));
   await Promise.all(
     roots.splice(0).map(async root => rm(root, { recursive: true }))
@@ -32,6 +39,243 @@ afterEach(async () => {
 });
 
 describe("StreamThreadController Agent Project runtime", () => {
+  test("runs the same compiled Agent through a restart-safe Local Server authority", async () => {
+    const { home, models, manager, opened, threadId, workspace } = await _fixture({
+      instructions: "Use echo.\n",
+      projectTool: true
+    });
+    let directResult = "";
+    const directController = new StreamThreadController(
+      _modelManager(models),
+      { capture: () => undefined } as never,
+      manager
+    );
+    await directController.run(
+      {
+        streamId: "stream-direct-parity",
+        runtime: {
+          type: "agentProject",
+          projectId: opened.id,
+          threadId,
+          executionMode: "react",
+          modelSource: "agent"
+        },
+        request: {
+          model: { provider: "fake", id: "fake-model" },
+          context: {
+            systemPrompt: opened.instructions,
+            messages: [{
+              role: "user",
+              content: [{ type: "text", text: "hello" }],
+              timestamp: Date.now()
+            }],
+            tools: opened.tools,
+            sourceTools: opened.tools
+          }
+        }
+      },
+      message => {
+        if (message.type === "event") {
+          directResult = _finalAssistantText(message.event) ?? directResult;
+        }
+      }
+    );
+    const record = await manager.readThread(opened.id, threadId);
+    await manager.writeThread(opened.id, threadId, {
+      ...record,
+      thread: {
+        ...record.thread,
+        runtimeProfile: {
+          version: 1,
+          type: "localServer",
+          artifactFingerprint: opened.artifactFingerprint
+        }
+      }
+    });
+    const localServers = new EmbeddedLocalServerManager({
+      externalAgentProjects: manager,
+      homePath: home,
+      models
+    });
+    LOCAL_SERVER_MANAGERS.push(localServers);
+    const controller = new StreamThreadController(
+      _modelManager(models),
+      { capture: () => undefined } as never,
+      manager,
+      undefined,
+      undefined,
+      localServers
+    );
+    const messages: string[] = [];
+    let serverResult = "";
+    let lineage: ThreadServerRunLineage | undefined;
+    await controller.run(
+      _localServerRequest(opened.id, threadId, "hello"),
+      message => {
+        messages.push(message.type);
+        if (message.type === "localServerLineage") {
+          lineage = message.lineage;
+        } else if (message.type === "event") {
+          serverResult = _finalAssistantText(message.event) ?? serverResult;
+        }
+      }
+    );
+    expect(messages).toContain("event");
+    expect(messages.at(-1)).toBe("done");
+    expect(serverResult).toBe(directResult);
+    expect(serverResult).toBe("done");
+    expect(lineage?.profile).toBe("localServer");
+    expect(lineage?.artifactFingerprint).toBe(opened.artifactFingerprint);
+    expect(lineage?.sessionId).toMatch(/^session-/);
+    expect(lineage?.runId).toMatch(/^run-/);
+    const firstSessionId = lineage?.sessionId;
+    const firstRunId = lineage?.runId;
+    const persisted = await manager.readThread(opened.id, threadId);
+    expect(persisted.thread.runtimeProfile).toEqual({
+      version: 1,
+      type: "localServer",
+      artifactFingerprint: opened.artifactFingerprint,
+      serverSessionId: lineage?.sessionId
+    });
+    expect(persisted.thread.runtimeSession).toBeUndefined();
+    expect(JSON.stringify(persisted)).not.toContain("continuationToken");
+
+    await localServers.shutdown();
+    const restarted = new EmbeddedLocalServerManager({
+      externalAgentProjects: manager,
+      homePath: home,
+      models
+    });
+    LOCAL_SERVER_MANAGERS.push(restarted);
+    expect(await restarted.status(opened.id, threadId)).toEqual({
+      state: "ready"
+    });
+    const restartedController = new StreamThreadController(
+      _modelManager(models),
+      { capture: () => undefined } as never,
+      manager,
+      undefined,
+      undefined,
+      restarted
+    );
+    let secondLineage: ThreadServerRunLineage | undefined;
+    await restartedController.run(
+      _localServerRequest(opened.id, threadId, "again"),
+      message => {
+        if (message.type === "localServerLineage") {
+          secondLineage = message.lineage;
+        }
+      }
+    );
+    expect(secondLineage?.sessionId).toBe(firstSessionId);
+    expect(secondLineage?.runId).not.toBe(firstRunId);
+
+    let abortedOutcome: string | undefined;
+    await restartedController.run(
+      _localServerRequest(opened.id, threadId, "abort-me"),
+      message => {
+        if (
+          message.type === "localServerLineage"
+          && !message.terminalOutcome
+        ) {
+          restartedController.abort({ streamId: "stream-abort-me" });
+        }
+        if (message.type === "localServerLineage") {
+          abortedOutcome = message.terminalOutcome ?? abortedOutcome;
+        }
+      }
+    );
+    expect(abortedOutcome).toBe("cancelled");
+
+    await restarted.shutdown();
+    await manager.writeSource(opened.id, "instructions.md", "Changed source.\n");
+    const changed = await manager.refresh(opened.id);
+    expect(changed.artifactFingerprint).not.toBe(opened.artifactFingerprint);
+    await manager.shutdown();
+    const managerAfterRestart = new ExternalAgentProjectManager({
+      homePath: home,
+      workspaceRoot: workspace,
+      getModels: async () => Promise.resolve(models)
+    });
+    managers.push(managerAfterRestart);
+    expect((await managerAfterRestart.inspect(opened.id)).artifactFingerprint)
+      .toBe(changed.artifactFingerprint);
+    const detachedAfterRestart = new EmbeddedLocalServerManager({
+      externalAgentProjects: managerAfterRestart,
+      homePath: home,
+      models
+    });
+    LOCAL_SERVER_MANAGERS.push(detachedAfterRestart);
+    await detachedAfterRestart.detachThread(opened.id, threadId);
+    expect(
+      await Bun.file(
+        path.join(home, "credentials", "local-server.json")
+      ).json()
+    ).toEqual({ version: 1, entries: [] });
+    expect(await detachedAfterRestart.status(opened.id, threadId)).toEqual({
+      state: "stale",
+      message: "This Thread is bound to an older compiled Agent artifact."
+    });
+  });
+
+  test("reports a missing Local Server Host model as unavailable", async () => {
+    const { home, manager, models, opened, threadId } = await _fixture({
+      instructions: "Answer briefly.\n"
+    });
+    const record = await manager.readThread(opened.id, threadId);
+    await manager.writeThread(opened.id, threadId, {
+      ...record,
+      thread: {
+        ...record.thread,
+        runtimeProfile: {
+          version: 1,
+          type: "localServer",
+          artifactFingerprint: opened.artifactFingerprint
+        }
+      }
+    });
+    const localServers = new EmbeddedLocalServerManager({
+      externalAgentProjects: manager,
+      homePath: home,
+      models: createModels()
+    });
+    LOCAL_SERVER_MANAGERS.push(localServers);
+    const controller = new StreamThreadController(
+      _modelManager(models),
+      { capture: () => undefined } as never,
+      manager,
+      undefined,
+      undefined,
+      localServers
+    );
+    const responses: Array<{
+      message?: string;
+      state?: string;
+      type: string;
+    }> = [];
+    await controller.run(
+      _localServerRequest(opened.id, threadId, "hello"),
+      message => {
+        responses.push({
+          type: message.type,
+          ...(message.type === "localServerStatus"
+            ? { state: message.status.state, message: message.status.message }
+            : message.type === "error"
+              ? { message: message.message }
+              : {})
+        });
+      }
+    );
+    const message =
+      "The Local Server could not start. Verify its Host model credentials and try again.";
+    expect(responses).toContainEqual({
+      type: "localServerStatus",
+      state: "unavailable",
+      message
+    });
+    expect(responses.at(-1)).toEqual({ type: "error", message });
+  });
+
   test("streams a complete Pi Agent ReAct run without Bun-side transcript persistence", async () => {
     const { models, manager, opened, threadId } = await _fixture({
       instructions: "Use echo.\n",
@@ -352,7 +596,56 @@ async function _fixture({
   });
   managers.push(manager);
   const opened = await manager.trustAndOpen(project);
-  return { models, manager, opened, threadId: opened.threads[0].id };
+  return {
+    home,
+    manager,
+    models,
+    opened,
+    project,
+    threadId: opened.threads[0].id,
+    workspace
+  };
+}
+
+function _localServerRequest(
+  projectId: string,
+  threadId: string,
+  text: string
+) {
+  return {
+    streamId: `stream-${text}`,
+    runtime: {
+      type: "localServerAgentProject" as const,
+      projectId,
+      threadId
+    },
+    request: {
+      model: { provider: "fake", id: "fake-model" },
+      context: {
+        systemPrompt: "ignored by Server authority",
+        messages: [{
+          role: "user" as const,
+          content: [{ type: "text" as const, text }],
+          timestamp: Date.now()
+        }],
+        tools: []
+      }
+    }
+  };
+}
+
+function _finalAssistantText(event: AgentEvent): string | null {
+  if (event.type !== "agent_end") {
+    return null;
+  }
+  const assistant = event.messages.findLast(message => message.role === "assistant");
+  if (assistant?.role !== "assistant") {
+    return null;
+  }
+  return assistant.content
+    .filter(content => content.type === "text")
+    .map(content => content.text)
+    .join("");
 }
 
 function _modelManager(models: ReturnType<typeof _models>) {

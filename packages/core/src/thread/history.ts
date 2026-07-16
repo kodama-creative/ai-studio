@@ -533,6 +533,9 @@ export function withRunMetadata(
   if (thread.runtimeSession !== undefined) {
     next.runtimeSession = thread.runtimeSession;
   }
+  if (thread.runtimeProfile !== undefined) {
+    next.runtimeProfile = thread.runtimeProfile;
+  }
   if (normalized.length > 0) {
     next.runHistory = normalized;
   }
@@ -599,6 +602,7 @@ function _normalizeRuntimeCheckpoint(
   const continuationFingerprint = _trimmed(record.continuationFingerprint);
   const state = record.state;
   const checkpointOrder = record.checkpointOrder;
+  const server = _normalizeServerRunLineage(record.server, runId);
   if (
     !runId
     || !continuationFingerprint
@@ -606,6 +610,7 @@ function _normalizeRuntimeCheckpoint(
     || !RUNTIME_RUN_STATES.has(state as ThreadRuntimeRunState)
     || !Number.isSafeInteger(checkpointOrder)
     || (checkpointOrder as number) < 1
+    || (record.server !== undefined && !server)
   ) {
     return null;
   }
@@ -613,7 +618,36 @@ function _normalizeRuntimeCheckpoint(
     runId,
     state: state as ThreadRuntimeRunState,
     checkpointOrder: checkpointOrder as number,
-    continuationFingerprint
+    continuationFingerprint,
+    ...(server ? { server } : {})
+  };
+}
+
+function _normalizeServerRunLineage(
+  value: unknown,
+  checkpointRunId: string | null
+): ThreadRuntimeCheckpoint["server"] | null {
+  if (value === undefined) {
+    return null;
+  }
+  const record = _asRecord(value);
+  const artifactFingerprint = _trimmed(record?.artifactFingerprint);
+  const sessionId = _trimmed(record?.sessionId);
+  const runId = _trimmed(record?.runId);
+  if (
+    record?.profile !== "localServer"
+    || !artifactFingerprint
+    || !sessionId
+    || !runId
+    || runId !== checkpointRunId
+  ) {
+    return null;
+  }
+  return {
+    profile: "localServer",
+    artifactFingerprint,
+    sessionId,
+    runId
   };
 }
 

@@ -1,7 +1,7 @@
 # Studio Server Runtime Profile And Trace Handoff
 
 - Status: done
-- Outcome: blocked pending human decisions
+- Outcome: completed
 - Roadmap item: 07
 
 ## Trigger
@@ -13,10 +13,10 @@ state, and task file were not changed.
 
 ## Product stage and context
 
-The product can author and run one portable Agent Project directly in Desktop,
-persist Runtime Run checkpoints in each editable Thread, inspect those runs in
-Run History, and independently serve the compiled Agent through protected
-HTTP/SSE. Studio cannot yet choose that Server as an execution location.
+The product can now bind an Agent Project Thread to either Desktop Direct or a
+protected embedded Local Server, keep Server execution authority and secrets
+outside editable Thread data, and inspect projected Server Runs through the
+same Run History surface. Desktop Sandbox remains deliberately unavailable.
 
 ## Evidence reviewed
 
@@ -65,8 +65,8 @@ targets.
 - `Independent Agent Serving`: confirmed from item 06.
 - `Run And Streaming`: confirmed for Desktop direct execution.
 - `Debug Timeline`: confirmed for the existing `RunTraceView` inspector.
-- `Studio Runtime Profiles And Server Trace Handoff`: confirmed missing and
-  blocked on new decisions; added in this pass.
+- `Studio Runtime Profiles And Server Trace Handoff`: confirmed shipped after
+  focused fixtures and the current real CEF audit.
 - The experimental Langfuse Trace sidebar is confirmed to be a different
   capability and is not used as a substitute for item 32 canonical Trace.
 
@@ -118,7 +118,7 @@ experimental Langfuse sidebar into a premature canonical Runtime Trace.
 
 ## V1 capability definition
 
-Proposed user-visible behavior, pending approval:
+Shipped user-visible behavior:
 
 - An Agent Project Thread header exposes a Runtime Profile control with
   `Desktop direct`, `Desktop sandbox`, and `Local Server` plus concise capability
@@ -132,8 +132,8 @@ Proposed user-visible behavior, pending approval:
   stale-artifact, and unavailable states.
 - A completed Server run is selected automatically in the existing Run History
   inspector and shows non-secret artifact/Session/Run lineage.
-- Changing authority after the first run creates a new Thread instead of
-  migrating or silently reinterpreting existing history.
+- Choosing another authority creates a new empty Thread instead of migrating
+  or silently reinterpreting an existing draft, history, Session, or credential.
 
 Explicit non-goals: remote endpoints, token-entry UI, cloud/fleet management,
 actual sandbox execution, raw trace/event viewer, canonical instrumentation,
@@ -168,7 +168,7 @@ provider/tool exactly-once claims.
 5. Add the confirmed interaction, errors, parity diagnostics, tests, CEF audit,
    review, capability evidence, commit, and push.
 
-Approval status: blocked. No product code was changed.
+Approval status: approved after the completed requirements discussion below.
 
 ## `$grill-me` requirements discussion
 
@@ -177,32 +177,102 @@ Server is ReAct-only and owns transcript/model configuration; sandbox is not
 implemented; direct transport substitution would create a second Runtime Run
 identity; raw continuation credentials cannot enter Thread data.
 
-Decision 1 is pending: whether Runtime Profile authority is immutable per
-Thread after its first run, with a profile change creating a new Thread rather
-than migrating history. Subsequent decisions depend on this answer: secret
-registry/restart behavior, local Server lifecycle scope, lineage schema,
-artifact drift, and detailed profile interaction.
+The user approved the complete design tree:
+
+- Runtime Profile is immutable after a Thread's first Run; another profile
+  creates a new empty Thread without migrating or reinterpreting history.
+- Bun owns a dedicated atomic `0700`/`0600` continuation-credential registry,
+  preserves credentials across restart, never exposes them to renderer data,
+  and revokes/deletes them with Thread deletion or explicit detach.
+- A stable local Desktop principal uses a fresh process-only Bearer key; one
+  protected loopback Server per artifact is lazily owned and cleaned up by the
+  Desktop Host.
+- Local Server persists only non-secret profile/artifact/Server Session/Run
+  lineage. Server IDs are authoritative and Desktop creates no second Runtime
+  Run or `runtimeSession`.
+- Artifact drift makes the old Thread inspect-only after active work settles;
+  current source requires a new empty Thread.
+- The confirmed header interaction exposes Desktop direct, an explicitly
+  unavailable Desktop sandbox, and Local Server; it constrains Server input to
+  one text draft, reports lifecycle states without fallback, and hands terminal
+  Runs to the existing Run History `RunTraceView` at normal and narrow sizes.
+
+ADR 0003 records these authority, security, persistence, lineage, drift, and
+interaction decisions. The user then explicitly confirmed shared understanding
+and authorized implementation of item 07.
 
 ## Work performed
 
-Discovery, market scan, current CEF inspection, capability-map refresh, blocker
-analysis, north-star definition, recommendation, alternatives, interaction
-proposal, acceptance plan, and first grill question. No product implementation.
+- Added migration-safe Thread Runtime Profile and non-secret Server lineage
+  schemas. Run History validates the authoritative duplicated Server Run ID,
+  while top-level profile authority survives normal Run metadata updates.
+- Added a Bun-only private continuation-credential registry with atomic writes
+  and `0700`/`0600` permissions, plus one process-scoped embedded Local Server
+  manager per artifact with stable Desktop principal identity, restart Session
+  reuse, abort settlement, credential detach/revoke, stale-artifact detection,
+  reconnect status, and `DesktopHost` cleanup.
+- Added a private Server-owned offline revocation command so deletion after a
+  full Desktop restart and artifact drift can exclusively open the old
+  repository, authorize the exact stable principal/token, revoke, close, and
+  only then delete Desktop's credential without loading obsolete Agent code.
+- Routed Local Server Agent Project Runs through the existing typed Desktop RPC
+  message stream and the browser-safe Server client. Version-pinned Pi events
+  remain the execution protocol; renderer data receives only lifecycle status
+  and non-secret lineage. Server Session/Run IDs remain authoritative and no
+  Desktop Runtime Session is created.
+- Added Runtime Profile interaction for Desktop Direct, unavailable Desktop
+  Sandbox, and Local Server; locked Server-owned configuration/history; limited
+  input to one trailing pure-text draft; required a new empty Thread for profile
+  or artifact changes; and handed terminal Server Runs into existing Run History
+  and `RunTraceView` lineage inspection.
+- Added safe profile-aware Thread creation/duplication and tests for parity,
+  credentials, restart/reconnect, abort, lineage, authority, schema
+  normalization, and immutable profile behavior.
+- The rendered audit found one stale-state regression: `Add message` remained
+  available after artifact drift. The fix locks stale transcript editing while
+  preserving profile selection, latest-artifact Thread creation, and Run
+  History inspection.
 
 ## Verification and product-design audit results
 
-Discovery-only CEF checks found the current app operational at 1280×800 with no
-document horizontal overflow and only Vite/React development console messages.
-A completion audit is pending implementation approval. No product-code gate was
-applicable because no product code changed.
+- Focused item-07 fixtures: 60 passed, 0 failed, 213 assertions across eight
+  files, including direct-vs-Server outcome parity, restart Session reuse,
+  abort settlement, private credential persistence, transport-owned lineage,
+  manager reconnect callbacks, Thread authority, and schema normalization.
+- Full repository: 204 passed, 0 failed, 778 assertions across 43 files.
+- TypeScript: Runtime, Core, CLI, Server, example Agent, and Desktop all pass
+  `tsc --noEmit`.
+- Repository lint and `git diff --check` pass.
+- Browser Runtime client bundles at 12.69 KB; Bun Server bundles at 6.39 MB.
+- Renderer-only Vite passes with the existing large-chunk warning.
+- Real Electrobun CEF audit at 1280×800 and 900×700 passes profile entry and
+  explanation, disabled Sandbox/no fallback, one pure-text draft, stale recovery,
+  Run History, Server lineage, keyboard menu/focus restoration, and document
+  overflow checks. A three-second console observation contains only Vite and
+  React development messages. Evidence is in
+  `audits/2026-07-17-060917-studio-server-runtime-profile/`.
+- No live paid provider call was made in the UI audit; deterministic Runtime and
+  real loopback HTTP/SSE fixtures establish outcome/lineage parity. No Electrobun
+  packaging, signing, notarization, or release command ran.
+- A deliberately concurrent focused/full test invocation once exhausted the
+  Server abort fixture's teardown timeout; the required standalone full suite
+  immediately passed all 204 tests, so no product failure remains.
 
 ## Review
 
-Self-review found that treating Local Server as a simple transport dropdown
-would violate existing authority boundaries: Desktop and Server would each
-claim a Runtime Run, editable Thread history could not seed the Server-owned
-transcript, and the raw continuation credential would lack an approved owner.
-The pass therefore stopped instead of implementing an unsafe approximation.
+Self-review rejected a transport-only profile toggle and verified the final
+implementation against ADRs 0002/0003: Server identity remains authoritative,
+credentials never cross renderer RPC, the Server-owned transcript cannot be
+reinterpreted as Desktop history, and unavailable Sandbox never falls back.
+Rendered review found and fixed stale transcript editing. Initial two-axis
+review also found and fixed renderer Session-ID injection, incomplete
+restart-plus-drift credential revocation, per-event status rerenders, direct RPC
+user actions, copy/naming violations, and lifecycle cleanup order. Final
+Standards and Spec re-review found zero remaining findings.
+The remaining risks are explicit deferrals: credentials use OS file permissions
+rather than Keychain encryption; trusted tools retain OS-user authority; live
+provider reliability is not claimed; canonical cross-host Trace and actual
+sandboxing remain later roadmap items.
 
 ## Follow-up product bets
 
@@ -214,5 +284,9 @@ The pass therefore stopped instead of implementing an unsafe approximation.
 
 ## Outcome
 
-Blocked pending the first human design-tree decision. Item 07 remains unchecked.
-The next pass must resume this same grill and must not start item 08.
+Completed. Studio exposes Desktop Direct, unavailable Desktop Sandbox, and
+Local Server with explicit capability differences; the deterministic fixture
+produces equivalent user-visible direct/Server outcomes, and Server artifact,
+Session, and Run lineage opens in the existing Run History inspector. Item 07
+satisfies its `Done when` contract, the capability map and roadmap are updated,
+and this pass stops before item 08.

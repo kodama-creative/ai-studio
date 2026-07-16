@@ -2,11 +2,15 @@ import {
   type AgentEvent,
   type AgentTransport,
   type ThreadAgentRuntimeProvenance,
+  type ThreadServerRunLineage,
   uuid
 } from "@llm-space/core";
 
 import { electrobun } from "@/lib/electrobun";
 
+import type {
+  ExternalAgentProjectRuntimeStatus
+} from "@/shared/external-agent-project";
 import type {
   StreamThreadRequestPayload,
   StreamThreadResponsePayload
@@ -21,8 +25,14 @@ const createAbortError = () =>
  * `receiveStreamThreadResponse` messages into an async iterator of events.
  */
 export function createRpcTransport(options?: {
+  onLocalServerLineage?: (
+    lineage: ThreadServerRunLineage,
+    terminalOutcome?: "cancelled" | "completed" | "failed" | "outcomeUnknown"
+  ) => void;
+  onLocalServerStatus?: (status: ExternalAgentProjectRuntimeStatus) => void;
   onRuntimeResolved?: (runtime: ThreadAgentRuntimeProvenance) => void;
   runtime?: () => StreamThreadRequestPayload["runtime"];
+  settleAbort?: () => boolean;
 }): AgentTransport {
   return async function* rpcTransport(request, { signal }) {
     const rpc = electrobun.rpc;
@@ -35,6 +45,7 @@ export function createRpcTransport(options?: {
     let wake: (() => void) | null = null;
     let finished = false;
     let aborted = false;
+    let settleAbort = false;
     let errorMessage: string | null = null;
     const notify = () => {
       wake?.();
@@ -54,6 +65,16 @@ export function createRpcTransport(options?: {
         events.push(message.event);
       } else if (message.type === "runtime") {
         options?.onRuntimeResolved?.(message.runtime);
+      } else if (message.type === "localServerStatus") {
+        options?.onLocalServerStatus?.(message.status);
+      } else if (message.type === "localServerLineage") {
+        options?.onLocalServerLineage?.(
+          message.lineage,
+          message.terminalOutcome
+        );
+        if (aborted && message.terminalOutcome) {
+          finished = true;
+        }
       } else if (message.type === "done") {
         finished = true;
       } else {
@@ -66,7 +87,10 @@ export function createRpcTransport(options?: {
     const onAbort = () => {
       rpc.send.abortStreamThread({ streamId });
       aborted = true;
-      finished = true;
+      settleAbort = options?.settleAbort?.() ?? false;
+      if (!settleAbort) {
+        finished = true;
+      }
       notify();
     };
 
@@ -84,11 +108,15 @@ export function createRpcTransport(options?: {
         ...(options?.runtime ? { runtime: options.runtime() } : {})
       });
       while (true) {
+        if (aborted) {
+          if (finished || !settleAbort) {
+            throw createAbortError();
+          }
+          await waitForEvent();
+          continue;
+        }
         while (events.length > 0) {
           yield events.shift()!;
-        }
-        if (aborted) {
-          throw createAbortError();
         }
         if (errorMessage !== null) {
           throw new Error(errorMessage);

@@ -21,10 +21,12 @@ export function MessageListView({
   context: contextFromProps,
   messages: messagesFromProps,
   readonly: readonlyFromProps = false,
-  runDisabled = false
+  runDisabled = false,
+  editingMode = "full"
 }: {
   readonly className?: string;
   readonly context?: ThreadContext;
+  readonly editingMode?: "appendTextOnly" | "full";
   readonly messages?: Message[];
   readonly readonly?: boolean;
   readonly runDisabled?: boolean;
@@ -91,6 +93,7 @@ export function MessageListView({
                     autoFocusMessageId={autoFocusMessageId}
                     collapsedMessageIds={collapsedMessageIds}
                     droppableProvided={droppableProvided}
+                    editingMode={editingMode}
                     messages={messages}
                     readonly={readonly}
                     runDisabled={runDisabled}
@@ -108,7 +111,10 @@ export function MessageListView({
           className={cn(
             "text-muted-foreground hover:text-accent-foreground w-full justify-start rounded-lg py-5",
             dragging && "invisible",
-            readonly && "hidden"
+            (readonly
+              || (editingMode === "appendTextOnly"
+                && messages.at(-1)?.role === "user"))
+              && "hidden"
           )}
           disabled={readonly}
           onClick={appendMessage}
@@ -169,6 +175,7 @@ export const SnapshotMessageListView = memo(({
 function DroppableMessageList({
   droppableProvided,
   messages,
+  editingMode,
   readonly,
   runDisabled,
   autoFocusMessageId,
@@ -177,6 +184,7 @@ function DroppableMessageList({
   readonly autoFocusMessageId: string | null;
   readonly collapsedMessageIds: string[];
   readonly droppableProvided: DroppableProvided;
+  readonly editingMode: "appendTextOnly" | "full";
   readonly messages: Message[];
   readonly readonly: boolean;
   readonly runDisabled: boolean;
@@ -187,17 +195,27 @@ function DroppableMessageList({
       ref={droppableProvided.innerRef}
       {...droppableProvided.droppableProps}
     >
-      {messages.map((message, index) => (
-        <DraggableMessageRow
-          autoFocus={message.id === autoFocusMessageId}
-          collapsed={collapsedMessageIds.includes(message.id)}
-          index={index}
-          key={message.id}
-          message={message}
-          readonly={readonly}
-          runDisabled={runDisabled}
-        />
-      ))}
+      {messages.map((message, index) => {
+        const textOnlyDraft =
+          editingMode === "appendTextOnly"
+          && index === messages.length - 1
+          && message.role === "user";
+        return (
+          <DraggableMessageRow
+            autoFocus={message.id === autoFocusMessageId}
+            collapsed={collapsedMessageIds.includes(message.id)}
+            index={index}
+            key={message.id}
+            message={message}
+            readonly={
+              readonly
+              || (editingMode === "appendTextOnly" && !textOnlyDraft)
+            }
+            runDisabled={runDisabled}
+            textOnlyDraft={textOnlyDraft}
+          />
+        );
+      })}
       {droppableProvided.placeholder}
     </div>
   );
@@ -218,7 +236,8 @@ const _DraggableMessageRow = function DraggableMessageRow({
   readonly,
   runDisabled,
   autoFocus,
-  collapsed
+  collapsed,
+  textOnlyDraft
 }: {
   readonly autoFocus: boolean;
   readonly collapsed: boolean;
@@ -226,6 +245,7 @@ const _DraggableMessageRow = function DraggableMessageRow({
   readonly message: Message;
   readonly readonly: boolean;
   readonly runDisabled: boolean;
+  readonly textOnlyDraft: boolean;
 }) {
   return (
     <Draggable draggableId={message.id} index={index} isDragDisabled={readonly}>
@@ -249,6 +269,7 @@ const _DraggableMessageRow = function DraggableMessageRow({
               message={message}
               readonly={readonly}
               runDisabled={runDisabled}
+              textOnlyDraft={textOnlyDraft}
             />
           </div>
         );

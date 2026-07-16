@@ -42,6 +42,7 @@ const _MessageListItem = function MessageListItem({
   streaming,
   collapsed,
   autoFocus = false,
+  textOnlyDraft = false,
   dragHandleProps
 }: {
   readonly className?: string;
@@ -52,6 +53,7 @@ const _MessageListItem = function MessageListItem({
   readonly readonly?: boolean;
   readonly runDisabled?: boolean;
   readonly streaming?: boolean;
+  readonly textOnlyDraft?: boolean;
 
   /** Focus this message's editor on mount. Set only for a freshly-added message. */
   readonly autoFocus?: boolean;
@@ -110,6 +112,9 @@ const _MessageListItem = function MessageListItem({
   );
   const handlePaste = useCallback(
     (e: React.ClipboardEvent) => {
+      if (textOnlyDraft) {
+        return;
+      }
       if (message.role !== "user") {
         return;
       }
@@ -139,7 +144,7 @@ const _MessageListItem = function MessageListItem({
         }
       }
     },
-    [addMessageImageContent, message.id, message.role]
+    [addMessageImageContent, message.id, message.role, textOnlyDraft]
   );
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -163,7 +168,7 @@ const _MessageListItem = function MessageListItem({
         className={cn(
           "transition-border group absolute -top-3.5 flex h-3 w-full shrink-0",
           "has-[button:hover]:[&>.insert-line]:border-primary has-[button:hover]:[&>.insert-line]:right-0",
-          readonly && "invisible"
+          (readonly || textOnlyDraft) && "invisible"
         )}
       >
         <div className="insert-line absolute top-1.5 right-2 left-0 border-b border-dashed opacity-0 transition-[opacity,border-color,border-style] group-hover:opacity-100" />
@@ -195,6 +200,7 @@ const _MessageListItem = function MessageListItem({
         message={message}
         readonly={readonly}
         runDisabled={runDisabled}
+        textOnlyDraft={textOnlyDraft}
       />
       <CollapsibleContent collapsed={collapsed}>
         <main className="flex w-full flex-col">
@@ -209,7 +215,7 @@ const _MessageListItem = function MessageListItem({
           <ImageContentList
             images={imageContents}
             messageId={message.id}
-            readonly={readonly}
+            readonly={readonly || textOnlyDraft}
           />
           {message.content.length > 0 && (
             <CodeEditor

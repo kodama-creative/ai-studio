@@ -1,4 +1,5 @@
 import { type RunSnapshot, usageForRun } from "@llm-space/core/thread";
+import { ServerIcon } from "lucide-react";
 import { memo } from "react";
 import { format } from "timeago.js";
 
@@ -30,6 +31,7 @@ const _RunTraceView = function RunTraceView({
   const usage = usageForRun(run);
   const systemPrompt =
     run.thread.context?.systemPrompt?.trim() || "No system prompt";
+  const server = run.runtime?.server;
 
   return (
     <div className={cn("flex min-h-0 flex-col", className)}>
@@ -56,6 +58,25 @@ const _RunTraceView = function RunTraceView({
           <span>{runMessageCountLabel(run.thread)}</span>
           <span>{new Date(run.timestamp).toLocaleString()}</span>
         </div>
+        {server
+          ? (
+            <div
+              aria-label="Local Server run lineage"
+              className="text-muted-foreground mt-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 rounded-md border px-2 py-1.5 font-mono text-[0.625rem]"
+            >
+              <span className="text-foreground flex items-center gap-1 font-sans font-medium">
+                <ServerIcon className="size-3" /> Local Server
+              </span>
+              <span title={server.artifactFingerprint}>
+                artifact {_shortId(server.artifactFingerprint)}
+              </span>
+              <span title={server.sessionId}>
+                session {_shortId(server.sessionId)}
+              </span>
+              <span title={server.runId}>run {_shortId(server.runId)}</span>
+            </div>
+          )
+          : null}
         {usage ? <TokenUsageSummary className="mt-2" usage={usage} /> : null}
       </div>
       <details className="group shrink-0 border-b px-3 py-2">
@@ -81,3 +102,7 @@ const _RunTraceView = function RunTraceView({
 };
 
 export const RunTraceView = memo(_RunTraceView);
+
+function _shortId(value: string): string {
+  return value.replace(/^(?:run|session)-/, "").slice(0, 8);
+}

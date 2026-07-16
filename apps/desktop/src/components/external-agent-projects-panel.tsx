@@ -95,11 +95,18 @@ const _ExternalAgentProjectsPanel = function ExternalAgentProjectsPanel({
   }, [refresh]);
 
   useRegisterCommands({
-    createExternalAgentProjectThread: async ({ projectId }) => {
+    createExternalAgentProjectThread: async ({
+      projectId,
+      runtimeProfileType
+    }) => {
       const project = projects.find(candidate => candidate.id === projectId);
       if (!project) { return; }
       const { id, record } =
-        await externalAgentProjects.createThread(projectId);
+        await externalAgentProjects.createThread(
+          projectId,
+          undefined,
+          runtimeProfileType
+        );
       await refresh();
       onOpenThread(project, {
         id,

@@ -1,3 +1,4 @@
+import { getThreadRuntimeProfile } from "@llm-space/core";
 import { agentModelMatchesDefinition } from "@llm-space/runtime";
 import {
   AlertTriangleIcon,
@@ -19,7 +20,8 @@ import { toast } from "sonner";
 import type {
   ProjectTool,
   Thread,
-  ThreadAgentRuntimeProvenance
+  ThreadAgentRuntimeProvenance,
+  ThreadServerRunLineage
 } from "@llm-space/core";
 
 import { createRpcTransport, externalAgentProjects } from "@/client";
@@ -36,6 +38,7 @@ import {
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { useModels } from "@/components/model-provider";
 import { ThreadPlayground } from "@/components/thread-playground";
+import { RuntimeProfileControl } from "@/components/thread-playground/runtime-profile-control";
 import { getRuntimeExecutionMode } from "@/components/thread-playground/stores/run-mode";
 import { Button } from "@/components/ui/button";
 import { electrobun } from "@/lib/electrobun";
@@ -43,6 +46,7 @@ import { cn } from "@/lib/utils";
 import {
   type ExternalAgentProjectConnectionActivation,
   type ExternalAgentProjectRunBlockReason,
+  type ExternalAgentProjectRuntimeStatus,
   type ExternalAgentProjectThreadRecord,
   type ExternalAgentProjectView,
   getExternalAgentProjectRunBlockReason,
@@ -113,27 +117,59 @@ const _ProjectThreadPane = function ProjectThreadPane({
   }>();
   const [syncConfirmOpen, setSyncConfirmOpen] = useState(false);
   const [running, setRunning] = useState(false);
+  const [runtimeStatus, setRuntimeStatus] =
+    useState<ExternalAgentProjectRuntimeStatus>({ state: "ready" });
+  const [inspectRunRequest, setInspectRunRequest] = useState<{
+    revision: number;
+    runId: string;
+  }>();
   const providers = useModels();
   const { executeCommand } = useCommands();
   const writeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pending = useRef<ExternalAgentProjectThreadRecord | null>(null);
   const recordRef = useRef(record);
   const activeRunProvenance = useRef<ThreadAgentRuntimeProvenance | null>(null);
+  const activeServerRun = useRef<{
+    lineage: ThreadServerRunLineage;
+    terminalOutcome?: "cancelled" | "completed" | "failed" | "outcomeUnknown";
+  } | null>(null);
   recordRef.current = record;
   const runtimeTransport = useMemo(
     () =>
       createRpcTransport({
-        runtime: () => ({
-          type: "agentProject",
-          projectId,
-          threadId,
-          modelSource:
-            recordRef.current?.thread.agentRuntime?.modelSource
-            ?? "threadOverride",
-          executionMode: getRuntimeExecutionMode()
-        }),
+        runtime: () => {
+          const current = recordRef.current?.thread;
+          return current
+            && getThreadRuntimeProfile(current).type === "localServer"
+            ? {
+              type: "localServerAgentProject" as const,
+              projectId,
+              threadId
+            }
+            : {
+              type: "agentProject" as const,
+              projectId,
+              threadId,
+              modelSource:
+                  current?.agentRuntime?.modelSource ?? "threadOverride",
+              executionMode: getRuntimeExecutionMode()
+            };
+        },
+        settleAbort: () => {
+          const current = recordRef.current?.thread;
+          return Boolean(
+            current
+            && getThreadRuntimeProfile(current).type === "localServer"
+          );
+        },
         onRuntimeResolved: runtime => {
           activeRunProvenance.current = runtime;
+        },
+        onLocalServerStatus: status => {
+          setRuntimeStatus(status);
+        },
+        onLocalServerLineage: (lineage, terminalOutcome) => {
+          activeServerRun.current = { lineage, terminalOutcome };
         }
       }),
     [projectId, threadId]
@@ -157,19 +193,23 @@ const _ProjectThreadPane = function ProjectThreadPane({
   const load = useCallback(async () => {
     await flush();
     try {
-      const nextProject = await externalAgentProjects.inspect(projectId);
+      const [nextProject, nextRecord] = await Promise.all([
+        externalAgentProjects.inspect(projectId),
+        externalAgentProjects.readThread(projectId, threadId)
+      ]);
+      const nextProfile = getThreadRuntimeProfile(nextRecord.thread);
       const nextActivation =
-        nextProject.status === "ready"
+        nextProject.status === "ready" && nextProfile.type !== "localServer"
           ? await externalAgentProjects.activateConnections(
             projectId,
             threadId
           )
           : null;
-      const nextRecord = await externalAgentProjects.readThread(
-        projectId,
-        threadId
-      );
+      const nextRuntimeStatus = nextProfile.type === "localServer"
+        ? await externalAgentProjects.runtimeStatus(projectId, threadId)
+        : { state: "ready" as const };
       setConnectionActivation(nextActivation);
+      setRuntimeStatus(nextRuntimeStatus);
       setProject(nextProject);
       if (
         recordRef.current
@@ -281,6 +321,24 @@ const _ProjectThreadPane = function ProjectThreadPane({
     [flush]
   );
 
+  const selectRuntimeProfile = useCallback(
+    (type: "desktopDirect" | "localServer") => {
+      const current = recordRef.current;
+      if (!current) {
+        return;
+      }
+      const currentProfile = getThreadRuntimeProfile(current.thread);
+      if (currentProfile.type === type) {
+        return;
+      }
+      executeCommand({
+        type: "createExternalAgentProjectThread",
+        args: { projectId, runtimeProfileType: type }
+      });
+    },
+    [executeCommand, projectId]
+  );
+
   const syncFromAgent = useCallback(async () => {
     await flush();
     const next = await externalAgentProjects.syncThreadFromAgent(
@@ -332,6 +390,20 @@ const _ProjectThreadPane = function ProjectThreadPane({
         ) {
           return load();
         }
+      },
+      retryExternalAgentProjectRuntime: async ({
+        projectId: commandProjectId,
+        threadId: commandThreadId
+      }) => {
+        if (
+          commandProjectId === projectId
+          && commandThreadId === threadId
+          && !running
+        ) {
+          setRuntimeStatus(
+            await externalAgentProjects.runtimeStatus(projectId, threadId)
+          );
+        }
       }
     },
     active
@@ -357,6 +429,30 @@ const _ProjectThreadPane = function ProjectThreadPane({
   );
   const prepareRunSnapshot = useCallback(
     (thread: Thread): Thread => {
+      const profile = getThreadRuntimeProfile(thread);
+      if (profile.type === "localServer") {
+        const serverRun = activeServerRun.current;
+        const { runtimeSession: _runtimeSession, ...withoutRuntimeSession } =
+          thread;
+        return {
+          ...withoutRuntimeSession,
+          runtimeProfile: {
+            ...profile,
+            ...(serverRun
+              ? { serverSessionId: serverRun.lineage.sessionId }
+              : {})
+          },
+          agentRuntime: {
+            projectId,
+            snapshot: project?.snapshot ?? thread.agentRuntime?.snapshot ?? "",
+            definitionFingerprint:
+              project?.definitionFingerprint
+              ?? thread.agentRuntime?.definitionFingerprint
+              ?? "",
+            modelSource: "agent"
+          }
+        };
+      }
       const frozen = activeRunProvenance.current ?? {
         projectId,
         snapshot: project?.snapshot ?? "",
@@ -384,6 +480,8 @@ const _ProjectThreadPane = function ProjectThreadPane({
     [project, projectId]
   );
   const handleStreamingStart = useCallback(() => {
+    activeServerRun.current = null;
+    setRuntimeStatus({ state: "running" });
     activeRunProvenance.current = project
       ? {
         projectId,
@@ -403,22 +501,67 @@ const _ProjectThreadPane = function ProjectThreadPane({
       : null;
     setRunning(true);
   }, [project, projectId]);
-  const handleStreamingEnd = useCallback(() => {
+  const handleStreamingEnd = useCallback((thread: Thread) => {
     setRunning(false);
+    setRuntimeStatus(current =>
+      (current.state === "stale" || current.state === "unavailable"
+        ? current
+        : { state: "ready" }));
+    const serverRun = activeServerRun.current;
+    if (serverRun) {
+      const snapshot = thread.runHistory?.find(
+        run => run.runtime?.runId === serverRun.lineage.runId
+      );
+      const snapshotId = snapshot?.id;
+      if (snapshotId) {
+        setInspectRunRequest(current => ({
+          revision: (current?.revision ?? 0) + 1,
+          runId: snapshotId
+        }));
+      }
+    }
     queueMicrotask(() => {
       activeRunProvenance.current = null;
       void refreshProject(true);
     });
   }, [refreshProject]);
 
+  const resolveTransportRuntimeCheckpoint = useCallback(
+    (outcome: "cancelled" | "completed" | "failed") => {
+      const serverRun = activeServerRun.current;
+      if (!serverRun) {
+        return null;
+      }
+      const state = serverRun.terminalOutcome
+        ?? (outcome === "cancelled" ? "cancelled" : "outcomeUnknown");
+      return {
+        runId: serverRun.lineage.runId,
+        state,
+        checkpointOrder: 1,
+        continuationFingerprint: [
+          "local-server",
+          serverRun.lineage.artifactFingerprint,
+          serverRun.lineage.sessionId,
+          serverRun.lineage.runId
+        ].join(":"),
+        server: serverRun.lineage
+      };
+    },
+    []
+  );
+
+  const localServer = record
+    ? getThreadRuntimeProfile(record.thread).type === "localServer"
+    : false;
   const awaitingToolResult = record
     ? hasPendingExternalAgentProjectToolResult(record)
     : false;
   const runBlockReason: ExternalAgentProjectRunBlockReason | null =
     project && record
-      ? getExternalAgentProjectRunBlockReason(project, record)
+      ? (localServer ? null : getExternalAgentProjectRunBlockReason(project, record))
       : "sourceUnavailable";
   const savedModelAvailable = useMemo(() => {
+    if (localServer) { return true; }
     const model = record?.thread.model;
     if (!model) { return false; }
     const provider = providers.find(
@@ -429,7 +572,7 @@ const _ProjectThreadPane = function ProjectThreadPane({
       && !provider.disabledModels?.includes(model.id)
       && provider.models.some(candidate => candidate.id === model.id)
     );
-  }, [providers, record?.thread.model]);
+  }, [localServer, providers, record?.thread.model]);
   useEffect(() => {
     if (runBlockReason === "staleToolSnapshot") {
       void refreshProject();
@@ -443,7 +586,12 @@ const _ProjectThreadPane = function ProjectThreadPane({
       </div>
     );
   }
-  if (project.status !== "ready" && !running && !awaitingToolResult) {
+  if (
+    project.status !== "ready"
+    && !localServer
+    && !running
+    && !awaitingToolResult
+  ) {
     return (
       <div className="flex size-full flex-col items-center justify-center gap-3 p-8 text-center">
         <AlertTriangleIcon className="text-destructive size-7" />
@@ -483,10 +631,11 @@ const _ProjectThreadPane = function ProjectThreadPane({
     modelLocallyChanged || reasoningLocallyChanged;
   const locallyChanged = promptLocallyChanged || definitionLocallyChanged;
   const agentOutOfSync =
-    record.promptFingerprint !== project.promptFingerprint
-    || record.definitionFingerprint !== project.definitionFingerprint
-    || locallyChanged
-    || connectionActivation?.hasSchemaDrift === true;
+    !localServer
+    && (record.promptFingerprint !== project.promptFingerprint
+      || record.definitionFingerprint !== project.definitionFingerprint
+      || locallyChanged
+      || connectionActivation?.hasSchemaDrift === true);
   const replacedFields = [
     ...(promptLocallyChanged ? ["instructions"] : []),
     ...(modelLocallyChanged ? ["model"] : []),
@@ -499,11 +648,13 @@ const _ProjectThreadPane = function ProjectThreadPane({
   const driftedConnections =
     connectionActivation?.statuses.filter(status => status.state === "drift")
     ?? [];
+  const runtimeProfile = getThreadRuntimeProfile(record.thread);
   return (
     <>
       <ThreadPlayground
         active={active}
         className="bg-background size-full"
+        configurationReadonly={localServer}
         externalUpdate={externalUpdate}
         headerDetails={
           <div className="flex min-w-0 items-center gap-2 text-[10px]">
@@ -513,7 +664,26 @@ const _ProjectThreadPane = function ProjectThreadPane({
                 ? null
                 : " · Source invalid; current run is frozen"}
             </span>
-            <span className="text-muted-foreground shrink-0">
+            <RuntimeProfileControl
+              disabled={running}
+              onSelect={selectRuntimeProfile}
+              profile={runtimeProfile}
+              status={runtimeStatus}
+            />
+            {localServer
+              && runtimeStatus.message
+              && (runtimeStatus.state === "stale"
+                || runtimeStatus.state === "unavailable")
+              ? (
+                <span
+                  className="text-destructive hidden min-w-0 truncate min-[1200px]:inline"
+                  title={runtimeStatus.message}
+                >
+                  {runtimeStatus.message}
+                </span>
+              )
+              : null}
+            <span className="text-muted-foreground hidden shrink-0 min-[1100px]:inline">
               {locallyChanged ? "Thread override" : "From Agent"}
             </span>
             {!savedModelAvailable
@@ -545,6 +715,43 @@ const _ProjectThreadPane = function ProjectThreadPane({
                 </Button>
               )
               : null}
+            {localServer && runtimeStatus.state === "stale"
+              ? (
+                <Button
+                  className="h-5 px-1.5 text-[10px]"
+                  onClick={() => {
+                    executeCommand({
+                      type: "createExternalAgentProjectThread",
+                      args: { projectId, runtimeProfileType: "localServer" }
+                    });
+                  }}
+                  size="sm"
+                  variant="outline"
+                >
+                  <RefreshCwIcon className="size-3" />
+                  <span className="hidden min-[1100px]:inline">
+                    Create thread for latest artifact
+                  </span>
+                  <span className="min-[1100px]:hidden">New thread</span>
+                </Button>
+              )
+              : localServer && runtimeStatus.state === "unavailable"
+                ? (
+                  <Button
+                    className="h-5 px-1.5 text-[10px]"
+                    onClick={() => {
+                      executeCommand({
+                        type: "retryExternalAgentProjectRuntime",
+                        args: { projectId, threadId }
+                      });
+                    }}
+                    size="sm"
+                    variant="outline"
+                  >
+                    <RefreshCwIcon className="size-3" /> Retry
+                  </Button>
+                )
+                : null}
             {driftedConnections.length > 0
               ? (
                 <span className="text-destructive flex shrink-0 items-center gap-1">
@@ -572,7 +779,13 @@ const _ProjectThreadPane = function ProjectThreadPane({
           </div>
         }
         initialValue={record.thread}
+        inspectRunRequest={inspectRunRequest}
+        key={runtimeProfile.type}
         loadPromptSkills={loadPromptSkills}
+        messageEditingMode={localServer ? "appendTextOnly" : "full"}
+        messagesReadonly={localServer
+          ? runtimeStatus.state === "stale"
+          : false}
         onChange={handleChange}
         onOpenProjectTool={openProjectToolSource}
         onRenameTitle={handleRename}
@@ -582,16 +795,26 @@ const _ProjectThreadPane = function ProjectThreadPane({
         persistSettledThread={persistSettledThread}
         prepareRunSnapshot={prepareRunSnapshot}
         preserveSavedModel
+        renderPromptVariables={!localServer}
+        resolveTransportRuntimeCheckpoint={
+          localServer ? resolveTransportRuntimeCheckpoint : undefined
+        }
         runDisabled={
           runBlockReason !== null
           || !savedModelAvailable
-          || connectionActivation?.hasSchemaDrift === true
+          || (!localServer && connectionActivation?.hasSchemaDrift === true)
+          || (localServer
+            && runtimeStatus.state !== "ready"
+            && runtimeStatus.state !== "running")
+          || (localServer && !_isLocalServerDraftReady(record.thread))
         }
+        runSettingsReadonly={localServer}
         runtimeOwnsToolLoop
         title={record.thread.title ?? "untitled"}
         toolExecutor={projectToolExecutor}
         toolsReadonly
         transport={runtimeTransport}
+        transportOwnsRuntimeRun={localServer}
       />
       <ConfirmDialog
         confirmLabel="Sync from Agent"
@@ -1171,6 +1394,16 @@ function _sameRuntimeModel(
     left?.provider === right?.provider
     && left?.id === right?.id
     && left?.params?.reasoning === right?.params?.reasoning
+  );
+}
+
+function _isLocalServerDraftReady(thread: Thread): boolean {
+  const message = thread.context?.messages?.at(-1);
+  return Boolean(
+    message?.role === "user"
+    && message.content.length === 1
+    && message.content[0]?.type === "text"
+    && message.content[0].text.trim()
   );
 }
 

@@ -47,3 +47,15 @@ _Avoid_: current project files, live settings, mutable defaults
 **Run Checkpoint**:
 A durable debugging snapshot captured when a Runtime Run reaches a wait or terminal boundary; several checkpoints may belong to one Run.
 _Avoid_: Runtime Run, new run, autosave
+
+**Runtime Profile**:
+The Thread-scoped choice of execution authority and location. It becomes immutable once the first Run starts; choosing a different profile always creates a new empty Thread rather than migrating transcript or Runtime authority.
+_Avoid_: transport toggle, execution mode, per-run target
+
+**Local Server Thread**:
+An Agent Project Desktop Thread bound to one immutable compiled artifact and Server Session. The Server owns transcript and Runtime Run identity; Desktop keeps a constrained draft and non-secret inspection projection.
+_Avoid_: Desktop Runtime Session, remote Server profile, migrated Thread
+
+**Server Run Lineage**:
+The non-secret artifact fingerprint, Server Session ID, and authoritative Server Run ID attached to a projected Run checkpoint for inspection.
+_Avoid_: continuation credential, bearer key, canonical Trace

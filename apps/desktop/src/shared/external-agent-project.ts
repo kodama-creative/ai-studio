@@ -32,6 +32,7 @@ export interface ExternalAgentProjectSummary {
 
 export interface ExternalAgentProjectView extends ExternalAgentProjectSummary {
   agentPath: string | null;
+  artifactFingerprint: string;
   instructions: string;
   definition: CompiledAgentDefinition | null;
   definitionFingerprint: string;
@@ -57,6 +58,17 @@ export interface ExternalAgentProjectConnectionActivation {
   tools: ProjectTool[];
   statuses: ExternalAgentProjectConnectionStatus[];
   hasSchemaDrift: boolean;
+}
+
+export interface ExternalAgentProjectRuntimeStatus {
+  message?: string;
+  state:
+    | "preparing"
+    | "ready"
+    | "reconnecting"
+    | "running"
+    | "stale"
+    | "unavailable";
 }
 
 /** Durable identity written before a remote Project tool call starts. */

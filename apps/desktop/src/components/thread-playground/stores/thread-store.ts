@@ -13,6 +13,7 @@ import {
   streamThread,
   type Thread,
   type ThreadContext,
+  type ThreadRuntimeCheckpoint,
   type ThreadVariable,
   type ThreadVariables,
   type ThreadVariableVariants,
@@ -181,6 +182,9 @@ export function createThreadStore(
     /** Skills available to prompt-variable rendering for this Thread. */
     loadPromptSkills?: typeof listEnabledPromptVariableSkills;
 
+    /** Whether Desktop expands prompt variables before transport submission. */
+    renderPromptVariables?: boolean;
+
     /** Add host-owned runtime provenance before recording a run snapshot. */
     prepareRunSnapshot?: (thread: Thread) => Thread;
 
@@ -200,6 +204,14 @@ export function createThreadStore(
 
     /** Runtime transport owns tool execution and continuation for this Thread. */
     runtimeOwnsToolLoop?: boolean;
+
+    /** Runtime transport, rather than Desktop, owns Session and Run identity. */
+    transportOwnsRuntimeRun?: boolean;
+
+    /** Resolve the transport-owned authoritative checkpoint after streaming. */
+    resolveTransportRuntimeCheckpoint?: (
+      outcome: "cancelled" | "completed" | "failed"
+    ) => ThreadRuntimeCheckpoint | null;
     transport: AgentTransport;
   }
 ): ThreadStore {
@@ -849,13 +861,17 @@ export function createThreadStore(
             get().thread.context?.snapshot;
           let preparedContext: ThreadContext;
           try {
-            const rendered = await renderThreadPromptVariables({
-              context: { ...get().thread.context, messages },
-              loadSkills:
-                options.loadPromptSkills ?? listEnabledPromptVariableSkills
-            });
-            preparedContext = rendered.context;
-            promptSnapshot = rendered.snapshot;
+            if (options.renderPromptVariables === false) {
+              preparedContext = { ...get().thread.context, messages };
+            } else {
+              const rendered = await renderThreadPromptVariables({
+                context: { ...get().thread.context, messages },
+                loadSkills:
+                  options.loadPromptSkills ?? listEnabledPromptVariableSkills
+              });
+              preparedContext = rendered.context;
+              promptSnapshot = rendered.snapshot;
+            }
           } catch (error) {
             toast.error("Unable to render prompt variables", {
               description:
@@ -873,48 +889,50 @@ export function createThreadStore(
               ...get().thread,
               context: preparedContext
             }) ?? { ...get().thread, context: preparedContext };
-          let begun;
-          try {
-            begun = await runtimeSession.begin({
-              thread: executionThread,
-              context: preparedContext,
-              executionMode,
-              model
-            });
-            await persistRuntimeSession(begun.session);
-          } catch (error) {
-            if (error instanceof ThreadRuntimeOutcomeUnknownError) {
-              try {
-                await persistRuntimeSession(error.session);
-              } catch (persistError) {
-                runtimeSession = new ThreadRuntimeSession(
-                  previousRuntimeSession
-                );
-                applyRuntimeSession(previousRuntimeSession);
-                toast.error("Unable to persist Runtime recovery", {
-                  description:
+          let runId = `transport-${uuid()}`;
+          if (!options.transportOwnsRuntimeRun) {
+            try {
+              const begun = await runtimeSession.begin({
+                thread: executionThread,
+                context: preparedContext,
+                executionMode,
+                model
+              });
+              runId = begun.runId;
+              await persistRuntimeSession(begun.session);
+            } catch (error) {
+              if (error instanceof ThreadRuntimeOutcomeUnknownError) {
+                try {
+                  await persistRuntimeSession(error.session);
+                } catch (persistError) {
+                  runtimeSession = new ThreadRuntimeSession(
+                    previousRuntimeSession
+                  );
+                  applyRuntimeSession(previousRuntimeSession);
+                  toast.error("Unable to persist Runtime recovery", {
+                    description:
                     persistError instanceof Error
                       ? persistError.message
                       : "Runtime Session recovery failed"
+                  });
+                  return;
+                }
+                toast.error("Runtime Run outcome unknown", {
+                  description: error.message
                 });
                 return;
               }
-              toast.error("Runtime Run outcome unknown", {
-                description: error.message
+              runtimeSession = new ThreadRuntimeSession(previousRuntimeSession);
+              applyRuntimeSession(previousRuntimeSession);
+              toast.error("Unable to start Runtime Run", {
+                description:
+                error instanceof Error ? error.message : "Runtime Session failed"
               });
               return;
             }
-            runtimeSession = new ThreadRuntimeSession(previousRuntimeSession);
-            applyRuntimeSession(previousRuntimeSession);
-            toast.error("Unable to start Runtime Run", {
-              description:
-                error instanceof Error ? error.message : "Runtime Session failed"
-            });
-            return;
           }
 
           const abortController = new AbortController();
-          const runId = begun.runId;
           const isActiveRun = () => get().activeRunId === runId;
           set({
             status: "running",
@@ -1039,19 +1057,63 @@ export function createThreadStore(
               options.prepareRunSnapshot?.(finalThread) ?? finalThread;
             let settledContext = threadWithSnapshot.context ?? {};
             try {
-              settledContext = (
-                await renderThreadPromptVariables({
-                  context: settledContext,
-                  loadSkills:
-                    options.loadPromptSkills ?? listEnabledPromptVariableSkills
-                })
-              ).context;
+              if (options.renderPromptVariables !== false) {
+                settledContext = (
+                  await renderThreadPromptVariables({
+                    context: settledContext,
+                    loadSkills:
+                      options.loadPromptSkills ?? listEnabledPromptVariableSkills
+                  })
+                ).context;
+              }
             } catch {
               // The run already used its frozen prompt snapshot. Keep the final
               // boundary durable; a later execution edit will branch safely.
             }
 
             try {
+              if (options.transportOwnsRuntimeRun) {
+                const checkpoint =
+                  options.resolveTransportRuntimeCheckpoint?.(outcome) ?? null;
+                const { runtimeSession: _runtimeSession, ...withoutRuntimeSession } =
+                  threadWithSnapshot;
+                const runUsage = aggregateMessageUsage(
+                  (withoutRuntimeSession.context?.messages ?? []).slice(
+                    runStartMessageCount
+                  )
+                );
+                const runHistory = checkpoint
+                  ? recordRun(
+                    get().runHistory,
+                    withoutRuntimeSession,
+                    Date.now(),
+                    { runtime: checkpoint, usage: runUsage }
+                  )
+                  : get().runHistory;
+                const evaluations = normalizeEvaluations(
+                  get().evaluations,
+                  runHistory
+                );
+                const thread = withRunMetadata(withoutRuntimeSession, {
+                  runHistory,
+                  evaluations,
+                  evaluationRubrics: get().evaluationRubrics
+                });
+                set({
+                  thread,
+                  streamingMessage: null,
+                  changeHistory: recordSnapshot(get().changeHistory, thread),
+                  runHistory,
+                  evaluations
+                });
+                await options.persistSettledThread?.(thread);
+                set({
+                  status: "idle",
+                  abortController: null,
+                  activeRunId: null
+                });
+                return;
+              }
               const settled = await runtimeSession.settle({
                 thread: threadWithSnapshot,
                 context: settledContext,
@@ -1131,7 +1193,8 @@ export function createThreadStore(
           }
           const thread = withRunMetadata({
             ...result.thread,
-            runtimeSession: get().thread.runtimeSession
+            runtimeSession: get().thread.runtimeSession,
+            runtimeProfile: get().thread.runtimeProfile
           }, {
             runHistory: get().runHistory,
             evaluations: get().evaluations,
@@ -1156,7 +1219,8 @@ export function createThreadStore(
           }
           const thread = withRunMetadata({
             ...result.thread,
-            runtimeSession: get().thread.runtimeSession
+            runtimeSession: get().thread.runtimeSession,
+            runtimeProfile: get().thread.runtimeProfile
           }, {
             runHistory: get().runHistory,
             evaluations: get().evaluations,
@@ -1177,7 +1241,8 @@ export function createThreadStore(
           }
           const next = withRunMetadata({
             ...thread,
-            runtimeSession: get().thread.runtimeSession
+            runtimeSession: get().thread.runtimeSession,
+            runtimeProfile: get().thread.runtimeProfile
           }, {
             runHistory: get().runHistory,
             evaluations: get().evaluations,

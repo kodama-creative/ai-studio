@@ -120,6 +120,28 @@ export type ThreadAgentRuntimeProvenance = Static<
   typeof ThreadAgentRuntimeProvenance
 >;
 
+export const ThreadRuntimeProfile = Type.Union([
+  Type.Object({
+    version: Type.Literal(1),
+    type: Type.Literal("desktopDirect")
+  }),
+  Type.Object({
+    version: Type.Literal(1),
+    type: Type.Literal("localServer"),
+    artifactFingerprint: Type.String(),
+    serverSessionId: Type.Optional(Type.String())
+  })
+]);
+export type ThreadRuntimeProfile = Static<typeof ThreadRuntimeProfile>;
+
+export const ThreadServerRunLineage = Type.Object({
+  profile: Type.Literal("localServer"),
+  artifactFingerprint: Type.String(),
+  sessionId: Type.String(),
+  runId: Type.String()
+});
+export type ThreadServerRunLineage = Static<typeof ThreadServerRunLineage>;
+
 const THREAD_FIELDS = {
   /**
    * The title of the thread.
@@ -168,7 +190,10 @@ export const ThreadRuntimeCheckpoint = Type.Object({
   runId: Type.String(),
   state: ThreadRuntimeRunState,
   checkpointOrder: Type.Integer({ minimum: 1 }),
-  continuationFingerprint: Type.String()
+  continuationFingerprint: Type.String(),
+
+  /** Non-secret Local Server authority attached to a projected checkpoint. */
+  server: Type.Optional(ThreadServerRunLineage)
 });
 export type ThreadRuntimeCheckpoint = Static<typeof ThreadRuntimeCheckpoint>;
 
@@ -345,6 +370,9 @@ export type ThreadEvaluation = Static<typeof ThreadEvaluation>;
 export const Thread = Type.Object({
   ...THREAD_FIELDS,
 
+  /** Immutable execution authority for an Agent Project Thread. */
+  runtimeProfile: Type.Optional(ThreadRuntimeProfile),
+
   /**
    * Recent completed runs for debugging and replay. Entries are bounded by the
    * desktop store and store de-nested thread snapshots.
@@ -374,6 +402,14 @@ export function normalizeThread(thread: Thread): Thread {
   const runHistory = thread.runHistory;
   let next = thread;
 
+  const runtimeProfile = normalizeThreadRuntimeProfile(thread.runtimeProfile);
+  if (thread.runtimeProfile !== undefined && runtimeProfile === undefined) {
+    const { runtimeProfile: _runtimeProfile, ...withoutRuntimeProfile } = next;
+    next = withoutRuntimeProfile;
+  } else if (runtimeProfile && runtimeProfile !== thread.runtimeProfile) {
+    next = { ...next, runtimeProfile };
+  }
+
   if (tools) {
     const normalizedTools = normalizeTools(tools);
     if (!_sameTools(tools, normalizedTools)) {
@@ -400,6 +436,53 @@ export function normalizeThread(thread: Thread): Thread {
   }
 
   return next;
+}
+
+/** Resolve persisted Runtime Profile data, defaulting absent data to direct. */
+export function getThreadRuntimeProfile(thread: Thread): ThreadRuntimeProfile {
+  return normalizeThreadRuntimeProfile(thread.runtimeProfile) ?? {
+    version: 1,
+    type: "desktopDirect"
+  };
+}
+
+/** Validate untrusted persisted profile metadata without exposing credentials. */
+export function normalizeThreadRuntimeProfile(
+  value: unknown
+): ThreadRuntimeProfile | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  if (record.version !== 1) {
+    return undefined;
+  }
+  if (record.type === "desktopDirect") {
+    return { version: 1, type: "desktopDirect" };
+  }
+  if (record.type !== "localServer") {
+    return undefined;
+  }
+  const artifactFingerprint = _trimmedString(record.artifactFingerprint);
+  const serverSessionId = record.serverSessionId === undefined
+    ? undefined
+    : _trimmedString(record.serverSessionId);
+  if (
+    !artifactFingerprint
+    || (record.serverSessionId !== undefined && !serverSessionId)
+  ) {
+    return undefined;
+  }
+  return {
+    version: 1,
+    type: "localServer",
+    artifactFingerprint,
+    ...(serverSessionId ? { serverSessionId } : {})
+  };
+}
+
+function _trimmedString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 function _sameTools(

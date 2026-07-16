@@ -60,7 +60,10 @@ export interface TrustExternalAgentProjectCommand extends GenericCommand<
 /** Create a desktop-owned Thread for an imported Agent Project. */
 export interface CreateExternalAgentProjectThreadCommand extends GenericCommand<
   "createExternalAgentProjectThread",
-  { projectId: string; }
+  {
+    projectId: string;
+    runtimeProfileType?: "desktopDirect" | "localServer";
+  }
 > {}
 
 /** Reload one imported Agent Project from its watched source directory. */
@@ -108,6 +111,12 @@ export interface SyncExternalAgentProjectThreadFromAgentCommand extends GenericC
 /** Reconnect one active Project Thread's source-declared MCP connections. */
 export interface RetryExternalAgentProjectConnectionsCommand extends GenericCommand<
   "retryExternalAgentProjectConnections",
+  { projectId: string; threadId: string; }
+> {}
+
+/** Recheck one Local Server Thread's Bun-owned runtime availability. */
+export interface RetryExternalAgentProjectRuntimeCommand extends GenericCommand<
+  "retryExternalAgentProjectRuntime",
   { projectId: string; threadId: string; }
 > {}
 
@@ -391,6 +400,7 @@ export type Command =
   | ReportBugsCommand
   | ResetZoomCommand
   | RetryExternalAgentProjectConnectionsCommand
+  | RetryExternalAgentProjectRuntimeCommand
   | RevealExternalAgentProjectCommand
   | RevealFileCommand
   | RunThreadCommand
@@ -474,6 +484,10 @@ export const COMMAND_META: Record<
   },
   retryExternalAgentProjectConnections: {
     label: "Retry Agent Project Connections",
+    target: "webview"
+  },
+  retryExternalAgentProjectRuntime: {
+    label: "Retry Local Server Runtime",
     target: "webview"
   },
   openExternalAgentProjectSource: {

@@ -16,6 +16,7 @@ const PROJECT = {
   status: "ready",
   threads: [],
   agentPath: "/tmp/project/agent",
+  artifactFingerprint: "artifact-one",
   instructions: "Test",
   definition: {
     model: { provider: "openai", id: "gpt-5.3-codex" },

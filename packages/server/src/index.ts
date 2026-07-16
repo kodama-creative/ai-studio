@@ -4,6 +4,7 @@ export {
   type ServerPrincipal,
   type StaticBearerPrincipal
 } from "./auth/server-authenticator";
+export { revokeStoredServerContinuation } from "./repository/revoke-stored-continuation";
 export {
   startAgentServer,
   type StartAgentServerOptions,

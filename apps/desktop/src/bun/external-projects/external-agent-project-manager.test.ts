@@ -66,6 +66,68 @@ export default defineTool({
 }
 
 describe("ExternalAgentProjectManager", () => {
+  test("keeps Local Server authority immutable and duplicates it as a fresh Thread", async () => {
+    const { manager, project } = await _fixture();
+    const opened = await manager.trustAndOpen(project);
+    const created = await manager.createThread(
+      opened.id,
+      "Server Thread",
+      "localServer"
+    );
+    expect(created.record.thread.runtimeProfile).toEqual({
+      version: 1,
+      type: "localServer",
+      artifactFingerprint: opened.artifactFingerprint
+    });
+    const createdProfile = created.record.thread.runtimeProfile;
+    if (createdProfile?.type !== "localServer") {
+      throw new Error("Expected a Local Server Runtime Profile.");
+    }
+    await expect(manager.writeThread(opened.id, created.id, {
+      ...created.record,
+      thread: {
+        ...created.record.thread,
+        runtimeProfile: {
+          ...createdProfile,
+          serverSessionId: "renderer-injected"
+        }
+      }
+    })).rejects.toThrow("Only the Desktop Bun process");
+    const bound = await manager.bindLocalServerSession(
+      opened.id,
+      created.id,
+      {
+        artifactFingerprint: opened.artifactFingerprint,
+        sessionId: "session-one"
+      }
+    );
+    expect(bound.thread.runtimeSession).toBeUndefined();
+    expect(bound.thread.runtimeProfile).toMatchObject({
+      type: "localServer",
+      serverSessionId: "session-one"
+    });
+
+    await expect(manager.writeThread(opened.id, created.id, {
+      ...bound,
+      thread: {
+        ...bound.thread,
+        runtimeProfile: { version: 1, type: "desktopDirect" }
+      }
+    })).rejects.toThrow("immutable");
+    await expect(
+      manager.syncThreadFromAgent(opened.id, created.id)
+    ).rejects.toThrow("latest artifact");
+
+    const duplicate = await manager.duplicateThread(opened.id, created.id);
+    expect(duplicate.record.thread.context?.messages).toEqual([]);
+    expect(duplicate.record.thread.runHistory).toBeUndefined();
+    expect(duplicate.record.thread.runtimeProfile).toEqual({
+      version: 1,
+      type: "localServer",
+      artifactFingerprint: opened.artifactFingerprint
+    });
+  });
+
   test("does not import tools before trust, then creates desktop-owned Threads", async () => {
     const { home, manager, marker, project } = await _fixture();
     const preview = await manager.preview(project);

@@ -17,7 +17,12 @@ import {
 } from "react";
 import { usePanelRef } from "react-resizable-panels";
 
-import type { AgentTransport, ProjectTool, Thread } from "@llm-space/core";
+import type {
+  AgentTransport,
+  ProjectTool,
+  Thread,
+  ThreadRuntimeCheckpoint
+} from "@llm-space/core";
 
 import {
   executeTool,
@@ -87,6 +92,18 @@ export interface ThreadPlaygroundProps {
   readonly initialValue: Thread;
   readonly readonly?: boolean;
 
+  /** Lock Agent-owned model, tools, variables, and prompt configuration. */
+  readonly configurationReadonly?: boolean;
+
+  /** Restrict message editing to one trailing pure-text user draft. */
+  readonly messageEditingMode?: "appendTextOnly" | "full";
+
+  /** Lock transcript editing without hiding Run History inspection controls. */
+  readonly messagesReadonly?: boolean;
+
+  /** Keep a Server text Turn literal instead of applying Desktop variables. */
+  readonly renderPromptVariables?: boolean;
+
   /** Block new model runs while leaving manual tool-result editing available. */
   readonly runDisabled?: boolean;
 
@@ -112,6 +129,19 @@ export interface ThreadPlaygroundProps {
   /** The transport executes tool batches and ReAct continuation itself. */
   readonly runtimeOwnsToolLoop?: boolean;
 
+  /** The injected transport supplies authoritative Session/Run identity. */
+  readonly transportOwnsRuntimeRun?: boolean;
+
+  readonly resolveTransportRuntimeCheckpoint?: (
+    outcome: "cancelled" | "completed" | "failed"
+  ) => ThreadRuntimeCheckpoint | null;
+
+  /** Hide Desktop execution-mode controls for a Server-owned ReAct loop. */
+  readonly runSettingsReadonly?: boolean;
+
+  /** Open the existing Run History inspector at a newly terminal Server Run. */
+  readonly inspectRunRequest?: { revision: number; runId: string; };
+
   /** Keep an unavailable saved model visible instead of resolving a fallback. */
   readonly preserveSavedModel?: boolean;
 
@@ -134,7 +164,7 @@ export interface ThreadPlaygroundProps {
   readonly onRenameTitle?: (title: string) => Promise<boolean>;
   readonly validateTitle?: TitleValidator;
   readonly onStreamingStart?: () => void;
-  readonly onStreamingEnd?: () => void;
+  readonly onStreamingEnd?: (thread: Thread) => void;
 }
 
 export function ThreadPlayground({
@@ -166,6 +196,9 @@ const _ThreadPlayground = function ThreadPlayground({
   transport,
   toolExecutor = executeTool,
   runtimeOwnsToolLoop,
+  transportOwnsRuntimeRun,
+  resolveTransportRuntimeCheckpoint,
+  renderPromptVariables,
   preserveSavedModel,
   prepareRunSnapshot,
   persistSettledThread,
@@ -207,6 +240,9 @@ const _ThreadPlayground = function ThreadPlayground({
           (loadPromptSkillsRef.current ?? listEnabledPromptVariableSkills)()
         : undefined,
       runtimeOwnsToolLoop,
+      transportOwnsRuntimeRun,
+      resolveTransportRuntimeCheckpoint,
+      renderPromptVariables,
       persistSettledThread,
       prepareRunSnapshot: thread =>
         prepareRunSnapshotRef.current?.(thread) ?? thread
@@ -264,6 +300,11 @@ function ThreadPlaygroundContent({
   onRenameTitle,
   validateTitle,
   readonly: readonlyFromProps = false,
+  configurationReadonly = false,
+  messageEditingMode = "full",
+  messagesReadonly = false,
+  runSettingsReadonly = false,
+  inspectRunRequest,
   runDisabled = false,
   active = false,
   preserveSavedModel = false,
@@ -339,6 +380,12 @@ function ThreadPlaygroundContent({
   const closeHistory = useCallback(() => {
     runHistoryPanelRef.current?.collapse();
   }, [runHistoryPanelRef]);
+  useEffect(() => {
+    if (!inspectRunRequest) {
+      return;
+    }
+    runHistoryPanelRef.current?.resize(RUN_HISTORY_PANEL_SIZE);
+  }, [inspectRunRequest, runHistoryPanelRef]);
   const handleShortcuts = useShortcuts({
     readonly: readonlyFromProps || (runDisabled && status !== "running")
   });
@@ -382,7 +429,7 @@ function ThreadPlaygroundContent({
               <Tooltip content="Undo last edit">
                 <Button
                   aria-label="Undo last edit"
-                  disabled={readonly || !undoable}
+                  disabled={readonly || configurationReadonly || !undoable}
                   onClick={undo}
                   size="icon-lg"
                   variant="ghost"
@@ -393,7 +440,7 @@ function ThreadPlaygroundContent({
               <Tooltip content="Redo last edit">
                 <Button
                   aria-label="Redo last edit"
-                  disabled={readonly || !redoable}
+                  disabled={readonly || configurationReadonly || !redoable}
                   onClick={redo}
                   size="icon-lg"
                   variant="ghost"
@@ -457,57 +504,61 @@ function ThreadPlaygroundContent({
                     {status === "running" ? "Stop" : "Run"}
                   </Button>
                 </Tooltip>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      aria-label="Run settings"
-                      className="border-none pr-1.5 pl-0.5 active:translate-y-0!"
-                      disabled={
-                        readonlyFromProps
-                        || (status !== "running" && (!hasModel || runDisabled))
-                      }
-                    >
-                      <ChevronDownIcon className="size-3" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="min-w-56">
-                    <DropdownMenuLabel>Run settings</DropdownMenuLabel>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      className="justify-between gap-6"
-                      onSelect={event => {
-                        event.preventDefault();
-                        setReactLoop(!reactLoop);
-                      }}
-                    >
-                      Enable ReAct loop
-                      <Switch
-                        checked={reactLoop}
-                        className="pointer-events-none"
-                        size="sm"
-                      />
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      className="justify-between gap-6"
-                      // The ReAct loop implies auto-running tools, so this row
-                      // is forced on and locked while the loop is enabled.
-                      disabled={reactLoop}
-                      onSelect={event => {
-                        // Keep the menu open so the switch toggles in place.
-                        event.preventDefault();
-                        setAutoRunTools(!effectiveAutoRunTools);
-                      }}
-                    >
-                      Auto run tools
-                      <Switch
-                        checked={effectiveAutoRunTools}
-                        className="pointer-events-none"
-                        disabled={reactLoop}
-                        size="sm"
-                      />
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                {!runSettingsReadonly
+                  ? (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          aria-label="Run settings"
+                          className="border-none pr-1.5 pl-0.5 active:translate-y-0!"
+                          disabled={
+                            readonlyFromProps
+                            || (status !== "running" && (!hasModel || runDisabled))
+                          }
+                        >
+                          <ChevronDownIcon className="size-3" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="min-w-56">
+                        <DropdownMenuLabel>Run settings</DropdownMenuLabel>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          className="justify-between gap-6"
+                          onSelect={event => {
+                            event.preventDefault();
+                            setReactLoop(!reactLoop);
+                          }}
+                        >
+                          Enable ReAct loop
+                          <Switch
+                            checked={reactLoop}
+                            className="pointer-events-none"
+                            size="sm"
+                          />
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          className="justify-between gap-6"
+                          // The ReAct loop implies auto-running tools, so this row
+                          // is forced on and locked while the loop is enabled.
+                          disabled={reactLoop}
+                          onSelect={event => {
+                            // Keep the menu open so the switch toggles in place.
+                            event.preventDefault();
+                            setAutoRunTools(!effectiveAutoRunTools);
+                          }}
+                        >
+                          Auto run tools
+                          <Switch
+                            checked={effectiveAutoRunTools}
+                            className="pointer-events-none"
+                            disabled={reactLoop}
+                            size="sm"
+                          />
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )
+                  : null}
               </ButtonGroup>
             </div>
           </header>
@@ -530,7 +581,7 @@ function ThreadPlaygroundContent({
                     <div className="flex grow items-center">
                       <ModelConfigEditor
                         preserveSavedModel={preserveSavedModel}
-                        readonly={readonly}
+                        readonly={readonly || configurationReadonly}
                       />
                     </div>
                   </div>
@@ -552,7 +603,11 @@ function ThreadPlaygroundContent({
                     <div className="flex grow items-center">
                       <PromptVariablesListView
                         active={active}
-                        disabled={readonly || systemPromptStreaming}
+                        disabled={
+                          readonly
+                          || configurationReadonly
+                          || systemPromptStreaming
+                        }
                       />
                     </div>
                   </div>
@@ -561,14 +616,18 @@ function ThreadPlaygroundContent({
                   <SystemPromptEditor
                     className="size-full min-h-0 px-3"
                     onStreamingChange={setSystemPromptStreaming}
-                    readonly={readonly}
+                    readonly={readonly || configurationReadonly}
                   />
                 </div>
               </div>
             </ResizablePanel>
             <ResizableHandle className="opacity-50 hover:opacity-100" />
             <ResizablePanel minSize="300px">
-              <MessageListView readonly={readonly} runDisabled={runDisabled} />
+              <MessageListView
+                editingMode={messageEditingMode}
+                readonly={readonly || messagesReadonly}
+                runDisabled={runDisabled}
+              />
             </ResizablePanel>
           </ResizablePanelGroup>
         </ResizablePanel>
@@ -583,7 +642,10 @@ function ThreadPlaygroundContent({
           }}
           panelRef={runHistoryPanelRef}
         >
-          <RunHistoryListView onClose={closeHistory} />
+          <RunHistoryListView
+            inspectRunRequest={inspectRunRequest}
+            onClose={closeHistory}
+          />
         </ResizablePanel>
       </ResizablePanelGroup>
     </div>

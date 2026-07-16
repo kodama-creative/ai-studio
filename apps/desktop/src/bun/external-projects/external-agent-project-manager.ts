@@ -12,6 +12,7 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import {
+  getThreadRuntimeProfile,
   type ModelConfig,
   normalizeThread,
   type ProjectTool,
@@ -29,6 +30,7 @@ import {
   type AgentProjectSnapshot,
   AgentRuntime,
   type AgentSession,
+  type CompiledAgentProjectSnapshot,
   type CreateAgentSessionOptions,
   loadAgentProject,
   loadAgentProjectManifest,
@@ -199,6 +201,7 @@ export class ExternalAgentProjectManager {
       ...(loaded.error ? { error: loaded.error } : {}),
       threads,
       agentPath: loaded.resolved?.agentRoot ?? null,
+      artifactFingerprint: snapshot?.artifact?.fingerprint ?? "",
       instructions: snapshot?.instructions ?? "",
       definition: snapshot?.definition ?? null,
       definitionFingerprint: snapshot?.definition
@@ -237,7 +240,8 @@ export class ExternalAgentProjectManager {
 
   async createThread(
     projectId: string,
-    title = "untitled"
+    title = "untitled",
+    runtimeProfileType?: "desktopDirect" | "localServer"
   ): Promise<{ id: string; record: ExternalAgentProjectThreadRecord; }> {
     const view = await this.inspect(projectId);
     if (view.status !== "ready") {
@@ -257,6 +261,17 @@ export class ExternalAgentProjectManager {
     }
     const thread: Thread = ensureThreadVariableState({
       title,
+      ...(runtimeProfileType === "desktopDirect"
+        ? { runtimeProfile: { version: 1 as const, type: "desktopDirect" as const } }
+        : runtimeProfileType === "localServer"
+          ? {
+            runtimeProfile: {
+              version: 1 as const,
+              type: "localServer" as const,
+              artifactFingerprint: view.artifactFingerprint
+            }
+          }
+          : {}),
       model: _modelFromDefinition(view.definition),
       agentRuntime: {
         projectId,
@@ -310,6 +325,8 @@ export class ExternalAgentProjectManager {
     record: ExternalAgentProjectThreadRecord
   ): Promise<void> {
     this._entry(projectId);
+    const existing = await this._readThreadFile(projectId, threadId);
+    _assertRuntimeProfileWrite(existing.thread, record.thread);
     await this._writeThreadFile(projectId, threadId, {
       thread: normalizeThread(record.thread),
       promptFingerprint: record.promptFingerprint,
@@ -325,6 +342,13 @@ export class ExternalAgentProjectManager {
     threadId: string
   ): Promise<{ id: string; record: ExternalAgentProjectThreadRecord; }> {
     const source = await this.readThread(projectId, threadId);
+    if (source.thread.runtimeProfile?.type === "localServer") {
+      return this.createThread(
+        projectId,
+        `${source.thread.title ?? "untitled"} copy`,
+        "localServer"
+      );
+    }
     const id = randomUUID();
     const record = {
       ...source,
@@ -344,12 +368,75 @@ export class ExternalAgentProjectManager {
     this._notify(projectId);
   }
 
+  async bindLocalServerSession(
+    projectId: string,
+    threadId: string,
+    input: { artifactFingerprint: string; sessionId: string; }
+  ): Promise<ExternalAgentProjectThreadRecord> {
+    const record = await this.readThread(projectId, threadId);
+    const profile = record.thread.runtimeProfile;
+    if (
+      profile?.type !== "localServer"
+      || profile.artifactFingerprint !== input.artifactFingerprint
+    ) {
+      throw new Error("Thread Local Server artifact binding changed.");
+    }
+    if (
+      profile.serverSessionId
+      && profile.serverSessionId !== input.sessionId
+    ) {
+      throw new Error("Thread already belongs to another Server Session.");
+    }
+    const next = {
+      ...record,
+      thread: {
+        ...record.thread,
+        runtimeSession: undefined,
+        runtimeProfile: {
+          ...profile,
+          serverSessionId: input.sessionId
+        }
+      }
+    };
+    await this._writeThreadFile(projectId, threadId, {
+      thread: normalizeThread(next.thread),
+      promptFingerprint: next.promptFingerprint,
+      syncedPrompt: next.syncedPrompt,
+      definitionFingerprint: next.definitionFingerprint,
+      syncedDefinition: next.syncedDefinition
+    });
+    this._notify(projectId);
+    return next;
+  }
+
+  async getCompiledProject(
+    projectId: string,
+    artifactFingerprint: string
+  ): Promise<CompiledAgentProjectSnapshot> {
+    await this._ensureRegistry();
+    await this._ensureProject(projectId);
+    const snapshot = [...this._state(projectId).snapshots.values()].find(
+      candidate => candidate.artifact?.fingerprint === artifactFingerprint
+    );
+    if (!snapshot?.artifact) {
+      throw new Error(
+        "The Thread's compiled Agent artifact is no longer available in this Desktop process."
+      );
+    }
+    return snapshot as CompiledAgentProjectSnapshot;
+  }
+
   async syncThreadFromAgent(
     projectId: string,
     threadId: string
   ): Promise<ExternalAgentProjectThreadRecord> {
     const project = await this.inspect(projectId);
     const record = await this.readThread(projectId, threadId);
+    if (record.thread.runtimeProfile?.type === "localServer") {
+      throw new Error(
+        "A Local Server Thread cannot adopt new Agent source. Create a Thread for the latest artifact."
+      );
+    }
     if (!project.definition) {
       throw new Error("Agent Project has no valid definition.");
     }
@@ -1345,6 +1432,39 @@ function _definitionFromModel(
     model: { provider: model.provider, id: model.id },
     ...(model.params?.reasoning ? { reasoning: model.params.reasoning } : {})
   };
+}
+
+function _assertRuntimeProfileWrite(current: Thread, next: Thread): void {
+  const currentProfile = getThreadRuntimeProfile(current);
+  const nextProfile = getThreadRuntimeProfile(next);
+  if (nextProfile.type === "localServer" && next.runtimeSession !== undefined) {
+    throw new Error("Local Server Threads cannot persist a Desktop Runtime Session.");
+  }
+  const hasAuthority =
+    current.runtimeSession !== undefined
+    || Boolean(current.runHistory?.length)
+    || (
+      currentProfile.type === "localServer"
+      && Boolean(currentProfile.serverSessionId)
+    );
+  if (
+    hasAuthority
+    && JSON.stringify(currentProfile) !== JSON.stringify(nextProfile)
+  ) {
+    throw new Error(
+      "Runtime Profile is immutable after the Thread's first Run. Create a new Thread to use another profile."
+    );
+  }
+  if (
+    (currentProfile.type === "localServer"
+      ? currentProfile.serverSessionId
+      : undefined)
+    !== (nextProfile.type === "localServer"
+      ? nextProfile.serverSessionId
+      : undefined)
+  ) {
+    throw new Error("Only the Desktop Bun process may bind a Server Session.");
+  }
 }
 
 function _hasCode(error: unknown, code: string): boolean {

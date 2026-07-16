@@ -7,7 +7,7 @@ import type { ThreadStore } from "./stores";
 export interface ThreadPlaygroundEventCallbacks {
   onChange?: (thread: Thread) => void;
   onStreamingStart?: () => void;
-  onStreamingEnd?: () => void;
+  onStreamingEnd?: (thread: Thread) => void;
 }
 
 export function useThreadPlaygroundEvents(
@@ -37,7 +37,7 @@ export function useThreadPlaygroundEvents(
       }
 
       if (status === "idle" && prevStatus === "running") {
-        onStreamingEndRef.current?.();
+        onStreamingEndRef.current?.(state.thread);
         // Flush thread changes that were suppressed while streaming.
         onChangeRef.current?.(state.thread);
         return;

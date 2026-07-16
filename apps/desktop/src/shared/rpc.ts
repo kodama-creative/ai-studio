@@ -7,7 +7,8 @@ import type {
   ModelConfig,
   ModelProviderGroup,
   Thread,
-  ThreadAgentRuntimeProvenance
+  ThreadAgentRuntimeProvenance,
+  ThreadServerRunLineage
 } from "@llm-space/core";
 import type { RuntimeExecutionMode } from "@llm-space/runtime";
 import type { RPCSchema } from "electrobun";
@@ -18,6 +19,7 @@ import type {
   ExternalAgentProjectChangedPayload,
   ExternalAgentProjectConnectionActivation,
   ExternalAgentProjectPreview,
+  ExternalAgentProjectRuntimeStatus,
   ExternalAgentProjectSummary,
   ExternalAgentProjectThreadRecord,
   ExternalAgentProjectToolCallResponse,
@@ -60,17 +62,33 @@ export interface StreamThreadRequestPayload {
     | {
       executionMode: RuntimeExecutionMode;
       type: "desktopThread";
+    }
+    | {
+      projectId: string;
+      threadId: string;
+      type: "localServerAgentProject";
     };
 }
 
 /** A bun→webview chunk of a streaming agent run, keyed by `streamId`. */
 export type StreamThreadResponsePayload =
   | { event: AgentEvent; streamId: string; type: "event"; }
+  | {
+    lineage: ThreadServerRunLineage;
+    streamId: string;
+    terminalOutcome?: "cancelled" | "completed" | "failed" | "outcomeUnknown";
+    type: "localServerLineage";
+  }
   | { message: string; streamId: string; type: "error"; }
   | {
     runtime: ThreadAgentRuntimeProvenance;
     streamId: string;
     type: "runtime";
+  }
+  | {
+    status: ExternalAgentProjectRuntimeStatus;
+    streamId: string;
+    type: "localServerStatus";
   }
   | { streamId: string; type: "done"; };
 
@@ -161,7 +179,11 @@ export interface DesktopRPCType {
         response: ExternalAgentProjectToolCallResponse;
       };
       externalAgentProjectCreateThread: {
-        params: { projectId: string; title?: string; };
+        params: {
+          projectId: string;
+          runtimeProfileType?: "desktopDirect" | "localServer";
+          title?: string;
+        };
         response: { id: string; record: ExternalAgentProjectThreadRecord; };
       };
       externalAgentProjectDeactivateConnections: {
@@ -199,6 +221,10 @@ export interface DesktopRPCType {
       externalAgentProjectRemove: {
         params: { projectId: string; };
         response: null;
+      };
+      externalAgentProjectRuntimeStatus: {
+        params: { projectId: string; threadId: string; };
+        response: ExternalAgentProjectRuntimeStatus;
       };
       externalAgentProjectSyncThreadFromAgent: {
         params: { projectId: string; threadId: string; };

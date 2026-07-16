@@ -27,7 +27,8 @@ const _MessageListItemHeader = function MessageListItemHeader({
   readonly = false,
   runDisabled = false,
   collapsed,
-  dragHandleProps
+  dragHandleProps,
+  textOnlyDraft = false
 }: {
   readonly className?: string;
   readonly collapsed?: boolean;
@@ -35,6 +36,7 @@ const _MessageListItemHeader = function MessageListItemHeader({
   readonly message: Message;
   readonly readonly?: boolean;
   readonly runDisabled?: boolean;
+  readonly textOnlyDraft?: boolean;
 }) {
   const { run, removeMessage, toggleMessageRole, toggleMessageCollapsed } =
     useThreadStoreActions();
@@ -129,7 +131,7 @@ const _MessageListItemHeader = function MessageListItemHeader({
             <Button
               aria-label={`Change message role from ${message.role}`}
               className="px-2"
-              disabled={readonly}
+              disabled={readonly || textOnlyDraft}
               onClick={handleToggleMessageRole}
               size="sm"
               variant="outline"
@@ -186,7 +188,7 @@ const _MessageListItemHeader = function MessageListItemHeader({
             <EyeIcon className="size-4" />
           </Button>
         </Tooltip>
-        {message.role === "user" && (
+        {message.role === "user" && !textOnlyDraft && (
           <AddImagesMenu disabled={readonly} messageId={message.id} />
         )}
         {showRun
