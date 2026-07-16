@@ -1,4 +1,3 @@
-import { afterEach, expect, test } from "bun:test";
 import {
   mkdirSync,
   mkdtempSync,
@@ -8,6 +7,7 @@ import {
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { afterEach, expect, test } from "bun:test";
 
 import { McpManager } from "./mcp-manager";
 

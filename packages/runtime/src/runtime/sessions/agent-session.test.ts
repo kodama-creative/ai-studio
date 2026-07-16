@@ -1,4 +1,3 @@
-import { describe, expect, test } from "bun:test";
 import {
   type Api,
   type AssistantMessage,
@@ -8,6 +7,7 @@ import {
   type Models,
   type ToolResultMessage
 } from "@earendil-works/pi-ai";
+import { describe, expect, test } from "bun:test";
 
 import type {
   AgentMessage,
