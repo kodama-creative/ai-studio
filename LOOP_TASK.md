@@ -17,11 +17,11 @@ Every execution must end with a commit and push on the branch that was current a
 
 ### Current understanding
 The repository is /Users/feng/Projects/ai-studio, currently tracking develop against origin/develop.
-Execution status is IMPLEMENTED / VALIDATION BLOCKED on roadmap item 01; no later item is dependency-eligible yet.
-LOOP_PLAN.md currently has 29 unchecked numbered items. Item 01 is the first eligible capability.
+Execution status is COMPLETE on roadmap item 01; item 02 is now dependency-eligible for a future pass.
+LOOP_PLAN.md has item 01 checked after its current Done-when evidence passed.
 The source-level recheck confirmed that AgentHarness supports only a busy unresolved-tool Promise, not settled manual execution across UI delay or reload. The user authorized abandoning Harness, so item 01 now standardizes on one LLM Space AgentSession backed by official Pi Agent.
-The implementation removes the runtime snapshot's AgentHarness resource dependency, documents the single owner, and adds explicit settled-manual reload, abort terminal persistence, and persistence-before-agent_end fixtures. The focused matrix passes 14/14 and the full suite passes 134/134; all five package TypeScript checks and touched-file lint pass.
-Full-repository lint remains the only completion-gate blocker: both clean baseline 15d952b and the current tree report exactly 1,451 pre-existing problems (1,356 errors, 95 warnings), while this run's touched TypeScript files are clean. Item 01 therefore remains unchecked rather than overstating completion.
+The implementation removes the runtime snapshot's AgentHarness resource dependency, documents the single owner, and adds explicit settled-manual reload, abort terminal persistence, and persistence-before-agent_end fixtures. The focused matrix passes 14/14 and the full suite passes 136/136; all five package TypeScript checks and touched-file lint pass.
+Full-repository lint, the browser-target runtime bundle, and the renderer-only Vite build now pass. Item 01 therefore satisfies the revised current completion gates.
 The plan's explicit deferrals and exclusions remain binding throughout all runs.
 The user has pre-authorized all model-recommended/default answers during grill-me and the kaizen approval gate so unattended runs do not stop for questions.
 Every run must create a commit and push it, including blocked or no-delta runs.
@@ -33,3 +33,4 @@ The 2026-07-15 23:41 +0800 overlap check found the preceding window complete: it
 * 2026-07-15 23:43 +0800 - DONE (BLOCKED) - Commit b509d36 was already pushed and no item-01 process remained, so this window did not overlap. Pi upstream and npm remain unchanged, and the 11/11 focused matrix still runs through Pi Agent; item 01 remains blocked and unchecked.
 * 2026-07-15 23:53 +0800 - IN PROGRESS - User authorized the item-01 fallback: re-audit AgentHarness manual execution first, then replace the Harness target with one Pi Agent-backed LLM Space session authority if the missing continuation/transcript seams are confirmed. Product-code edits wait until this research and grill gate completes.
 * 2026-07-16 00:25 +0800 - IMPLEMENTED (VALIDATION BLOCKED) - AgentHarness was rejected for settled manual execution and the Pi Agent-backed single session boundary now passes 14/14 focused and 134/134 full tests. Item 01 stays unchecked only because current and clean-baseline lint both fail with the same 1,451 unrelated problems. Per user direction, worktree packaging validation is now forbidden; the active pack was stopped and its generated canary artifacts were removed.
+* 2026-07-16 13:10 +0800 - DONE - Verified and closed item 01 without reimplementation: 14/14 focused and 136/136 full tests, five TypeScript projects, focused/full lint, runtime browser bundle, and renderer-only Vite build passed; capability evidence was refreshed and the pass stopped before item 02.

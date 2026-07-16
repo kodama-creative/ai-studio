@@ -17,7 +17,7 @@ LLM Space is an Agent Studio: Agent Project source is the portable product, Thre
 
 ## Primary Build-To-Server Spine
 
-- [ ] **01 — Pi Agent session authority**
+- [x] **01 — Pi Agent session authority**
   - Depends on: current runtime.
   - Run: `$kaizen-loop Make the Pi Agent-backed LLM Space session core authoritative without changing shipped behavior.`
   - Done when: existing manual, auto-once, ReAct, persistence, abort, reload, tool, and event fixtures run through one LLM Space `AgentSession` backed by Pi `Agent`; Pi owns the official loop/tool lifecycle while Thread persistence, settled manual policy, and event projection each have one documented LLM Space owner.

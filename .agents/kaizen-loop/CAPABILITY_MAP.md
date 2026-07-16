@@ -1,7 +1,7 @@
 # LLM Space Capability Map
 
-- Last updated: 2026-07-15
-- Map status: refreshed after roadmap item 01 established one Pi Agent-backed LLM Space session authority. Workspace and explicitly opened Agents share one Build + Project Threads product and one runtime session core; Pi `Agent` owns the official provider/ReAct/tool/abort/continuation lifecycle, while LLM Space owns settled manual policy, Thread persistence, and event projection. `AgentHarness` is intentionally not the session core because it cannot settle and later resume an external tool result without a new user message. Public or dynamically loaded plugins remain absent.
+- Last updated: 2026-07-16
+- Map status: refreshed after roadmap item 01's existing Pi Agent-backed Runtime Harness V0 passed its complete current acceptance matrix. Workspace and explicitly opened Agents share one Build + Project Threads product and one runtime session core; Pi `Agent` owns the official provider/ReAct/tool/abort/continuation lifecycle, while LLM Space owns settled manual policy, Thread persistence, and event projection. `AgentHarness` is intentionally not the session core because it cannot settle and later resume an external tool result without a new user message. Public or dynamically loaded plugins remain absent.
 - Evidence rule: entries marked `confirmed` cite current rendered-product or current-code evidence. Entries marked `stale` rely on previous logs or code paths not fully re-inspected in this loop. Entries marked `unknown` need a future product-surface check before they can drive a recommendation.
 
 ## First-Run Model Setup
@@ -152,7 +152,7 @@
 
 - Status: shipped Agent Definition And Runtime V1
 - Freshness: confirmed
-- Last checked: 2026-07-15
+- Last checked: 2026-07-16
 - Evidence:
   - Eve commit `626c17678b0398d64b1c38f5c293f88889807941` was inspected as the primary structural reference. `packages/runtime/src` now separates public definitions, shared authored/compiled representations, internal authored validation, non-executing discovery, trusted compiler normalization, runtime Agent/model preparation, runtime session lifecycle, and execution policy/event projection.
   - `@llm-space/runtime` now exports only authored and cross-environment pure contracts; `@llm-space/runtime/node` explicitly exports filesystem discovery/compiler and host execution without re-exporting root. A browser-target root bundle succeeds, and `public/`/`shared/` contain no Node/runtime/execution imports.
@@ -164,6 +164,7 @@
   - The prior Desktop Builder/Target experiment is preserved as historical evidence in `audits/2026-07-13-002622-agent-builder-v1/`, but the current Desktop intentionally no longer exposes that second Agent product model.
   - Current CEF audit `audits/2026-07-14-005810-agent-navigation-editor/` shows one Agent Build surface for both default-directory and explicitly opened projects, with source editing and desktop-owned nested Threads behind the same typed runtime/RPC boundary.
   - Roadmap item 01 audited installed `@earendil-works/pi-agent-core@0.80.3`, npm `0.80.7` at `818d674`, and upstream main at `5e336cf`. Harness can only model manual work by keeping the whole run busy on an unresolved tool Promise; it cannot provide LLM Space's settled manual/reload contract. The accepted session boundary therefore uses official Pi `Agent.continue()` under LLM Space `AgentSession`, removes the runtime snapshot's `AgentHarnessResources` dependency, and passes the 14/14 focused runtime/Desktop behavior matrix.
+  - Fresh item-01 acceptance on 2026-07-16 passed 14/14 focused Runtime Harness fixtures, 136/136 repository tests, all five TypeScript projects, focused and repository-wide lint, a browser-target runtime bundle, and the renderer-only Vite build. Pi upstream moved only for an unrelated Windows terminal-title fix; npm latest remains `0.80.7`.
 - Boundary: a filesystem-authored Agent must define static model/reasoning defaults in `agent.ts`, plus instructions, TypeScript/JavaScript tools, and skills. Runtime snapshots are immutable; sessions may persistently override model/reasoning, and Desktop Project Threads execute/debug that same runtime while retaining editable messages and run history.
 - Explicit non-goals: dynamic model resolvers, automatic compaction/session budgets, database/cloud persistence, crash-safe tool replay, distributed workflow durability, channels, schedules, sandbox provisioning, subagents, public plugin SDK, dynamic third-party loading, or separate Desktop Builder/Target Agent model.
 - Visible gaps: isolated CEF could not prove a live external provider completion; deterministic Bun integration covers the runtime branch instead. Trusted project tools remain unsandboxed. Pi has no native durable pause-before-tool state, so settled manual mode remains an LLM Space-owned deferred-result policy over Pi `Agent`. Pi-native compaction/tree navigation and automatic session budgets remain future capabilities with separate roadmap boundaries.
@@ -257,7 +258,7 @@
 
 - Status: shipped manual, auto-once, and ReAct execution paths
 - Freshness: confirmed
-- Last checked: 2026-07-14
+- Last checked: 2026-07-16
 - Evidence:
   - Current discovery screenshot `audits/2026-07-04-110944-core-capability-discovery/03-general-agent-open.png` shows the General Agent example ships with tool definitions such as `web_search`, `web_fetch`, `bash`, `read`, `write`, and `edit`.
   - Current fixture screenshot `audits/2026-07-04-110944-core-capability-discovery/04-tool-step-fixture-after-run.png` shows a thread with an assistant tool call and editable `Response` field, but no product-level pending-tool state or explicit `Continue` action tied to completed tool outputs.
@@ -272,6 +273,7 @@
   - Current `packages/runtime/src/shared/runtime-execution-mode.ts`, `execution/tool-execution-policy.ts`, and `runtime/sessions/agent-session.ts` own `manual`, `autoOnce`, and `react` execution, internal deferred results, continuation, and mode changes behind the public Agent session.
   - Current `apps/desktop/src/components/thread-playground/stores/run-mode.ts` preserves explicit user preferences for manual calls, one-step auto-run, and the full ReAct loop. `tool-call-list-item.tsx` still provides the visible per-call play action and editable/error result path.
   - Fresh CEF Thread inspection on 2026-07-14 showed the current Tools row and run controls render without document overflow; no live provider tool turn was attempted in this discovery loop.
+  - Fresh non-UI Runtime Harness verification on 2026-07-16 passed settled manual reload and exact-result continuation without a synthetic user message, auto-once, complete ReAct tool execution, dangerous/deferred tool boundaries, persistence-before-terminal-event ordering, abort settlement, and Desktop Agent Project streaming fixtures.
 - Boundary: ordinary Threads and Agent Project Threads can receive model tool calls, run visible executable tools manually, edit/mark tool results, continue after all results are ready, or opt into automatic one-step/ReAct behavior. Agent Project runtime sessions own the Pi loop and deferred state; Desktop Thread data remains the durable transcript.
 - Explicit non-goals: no per-tool permission policy, durable approve/deny state, sandbox, background tool queue, crash-safe side-effect replay, or multi-agent orchestration.
 - Visible gaps: tool safety is a global/manual-vs-auto execution choice rather than authored per-tool policy; trusted project tools remain unsandboxed; error marking is a compact result toggle rather than a dedicated denial record; live paid-provider continuation remains unaudited.
