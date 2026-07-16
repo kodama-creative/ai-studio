@@ -9,6 +9,8 @@
     "src"
   ],
   "dependencies": {
-    "@llm-space/runtime": "workspace:*"
+    "@earendil-works/pi-ai": "catalog:",
+    "@llm-space/runtime": "workspace:*",
+    "@llm-space/server": "workspace:*"
   }
 }

@@ -55,13 +55,12 @@ Runtime architecture follows [ADR 0001](./docs/adr/0001-runtime-harness-over-pi-
   - Boundary: no credentials, Sessions, Thread history, Eval results, Server, container, or cloud deployment.
   - Metric: deterministic build completion without manual source repair.
 
-- [ ] **06 — Local Server protocol V1**
+- [x] **06 — Local Server protocol V1**
   - Depends on: 05.
   - Run: `$kaizen-loop Run one compiled Agent artifact as an independent protected Bun HTTP/SSE Server.`
   - Done when: one artifact serves many isolated Sessions with authenticated requests, Channel-owned continuation tokens, Runtime-owned session/run IDs, ordered terminal events, abort, and authorized reconnect cursors.
   - Boundary: one Agent Project per deployment; no vendor channels, cloud control plane, remote agents, schedules, or multi-project loading.
   - Metric: protected streaming completion with lossless reconnect.
-  - Blocker (2026-07-16): human approval is required for inbound identity/authentication, TLS termination, Session authorization, continuation-token lifecycle, and Server Session Store ownership/durability/root/retention. ADR 0001 and the roadmap define required outcomes but do not select these security and persistence policies.
 
 - [ ] **07 — Studio Server Runtime Profile and Trace handoff**
   - Depends on: 06.

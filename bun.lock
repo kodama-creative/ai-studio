@@ -110,7 +110,9 @@
         "llm-space": "./src/index.ts",
       },
       "dependencies": {
+        "@earendil-works/pi-ai": "catalog:",
         "@llm-space/runtime": "workspace:*",
+        "@llm-space/server": "workspace:*",
       },
     },
     "packages/core": {
@@ -132,6 +134,15 @@
         "@earendil-works/pi-ai": "catalog:",
         "@modelcontextprotocol/sdk": "catalog:",
         "typebox": "catalog:",
+      },
+    },
+    "packages/server": {
+      "name": "@llm-space/server",
+      "version": "0.1.0",
+      "dependencies": {
+        "@earendil-works/pi-agent-core": "catalog:",
+        "@earendil-works/pi-ai": "catalog:",
+        "@llm-space/runtime": "workspace:*",
       },
     },
   },
@@ -587,6 +598,8 @@
     "@llm-space/example-agent": ["@llm-space/example-agent@workspace:apps/example-agent"],
 
     "@llm-space/runtime": ["@llm-space/runtime@workspace:packages/runtime"],
+
+    "@llm-space/server": ["@llm-space/server@workspace:packages/server"],
 
     "@lobehub/emojilib": ["@lobehub/emojilib@1.0.0", "https://registry.npmmirror.com/@lobehub/emojilib/-/emojilib-1.0.0.tgz", {}, "sha512-s9KnjaPjsEefaNv150G3aifvB+J3P4eEKG+epY9zDPS2BeB6+V2jELWqAZll+nkogMaVovjEE813z3V751QwGw=="],
 

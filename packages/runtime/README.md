@@ -21,6 +21,10 @@ The runtime owns three boundaries:
 - `@llm-space/runtime/harness` is the cross-environment Host contract for
   durable Runtime Run state. It exports the Run state machine, Session Store
   interface, typed conflicts, and an in-memory reference adapter.
+- `@llm-space/runtime/client` is the browser-safe Local Server client. It owns
+  authenticated commands, Channel-generated continuation credentials,
+  fetch-based SSE parsing, exact sequence replay, and Pi `AgentEvent` typing;
+  it does not import Bun/Node Server code or persist credentials automatically.
 - `@llm-space/runtime/tools` is the authored local-action contract. It exports
   `defineTool()` and the bounded `ToolContext`.
 - `@llm-space/runtime/connections` is the authored remote-action contract. It
@@ -191,6 +195,44 @@ integration that preserves settled manual continuation.
 Execution modes are `manual`, `autoOnce`, and `react`. Manual deferred tool
 results remain internal control messages and are exposed as pending calls until
 the host supplies real results and calls `continue()`.
+
+## Local Server client
+
+The framework-neutral client consumes the protected Server without introducing
+a second text/tool event protocol:
+
+```ts
+import { createAgentServerClient } from "@llm-space/runtime/client";
+
+const client = createAgentServerClient({
+  baseUrl: "https://agent.example.com",
+  authorization: () => accessToken
+});
+const session = await client.createSession();
+const run = await client.createRun({
+  sessionId: session.sessionId,
+  continuationToken: session.continuationToken,
+  text: "Hello"
+});
+
+for await (const event of client.streamRun({
+  sessionId: session.sessionId,
+  runId: run.runId,
+  continuationToken: session.continuationToken
+})) {
+  if (event.event === "pi") {
+    console.log(event.data.type);
+  }
+}
+```
+
+Disconnecting the iterator only stops observation. Use `abortRun()` to cancel
+execution. Applications that need continuation across their own restart must
+store the raw continuation token in their Channel-owned secure storage; the
+Server repository stores only its hash. Streams reconnect after transient
+transport failures, honor bounded HTTP/server shutdown retry hints, and accept
+only contiguous events or byte-equivalent cursor replays. A terminal
+`abortRun()` response includes the Run's existing outcome.
 
 ## Runtime Harness state
 

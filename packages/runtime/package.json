@@ -5,6 +5,7 @@
   "private": true,
   "exports": {
     ".": "./src/index.ts",
+    "./client": "./src/client/index.ts",
     "./connections": "./src/public/connections/index.ts",
     "./harness": "./src/runtime/harness/index.ts",
     "./node": "./src/node/index.ts",
