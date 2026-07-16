@@ -192,6 +192,19 @@
 - Explicit non-goals: serialized artifact files/registries, SBOM/signing/attestation, dynamic model resolvers, automatic compaction/session budgets, Server Session Store migration, filesystem/database/cloud persistence adapters, external-effect retry or exactly-once claims, distributed workflow durability, channels, schedules, sandbox provisioning, subagents, public plugin SDK, dynamic third-party loading, or separate Desktop Builder/Target Agent model.
 - Visible gaps: Local Server artifact consumption, artifact/source migrations after a real schema evolution, source-declared environment variables, principal-authenticated Server replay, external-operation idempotency/recovery, compaction, and canonical Trace remain later roadmap capabilities. Isolated CEF did not execute a paid live provider; deterministic Pi/Session Store fixtures cover runtime behavior. Trusted project tools remain unsandboxed. Pi has no native durable pause-before-tool state, so settled manual mode remains an LLM Space-owned deferred-result policy over Pi `Agent`.
 
+## Independent Agent Serving
+
+- Status: missing; roadmap item 06 blocked on security and persistence decisions
+- Freshness: confirmed
+- Last checked: 2026-07-16
+- Evidence:
+  - Current packages expose Desktop RPC execution, the Host-neutral Runtime Harness, an in-memory reference Session Store, safe replay cursors, and the compiled Agent artifact, but no independent Bun Server, inbound authenticator, continuation-token issuer, or durable Server repository.
+  - The originating roadmap requires protected HTTP/SSE, production identity, distinct Channel continuation-token authority, token rotation/revocation, restart, concurrent Session isolation, authorized reconnect, and no Desktop dependency.
+  - RFC 6750 requires TLS for bearer-token usage and replay/lifetime/audience controls. WHATWG SSE defines event IDs and `Last-Event-ID` reconnect mechanics but does not authorize a caller for a Session.
+- Boundary: one future Bun deployment loads one compiled Agent artifact and serves many isolated Runtime Sessions through fail-closed authenticated HTTP/SSE, Runtime-owned Session/Run IDs, Channel-owned continuation credentials, ordered terminal events, abort, and authorized exclusive-cursor reconnect.
+- Explicit non-goals: anonymous production fallback, vendor channels, hosted identity, OAuth connections, remote agents, schedules, multi-project loading, OCI/container/cloud control plane, exactly-once effects, canonical Trace, or Studio Runtime Profile UI.
+- Visible gaps: human approval is required for the inbound principal/authenticator model, TLS termination, Session authorization, continuation-token issuance/binding/rotation/revocation, and Server Session Store ownership, root, durability, atomicity, and retention. A loopback-only anonymous server or environment-secret plus in-memory Store would not satisfy the accepted V1 contract.
+
 ## Agent Action Authoring
 
 - Status: shipped Portable Agent Actions V1
