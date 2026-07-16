@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -8,6 +7,11 @@ import {
 import { Compile } from "typebox/compile";
 
 import { compileAgentDefinition } from "./compile-agent-definition";
+import {
+  type AgentProjectArtifactDependencyInput,
+  type AgentProjectArtifactSourceInput,
+  createAgentProjectArtifact
+} from "./create-agent-project-artifact";
 import { loadAuthoredModule } from "./load-authored-module";
 import { normalizeAgentDefinition } from "../../internal/authored-definition/normalize-agent-definition";
 import { qualifyProjectMcpToolName } from "../../internal/project-mcp-tool-name";
@@ -21,7 +25,7 @@ import {
 } from "../discover/discover-agent-project";
 
 import type {
-  AgentProjectSnapshot,
+  CompiledAgentProjectSnapshot,
   CompiledMcpConnection,
   CompiledProjectTool
 } from "../../runtime/agent/agent-project-snapshot";
@@ -30,30 +34,41 @@ import type { AgentProjectDiagnostic } from "../../shared/agent-project";
 
 export async function loadAgentProject(
   agentRoot: string
-): Promise<AgentProjectSnapshot> {
+): Promise<CompiledAgentProjectSnapshot> {
   return _compileAgentProject(await discoverAgentProject(agentRoot));
 }
 
 async function _compileAgentProject(
   discovered: DiscoveredAgentProject
-): Promise<AgentProjectSnapshot> {
+): Promise<CompiledAgentProjectSnapshot> {
   const diagnostics = [...discovered.diagnostics];
-  const hash = createHash("sha256");
+  const dependencies: AgentProjectArtifactDependencyInput[] = [];
+  const sources: AgentProjectArtifactSourceInput[] = [];
   const definition = await _compileDefinition(
     discovered.definition,
     diagnostics,
-    hash
+    dependencies,
+    discovered.root,
+    sources
   );
   const instructions = await _compileInstructions(
     discovered.instructions,
     diagnostics,
-    hash
+    sources
   );
-  const tools = await _compileTools(discovered.tools, diagnostics, hash);
+  const tools = await _compileTools(
+    discovered.tools,
+    diagnostics,
+    dependencies,
+    discovered.root,
+    sources
+  );
   const connections = await _compileConnections(
     discovered.connections,
     diagnostics,
-    hash,
+    dependencies,
+    discovered.root,
+    sources,
     new Map(
       tools.map(tool => [
         tool.name,
@@ -61,8 +76,18 @@ async function _compileAgentProject(
       ])
     )
   );
-  const skills = await _compileSkills(discovered, diagnostics, hash);
+  const skills = await _compileSkills(discovered, diagnostics, sources);
+  const artifact = createAgentProjectArtifact({
+    connections,
+    definition,
+    dependencies,
+    instructions,
+    skills,
+    sources,
+    tools
+  });
   return createImmutableAgentProjectSnapshot({
+    artifact,
     root: discovered.root,
     definition,
     instructions,
@@ -70,24 +95,27 @@ async function _compileAgentProject(
     connections,
     resources: { skills },
     diagnostics,
-    fingerprint: hash.digest("hex")
+    fingerprint: artifact.fingerprint
   });
 }
 
 async function _compileDefinition(
   sourceRef: AgentProjectSourceRef | undefined,
   diagnostics: AgentProjectDiagnostic[],
-  hash: ReturnType<typeof createHash>
+  dependencies: AgentProjectArtifactDependencyInput[],
+  projectRoot: string,
+  sources: AgentProjectArtifactSourceInput[]
 ): Promise<CompiledAgentDefinition | undefined> {
   if (!sourceRef) { return undefined; }
   let authored: unknown;
   try {
     const loaded = await loadAuthoredModule({
+      projectRoot,
       sourcePath: sourceRef.absolutePath,
       authoredSdk: true
     });
-    hash.update(sourceRef.absolutePath);
-    hash.update(loaded.fingerprint);
+    _recordDependencies(dependencies, sourceRef.logicalPath, loaded.dependencies);
+    sources.push({ id: sourceRef.logicalPath, content: loaded.source });
     authored = loaded.default;
   } catch (error) {
     diagnostics.push({
@@ -119,13 +147,12 @@ async function _compileDefinition(
 async function _compileInstructions(
   sourceRef: AgentProjectSourceRef | undefined,
   diagnostics: AgentProjectDiagnostic[],
-  hash: ReturnType<typeof createHash>
+  sources: AgentProjectArtifactSourceInput[]
 ): Promise<string> {
   if (!sourceRef) { return ""; }
   try {
     const instructions = await readFile(sourceRef.absolutePath, "utf8");
-    hash.update(sourceRef.absolutePath);
-    hash.update(instructions);
+    sources.push({ id: sourceRef.logicalPath, content: instructions });
     return instructions;
   } catch (error) {
     diagnostics.push({
@@ -141,18 +168,25 @@ async function _compileInstructions(
 async function _compileTools(
   sourceRefs: readonly AgentProjectSourceRef[],
   diagnostics: AgentProjectDiagnostic[],
-  hash: ReturnType<typeof createHash>
+  dependencies: AgentProjectArtifactDependencyInput[],
+  projectRoot: string,
+  sources: AgentProjectArtifactSourceInput[]
 ): Promise<CompiledProjectTool[]> {
   const tools: CompiledProjectTool[] = [];
   const names = new Map<string, string>();
   for (const sourceRef of sourceRefs) {
     try {
       const loaded = await loadAuthoredModule({
+        projectRoot,
         sourcePath: sourceRef.absolutePath,
         authoredSdk: true
       });
-      hash.update(sourceRef.absolutePath);
-      hash.update(loaded.fingerprint);
+      _recordDependencies(
+        dependencies,
+        sourceRef.logicalPath,
+        loaded.dependencies
+      );
+      sources.push({ id: sourceRef.logicalPath, content: loaded.source });
       const definition = loaded.default;
       if (!isToolDefinition(definition)) {
         diagnostics.push({
@@ -202,6 +236,7 @@ async function _compileTools(
         label: name,
         description: definition.description,
         parameters: definition.inputSchema,
+        outputSchema: definition.outputSchema,
         sourcePath: sourceRef.logicalPath,
         async execute(toolCallId, input, signal) {
           if (!inputValidator.Check(input)) {
@@ -237,7 +272,9 @@ async function _compileTools(
 async function _compileConnections(
   sourceRefs: readonly AgentProjectSourceRef[],
   diagnostics: AgentProjectDiagnostic[],
-  hash: ReturnType<typeof createHash>,
+  dependencies: AgentProjectArtifactDependencyInput[],
+  projectRoot: string,
+  sources: AgentProjectArtifactSourceInput[],
   occupiedToolNames: Map<string, string>
 ): Promise<CompiledMcpConnection[]> {
   const connections: CompiledMcpConnection[] = [];
@@ -269,11 +306,16 @@ async function _compileConnections(
     connectionNames.set(name, sourceRef.absolutePath);
     try {
       const loaded = await loadAuthoredModule({
+        projectRoot,
         sourcePath: sourceRef.absolutePath,
         authoredSdk: true
       });
-      hash.update(sourceRef.absolutePath);
-      hash.update(loaded.fingerprint);
+      _recordDependencies(
+        dependencies,
+        sourceRef.logicalPath,
+        loaded.dependencies
+      );
+      sources.push({ id: sourceRef.logicalPath, content: loaded.source });
       const definition = loaded.default;
       if (!isMcpClientConnectionDefinition(definition)) {
         diagnostics.push({
@@ -333,7 +375,7 @@ async function _compileConnections(
 async function _compileSkills(
   discovered: DiscoveredAgentProject,
   diagnostics: AgentProjectDiagnostic[],
-  hash: ReturnType<typeof createHash>
+  sources: AgentProjectArtifactSourceInput[]
 ) {
   if (!discovered.skillsRoot) { return []; }
   const env = new NodeExecutionEnv({ cwd: discovered.root });
@@ -348,8 +390,10 @@ async function _compileSkills(
       });
     }
     for (const skill of loaded.skills) {
-      hash.update(skill.filePath);
-      hash.update(skill.content);
+      sources.push({
+        id: _logicalSkillPath(discovered.root, skill.filePath),
+        content: skill.content
+      });
     }
     return loaded.skills;
   } catch (error) {
@@ -362,6 +406,30 @@ async function _compileSkills(
     return [];
   } finally {
     await env.cleanup();
+  }
+}
+
+function _logicalSkillPath(root: string, filePath: string): string {
+  const relative = path.relative(root, filePath);
+  return relative && !relative.startsWith(`..${path.sep}`)
+    ? relative.split(path.sep).join(path.posix.sep)
+    : path.posix.join(
+      "skills",
+      path.basename(path.dirname(filePath)),
+      path.basename(filePath)
+    );
+}
+
+function _recordDependencies(
+  target: AgentProjectArtifactDependencyInput[],
+  sourceId: string,
+  dependencies: readonly AgentProjectArtifactDependencyInput[]
+): void {
+  for (const dependency of dependencies) {
+    target.push({
+      id: `${sourceId} -> ${dependency.id}`,
+      fingerprint: dependency.fingerprint
+    });
   }
 }
 

@@ -1,8 +1,8 @@
 import type { AgentProjectSnapshot } from "./agent-project-snapshot";
 
-export function createImmutableAgentProjectSnapshot(
-  snapshot: AgentProjectSnapshot
-): AgentProjectSnapshot {
+export function createImmutableAgentProjectSnapshot<
+  TSnapshot extends AgentProjectSnapshot
+>(snapshot: TSnapshot): TSnapshot {
   return _immutablePlainDataCopy(
     snapshot,
     "AgentProjectSnapshot",

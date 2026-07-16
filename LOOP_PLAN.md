@@ -48,7 +48,7 @@ Runtime architecture follows [ADR 0001](./docs/adr/0001-runtime-harness-over-pi-
   - Boundary: control-plane recovery and replay only; no retry of in-flight provider/tool effects, idempotency protocol, exactly-once claim, distributed lease service, Local Server endpoint, or canonical observability Trace.
   - Metric: safe recovery/replay correctness across restart, cursor, duplicate-resume, and injected-interruption fixtures.
 
-- [ ] **05 — Inspectable compiled Agent artifact V1**
+- [x] **05 — Inspectable compiled Agent artifact V1**
   - Depends on: 04.
   - Run: `$kaizen-loop Build an immutable, inspectable, deterministic Agent Project artifact.`
   - Done when: canonical projects build into artifacts containing source, dependency, capability, schema, runtime, and environment-requirement fingerprints.

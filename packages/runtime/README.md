@@ -15,9 +15,9 @@ The runtime owns three boundaries:
   diagnostics and manifest types, execution-mode types, and pure comparison
   helpers.
 - `@llm-space/runtime/node` is the Bun/Node host contract. It exports local
-  project discovery/compilation, `AgentRuntime`, `AgentSession`, the
-  `PreparedAgentTool` host contract, and `LocalAgentRuntime`. It does not
-  re-export the root entrypoint.
+  project discovery/compilation, the inspectable compiled artifact descriptor,
+  `AgentRuntime`, `AgentSession`, the `PreparedAgentTool` host contract, and
+  `LocalAgentRuntime`. It does not re-export the root entrypoint.
 - `@llm-space/runtime/harness` is the cross-environment Host contract for
   durable Runtime Run state. It exports the Run state machine, Session Store
   interface, typed conflicts, and an in-memory reference adapter.
@@ -54,6 +54,26 @@ Definitions progress through explicit representations:
 ```text
 AgentDefinition -> CompiledAgentDefinition -> resolved runtime model
 ```
+
+`loadAgentProject()` returns an immutable compiled snapshot with a versioned
+plain-data `artifact` descriptor. The descriptor derives its overall identity
+from six independently inspectable SHA-256 sections:
+
+- portable source files by logical path;
+- authored bundled dependencies, separate from their entry source;
+- compiled Agent, instruction, tool, connection, and skill capabilities;
+- local tool input/output schemas;
+- the exact Bun compiler, resolved runtime dependencies, and production runtime
+  source build;
+- the minimum Bun environment requirement.
+
+Entries and object keys use code-point ordering before hashing, so repeated
+builds and equivalent project copies at different absolute paths produce the
+same descriptor. The legacy snapshot `fingerprint` is the descriptor's overall
+fingerprint. The descriptor contains only logical IDs and fingerprints: it
+does not contain resolved connection credentials, callback results, Sessions,
+Thread history, or Eval results. Executable callbacks remain in the trusted
+in-memory snapshot and resolve credentials only during Host activation.
 
 Prepared tools similarly keep Pi's internal deferred-result marker inside the
 execution layer. Hosts provide typed executable/deferred tools and observe

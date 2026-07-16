@@ -34,8 +34,9 @@ bun test apps/example-agent
 The test loads this exact project through `@llm-space/runtime`, resolves the
 model/reasoning defaults from `agent.ts`, discovers the `weather-brief` skill,
 compiles the source-owned `fixture__remote_echo` allowlist without connecting,
-and verifies that `get-weather({ city: "Shanghai" })` returns structured,
-JSON-compatible weather data.
+verifies all six inspectable compiled-artifact fingerprint sections, and checks
+that `get-weather({ city: "Shanghai" })` returns structured, JSON-compatible
+weather data.
 
 This project is example code for local development. It does not provide live
 weather data, sandbox tool execution, or production deployment guarantees.

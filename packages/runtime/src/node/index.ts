@@ -1,5 +1,13 @@
 export {
+  AGENT_PROJECT_ARTIFACT_SCHEMA_VERSION,
+  type AgentProjectArtifact,
+  type AgentProjectArtifactFingerprintEntry,
+  type AgentProjectArtifactFingerprints,
+  type AgentProjectArtifactFingerprintSection
+} from "../runtime/agent/agent-project-artifact";
+export {
   type AgentProjectSnapshot,
+  type CompiledAgentProjectSnapshot,
   type CompiledMcpConnection,
   type CompiledProjectTool
 } from "../runtime/agent/agent-project-snapshot";
