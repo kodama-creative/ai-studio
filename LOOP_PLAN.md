@@ -68,6 +68,7 @@ Runtime architecture follows [ADR 0001](./docs/adr/0001-runtime-harness-over-pi-
   - Done when: Studio exposes Desktop-direct, Desktop-sandbox, and Local-Server profiles, explains capability differences, and opens Server runs in the same Trace inspector.
   - Boundary: no remote fleet or cloud deployment management UI.
   - Metric: equivalent fixture outcome and trace lineage across Desktop and Local Server profiles.
+  - Blocker (2026-07-17): current contracts do not decide whether profile authority is immutable per Thread, where Desktop-owned continuation secrets live, how Server Session/Run lineage persists without creating a second Runtime Run authority, or how the not-yet-shipped sandbox profile is represented. Human approval is required before product-code changes.
 
 - [ ] **08 — OCI deployment V1**
   - Depends on: 06.

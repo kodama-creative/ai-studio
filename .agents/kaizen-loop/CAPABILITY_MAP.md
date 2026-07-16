@@ -1,7 +1,7 @@
 # LLM Space Capability Map
 
-- Last updated: 2026-07-16
-- Map status: refreshed after roadmap item 04 added safe-boundary recovery and ordered scoped Run Journal replay. Fresh Hosts can reconstruct idle/safe-wait Sessions, claim one same-Run resume through CAS, and project immutable control-plane events after an exclusive validated cursor; persisted in-flight model/tool work becomes terminal `outcomeUnknown` and is never replayed automatically. Standalone, Trace-workbench compatibility, and Agent Project Threads continue to use Pi `Agent` for provider/ReAct/tool/abort/continuation lifecycle. Public or dynamically loaded plugins remain absent.
+- Last updated: 2026-07-17
+- Map status: refreshed for roadmap item 07 discovery. Local Server execution and Desktop Run History inspection are confirmed, but Studio has no Runtime Profile model or sandbox implementation. Connecting them requires explicit Thread/Server authority, continuation-secret custody, lineage persistence, and artifact-drift decisions before product code changes.
 - Evidence rule: entries marked `confirmed` cite current rendered-product or current-code evidence. Entries marked `stale` rely on previous logs or code paths not fully re-inspected in this loop. Entries marked `unknown` need a future product-surface check before they can drive a recommendation.
 
 ## First-Run Model Setup
@@ -207,6 +207,21 @@
 - Boundary: one Bun deployment loads one compiled Agent artifact and serves many principal-owned isolated Runtime Sessions through fail-closed authenticated HTTP/SSE, Runtime-owned Session/Run IDs, Channel-owned continuation credentials, ordered Pi plus terminal events, explicit abort, restart recovery, and authorized exclusive-cursor reconnect. Server source/configuration remains Host-owned and immutable for the process lifetime.
 - Explicit non-goals: anonymous production fallback, vendor Channel adapters, hosted identity/OAuth, attachments or caller model overrides, remote agents, schedules, multi-project loading, distributed storage, OCI/container/cloud control plane, sandbox claims, exactly-once effects, canonical Trace, or Studio Runtime Profile UI.
 - Visible gaps: Studio has no Local Server Runtime Profile or shared Trace handoff; OCI packaging, vendor Channel normalization/delivery, approval/attachment semantics, richer authenticators, external-effect idempotency, distributed storage, and sandboxing remain later roadmap items.
+
+## Studio Runtime Profiles And Server Trace Handoff
+
+- Status: blocked before V1 implementation
+- Freshness: confirmed
+- Last checked: 2026-07-17
+- Evidence:
+  - Current Electrobun CEF at 1280×800 shows Agent Project Threads exposing Agent/model provenance, Run controls, editable prompt/messages, and the existing Run History inspector, but no execution-location or Runtime Profile control. The renderer has no application console errors or document overflow in the inspected states.
+  - `ThreadTabPane` and the Agent Project Thread pane inject only the Desktop RPC transport. `ThreadRuntimeSession` begins and settles a Desktop-owned Runtime Run before/after transport, while the Local Server creates its own authoritative Session and Run IDs; naively swapping transports would create two Runtime Run authorities.
+  - The current Run History `RunTraceView` already inspects normal persisted `RunSnapshot` records. The experimental Traces sidebar is a separate Langfuse import/sync workbench and is not the item-07 handoff target; canonical cross-host instrumentation remains roadmap item 32.
+  - Local Server V1 accepts one text input into a Server-owned transcript, freezes artifact/model authority, and stores only continuation hashes. An editable Desktop Thread cannot switch an existing transcript into that authority without a declared migration/switch rule and Desktop custody for the raw continuation credential.
+  - No Desktop sandbox profile or Pi `ExecutionEnv` sandbox provider exists. The original roadmap defers the actual sandbox/workspace/attachment implementation; required sandbox unavailability must never silently fall back to direct host execution.
+- Boundary: item 07 may select and explain execution location, launch/connect one protected local Server per Agent artifact, project authorized Pi events into the existing Thread/Run History experience, and preserve non-secret Server Session/Run lineage. It must not invent canonical Trace item 32, remote fleet operations, cloud deployment UI, or a fake sandbox.
+- Explicit non-goals: remote Server URL/token management, production fleet lifecycle, cloud control plane, sandbox implementation, raw provider payload retention, caller-supplied Server history/configuration, or copying secrets into Agent source, Thread JSON, Run snapshots, Trace data, or analytics.
+- Visible gaps: human decisions are required for per-Thread profile immutability and switching, raw continuation-secret storage, stable local principal/restart behavior, Server lineage schema, artifact-source drift, and the unavailable Desktop-sandbox presentation.
 
 ## Agent Action Authoring
 
