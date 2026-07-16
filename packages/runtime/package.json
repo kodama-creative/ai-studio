@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./connections": "./src/public/connections/index.ts",
+    "./harness": "./src/runtime/harness/index.ts",
     "./node": "./src/node/index.ts",
     "./tools": "./src/public/tools/index.ts",
     "./package.json": "./package.json"

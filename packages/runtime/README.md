@@ -18,6 +18,9 @@ The runtime owns three boundaries:
   project discovery/compilation, `AgentRuntime`, `AgentSession`, the
   `PreparedAgentTool` host contract, and `LocalAgentRuntime`. It does not
   re-export the root entrypoint.
+- `@llm-space/runtime/harness` is the cross-environment Host contract for
+  durable Runtime Run state. It exports the Run state machine, Session Store
+  interface, typed conflicts, and an in-memory reference adapter.
 - `@llm-space/runtime/tools` is the authored local-action contract. It exports
   `defineTool()` and the bounded `ToolContext`.
 - `@llm-space/runtime/connections` is the authored remote-action contract. It
@@ -36,6 +39,7 @@ node/discover/               non-executing source discovery and diagnostics
 node/compiler/               trusted Bun compilation and normalization
 runtime/agent/               immutable Agent snapshot and model preparation
 runtime/sessions/            stateful Agent session interface and lifecycle
+runtime/harness/             durable Run state and transactional Session Store
 execution/                   Pi tool policy, deferred state, and event projection
 ```
 
@@ -167,3 +171,47 @@ integration that preserves settled manual continuation.
 Execution modes are `manual`, `autoOnce`, and `react`. Manual deferred tool
 results remain internal control messages and are exposed as pending calls until
 the host supplies real results and calls `continue()`.
+
+## Runtime Harness state
+
+The Host-facing durable seam is deliberately separate from live Pi execution:
+
+```ts
+import { InMemorySessionStore } from "@llm-space/runtime/harness";
+
+const store = new InMemorySessionStore();
+const stored = await store.commit({
+  sessionId: "session-one",
+  expectedVersion: null,
+  mutations: [{
+    type: "startRun",
+    runId: "run-one",
+    configuration: {
+      id: "config-one",
+      agentSnapshotFingerprint: "agent-fingerprint",
+      contextFingerprint: "context-fingerprint",
+      executionMode: "manual",
+      model: { provider: "openai", id: "gpt-5.3-codex" },
+      toolConfigurationFingerprint: "tools-fingerprint",
+    },
+  }],
+});
+
+await store.commit({
+  sessionId: "session-one",
+  expectedVersion: stored.version,
+  mutations: [{
+    type: "transitionRun",
+    runId: "run-one",
+    to: "runningTools",
+  }],
+});
+```
+
+One commit atomically advances the versioned Session snapshot, preserves any
+new immutable Run Configuration Snapshot, and appends ordered Run Journal
+entries. Expected versions provide compare-and-swap protection: stale or
+simultaneous writers cannot silently overwrite each other. Runtime Run state
+persists across model, tool, and durable-wait boundaries; terminal states never
+transition again. Desktop and Server adapters are intentionally later roadmap
+work.

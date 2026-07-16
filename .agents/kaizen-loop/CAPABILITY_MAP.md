@@ -1,7 +1,7 @@
 # LLM Space Capability Map
 
 - Last updated: 2026-07-16
-- Map status: refreshed after roadmap item 01's existing Pi Agent-backed Runtime Harness V0 passed its complete current acceptance matrix. Workspace and explicitly opened Agents share one Build + Project Threads product and one runtime session core; Pi `Agent` owns the official provider/ReAct/tool/abort/continuation lifecycle, while LLM Space owns settled manual policy, Thread persistence, and event projection. `AgentHarness` is intentionally not the session core because it cannot settle and later resume an external tool result without a new user message. Public or dynamically loaded plugins remain absent.
+- Map status: refreshed after roadmap item 02 added explicit durable Runtime Run state and a transactional Host-neutral Session Store seam. Workspace and explicitly opened Agents share one Build + Project Threads product and one runtime session core; Pi `Agent` owns the official provider/ReAct/tool/abort/continuation lifecycle, while LLM Space owns settled manual policy, Runtime Run state, Session Store coordination, Thread persistence, and event projection. `AgentHarness` is intentionally not the session core because it cannot settle and later resume an external tool result without a new user message. Public or dynamically loaded plugins remain absent.
 - Evidence rule: entries marked `confirmed` cite current rendered-product or current-code evidence. Entries marked `stale` rely on previous logs or code paths not fully re-inspected in this loop. Entries marked `unknown` need a future product-surface check before they can drive a recommendation.
 
 ## First-Run Model Setup
@@ -150,7 +150,7 @@
 
 ## Agent Definition And Runtime
 
-- Status: shipped Agent Definition And Runtime V1
+- Status: shipped Agent Definition And Runtime V1 plus Runtime Harness state foundation
 - Freshness: confirmed
 - Last checked: 2026-07-16
 - Evidence:
@@ -165,9 +165,10 @@
   - Current CEF audit `audits/2026-07-14-005810-agent-navigation-editor/` shows one Agent Build surface for both default-directory and explicitly opened projects, with source editing and desktop-owned nested Threads behind the same typed runtime/RPC boundary.
   - Roadmap item 01 audited installed `@earendil-works/pi-agent-core@0.80.3`, npm `0.80.7` at `818d674`, and upstream main at `5e336cf`. Harness can only model manual work by keeping the whole run busy on an unresolved tool Promise; it cannot provide LLM Space's settled manual/reload contract. The accepted session boundary therefore uses official Pi `Agent.continue()` under LLM Space `AgentSession`, removes the runtime snapshot's `AgentHarnessResources` dependency, and passes the 14/14 focused runtime/Desktop behavior matrix.
   - Fresh item-01 acceptance on 2026-07-16 passed 14/14 focused Runtime Harness fixtures, 136/136 repository tests, all five TypeScript projects, focused and repository-wide lint, a browser-target runtime bundle, and the renderer-only Vite build. Pi upstream moved only for an unrelated Windows terminal-title fix; npm latest remains `0.80.7`.
-- Boundary: a filesystem-authored Agent must define static model/reasoning defaults in `agent.ts`, plus instructions, TypeScript/JavaScript tools, and skills. Runtime snapshots are immutable; sessions may persistently override model/reasoning, and Desktop Project Threads execute/debug that same runtime while retaining editable messages and run history.
-- Explicit non-goals: dynamic model resolvers, automatic compaction/session budgets, database/cloud persistence, crash-safe tool replay, distributed workflow durability, channels, schedules, sandbox provisioning, subagents, public plugin SDK, dynamic third-party loading, or separate Desktop Builder/Target Agent model.
-- Visible gaps: isolated CEF could not prove a live external provider completion; deterministic Bun integration covers the runtime branch instead. Trusted project tools remain unsandboxed. Pi has no native durable pause-before-tool state, so settled manual mode remains an LLM Space-owned deferred-result policy over Pi `Agent`. Pi-native compaction/tree navigation and automatic session budgets remain future capabilities with separate roadmap boundaries.
+  - Roadmap item 02 exposes `@llm-space/runtime/harness` as a browser-safe Host seam. Its nine-state Runtime Run matrix, one-active-Run branch rule, immutable configuration identity, versioned Session snapshot, ordered journal, atomic rollback, and stale/simultaneous CAS rejection pass 7 focused tests with 106 assertions and the 143-test repository suite.
+- Boundary: a filesystem-authored Agent must define static model/reasoning defaults in `agent.ts`, plus instructions, TypeScript/JavaScript tools, and skills. Runtime snapshots are immutable; sessions may persistently override model/reasoning, and Desktop Project Threads execute/debug that same runtime while retaining editable messages and run history. Host implementations can also use the separate Runtime Harness seam to keep one stable Runtime Run identity across model, tool, and durable-wait states while atomically recording immutable configuration and ordered state history.
+- Explicit non-goals: dynamic model resolvers, automatic compaction/session budgets, Desktop or Server Session Store migration, filesystem/database/cloud persistence adapters, recovery/event replay, external-effect retry or exactly-once claims, distributed workflow durability, channels, schedules, sandbox provisioning, subagents, public plugin SDK, dynamic third-party loading, or separate Desktop Builder/Target Agent model.
+- Visible gaps: Desktop Threads do not yet use the Session Store seam; the reference adapter is intentionally process-local and in-memory; recovery, authorized cursor replay, and interrupted-operation handling remain later roadmap capabilities. Isolated CEF could not prove a live external provider completion; deterministic Bun integration covers the runtime branch instead. Trusted project tools remain unsandboxed. Pi has no native durable pause-before-tool state, so settled manual mode remains an LLM Space-owned deferred-result policy over Pi `Agent`.
 
 ## Agent Action Authoring
 
