@@ -12,7 +12,6 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import {
-  convertFromPiMessages,
   type ModelConfig,
   normalizeThread,
   type ProjectTool,
@@ -40,7 +39,6 @@ import {
   type ResolvedAgentProjectManifest
 } from "@llm-space/runtime/node";
 
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Models } from "@earendil-works/pi-ai";
 
 import { agentDefinitionFingerprint } from "./agent-definition-fingerprint";
@@ -677,24 +675,7 @@ export class ExternalAgentProjectManager {
       loaded.runtime = new AgentRuntime({ models, project: loaded.snapshot });
       loaded.models = models;
     }
-    const callerPersistence = options.persistence;
-    return loaded.runtime.createSession({
-      ...options,
-      ...(options.id
-        ? {
-          persistence: {
-            replaceMessages: async (messages: AgentMessage[]) => {
-              await this._replaceRuntimeMessages(
-                projectId,
-                options.id!,
-                messages
-              );
-              await callerPersistence?.replaceMessages(messages);
-            }
-          }
-        }
-        : {})
-    });
+    return loaded.runtime.createSession(options);
   }
 
   async refresh(projectId: string): Promise<ExternalAgentProjectView> {
@@ -1016,27 +997,6 @@ export class ExternalAgentProjectManager {
       await _atomicJsonWrite(this._threadFile(projectId, threadId), migrated);
     }
     return migrated;
-  }
-
-  private async _replaceRuntimeMessages(
-    projectId: string,
-    threadId: string,
-    messages: AgentMessage[]
-  ): Promise<void> {
-    const record = await this._readThreadFile(projectId, threadId);
-    await this._writeThreadFile(projectId, threadId, {
-      ...record,
-      thread: {
-        ...record.thread,
-        context: {
-          ...record.thread.context,
-          messages: convertFromPiMessages(
-            messages,
-            record.thread.context?.messages
-          )
-        }
-      }
-    });
   }
 
   private async _markToolCallAttempt(

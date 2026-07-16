@@ -33,6 +33,15 @@ export type RuntimeRunJournalEntry =
     readonly type: "runStarted";
   }
   | {
+    readonly continuationFingerprint: string;
+    readonly order: number;
+    readonly runId: string;
+    readonly sequence: number;
+    readonly sessionVersion: number;
+    readonly state: Exclude<RuntimeRunState, "runningModel" | "runningTools">;
+    readonly type: "runCheckpointRecorded";
+  }
+  | {
     readonly from: RuntimeRunState;
     readonly runId: string;
     readonly sequence: number;
@@ -53,6 +62,11 @@ export type RuntimeSessionMutation =
     readonly configuration: RuntimeRunConfigurationSnapshot;
     readonly runId: string;
     readonly type: "startRun";
+  }
+  | {
+    readonly continuationFingerprint: string;
+    readonly runId: string;
+    readonly type: "recordCheckpoint";
   }
   | {
     readonly runId: string;

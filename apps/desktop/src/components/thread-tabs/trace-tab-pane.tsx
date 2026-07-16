@@ -9,13 +9,19 @@ import type { Thread } from "@llm-space/core";
 
 import { createRpcTransport, traceClient } from "@/client";
 import { ThreadPlayground } from "@/components/thread-playground";
+import { getRuntimeExecutionMode } from "@/components/thread-playground/stores";
 import { Tooltip } from "@/components/tooltip";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 import type { TraceRecord } from "@/shared/traces";
 
-const rpcTransport = createRpcTransport();
+const RPC_TRANSPORT = createRpcTransport({
+  runtime: () => ({
+    type: "desktopThread",
+    executionMode: getRuntimeExecutionMode()
+  })
+});
 
 interface TraceTabPaneProps {
   readonly projectId: string;
@@ -83,6 +89,11 @@ const _TraceTabPane = function TraceTabPane({
     [flushPending]
   );
 
+  const persistSettledThread = useCallback(async (next: Thread) => {
+    pending.current = next;
+    await flushPending();
+  }, [flushPending]);
+
   const handleRenameTitle = useCallback(
     async (title: string): Promise<boolean> => {
       await flushPending();
@@ -147,8 +158,10 @@ const _TraceTabPane = function TraceTabPane({
         onChange={handleChange}
         onRenameTitle={handleRenameTitle}
         path={`trace/${projectId}/${traceKey}/workbench.json`}
+        persistSettledThread={persistSettledThread}
+        runtimeOwnsToolLoop
         title={trace?.title ?? traceKey}
-        transport={rpcTransport}
+        transport={RPC_TRANSPORT}
         validateTitle={_validateTraceTitle}
       />
     </div>

@@ -1,6 +1,7 @@
 import {
   InMemorySessionStore,
   RUNTIME_RUN_STATES,
+  RUNTIME_SESSION_SCHEMA_VERSION,
   type RuntimeRunConfigurationSnapshot,
   type RuntimeRunSnapshot,
   type RuntimeRunState,
@@ -64,6 +65,127 @@ describe("Runtime Run state machine", () => {
 });
 
 describe("InMemorySessionStore", () => {
+  test("hydrates a persisted safe-boundary Session without replaying mutations", async () => {
+    const original = new InMemorySessionStore();
+    const started = await original.commit({
+      sessionId: "session-hydrated",
+      expectedVersion: null,
+      mutations: [
+        {
+          type: "startRun",
+          runId: "run-hydrated",
+          configuration: _configuration("config-hydrated")
+        },
+        {
+          type: "transitionRun",
+          runId: "run-hydrated",
+          to: "runningTools"
+        },
+        {
+          type: "transitionRun",
+          runId: "run-hydrated",
+          to: "waitingForContinue"
+        }
+      ]
+    });
+
+    const hydrated = new InMemorySessionStore([started]);
+    expect(await hydrated.load("session-hydrated")).toEqual(started);
+    const resumed = await hydrated.commit({
+      sessionId: "session-hydrated",
+      expectedVersion: started.version,
+      mutations: [
+        {
+          type: "transitionRun",
+          runId: "run-hydrated",
+          to: "runningModel"
+        }
+      ]
+    });
+
+    expect(resumed.snapshot.activeRunId).toBe("run-hydrated");
+    expect(resumed.snapshot.runs.at(-1)?.state).toBe("runningModel");
+    expect(resumed.journal).toHaveLength(started.journal.length + 1);
+  });
+
+  test("keeps checkpoint order and continuation identity in the Session Store", async () => {
+    const store = new InMemorySessionStore();
+    const waiting = await store.commit({
+      sessionId: "session-checkpoints",
+      expectedVersion: null,
+      mutations: [
+        {
+          type: "startRun",
+          runId: "run-checkpoints",
+          configuration: _configuration("config-checkpoints")
+        },
+        { type: "transitionRun", runId: "run-checkpoints", to: "runningTools" },
+        {
+          type: "transitionRun",
+          runId: "run-checkpoints",
+          to: "waitingForToolResults"
+        },
+        {
+          type: "recordCheckpoint",
+          runId: "run-checkpoints",
+          continuationFingerprint: "continuation-one"
+        }
+      ]
+    });
+    const resumed = await store.commit({
+      sessionId: "session-checkpoints",
+      expectedVersion: waiting.version,
+      mutations: [
+        {
+          type: "transitionRun",
+          runId: "run-checkpoints",
+          to: "waitingForContinue"
+        },
+        {
+          type: "transitionRun",
+          runId: "run-checkpoints",
+          to: "runningModel"
+        },
+        { type: "transitionRun", runId: "run-checkpoints", to: "completed" },
+        {
+          type: "recordCheckpoint",
+          runId: "run-checkpoints",
+          continuationFingerprint: "continuation-two"
+        }
+      ]
+    });
+
+    expect(waiting.snapshot.runs[0]?.checkpoint).toEqual({
+      order: 1,
+      state: "waitingForToolResults",
+      continuationFingerprint: "continuation-one"
+    });
+    expect(resumed.snapshot.runs[0]?.checkpoint).toEqual({
+      order: 2,
+      state: "completed",
+      continuationFingerprint: "continuation-two"
+    });
+    expect(resumed.journal.filter(entry =>
+      entry.type === "runCheckpointRecorded")).toHaveLength(2);
+  });
+
+  test("rejects malformed persisted Sessions instead of silently dropping them", () => {
+    expect(() =>
+      new InMemorySessionStore([
+        {
+          version: 1,
+          snapshot: {
+            schemaVersion: RUNTIME_SESSION_SCHEMA_VERSION,
+            id: "session-invalid",
+            activeRunId: "missing-run",
+            runs: []
+          },
+          configurations: [],
+          journal: []
+        }
+      ])).toThrow(SessionStoreInvariantError);
+  });
+
   test("keeps one Run identity through model, tool, wait, and completion states", async () => {
     const store: SessionStore = new InMemorySessionStore();
     const created = await store.commit({

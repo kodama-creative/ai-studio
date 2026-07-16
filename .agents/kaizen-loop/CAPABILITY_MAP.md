@@ -1,7 +1,7 @@
 # LLM Space Capability Map
 
 - Last updated: 2026-07-16
-- Map status: refreshed after roadmap item 02 added explicit durable Runtime Run state and a transactional Host-neutral Session Store seam. Workspace and explicitly opened Agents share one Build + Project Threads product and one runtime session core; Pi `Agent` owns the official provider/ReAct/tool/abort/continuation lifecycle, while LLM Space owns settled manual policy, Runtime Run state, Session Store coordination, Thread persistence, and event projection. `AgentHarness` is intentionally not the session core because it cannot settle and later resume an external tool result without a new user message. Public or dynamically loaded plugins remain absent.
+- Map status: refreshed after roadmap item 03 moved Desktop Thread settled-step debugging onto the Runtime Harness. Standalone, Trace-workbench compatibility, and Agent Project Threads now use Pi `Agent` for provider/ReAct/tool/abort/continuation lifecycle; LLM Space owns settled manual policy, Runtime Run state, Thread-backed Session Store coordination, sole renderer-side transcript persistence, and event projection. `AgentHarness` is intentionally not the session core because it cannot settle and later resume an external tool result without a new user message. Public or dynamically loaded plugins remain absent.
 - Evidence rule: entries marked `confirmed` cite current rendered-product or current-code evidence. Entries marked `stale` rely on previous logs or code paths not fully re-inspected in this loop. Entries marked `unknown` need a future product-surface check before they can drive a recommendation.
 
 ## First-Run Model Setup
@@ -118,15 +118,16 @@
 
 ## Run And Streaming
 
-- Status: shipped core loop
+- Status: shipped core loop on the Desktop Runtime Harness
 - Freshness: confirmed
-- Last checked: 2026-07-04
+- Last checked: 2026-07-16
 - Evidence:
   - Current screenshots `03-example-thread-opened.png` and `06-restored-run-message-view.png` show `Run` enabled once a fallback model exists.
   - Current discovery screenshot `audits/2026-07-04-110944-core-capability-discovery/03-general-agent-open.png` shows the General Agent example ready to run with model, messages, and tool definitions.
   - `apps/desktop/src/components/thread-playground/stores/thread-store.ts` streams through `streamThread()`, folds reducer events into messages, and records completed runs.
   - `apps/desktop/src/components/thread-tabs/thread-tab-pane.tsx` wires a single Electrobun RPC transport into the active thread.
-- Boundary: one thread can run against its selected or fallback model, stream assistant/tool output, abort, and persist completed state.
+- Roadmap item 03 focused fixtures prove standalone and Agent Project manual, auto-once, and ReAct execution through Pi `AgentSession`; full validation passed 158 tests, all five TypeScript projects, repository lint, the browser-safe harness bundle, and renderer-only Vite build.
+- Boundary: one thread can run against its selected or fallback model, stream assistant/tool output, abort, and durably persist Runtime Run starts plus settled checkpoints through its Thread-owned Session Store record.
 - Explicit non-goals: batch runs, scheduled runs, provider health validation.
 - Visible gaps: live-provider continuation after a real paid/provider tool-call turn still needs a bounded smoke check; the global run control remains generic while the message-level continuation flow is specialized.
 
@@ -150,7 +151,7 @@
 
 ## Agent Definition And Runtime
 
-- Status: shipped Agent Definition And Runtime V1 plus Runtime Harness state foundation
+- Status: shipped Agent Definition And Runtime V1 plus Desktop Runtime Harness integration
 - Freshness: confirmed
 - Last checked: 2026-07-16
 - Evidence:
@@ -166,9 +167,10 @@
   - Roadmap item 01 audited installed `@earendil-works/pi-agent-core@0.80.3`, npm `0.80.7` at `818d674`, and upstream main at `5e336cf`. Harness can only model manual work by keeping the whole run busy on an unresolved tool Promise; it cannot provide LLM Space's settled manual/reload contract. The accepted session boundary therefore uses official Pi `Agent.continue()` under LLM Space `AgentSession`, removes the runtime snapshot's `AgentHarnessResources` dependency, and passes the 14/14 focused runtime/Desktop behavior matrix.
   - Fresh item-01 acceptance on 2026-07-16 passed 14/14 focused Runtime Harness fixtures, 136/136 repository tests, all five TypeScript projects, focused and repository-wide lint, a browser-target runtime bundle, and the renderer-only Vite build. Pi upstream moved only for an unrelated Windows terminal-title fix; npm latest remains `0.80.7`.
   - Roadmap item 02 exposes `@llm-space/runtime/harness` as a browser-safe Host seam. Its nine-state Runtime Run matrix, one-active-Run branch rule, immutable configuration identity, versioned Session snapshot, ordered journal, atomic rollback, and stale/simultaneous CAS rejection pass 7 focused tests with 106 assertions and the 143-test repository suite.
-- Boundary: a filesystem-authored Agent must define static model/reasoning defaults in `agent.ts`, plus instructions, TypeScript/JavaScript tools, and skills. Runtime snapshots are immutable; sessions may persistently override model/reasoning, and Desktop Project Threads execute/debug that same runtime while retaining editable messages and run history. Host implementations can also use the separate Runtime Harness seam to keep one stable Runtime Run identity across model, tool, and durable-wait states while atomically recording immutable configuration and ordered state history.
-- Explicit non-goals: dynamic model resolvers, automatic compaction/session budgets, Desktop or Server Session Store migration, filesystem/database/cloud persistence adapters, recovery/event replay, external-effect retry or exactly-once claims, distributed workflow durability, channels, schedules, sandbox provisioning, subagents, public plugin SDK, dynamic third-party loading, or separate Desktop Builder/Target Agent model.
-- Visible gaps: Desktop Threads do not yet use the Session Store seam; the reference adapter is intentionally process-local and in-memory; recovery, authorized cursor replay, and interrupted-operation handling remain later roadmap capabilities. Isolated CEF could not prove a live external provider completion; deterministic Bun integration covers the runtime branch instead. Trusted project tools remain unsandboxed. Pi has no native durable pause-before-tool state, so settled manual mode remains an LLM Space-owned deferred-result policy over Pi `Agent`.
+  - Roadmap item 03 stores the validated Session Store record inside each Desktop Thread, keeps one Runtime Run identity across settled manual reload/continue without a synthetic user message, atomically supersedes configuration/context branches, and groups immutable checkpoints under the current Session-authoritative state. Agent Project Bun-side transcript writes were removed, and standalone execution now uses Pi `AgentSession` for all three execution modes.
+- Boundary: a filesystem-authored Agent must define static model/reasoning defaults in `agent.ts`, plus instructions, TypeScript/JavaScript tools, and skills. Runtime snapshots are immutable; sessions may persistently override model/reasoning, and Desktop standalone plus Project Threads execute/debug through the same Runtime Harness while retaining editable messages and grouped checkpoint history. Each Desktop Thread is its Session Store and sole durable transcript owner.
+- Explicit non-goals: dynamic model resolvers, automatic compaction/session budgets, Server Session Store migration, filesystem/database/cloud persistence adapters, recovery/event replay, external-effect retry or exactly-once claims, distributed workflow durability, channels, schedules, sandbox provisioning, subagents, public plugin SDK, dynamic third-party loading, or separate Desktop Builder/Target Agent model.
+- Visible gaps: recovery, authorized cursor replay, interrupted-operation handling, and a Server adapter remain later roadmap capabilities. Isolated CEF did not execute a paid live provider; deterministic Pi/Session Store fixtures cover runtime behavior. Trusted project tools remain unsandboxed. Pi has no native durable pause-before-tool state, so settled manual mode remains an LLM Space-owned deferred-result policy over Pi `Agent`.
 
 ## Agent Action Authoring
 
@@ -275,7 +277,8 @@
   - Current `apps/desktop/src/components/thread-playground/stores/run-mode.ts` preserves explicit user preferences for manual calls, one-step auto-run, and the full ReAct loop. `tool-call-list-item.tsx` still provides the visible per-call play action and editable/error result path.
   - Fresh CEF Thread inspection on 2026-07-14 showed the current Tools row and run controls render without document overflow; no live provider tool turn was attempted in this discovery loop.
   - Fresh non-UI Runtime Harness verification on 2026-07-16 passed settled manual reload and exact-result continuation without a synthetic user message, auto-once, complete ReAct tool execution, dangerous/deferred tool boundaries, persistence-before-terminal-event ordering, abort settlement, and Desktop Agent Project streaming fixtures.
-- Boundary: ordinary Threads and Agent Project Threads can receive model tool calls, run visible executable tools manually, edit/mark tool results, continue after all results are ready, or opt into automatic one-step/ReAct behavior. Agent Project runtime sessions own the Pi loop and deferred state; Desktop Thread data remains the durable transcript.
+- Roadmap item 03 confirms incomplete results block only same-Run continuation; execution-affecting edits may atomically supersede and branch from an earlier boundary without fabricating results for the old Run.
+- Boundary: ordinary Threads and Agent Project Threads can receive model tool calls, run visible executable tools manually, edit/mark tool results, continue after all results are ready, or opt into automatic one-step/ReAct behavior. Pi `AgentSession` owns the loop and deferred state for both surfaces; the Desktop Thread remains the sole durable transcript and Session Store authority.
 - Explicit non-goals: no per-tool permission policy, durable approve/deny state, sandbox, background tool queue, crash-safe side-effect replay, or multi-agent orchestration.
 - Visible gaps: tool safety is a global/manual-vs-auto execution choice rather than authored per-tool policy; trusted project tools remain unsandboxed; error marking is a compact result toggle rather than a dedicated denial record; live paid-provider continuation remains unaudited.
 
@@ -380,15 +383,16 @@
 
 ## Debug Timeline
 
-- Status: shipped V1 with inspection entry points
+- Status: shipped V1 with Runtime Run grouping
 - Freshness: confirmed
-- Last checked: 2026-07-03
+- Last checked: 2026-07-16
 - Evidence:
   - Current screenshot `04-trace-fixture-run-history.png` shows two durable run snapshots listed in the Run history panel.
   - Current screenshot `06-restored-run-message-view.png` shows restoring a run displays assistant thinking and tool call outputs in the main message editor.
   - Implementation audit screenshot `audits/2026-07-03-225143-trace-inspector-v1/02-run-history-open.png` shows run-history rows with compare, inspect, and restore actions visible inside the right panel at 1280x800.
   - `apps/desktop/src/components/thread-playground/run-history-list-view.tsx` renders run history, inspect controls, restore controls, removal, comparison selection, and saved evaluation cards.
-- Boundary: recent completed runs are recorded per thread, listed in the Run history panel, inspectable without mutation, and restorable into the editor when the user intentionally wants an editable snapshot.
+- Current item-03 CEF audit `audits/2026-07-16-134144-desktop-runtime-harness/` shows two settled checkpoints grouped under one stable Runtime Run, keyboard inspection and comparison preserved, Session-authoritative `Superseded` status, no horizontal overflow at 1280×800, and no application console errors.
+- Boundary: settled checkpoints are recorded per Thread and grouped under their stable Runtime Run with current lifecycle state sourced from the Session Store; each checkpoint remains independently inspectable, comparable, removable, and intentionally restorable into the editor.
 - Explicit non-goals: full raw trace event persistence, step-through trace inspector, global run database.
 - Visible gaps: restore still intentionally mutates the working thread; raw event timing and step-through playback remain out of scope.
 

@@ -118,6 +118,9 @@ export interface ThreadPlaygroundProps {
   /** Stamp runtime provenance into the durable run snapshot. */
   readonly prepareRunSnapshot?: (thread: Thread) => Thread;
 
+  /** Immediately persist Runtime Run starts and settled boundaries. */
+  readonly persistSettledThread?: (thread: Thread) => Promise<void>;
+
   /** Override local skill discovery for project-backed Threads. */
   readonly loadPromptSkills?: PromptSkillsLoader;
 
@@ -165,6 +168,7 @@ const _ThreadPlayground = function ThreadPlayground({
   runtimeOwnsToolLoop,
   preserveSavedModel,
   prepareRunSnapshot,
+  persistSettledThread,
   loadPromptSkills,
   externalUpdate,
   onChange,
@@ -198,12 +202,12 @@ const _ThreadPlayground = function ThreadPlayground({
           )),
       getAutoRunTools,
       getReactLoop,
-      executeTool: toolExecutor,
       loadPromptSkills: loadPromptSkills
         ? async () =>
           (loadPromptSkillsRef.current ?? listEnabledPromptVariableSkills)()
         : undefined,
       runtimeOwnsToolLoop,
+      persistSettledThread,
       prepareRunSnapshot: thread =>
         prepareRunSnapshotRef.current?.(thread) ?? thread
     }));

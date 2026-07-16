@@ -36,10 +36,7 @@ import {
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { useModels } from "@/components/model-provider";
 import { ThreadPlayground } from "@/components/thread-playground";
-import {
-  getAutoRunTools,
-  getReactLoop
-} from "@/components/thread-playground/stores/run-mode";
+import { getRuntimeExecutionMode } from "@/components/thread-playground/stores/run-mode";
 import { Button } from "@/components/ui/button";
 import { electrobun } from "@/lib/electrobun";
 import { cn } from "@/lib/utils";
@@ -133,11 +130,7 @@ const _ProjectThreadPane = function ProjectThreadPane({
           modelSource:
             recordRef.current?.thread.agentRuntime?.modelSource
             ?? "threadOverride",
-          executionMode: getReactLoop()
-            ? "react"
-            : getAutoRunTools()
-              ? "autoOnce"
-              : "manual"
+          executionMode: getRuntimeExecutionMode()
         }),
         onRuntimeResolved: runtime => {
           activeRunProvenance.current = runtime;
@@ -265,6 +258,14 @@ const _ProjectThreadPane = function ProjectThreadPane({
       writeTimer.current = setTimeout(() => void flush(), 500);
     },
     [flush, project, projectId]
+  );
+
+  const persistSettledThread = useCallback(
+    async (thread: Thread) => {
+      handleChange(thread);
+      await flush();
+    },
+    [flush, handleChange]
   );
 
   const handleRename = useCallback(
@@ -578,6 +579,7 @@ const _ProjectThreadPane = function ProjectThreadPane({
         onStreamingEnd={handleStreamingEnd}
         onStreamingStart={handleStreamingStart}
         path={`project/${projectId}/${threadId}.json`}
+        persistSettledThread={persistSettledThread}
         prepareRunSnapshot={prepareRunSnapshot}
         preserveSavedModel
         runDisabled={

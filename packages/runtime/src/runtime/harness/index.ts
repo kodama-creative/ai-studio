@@ -2,6 +2,7 @@ export { InMemorySessionStore } from "./in-memory-session-store";
 export {
   isTerminalRuntimeRunState,
   RUNTIME_RUN_STATES,
+  type RuntimeRunCheckpointSnapshot,
   type RuntimeRunSnapshot,
   type RuntimeRunState,
   RuntimeRunTransitionError,

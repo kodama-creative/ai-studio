@@ -16,8 +16,30 @@ import {
   type StoredRuntimeSession
 } from "./session-store";
 
+const CHECKPOINT_STATES = new Set([
+  "waitingForToolResults",
+  "waitingForContinue",
+  "completed",
+  "failed",
+  "cancelled",
+  "superseded",
+  "outcomeUnknown"
+]);
+
 export class InMemorySessionStore implements SessionStore {
   private readonly _sessions = new Map<string, StoredRuntimeSession>();
+
+  constructor(initialSessions: readonly StoredRuntimeSession[] = []) {
+    for (const session of initialSessions) {
+      _assertStoredSession(session);
+      if (this._sessions.has(session.snapshot.id)) {
+        throw new SessionStoreInvariantError(
+          `Session ${session.snapshot.id} was hydrated more than once`
+        );
+      }
+      this._sessions.set(session.snapshot.id, _snapshot(session));
+    }
+  }
 
   async load(sessionId: string): Promise<StoredRuntimeSession | null> {
     _assertId("Session", sessionId);
@@ -107,7 +129,11 @@ function _applyMutation({
     });
     return;
   }
-  _transitionRun({ journal, mutation, sessionVersion, snapshot });
+  if (mutation.type === "transitionRun") {
+    _transitionRun({ journal, mutation, sessionVersion, snapshot });
+    return;
+  }
+  _recordCheckpoint({ journal, mutation, sessionVersion, snapshot });
 }
 
 function _startRun({
@@ -210,6 +236,54 @@ function _transitionRun({
   });
 }
 
+function _recordCheckpoint({
+  journal,
+  mutation,
+  sessionVersion,
+  snapshot
+}: {
+  journal: RuntimeRunJournalEntry[];
+  mutation: Extract<RuntimeSessionMutation, { type: "recordCheckpoint"; }>;
+  sessionVersion: number;
+  snapshot: RuntimeSessionSnapshot;
+}): void {
+  _assertId("Runtime Run", mutation.runId);
+  _assertId("Continuation fingerprint", mutation.continuationFingerprint);
+  const runIndex = snapshot.runs.findIndex(run => run.id === mutation.runId);
+  const run = snapshot.runs[runIndex];
+  if (!run) {
+    throw new SessionStoreInvariantError(
+      `Runtime Run ${mutation.runId} does not exist in Session ${snapshot.id}`
+    );
+  }
+  if (run.state === "runningModel" || run.state === "runningTools") {
+    throw new SessionStoreInvariantError(
+      `Runtime Run ${run.id} cannot record a checkpoint while ${run.state}`
+    );
+  }
+  if (run.checkpoint?.state === run.state) {
+    throw new SessionStoreInvariantError(
+      `Runtime Run ${run.id} already recorded its ${run.state} checkpoint`
+    );
+  }
+  const checkpoint = {
+    order: (run.checkpoint?.order ?? 0) + 1,
+    state: run.state,
+    continuationFingerprint: mutation.continuationFingerprint
+  };
+  (snapshot.runs as RuntimeRunSnapshot[])[runIndex] = {
+    ...run,
+    checkpoint
+  };
+  journal.push({
+    type: "runCheckpointRecorded",
+    sequence: journal.length + 1,
+    sessionVersion,
+    runId: run.id,
+    ...checkpoint
+  });
+}
+
 function _assertConfiguration(
   configuration: RuntimeRunConfigurationSnapshot
 ): void {
@@ -255,6 +329,127 @@ function _sameConfiguration(
     && left.reasoning === right.reasoning
     && left.toolConfigurationFingerprint === right.toolConfigurationFingerprint
   );
+}
+
+function _assertStoredSession(session: StoredRuntimeSession): void {
+  if (!Number.isSafeInteger(session.version) || session.version < 1) {
+    throw new SessionStoreInvariantError(
+      "Stored Session version must be a positive safe integer"
+    );
+  }
+  if (session.snapshot.schemaVersion !== RUNTIME_SESSION_SCHEMA_VERSION) {
+    throw new SessionStoreInvariantError(
+      `Unsupported Runtime Session schema version: ${String(session.snapshot.schemaVersion)}`
+    );
+  }
+  _assertId("Session", session.snapshot.id);
+
+  const configurations = new Map<string, RuntimeRunConfigurationSnapshot>();
+  for (const configuration of session.configurations) {
+    _assertConfiguration(configuration);
+    if (configurations.has(configuration.id)) {
+      throw new SessionStoreInvariantError(
+        `Run Configuration Snapshot ${configuration.id} is duplicated`
+      );
+    }
+    configurations.set(configuration.id, configuration);
+  }
+
+  const runIds = new Set<string>();
+  let activeRunCount = 0;
+  for (const run of session.snapshot.runs) {
+    _assertId("Runtime Run", run.id);
+    if (run.sessionId !== session.snapshot.id) {
+      throw new SessionStoreInvariantError(
+        `Runtime Run ${run.id} belongs to Session ${run.sessionId}, not ${session.snapshot.id}`
+      );
+    }
+    if (runIds.has(run.id)) {
+      throw new SessionStoreInvariantError(
+        `Runtime Run ${run.id} is duplicated in Session ${session.snapshot.id}`
+      );
+    }
+    if (!configurations.has(run.configurationId)) {
+      throw new SessionStoreInvariantError(
+        `Runtime Run ${run.id} references missing configuration ${run.configurationId}`
+      );
+    }
+    runIds.add(run.id);
+    if (run.checkpoint) {
+      _assertId(
+        "Continuation fingerprint",
+        run.checkpoint.continuationFingerprint
+      );
+      if (
+        !Number.isSafeInteger(run.checkpoint.order)
+        || run.checkpoint.order < 1
+        || !CHECKPOINT_STATES.has(run.checkpoint.state)
+      ) {
+        throw new SessionStoreInvariantError(
+          `Runtime Run ${run.id} has an invalid checkpoint`
+        );
+      }
+    }
+    if (!isTerminalRuntimeRunState(run.state)) {
+      activeRunCount += 1;
+      if (session.snapshot.activeRunId !== run.id) {
+        throw new SessionStoreInvariantError(
+          `Non-terminal Runtime Run ${run.id} must be the active Run`
+        );
+      }
+    }
+  }
+  if (activeRunCount > 1) {
+    throw new SessionStoreInvariantError(
+      `Session ${session.snapshot.id} has more than one active Runtime Run`
+    );
+  }
+  if (
+    session.snapshot.activeRunId !== null
+    && !runIds.has(session.snapshot.activeRunId)
+  ) {
+    throw new SessionStoreInvariantError(
+      `Session ${session.snapshot.id} references missing active Runtime Run ${session.snapshot.activeRunId}`
+    );
+  }
+  if (
+    (session.snapshot.activeRunId === null && activeRunCount !== 0)
+    || (session.snapshot.activeRunId !== null && activeRunCount !== 1)
+  ) {
+    throw new SessionStoreInvariantError(
+      `Session ${session.snapshot.id} active Runtime Run invariant is invalid`
+    );
+  }
+
+  for (const [index, entry] of session.journal.entries()) {
+    if (entry.sequence !== index + 1) {
+      throw new SessionStoreInvariantError(
+        `Run Journal sequence must be contiguous at ${index + 1}`
+      );
+    }
+    if (
+      !Number.isSafeInteger(entry.sessionVersion)
+      || entry.sessionVersion < 1
+      || entry.sessionVersion > session.version
+    ) {
+      throw new SessionStoreInvariantError(
+        `Run Journal entry ${entry.sequence} has an invalid Session version`
+      );
+    }
+    if (!runIds.has(entry.runId)) {
+      throw new SessionStoreInvariantError(
+        `Run Journal entry ${entry.sequence} references missing Runtime Run ${entry.runId}`
+      );
+    }
+    if (
+      entry.type === "runStarted"
+      && !configurations.has(entry.configurationId)
+    ) {
+      throw new SessionStoreInvariantError(
+        `Run Journal entry ${entry.sequence} references missing configuration ${entry.configurationId}`
+      );
+    }
+  }
 }
 
 function _snapshot<T>(value: T): T {

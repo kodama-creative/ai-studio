@@ -150,6 +150,28 @@ const THREAD_FIELDS = {
 export const ThreadSnapshot = Type.Object(THREAD_FIELDS);
 export type ThreadSnapshot = Static<typeof ThreadSnapshot>;
 
+export const ThreadRuntimeRunState = Type.Union([
+  Type.Literal("runningModel"),
+  Type.Literal("runningTools"),
+  Type.Literal("waitingForToolResults"),
+  Type.Literal("waitingForContinue"),
+  Type.Literal("completed"),
+  Type.Literal("failed"),
+  Type.Literal("cancelled"),
+  Type.Literal("superseded"),
+  Type.Literal("outcomeUnknown")
+]);
+export type ThreadRuntimeRunState = Static<typeof ThreadRuntimeRunState>;
+
+/** Runtime Harness identity attached to one settled debugging checkpoint. */
+export const ThreadRuntimeCheckpoint = Type.Object({
+  runId: Type.String(),
+  state: ThreadRuntimeRunState,
+  checkpointOrder: Type.Integer({ minimum: 1 }),
+  continuationFingerprint: Type.String()
+});
+export type ThreadRuntimeCheckpoint = Static<typeof ThreadRuntimeCheckpoint>;
+
 /**
  * A completed run in a thread's durable debug timeline.
  */
@@ -172,6 +194,9 @@ export const ThreadRunSnapshot = Type.Object({
    * summing the snapshot when they need a best-effort display for old files.
    */
   usage: Type.Optional(ModelUsage),
+
+  /** Stable Runtime Run grouping and settled-boundary identity. */
+  runtime: Type.Optional(ThreadRuntimeCheckpoint),
 
   /**
    * Epoch milliseconds (`Date.now()`) when the run completed.
@@ -332,7 +357,14 @@ export const Thread = Type.Object({
   evaluations: Type.Optional(Type.Array(ThreadEvaluation)),
 
   /** Reusable manual evaluation rubrics owned by this thread. */
-  evaluationRubrics: Type.Optional(Type.Array(ThreadEvaluationRubric))
+  evaluationRubrics: Type.Optional(Type.Array(ThreadEvaluationRubric)),
+
+  /**
+   * Host-owned Runtime Harness Session Store record. Core intentionally keeps
+   * this opaque so browser-safe Thread types do not depend on the runtime
+   * package; Desktop validates it through `@llm-space/runtime/harness`.
+   */
+  runtimeSession: Type.Optional(Type.Unknown())
 });
 export type Thread = Static<typeof Thread>;
 

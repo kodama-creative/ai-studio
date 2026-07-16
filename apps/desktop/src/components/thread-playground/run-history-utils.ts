@@ -2,8 +2,57 @@ import {
   type AssistantMessage,
   getMessageText,
   type Message,
+  type ThreadRuntimeRunState,
   type ThreadSnapshot
 } from "@llm-space/core";
+
+import type { RunSnapshot } from "@llm-space/core/thread";
+
+export interface RuntimeRunGroup {
+  readonly id: string;
+  readonly runs: readonly RunSnapshot[];
+  readonly runtimeRunId: string | null;
+  readonly state: ThreadRuntimeRunState | null;
+}
+
+/** Group newest-first settled checkpoints under their stable Runtime Run. */
+export function groupRuntimeRunCheckpoints(
+  runs: readonly RunSnapshot[],
+  currentStates: ReadonlyMap<string, ThreadRuntimeRunState> = new Map()
+): RuntimeRunGroup[] {
+  const groups: RuntimeRunGroup[] = [];
+  const indexByRuntimeRunId = new Map<string, number>();
+  for (const run of runs) {
+    const runtime = run.runtime;
+    const runtimeRunId = runtime?.runId;
+    if (!runtimeRunId) {
+      groups.push({
+        id: `legacy-${run.id}`,
+        runs: [run],
+        runtimeRunId: null,
+        state: null
+      });
+      continue;
+    }
+    const existingIndex = indexByRuntimeRunId.get(runtimeRunId);
+    if (existingIndex === undefined) {
+      indexByRuntimeRunId.set(runtimeRunId, groups.length);
+      groups.push({
+        id: runtimeRunId,
+        runs: [run],
+        runtimeRunId,
+        state: currentStates.get(runtimeRunId) ?? runtime.state
+      });
+      continue;
+    }
+    const existing = groups[existingIndex];
+    if (!existing) {
+      throw new Error(`Missing Runtime Run group ${runtimeRunId}`);
+    }
+    groups[existingIndex] = { ...existing, runs: [...existing.runs, run] };
+  }
+  return groups;
+}
 
 /**
  * A short summary of a run's resulting thread, derived from its last message.

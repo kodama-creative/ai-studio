@@ -32,7 +32,7 @@ afterEach(async () => {
 });
 
 describe("StreamThreadController Agent Project runtime", () => {
-  test("streams a complete Pi Agent ReAct run from the immutable project runtime", async () => {
+  test("streams a complete Pi Agent ReAct run without Bun-side transcript persistence", async () => {
     const { models, manager, opened, threadId } = await _fixture({
       instructions: "Use echo.\n",
       projectTool: true
@@ -91,16 +91,7 @@ describe("StreamThreadController Agent Project runtime", () => {
     expect(events).toContain("tool_execution_end");
     expect(events.at(-1)).toBe("done");
     const persisted = await manager.readThread(opened.id, threadId);
-    expect(
-      persisted.thread.context?.messages?.map(message => message.role)
-    ).toEqual(["user", "assistant", "assistant"]);
-    expect(
-      persisted.thread.context?.messages?.[1]?.role === "assistant"
-        ? persisted.thread.context.messages[1].toolCalls?.[0]?.output
-        : undefined
-    ).toMatchObject({
-      content: [{ type: "text", text: "hello" }]
-    });
+    expect(persisted.thread.context?.messages ?? []).toEqual([]);
   });
 
   test("leaves a dangerous bash call pending in the runtime ReAct loop", async () => {
@@ -175,7 +166,7 @@ describe("StreamThreadController Agent Project runtime", () => {
     ).toBeUndefined();
   });
 
-  test("persists an MCP-declared error as a failed tool result", async () => {
+  test("projects an MCP-declared error as a failed tool result", async () => {
     const toolName = "mcp__server__fail";
     const { models, manager, opened, threadId } = await _fixture({
       instructions: "Use MCP.\n",
@@ -239,14 +230,78 @@ describe("StreamThreadController Agent Project runtime", () => {
     );
 
     expect(toolResultIsError).toBe(true);
-    const persisted = await manager.readThread(opened.id, threadId);
-    const assistant = persisted.thread.context?.messages?.[1];
-    expect(
-      assistant?.role === "assistant"
-        ? assistant.toolCalls?.[0]?.output?.isError
-        : undefined
-    ).toBe(true);
   });
+});
+
+describe("StreamThreadController standalone Runtime Harness", () => {
+  test.each([
+    ["manual", 0, 1],
+    ["autoOnce", 1, 1],
+    ["react", 1, 2]
+  ] as const)(
+    "uses Pi Agent ownership for %s execution",
+    async (executionMode, expectedExecutions, expectedAssistantStarts) => {
+      const models = _models();
+      let executions = 0;
+      let assistantStarts = 0;
+      const controller = new StreamThreadController(
+        _modelManager(models),
+        { capture: () => undefined } as never,
+        undefined,
+        undefined,
+        {
+          call: async () => {
+            executions += 1;
+            return Promise.resolve({ contentText: "hello", isError: false });
+          }
+        } as never
+      );
+      const tool: BuiltinTool = {
+        type: "builtin",
+        name: "echo",
+        description: "Echo text.",
+        parameters: {
+          type: "object",
+          properties: { text: { type: "string" } },
+          required: ["text"]
+        }
+      };
+
+      await controller.run(
+        {
+          streamId: `standalone-${executionMode}`,
+          runtime: { type: "desktopThread", executionMode },
+          request: {
+            model: { provider: "fake", id: "fake-model" },
+            context: {
+              systemPrompt: "Use echo.",
+              messages: [
+                {
+                  role: "user",
+                  content: [{ type: "text", text: "hello" }],
+                  timestamp: Date.now()
+                }
+              ],
+              tools: [tool],
+              sourceTools: [tool]
+            }
+          }
+        },
+        message => {
+          if (
+            message.type === "event"
+            && message.event.type === "message_start"
+            && message.event.message.role === "assistant"
+          ) {
+            assistantStarts += 1;
+          }
+        }
+      );
+
+      expect(executions).toBe(expectedExecutions);
+      expect(assistantStarts).toBe(expectedAssistantStarts);
+    }
+  );
 });
 
 async function _fixture({

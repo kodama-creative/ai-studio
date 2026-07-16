@@ -12,11 +12,18 @@ export const RUNTIME_RUN_STATES = [
 
 export type RuntimeRunState = typeof RUNTIME_RUN_STATES[number];
 
+export interface RuntimeRunCheckpointSnapshot {
+  readonly continuationFingerprint: string;
+  readonly order: number;
+  readonly state: Exclude<RuntimeRunState, "runningModel" | "runningTools">;
+}
+
 export interface RuntimeRunSnapshot {
   readonly id: string;
   readonly sessionId: string;
   readonly configurationId: string;
   readonly state: RuntimeRunState;
+  readonly checkpoint?: RuntimeRunCheckpointSnapshot;
 }
 
 const LEGAL_TRANSITIONS: Readonly<

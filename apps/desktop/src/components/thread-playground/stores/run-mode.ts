@@ -1,5 +1,7 @@
 import { useSyncExternalStore } from "react";
 
+import type { RuntimeExecutionMode } from "@llm-space/runtime";
+
 /**
  * Persisted run-mode preferences. App-level and shared across every thread tab
  * (not persisted into a thread), so a single source of truth lives here rather
@@ -63,6 +65,19 @@ export function setReactLoop(value: boolean): void {
  */
 export function getEffectiveAutoRunTools(): boolean {
   return getReactLoop() || getAutoRunTools();
+}
+
+/** Resolve the Runtime Harness execution policy from the two UI preferences. */
+export function resolveRuntimeExecutionMode(
+  autoRunTools: boolean,
+  reactLoop: boolean
+): RuntimeExecutionMode {
+  return reactLoop ? "react" : autoRunTools ? "autoOnce" : "manual";
+}
+
+/** Read the current Runtime Harness execution policy. */
+export function getRuntimeExecutionMode(): RuntimeExecutionMode {
+  return resolveRuntimeExecutionMode(getAutoRunTools(), getReactLoop());
 }
 
 function _subscribe(listener: () => void): () => void {

@@ -204,6 +204,42 @@ describe("run history persistence", () => {
     expect(next[0]?.id).toBe("run-1");
     expect(next.at(-1)?.id).toBe("run-latest");
   });
+
+  test("keeps Runtime checkpoint identity while de-nesting Session metadata", () => {
+    const runtimeSession = { version: 1, opaque: true };
+    const next = recordRun(
+      [],
+      {
+        agentRuntime: {
+          projectId: "project-one",
+          snapshot: "snapshot-one",
+          definitionFingerprint: "definition-one",
+          modelSource: "agent"
+        },
+        runtimeSession
+      },
+      100,
+      {
+        id: "checkpoint-one",
+        runtime: {
+          runId: "runtime-run-one",
+          state: "waitingForContinue",
+          checkpointOrder: 1,
+          continuationFingerprint: "fingerprint-one"
+        }
+      }
+    );
+    const thread = withRunMetadata(
+      { runtimeSession, runHistory: next },
+      { runHistory: next }
+    );
+
+    expect(next[0]?.runtime?.runId).toBe("runtime-run-one");
+    expect(next[0]?.thread.agentRuntime?.snapshot).toBe("snapshot-one");
+    expect(next[0]?.thread).not.toHaveProperty("runtimeSession");
+    expect(thread.runtimeSession).toBe(runtimeSession);
+    expect(thread.runHistory?.[0]?.thread).not.toHaveProperty("runtimeSession");
+  });
 });
 
 describe("structured evaluation persistence", () => {

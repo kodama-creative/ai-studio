@@ -4,6 +4,7 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   EyeIcon,
+  GitBranchIcon,
   GitCompareArrowsIcon,
   RotateCcwIcon,
   Trash2Icon,
@@ -20,6 +21,7 @@ import {
 } from "react";
 import { format } from "timeago.js";
 
+import type { ThreadRuntimeRunState } from "@llm-space/core";
 import type {
   EvaluationRecord,
   RunSnapshot
@@ -34,12 +36,17 @@ import {
   preferredEvaluationRubricId
 } from "./run-evaluation-utils";
 import {
+  groupRuntimeRunCheckpoints,
   runMessageCountLabel,
   runModelLabel,
   summarizeRun
 } from "./run-history-utils";
 import { RunTraceView } from "./run-trace-view";
-import { useThreadStore, useThreadStoreActions } from "./stores";
+import {
+  runtimeRunStates,
+  useThreadStore,
+  useThreadStoreActions
+} from "./stores";
 import { useAutoAnimation } from "../../lib/use-auto-animation";
 import { ConfirmDialog } from "../confirm-dialog";
 import { Tooltip } from "../tooltip";
@@ -54,11 +61,24 @@ const VERDICT_LABELS: Record<EvaluationRecord["verdict"], string> = {
   fail: "Fail"
 };
 
+const RUNTIME_STATE_LABELS: Record<ThreadRuntimeRunState, string> = {
+  runningModel: "Running model",
+  runningTools: "Running tools",
+  waitingForToolResults: "Waiting for tool results",
+  waitingForContinue: "Waiting to continue",
+  completed: "Completed",
+  failed: "Failed",
+  cancelled: "Cancelled",
+  superseded: "Superseded",
+  outcomeUnknown: "Outcome unknown"
+};
+
 const _RunHistoryListView = function RunHistoryListView({ onClose }: { readonly onClose: () => void; }) {
   const [containerRef] = useAutoAnimation();
   const runHistory = useThreadStore(s => s.runHistory);
   const evaluations = useThreadStore(s => s.evaluations);
   const evaluationRubrics = useThreadStore(s => s.evaluationRubrics);
+  const persistedRuntimeSession = useThreadStore(s => s.thread.runtimeSession);
   const {
     restoreThread,
     removeRun,
@@ -75,6 +95,14 @@ const _RunHistoryListView = function RunHistoryListView({ onClose }: { readonly 
   const [evaluationPendingRemoval, setEvaluationPendingRemoval] =
     useState<EvaluationRecord | null>(null);
   const runs = useMemo(() => runHistory.slice().reverse(), [runHistory]);
+  const currentRuntimeRunStates = useMemo(
+    () => runtimeRunStates(persistedRuntimeSession),
+    [persistedRuntimeSession]
+  );
+  const runGroups = useMemo(
+    () => groupRuntimeRunCheckpoints(runs, currentRuntimeRunStates),
+    [currentRuntimeRunStates, runs]
+  );
   const inspectingRunIndex = useMemo(() => {
     if (!inspectingRunId) {
       return -1;
@@ -264,7 +292,7 @@ const _RunHistoryListView = function RunHistoryListView({ onClose }: { readonly 
         className="min-h-0 grow overflow-y-auto px-3 py-3.5"
         ref={containerRef}
       >
-        <ItemGroup className="gap-3.5!">
+        <div className="flex flex-col gap-3.5">
           {runs.length === 0
             ? (
               <div className="text-muted-foreground m-auto text-xs">
@@ -272,20 +300,54 @@ const _RunHistoryListView = function RunHistoryListView({ onClose }: { readonly 
               </div>
             )
             : (
-              runs.map((run, index) => (
-                <RunHistoryItem
-                  key={run.id}
-                  newest={index === 0}
-                  onInspectRun={inspectRunFromHistory}
-                  onRequestRemove={setRunPendingRemoval}
-                  onRestore={handleRestoreRun}
-                  onToggleSelected={toggleRunSelection}
-                  run={run}
-                  selected={selectedRunIds.includes(run.id)}
-                />
+              runGroups.map(group => (
+                <section
+                  aria-label={group.runtimeRunId
+                    ? `Runtime Run ${group.runtimeRunId}`
+                    : "Legacy run checkpoint"}
+                  className="flex flex-col gap-2"
+                  key={group.id}
+                >
+                  {group.runtimeRunId && group.state
+                    ? (
+                      <div className="text-muted-foreground flex min-w-0 items-center gap-1.5 px-1 text-[0.625rem]">
+                        <GitBranchIcon className="size-3 shrink-0" />
+                        <span
+                          className="text-foreground/80 truncate font-medium"
+                          title={group.runtimeRunId}
+                        >
+                          Run {group.runtimeRunId.replace(/^run-/, "").slice(0, 8)}
+                        </span>
+                        <span aria-hidden>·</span>
+                        <span className="truncate">
+                          {RUNTIME_STATE_LABELS[group.state]}
+                        </span>
+                        <span className="ml-auto shrink-0 tabular-nums">
+                          {group.runs.length} {group.runs.length === 1
+                            ? "checkpoint"
+                            : "checkpoints"}
+                        </span>
+                      </div>
+                    )
+                    : null}
+                  <ItemGroup className="gap-2!">
+                    {group.runs.map(run => (
+                      <RunHistoryItem
+                        key={run.id}
+                        newest={run.id === runs[0]?.id}
+                        onInspectRun={inspectRunFromHistory}
+                        onRequestRemove={setRunPendingRemoval}
+                        onRestore={handleRestoreRun}
+                        onToggleSelected={toggleRunSelection}
+                        run={run}
+                        selected={selectedRunIds.includes(run.id)}
+                      />
+                    ))}
+                  </ItemGroup>
+                </section>
               ))
             )}
-        </ItemGroup>
+        </div>
         {evaluations.length > 0 && (
           <_EvaluationList
             evaluations={evaluations}

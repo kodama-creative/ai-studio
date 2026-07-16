@@ -10,6 +10,8 @@ import type {
   ThreadEvaluationRubricSnapshot,
   ThreadEvaluationRunScores,
   ThreadRunSnapshot,
+  ThreadRuntimeCheckpoint,
+  ThreadRuntimeRunState,
   ThreadSnapshot
 } from "../types";
 
@@ -74,6 +76,9 @@ export function snapshotThread(thread: Thread): ThreadSnapshot {
   if (thread.model !== undefined) {
     snapshot.model = thread.model;
   }
+  if (thread.agentRuntime !== undefined) {
+    snapshot.agentRuntime = thread.agentRuntime;
+  }
   if (thread.context !== undefined) {
     snapshot.context = thread.context;
   }
@@ -108,12 +113,14 @@ export function normalizeRunHistory(
       && isModelUsage(run.usage)
         ? run.usage
         : undefined;
+    const runtime = _normalizeRuntimeCheckpoint(run.runtime);
     return [
       {
         id,
         timestamp: run.timestamp,
         thread: snapshotThread(run.thread),
-        ...(usage ? { usage } : {})
+        ...(usage ? { usage } : {}),
+        ...(runtime ? { runtime } : {})
       }
     ];
   });
@@ -523,6 +530,9 @@ export function withRunMetadata(
   const normalizedEvaluations = normalizeEvaluations(evaluations, normalized);
   const normalizedRubrics = normalizeEvaluationRubrics(evaluationRubrics);
   const next: Thread = snapshotThread(thread);
+  if (thread.runtimeSession !== undefined) {
+    next.runtimeSession = thread.runtimeSession;
+  }
   if (normalized.length > 0) {
     next.runHistory = normalized;
   }
@@ -544,7 +554,11 @@ export function recordRun(
   runHistory: RunSnapshot[],
   thread: Thread,
   timestamp: number = Date.now(),
-  options: { id?: string; usage?: ModelUsage | null; } = {}
+  options: {
+    id?: string;
+    runtime?: ThreadRuntimeCheckpoint;
+    usage?: ModelUsage | null;
+  } = {}
 ): RunSnapshot[] {
   const usage = options.usage ?? emptyModelUsage();
   const next = [
@@ -553,12 +567,54 @@ export function recordRun(
       id: options.id ?? uuid(),
       thread: snapshotThread(thread),
       timestamp,
-      usage
+      usage,
+      ...(options.runtime ? { runtime: options.runtime } : {})
     }
   ];
   return next.length > MAX_RUN_HISTORY
     ? next.slice(next.length - MAX_RUN_HISTORY)
     : next;
+}
+
+const RUNTIME_RUN_STATES = new Set<ThreadRuntimeRunState>([
+  "runningModel",
+  "runningTools",
+  "waitingForToolResults",
+  "waitingForContinue",
+  "completed",
+  "failed",
+  "cancelled",
+  "superseded",
+  "outcomeUnknown"
+]);
+
+function _normalizeRuntimeCheckpoint(
+  value: unknown
+): ThreadRuntimeCheckpoint | null {
+  const record = _asRecord(value);
+  if (!record) {
+    return null;
+  }
+  const runId = _trimmed(record.runId);
+  const continuationFingerprint = _trimmed(record.continuationFingerprint);
+  const state = record.state;
+  const checkpointOrder = record.checkpointOrder;
+  if (
+    !runId
+    || !continuationFingerprint
+    || typeof state !== "string"
+    || !RUNTIME_RUN_STATES.has(state as ThreadRuntimeRunState)
+    || !Number.isSafeInteger(checkpointOrder)
+    || (checkpointOrder as number) < 1
+  ) {
+    return null;
+  }
+  return {
+    runId,
+    state: state as ThreadRuntimeRunState,
+    checkpointOrder: checkpointOrder as number,
+    continuationFingerprint
+  };
 }
 
 /** Check whether two left/right run IDs describe the same comparison pair. */

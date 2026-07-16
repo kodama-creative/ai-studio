@@ -8,9 +8,17 @@ import {
 } from "@llm-space/core";
 import { streamAgent } from "@llm-space/core/server";
 import { agentModelMatchesDefinition } from "@llm-space/runtime";
+import {
+  type AgentProjectSnapshot,
+  AgentRuntime,
+  type AgentSession,
+  type PreparedAgentTool
+} from "@llm-space/runtime/node";
 
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { PreparedAgentTool } from "@llm-space/runtime/node";
+import type {
+  AgentMessage,
+  StreamFn
+} from "@earendil-works/pi-agent-core";
 
 import { agentDefinitionFingerprint } from "../external-projects/agent-definition-fingerprint";
 
@@ -58,6 +66,10 @@ export class StreamThreadController {
         await this._runAgentProject(payload, send, () => {
           aborted = true;
         });
+      } else if (payload.runtime?.type === "desktopThread") {
+        await this._runDesktopThread(payload, send, () => {
+          aborted = true;
+        });
       } else {
         for await (const event of streamAgent(request, {
           models: await this._modelManager.getAvailableModels(),
@@ -98,12 +110,71 @@ export class StreamThreadController {
     }
   }
 
+  private async _runDesktopThread(
+    payload: StreamThreadRequestPayload,
+    send: (message: StreamThreadResponsePayload) => void,
+    onAbort: () => void
+  ): Promise<void> {
+    if (payload.runtime?.type !== "desktopThread") {
+      throw new Error("Desktop Thread runtime is unavailable.");
+    }
+    const sourceTools = payload.request.context.sourceTools ?? [];
+    const extraTools = sourceTools
+      .filter(tool => tool.type !== "project")
+      .map(tool => this._runtimeTool(tool));
+    extraTools.push(
+      ...sourceTools
+        .filter((tool): tool is ProjectTool => tool.type === "project")
+        .map(tool => ({
+          kind: "deferred" as const,
+          definition: {
+            name: tool.name,
+            label: tool.name,
+            description: tool.description,
+            parameters: tool.parameters
+          }
+        }))
+    );
+    const project: AgentProjectSnapshot = {
+      root: "desktop-thread://runtime",
+      definition: {
+        model: payload.request.model,
+        reasoning: payload.request.config?.model?.reasoning
+      },
+      instructions: "",
+      tools: [],
+      connections: [],
+      resources: {},
+      diagnostics: [],
+      fingerprint: "desktop-thread-runtime-v1"
+    };
+    const runtime = new AgentRuntime({
+      models: await this._modelManager.getAvailableModels(),
+      project
+    });
+    const session = await runtime.createSession({
+      id: payload.streamId,
+      model: payload.request.model,
+      reasoning: payload.request.config?.model?.reasoning,
+      initialMessages: payload.request.context.messages as AgentMessage[],
+      extraTools,
+      activeToolNames: sourceTools.map(tool => tool.name),
+      systemPrompt: payload.request.context.systemPrompt,
+      executionMode: payload.runtime.executionMode,
+      streamFn: this._streamFn(payload)
+    });
+    await this._streamSession(payload.streamId, session, send, onAbort);
+  }
+
   private async _runAgentProject(
     payload: StreamThreadRequestPayload,
     send: (message: StreamThreadResponsePayload) => void,
     onAbort: () => void
   ): Promise<void> {
-    if (!payload.runtime || !this._externalAgentProjects) {
+    if (
+      payload.runtime?.type !== "agentProject"
+      || !this._externalAgentProjects
+    ) {
       throw new Error("Agent Project runtime is unavailable.");
     }
     const sourceTools = payload.request.context.sourceTools ?? [];
@@ -154,21 +225,7 @@ export class StreamThreadController {
         activeToolNames: activeSourceTools.map(tool => tool.name),
         systemPrompt: payload.request.context.systemPrompt,
         executionMode: payload.runtime.executionMode,
-        streamFn: async (model, context, options) => {
-          const models = await this._modelManager.getAvailableModels();
-          const baseUrl = this._modelManager.getBaseUrl(model.provider);
-          const headers = this._modelManager.getHeaders(model.provider);
-          return models.streamSimple(
-            baseUrl ? { ...model, baseUrl } : model,
-            context,
-            headers
-              ? {
-                ...options,
-                headers: { ...headers, ...options?.headers }
-              }
-              : options
-          );
-        }
+        streamFn: this._streamFn(payload)
       }
     );
     const definition = session.project.definition;
@@ -191,7 +248,16 @@ export class StreamThreadController {
             : "agent"
       }
     });
-    this._activeStreams.set(payload.streamId, {
+    await this._streamSession(payload.streamId, session, send, onAbort);
+  }
+
+  private async _streamSession(
+    streamId: string,
+    session: AgentSession,
+    send: (message: StreamThreadResponsePayload) => void,
+    onAbort: () => void
+  ): Promise<void> {
+    this._activeStreams.set(streamId, {
       abort() {
         onAbort();
         session.abort();
@@ -199,11 +265,7 @@ export class StreamThreadController {
     });
     const unsubscribe = session.subscribe(event => {
       if (event.type !== "tool_calls_deferred") {
-        send({
-          streamId: payload.streamId,
-          type: "event",
-          event
-        });
+        send({ streamId, type: "event", event });
       }
     });
     try {
@@ -211,6 +273,31 @@ export class StreamThreadController {
     } finally {
       unsubscribe();
     }
+  }
+
+  private _streamFn(payload: StreamThreadRequestPayload): StreamFn {
+    return async (model, context, options) => {
+      const models = await this._modelManager.getAvailableModels();
+      const baseUrl = this._modelManager.getBaseUrl(model.provider);
+      const headers = this._modelManager.getHeaders(model.provider);
+      const config = payload.request.config?.model;
+      return models.streamSimple(
+        baseUrl ? { ...model, baseUrl } : model,
+        context,
+        {
+          ...options,
+          ...(config?.maxTokens === undefined
+            ? {}
+            : { maxTokens: config.maxTokens }),
+          ...(config?.temperature === undefined
+            ? {}
+            : { temperature: config.temperature }),
+          ...(headers
+            ? { headers: { ...headers, ...options?.headers } }
+            : {})
+        }
+      );
+    };
   }
 
   private _runtimeTool(

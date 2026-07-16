@@ -1,17 +1,12 @@
 
 import {
   type AgentTransport,
-  type BuiltinTool,
   getMessageText,
-  isDangerousBashCommand,
-  isExecutableTool,
   isRunnableConversation,
-  type McpTool,
   type MessageContent,
   type ModelConfig,
   type ModelConfigParams,
   normalizeThread,
-  type ProjectTool,
   type ReducedMessageContent,
   reduceMessages,
   RUN_LAST_MESSAGE_ERROR,
@@ -22,7 +17,6 @@ import {
   type ThreadVariables,
   type ThreadVariableVariants,
   type Tool,
-  type ToolCall,
   Tool as ToolSchema,
   type UserMessage,
   uuid
@@ -65,8 +59,10 @@ import type {
   AssistantMessage,
   Message
 } from "@llm-space/core";
+import type { RuntimeExecutionMode } from "@llm-space/runtime";
 
 import { createFrameThrottle } from "@/lib/frame-throttle";
+import { resolveRuntimeExecutionMode } from "./run-mode";
 import {
   type ChangeHistory,
   createInitialHistory,
@@ -74,18 +70,11 @@ import {
   redo as redoHistory,
   undo as undoHistory
 } from "./thread-history";
+import { ThreadRuntimeSession } from "./thread-runtime-session";
 import { PREVIEW_THROTTLE_MS } from "../streaming-preview";
 import { listEnabledPromptVariableSkills } from "../variable/prompt-variable-skills";
 
 const toolValidator = Compile(ToolSchema);
-
-/**
- * Upper bound on model turns in a single auto-call-tools run. Each turn is one
- * model call (the server terminates the agent loop after tool calls), so this
- * caps how many times a run will auto-execute tools and continue — a backstop
- * against a model that calls tools without ever settling on an answer.
- */
-const MAX_AUTO_TOOL_TURNS = 50;
 
 export type ThreadStoreStatus = "idle" | "running";
 export interface ThreadState {
@@ -172,16 +161,6 @@ export function createThreadStore(
   initialThread: Thread,
   options: {
     /**
-     * Execute an MCP or built-in tool call, returning its textual result. Only
-     * used by the auto-run-tools path; manual tool runs go through the UI's own
-     * runner. Injected so the store stays decoupled from the RPC layer.
-     */
-    executeTool?: (
-      tool: BuiltinTool | McpTool | ProjectTool,
-      args: Record<string, unknown>
-    ) => Promise<{ contentText: string; isError: boolean; }>;
-
-    /**
      * Whether a run should automatically execute a model turn's pending tool
      * calls (instead of waiting for the user to click "Call tools"). Read fresh
      * at run time. On its own it runs tools once and stops; combined with
@@ -201,6 +180,9 @@ export function createThreadStore(
 
     /** Add host-owned runtime provenance before recording a run snapshot. */
     prepareRunSnapshot?: (thread: Thread) => Thread;
+
+    /** Persist a Runtime Run start or settled boundary before returning. */
+    persistSettledThread?: (thread: Thread) => Promise<void>;
 
     /**
      * Resolve the model a run/edit should use given the thread's saved model:
@@ -236,6 +218,9 @@ export function createThreadStore(
     evaluations: initialEvaluations,
     evaluationRubrics: initialEvaluationRubrics
   });
+  let runtimeSession = new ThreadRuntimeSession(
+    normalizedInitialThread.runtimeSession
+  );
 
   return createStore<ThreadState>()(
     subscribeWithSelector((set, get) => {
@@ -381,104 +366,11 @@ export function createThreadStore(
         || message.content.length > 0
         || (message.toolCalls?.length ?? 0) > 0;
 
-      /**
-       * Auto-call the pending tool calls on the last message so a run can loop
-       * without manual intervention. Returns the updated message list when
-       * every trailing tool call was executed (the conversation can stream
-       * again), or `null` when there is nothing to auto-call — no trailing tool
-       * calls, a non-executable (`function`) tool among them, missing executor,
-       * or an abort mid-flight. In the `null` case the loop stops and the user
-       * drives the next step by hand.
-       */
-      const executePendingToolCalls = async (
-        messages: Message[],
-        signal: AbortSignal
-      ): Promise<Message[] | null> => {
-        const execute = options.executeTool;
-        if (!execute) {
-          return null;
-        }
-        const last = messages[messages.length - 1];
-        if (last?.role !== "assistant") {
-          return null;
-        }
-        const toolCalls = last.toolCalls ?? [];
-        if (toolCalls.length === 0) {
-          return null;
-        }
-        const toolsByName = new Map(
-          (get().thread.context?.tools ?? []).map(tool => [tool.name, tool])
+      const getExecutionMode = (): RuntimeExecutionMode =>
+        resolveRuntimeExecutionMode(
+          options.getAutoRunTools?.() ?? false,
+          options.getReactLoop?.() ?? false
         );
-        // Every tool call must map to an executable (MCP/built-in) tool; a
-        // single `function` stub means the turn needs a hand-written result, so
-        // we bail and let the user fill it in.
-        const executable: Array<{
-          tool: BuiltinTool | McpTool | ProjectTool;
-          toolCall: ToolCall;
-        }> = [];
-        for (const toolCall of toolCalls) {
-          const tool = toolsByName.get(toolCall.input.name);
-          if (!tool || !isExecutableTool(tool)) {
-            return null;
-          }
-          // A destructive `bash` command must never be auto-executed, even under
-          // "auto run tools" or the ReAct loop — treat it like a `terminate`
-          // tool: stop the loop and leave it pending for the user to review and
-          // run by hand.
-          if (tool.type === "builtin" && tool.name === "bash") {
-            const command = (toolCall.input.arguments as { command?: unknown; })
-              ?.command;
-            if (
-              typeof command === "string"
-              && isDangerousBashCommand(command)
-            ) {
-              toast.warning("Auto-run paused for a risky command", {
-                description:
-                  "A bash command looked destructive, so it wasn't run automatically. Review it and run it by hand if it's safe."
-              });
-              return null;
-            }
-          }
-          executable.push({ toolCall, tool });
-        }
-        const results = await Promise.all(
-          executable.map(async ({ toolCall, tool }) => {
-            try {
-              const { contentText, isError } = await execute(
-                tool,
-                toolCall.input.arguments
-              );
-              return { id: toolCall.id, text: contentText, isError };
-            } catch (error) {
-              const text =
-                error instanceof Error ? error.message : "Tool call failed";
-              return { id: toolCall.id, text, isError: true };
-            }
-          })
-        );
-        // An abort could have landed while tools were in flight; drop the
-        // results and let the run's abort handling take over.
-        if (signal.aborted) {
-          return null;
-        }
-        const resultById = new Map(results.map(r => [r.id, r]));
-        const nextLast: AssistantMessage = {
-          ...last,
-          toolCalls: toolCalls.map(toolCall => {
-            const result = resultById.get(toolCall.id)!;
-            return {
-              ...toolCall,
-              output: {
-                content: [{ type: "text", text: result.text }],
-                isError: result.isError
-              }
-            };
-          })
-        };
-        const next = [...messages.slice(0, -1), nextLast];
-        setMessages(next);
-        return next;
-      };
 
       // --- store --------------------------------------------------------------
 
@@ -909,18 +801,11 @@ export function createThreadStore(
           if (get().status === "running") {
             throw new Error("Thread is already running");
           }
-          // Resolve the model to run with: the thread's own when available,
-          // else the default/first available. A thread with no resolvable model
-          // cannot run.
           const model = options.resolveModel?.(get().thread.model) ?? null;
           if (!model) {
             toast.error("Select a model to run");
             return;
           }
-          // Pre-flight: resolve the message list the run would use (including
-          // the rerun-from truncation) and validate it before entering the
-          // running state, so an unrunnable thread is a complete no-op — no
-          // truncation, no undo step, no run-history entry.
           let messages = [...(get().thread.context?.messages ?? [])];
           let truncated = false;
           if (fromMessageId) {
@@ -934,13 +819,15 @@ export function createThreadStore(
             toast.error("Error", { description: RUN_LAST_MESSAGE_ERROR });
             return;
           }
+
           let promptSnapshot: ThreadContext["snapshot"] =
             get().thread.context?.snapshot;
-          let preparedContext: ThreadContext | null = null;
+          let preparedContext: ThreadContext;
           try {
             const rendered = await renderThreadPromptVariables({
               context: { ...get().thread.context, messages },
-              loadSkills: listEnabledPromptVariableSkills
+              loadSkills:
+                options.loadPromptSkills ?? listEnabledPromptVariableSkills
             });
             preparedContext = rendered.context;
             promptSnapshot = rendered.snapshot;
@@ -953,8 +840,47 @@ export function createThreadStore(
             });
             return;
           }
+
+          const executionMode = getExecutionMode();
+          const previousRuntimeSession = get().thread.runtimeSession;
+          const executionThread =
+            options.prepareRunSnapshot?.({
+              ...get().thread,
+              context: preparedContext
+            }) ?? { ...get().thread, context: preparedContext };
+          let begun;
+          try {
+            begun = await runtimeSession.begin({
+              thread: executionThread,
+              context: preparedContext,
+              executionMode,
+              model
+            });
+            const thread = {
+              ...get().thread,
+              runtimeSession: begun.session
+            };
+            const changeHistory = get().changeHistory;
+            set({
+              thread,
+              changeHistory: {
+                ...changeHistory,
+                snapshots: changeHistory.snapshots.map((snapshot, index) =>
+                  (index === changeHistory.index ? thread : snapshot))
+              }
+            });
+            await options.persistSettledThread?.(thread);
+          } catch (error) {
+            runtimeSession = new ThreadRuntimeSession(previousRuntimeSession);
+            toast.error("Unable to start Runtime Run", {
+              description:
+                error instanceof Error ? error.message : "Runtime Session failed"
+            });
+            return;
+          }
+
           const abortController = new AbortController();
-          const runId = uuid();
+          const runId = begun.runId;
           const isActiveRun = () => get().activeRunId === runId;
           set({
             status: "running",
@@ -962,15 +888,11 @@ export function createThreadStore(
             activeRunId: runId,
             streamingMessage: null
           });
-
-          // Commit the truncation while running so it folds into the run's
-          // single undo step instead of becoming its own snapshot.
           if (truncated) {
             setMessages(messages);
           }
           const runStartMessageCount = messages.length;
 
-          // Append a finished assistant message to the thread.
           const commit = (message: AssistantMessage) => {
             if (!isActiveRun()) {
               return;
@@ -979,88 +901,15 @@ export function createThreadStore(
             setMessages(messages);
           };
 
-          // Live-preview state for the turn currently streaming; reset per turn.
           let streamingMessage: AssistantMessage | null = null;
           let content: ReducedMessageContent[] = [];
-          // Whether any turn produced at least one event — i.e. the run actually
-          // started. A run that dies earlier (transport/auth/network failure) is
-          // not recorded in the run history.
           let sawEvent = false;
-          // Whether the run ended in an error. The agent loop emits lifecycle
-          // events before the model call, and a model API failure completes
-          // the stream normally with the error tucked into the message
-          // (surfaced as a throw by reduceMessages on agent_end) — so
-          // `sawEvent` alone can't tell a failed run from a successful one.
-          // A failed run is never recorded in the run history.
-          let failed = false;
-
-          // Throttle live-preview updates (frame-aligned, at most one per
-          // PREVIEW_THROTTLE_MS) — see createFrameThrottle for why per-event
-          // set() calls are unsafe and re-rendering the growing document per
-          // frame is too expensive.
           const { schedule: schedulePreview, cancel: cancelPreview } =
             createFrameThrottle(() => {
               if (isActiveRun()) {
                 set({ streamingMessage });
               }
             }, PREVIEW_THROTTLE_MS);
-
-          const finalizeActiveRun = () => {
-            if (!isActiveRun()) {
-              return;
-            }
-            // Drop any pending frame before the terminal clear so a late flush
-            // can't resurrect a stale streamingMessage after we reset to null.
-            cancelPreview();
-            set({
-              streamingMessage: null,
-              status: "idle",
-              abortController: null,
-              activeRunId: null
-            });
-            stopActiveRun = null;
-
-            // Fold the whole run (truncation + generated messages) into one
-            // undo step, and record a run snapshot. No-op for undo if the
-            // thread is unchanged.
-            const finalThread = get().thread;
-            if (sawEvent && !failed) {
-              const threadWithSnapshot =
-                options.prepareRunSnapshot?.(
-                  withPromptVariableSnapshot(finalThread, promptSnapshot)
-                ) ?? withPromptVariableSnapshot(finalThread, promptSnapshot);
-              const runUsage = aggregateMessageUsage(
-                (threadWithSnapshot.context?.messages ?? []).slice(
-                  runStartMessageCount
-                )
-              );
-              const runHistory = recordRun(
-                get().runHistory,
-                threadWithSnapshot,
-                Date.now(),
-                { usage: runUsage }
-              );
-              const evaluations = normalizeEvaluations(
-                get().evaluations,
-                runHistory
-              );
-              const thread = withRunMetadata(threadWithSnapshot, {
-                runHistory,
-                evaluations,
-                evaluationRubrics: get().evaluationRubrics
-              });
-              set({
-                thread,
-                changeHistory: recordSnapshot(get().changeHistory, thread),
-                runHistory,
-                evaluations
-              });
-            } else {
-              set({
-                changeHistory: recordSnapshot(get().changeHistory, finalThread)
-              });
-            }
-          };
 
           stopActiveRun = () => {
             if (!isActiveRun()) {
@@ -1071,43 +920,15 @@ export function createThreadStore(
             } catch {
               // Ignored
             }
-            if (streamingMessage && hasContent(streamingMessage)) {
-              commit(streamingMessage);
-              streamingMessage = null;
-            }
-            finalizeActiveRun();
           };
 
-          // Stream a single model turn into `messages`. Returns whether it
-          // finished cleanly, was aborted, or failed — the auto-call loop only
-          // continues after a clean turn.
-          const streamTurn = async (): Promise<
-            "aborted" | "completed" | "failed"
+          const streamRuntimeRun = async (): Promise<
+            "cancelled" | "completed" | "failed"
           > => {
-            streamingMessage = null;
-            content = [];
             try {
-              const context = preparedContext
-                ? preparedContext
-                : (
-                  await renderThreadPromptVariables({
-                    context: {
-                      ...get().thread.context,
-                      messages,
-                      snapshot: promptSnapshot
-                    },
-                    loadSkills:
-                        options.loadPromptSkills
-                        ?? listEnabledPromptVariableSkills
-                  })
-                ).context;
-              preparedContext = null;
-              promptSnapshot = context.snapshot;
+              promptSnapshot = preparedContext.snapshot;
               const response = streamThread(
-                {
-                  context,
-                  model
-                },
+                { context: preparedContext, model },
                 {
                   signal: abortController.signal,
                   transport: options.transport
@@ -1115,7 +936,7 @@ export function createThreadStore(
               );
               for await (const chunk of response) {
                 if (!isActiveRun()) {
-                  return "aborted";
+                  return "cancelled";
                 }
                 sawEvent = true;
                 const reduced = reduceMessages(chunk, {
@@ -1127,9 +948,6 @@ export function createThreadStore(
                 }
                 if (reduced.type === "message_start" && streamingMessage) {
                   commit(streamingMessage);
-                  // The committed message now lives in `messages`; drop the
-                  // stale preview so it isn't rendered twice before the next
-                  // frame.
                   cancelPreview();
                   if (isActiveRun()) {
                     set({ streamingMessage: null });
@@ -1140,14 +958,10 @@ export function createThreadStore(
                 schedulePreview();
               }
               if (!isActiveRun()) {
-                return "aborted";
+                return "cancelled";
               }
               if (streamingMessage) {
                 commit(streamingMessage);
-                // The turn's message now lives in `messages`; clear the preview
-                // so it isn't rendered a second time during the gap before the
-                // next turn (e.g. while auto-run tools execute). The trailing
-                // frame is cancelled so a late flush can't resurrect it.
                 cancelPreview();
                 if (isActiveRun()) {
                   set({ streamingMessage: null });
@@ -1163,13 +977,10 @@ export function createThreadStore(
                   && hasContent(streamingMessage)
                 ) {
                   commit(streamingMessage);
+                  streamingMessage = null;
                 }
-                return "aborted";
+                return "cancelled";
               }
-              if (!isActiveRun()) {
-                return "aborted";
-              }
-              failed = true;
               console.error(error);
               if (error instanceof Error) {
                 toast.error("Error", { description: error.message });
@@ -1178,47 +989,103 @@ export function createThreadStore(
             }
           };
 
-          try {
-            // Drive the run:
-            //  - a model turn always runs;
-            //  - when tools are auto-run, execute the turn's trailing tool
-            //    calls (unless one needs a hand-written result — then stop and
-            //    let the user fill it in);
-            //  - only the ReAct loop continues to the next turn; plain auto-run
-            //    executes tools once and stops, staying step-by-step.
-            // Capped so a model that calls tools forever can't spin forever.
-            for (let turn = 0; turn < MAX_AUTO_TOOL_TURNS; turn++) {
-              const outcome = await streamTurn();
-              if (outcome !== "completed") {
-                break;
-              }
-              if (options.runtimeOwnsToolLoop) {
-                break;
-              }
-              const reactLoop = options.getReactLoop?.() ?? false;
-              const autoRunTools =
-                reactLoop || (options.getAutoRunTools?.() ?? false);
-              if (!autoRunTools) {
-                break;
-              }
-              const withResults = await executePendingToolCalls(
-                messages,
-                abortController.signal
-              );
-              if (!isActiveRun()) {
-                break;
-              }
-              if (!withResults) {
-                break;
-              }
-              messages = withResults;
-              if (!reactLoop) {
-                break;
-              }
+          const finalizeRuntimeRun = async (
+            outcome: "cancelled" | "completed" | "failed"
+          ) => {
+            if (!isActiveRun()) {
+              return;
             }
-          } finally {
-            finalizeActiveRun();
-          }
+            cancelPreview();
+            stopActiveRun = null;
+            const finalThread = withPromptVariableSnapshot(
+              get().thread,
+              promptSnapshot
+            );
+            const threadWithSnapshot =
+              options.prepareRunSnapshot?.(finalThread) ?? finalThread;
+            let settledContext = threadWithSnapshot.context ?? {};
+            try {
+              settledContext = (
+                await renderThreadPromptVariables({
+                  context: settledContext,
+                  loadSkills:
+                    options.loadPromptSkills ?? listEnabledPromptVariableSkills
+                })
+              ).context;
+            } catch {
+              // The run already used its frozen prompt snapshot. Keep the final
+              // boundary durable; a later execution edit will branch safely.
+            }
+
+            try {
+              const settled = await runtimeSession.settle({
+                thread: threadWithSnapshot,
+                context: settledContext,
+                executionMode,
+                model,
+                runId,
+                sawEvent,
+                outcome
+              });
+              const threadWithRuntime = {
+                ...threadWithSnapshot,
+                runtimeSession: settled.session
+              };
+              const runUsage = aggregateMessageUsage(
+                (threadWithRuntime.context?.messages ?? []).slice(
+                  runStartMessageCount
+                )
+              );
+              const runHistory = settled.checkpoint
+                ? recordRun(
+                  get().runHistory,
+                  threadWithRuntime,
+                  Date.now(),
+                  { runtime: settled.checkpoint, usage: runUsage }
+                )
+                : get().runHistory;
+              const evaluations = normalizeEvaluations(
+                get().evaluations,
+                runHistory
+              );
+              const thread = withRunMetadata(threadWithRuntime, {
+                runHistory,
+                evaluations,
+                evaluationRubrics: get().evaluationRubrics
+              });
+              set({
+                thread,
+                streamingMessage: null,
+                changeHistory: recordSnapshot(get().changeHistory, thread),
+                runHistory,
+                evaluations
+              });
+              await options.persistSettledThread?.(thread);
+              set({
+                status: "idle",
+                abortController: null,
+                activeRunId: null
+              });
+            } catch (error) {
+              set({
+                streamingMessage: null,
+                status: "idle",
+                abortController: null,
+                activeRunId: null,
+                changeHistory: recordSnapshot(
+                  get().changeHistory,
+                  get().thread
+                )
+              });
+              toast.error("Unable to persist Runtime Run", {
+                description:
+                  error instanceof Error ? error.message : "Runtime Session failed"
+              });
+            }
+          };
+
+          const outcome = await streamRuntimeRun();
+          await finalizeRuntimeRun(outcome);
         },
         undo() {
           if (get().status === "running") {
@@ -1228,7 +1095,10 @@ export function createThreadStore(
           if (!result) {
             return;
           }
-          const thread = withRunMetadata(result.thread, {
+          const thread = withRunMetadata({
+            ...result.thread,
+            runtimeSession: get().thread.runtimeSession
+          }, {
             runHistory: get().runHistory,
             evaluations: get().evaluations,
             evaluationRubrics: get().evaluationRubrics
@@ -1250,7 +1120,10 @@ export function createThreadStore(
           if (!result) {
             return;
           }
-          const thread = withRunMetadata(result.thread, {
+          const thread = withRunMetadata({
+            ...result.thread,
+            runtimeSession: get().thread.runtimeSession
+          }, {
             runHistory: get().runHistory,
             evaluations: get().evaluations,
             evaluationRubrics: get().evaluationRubrics
@@ -1268,7 +1141,10 @@ export function createThreadStore(
           if (get().status === "running") {
             return;
           }
-          const next = withRunMetadata(thread, {
+          const next = withRunMetadata({
+            ...thread,
+            runtimeSession: get().thread.runtimeSession
+          }, {
             runHistory: get().runHistory,
             evaluations: get().evaluations,
             evaluationRubrics: get().evaluationRubrics

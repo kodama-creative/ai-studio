@@ -49,13 +49,18 @@ import type { UpdateMode, UpdateStatusChangedPayload } from "./updates";
 export interface StreamThreadRequestPayload {
   streamId: string;
   request: AgentStreamRequest;
-  runtime?: {
-    executionMode: RuntimeExecutionMode;
-    modelSource: ThreadAgentRuntimeProvenance["modelSource"];
-    projectId: string;
-    threadId: string;
-    type: "agentProject";
-  };
+  runtime?:
+    | {
+      executionMode: RuntimeExecutionMode;
+      modelSource: ThreadAgentRuntimeProvenance["modelSource"];
+      projectId: string;
+      threadId: string;
+      type: "agentProject";
+    }
+    | {
+      executionMode: RuntimeExecutionMode;
+      type: "desktopThread";
+    };
 }
 
 /** A bun→webview chunk of a streaming agent run, keyed by `streamId`. */

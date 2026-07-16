@@ -8,12 +8,18 @@ import type { Thread } from "@llm-space/core";
 
 import { createRpcTransport, localFs } from "@/client";
 import { ThreadPlayground } from "@/components/thread-playground";
+import { getRuntimeExecutionMode } from "@/components/thread-playground/stores";
 import { parentOf, threadPathForTitle } from "@/lib/thread-file";
 import { cn } from "@/lib/utils";
 
 // One transport for the app: stream agent runs over Electrobun RPC to the bun
 // process (there is no HTTP server in the desktop app).
-const rpcTransport = createRpcTransport();
+const RPC_TRANSPORT = createRpcTransport({
+  runtime: () => ({
+    type: "desktopThread",
+    executionMode: getRuntimeExecutionMode()
+  })
+});
 
 interface ThreadTabPaneProps {
   readonly path: string;
@@ -103,6 +109,11 @@ export function ThreadTabPane({
     [flushPending]
   );
 
+  const persistSettledThread = useCallback(async (next: Thread) => {
+    pending.current = next;
+    await flushPending();
+  }, [flushPending]);
+
   // Flush any pending write when the tab closes so the last edit is never dropped.
   useEffect(() => {
     return () => {
@@ -180,7 +191,9 @@ export function ThreadTabPane({
         onChange={handleChange}
         onRenameTitle={handleRenameTitle}
         path={path}
-        transport={rpcTransport}
+        persistSettledThread={persistSettledThread}
+        runtimeOwnsToolLoop
+        transport={RPC_TRANSPORT}
       />
     </div>
   );
