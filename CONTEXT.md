@@ -44,6 +44,22 @@ _Avoid_: failed run, retryable run, cancelled run
 The immutable identity of the Agent artifact and execution-affecting configuration under which a Runtime Run proceeds.
 _Avoid_: current project files, live settings, mutable defaults
 
+**Agent Artifact**:
+The immutable compiled identity of one Agent Project's source, dependencies, capabilities, schemas, runtime, and environment requirements; executable callbacks belong to its trusted compiled snapshot.
+_Avoid_: source checkout, OCI image, container bundle
+
+**Agent Deployment Image**:
+A project-specific OCI image containing one Agent Artifact and the protected Bun Server; its OCI digest identifies the complete deployment while the Agent fingerprint retains execution lineage.
+_Avoid_: serialized Agent Artifact, generic Runtime image, source image
+
+**Agent Environment Requirement**:
+A source-owned declaration that names required or optional runtime configuration or secret input without containing its value.
+_Avoid_: credential, environment value, secret store
+
+**OCI Runtime Profile**:
+The fixed non-root network, environment, storage, health, and shutdown contract under which an Agent Deployment Image runs.
+_Avoid_: Thread Runtime Profile, cloud target, deployment control plane
+
 **Run Checkpoint**:
 A durable debugging snapshot captured when a Runtime Run reaches a wait or terminal boundary; several checkpoints may belong to one Run.
 _Avoid_: Runtime Run, new run, autosave

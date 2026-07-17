@@ -1,7 +1,7 @@
 # LLM Space Capability Map
 
 - Last updated: 2026-07-17
-- Map status: refreshed during roadmap item 08 discovery. Protected Local Server execution is confirmed, while OCI deployment is confirmed blocked on an approved executable-artifact/build, environment/secrets, non-root volume-ownership, and architecture contract.
+- Map status: refreshed after the roadmap item 08 decision gate. ADR 0004 now fixes the OCI artifact, environment/secrets, non-root volume, lifecycle, and two-platform acceptance boundary; implementation has not started.
 - Evidence rule: entries marked `confirmed` cite current rendered-product or current-code evidence. Entries marked `stale` rely on previous logs or code paths not fully re-inspected in this loop. Entries marked `unknown` need a future product-surface check before they can drive a recommendation.
 
 ## First-Run Model Setup
@@ -228,7 +228,7 @@
 
 ## OCI Agent Deployment
 
-- Status: blocked before V1 implementation
+- Status: approved design; V1 implementation pending
 - Freshness: confirmed
 - Last checked: 2026-07-17
 - Evidence:
@@ -238,9 +238,10 @@
   - ADR 0002 already provides reusable public `/v1/health` and `/v1/ready` endpoints, `SIGINT`/`SIGTERM` graceful shutdown through the CLI, an exclusive single-process repository, and `LLM_SPACE_SERVER_HOME`; it does not choose a container user/UID, volume ownership/bootstrap rule, image build unit, architecture set, or source-declared environment inventory.
   - Current host discovery found no Docker, Podman, Buildah, or nerdctl executable, so later clean-container acceptance needs an available local engine or CI runner; this is a verification constraint rather than permission to weaken the contract.
   - Current OCI Image Spec, Docker, and Bun primary documentation confirms that runtime user, environment, volume, entrypoint/stop signal, healthcheck compatibility, base image, and multi-platform manifest choices are explicit image/build concerns rather than defaults supplied by the Server.
-- Boundary: after approval, one immutable Agent deployment image should run the existing protected Bun Server, expose its existing health/readiness semantics, keep Server Sessions on one declared single-writer mount, receive secrets only at runtime, and terminate through the existing bounded Server shutdown path.
+  - ADR 0004 resolves the blocker with one project-specific Agent Deployment Image, an engine-neutral two-stage self-contained build context, separate Agent fingerprint and image digest, source-owned environment-name declarations, fixed non-root `1000:1000`, `/var/lib/llm-space` single-writer storage, trusted TLS termination, readiness healthcheck, eight-second default drain, and actual amd64/arm64 CI execution.
+- Boundary: one immutable project-specific Agent Deployment Image runs the existing protected Bun Server from a closed bundle, receives declared values only at runtime, exposes existing health/readiness semantics, persists Server Sessions only on the declared single-writer mount, and terminates through the bounded Server shutdown path.
 - Explicit non-goals: hosted control plane, Kubernetes operator, autoscaling, managed secrets, distributed/shared storage, dynamic multi-project loading, artifact registry product, SBOM/signing/attestation, or a new Agent message protocol.
-- Visible gaps: human approval is required for whether the image itself is the immutable artifact or loads a serialized artifact, what exact files cross the trusted build boundary, how required environment names are declared without baking values, which UID/GID owns a fresh or existing mount, and whether V1 must publish both Linux amd64 and arm64 variants.
+- Visible gaps: no build-context generator, environment schema, two-stage bundle/bootstrap, locked base image, Containerfile, OCI acceptance driver, or non-release two-platform workflow exists yet; this host still has no local OCI engine, so actual container evidence must come from the approved CI path unless an engine becomes available.
 
 ## Agent Action Authoring
 
