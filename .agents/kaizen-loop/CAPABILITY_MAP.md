@@ -228,20 +228,21 @@
 
 ## OCI Agent Deployment
 
-- Status: approved design; V1 implementation pending
+- Status: shipped OCI Deployment V1
 - Freshness: confirmed
 - Last checked: 2026-07-17
 - Evidence:
-  - `loadAgentProject()` imports trusted TypeScript/JavaScript source and returns an in-memory `CompiledAgentProjectSnapshot`; executable local-tool functions and MCP auth/header callbacks remain inside that snapshot and are not represented by the plain-data artifact descriptor.
-  - The item-05 descriptor records logical source, dependency, capability, schema, runtime, and Bun-environment fingerprints, but intentionally excludes serialized executable callbacks and was explicitly scoped away from artifact files or registries.
-  - `llm-space serve` currently receives an Agent Project directory, calls `loadAgentProject()` at process startup, and only then starts one immutable Server snapshot. There is no OCI build command, Dockerfile/Containerfile, deployment manifest, serialized artifact loader, or checked-in clean-container fixture.
-  - ADR 0002 already provides reusable public `/v1/health` and `/v1/ready` endpoints, `SIGINT`/`SIGTERM` graceful shutdown through the CLI, an exclusive single-process repository, and `LLM_SPACE_SERVER_HOME`; it does not choose a container user/UID, volume ownership/bootstrap rule, image build unit, architecture set, or source-declared environment inventory.
-  - Current host discovery found no Docker, Podman, Buildah, or nerdctl executable, so later clean-container acceptance needs an available local engine or CI runner; this is a verification constraint rather than permission to weaken the contract.
-  - Current OCI Image Spec, Docker, and Bun primary documentation confirms that runtime user, environment, volume, entrypoint/stop signal, healthcheck compatibility, base image, and multi-platform manifest choices are explicit image/build concerns rather than defaults supplied by the Server.
-  - ADR 0004 resolves the blocker with one project-specific Agent Deployment Image, an engine-neutral two-stage self-contained build context, separate Agent fingerprint and image digest, source-owned environment-name declarations, fixed non-root `1000:1000`, `/var/lib/llm-space` single-writer storage, trusted TLS termination, readiness healthcheck, eight-second default drain, and actual amd64/arm64 CI execution.
+  - `defineAgent().environment` declares validated, immutable config/secret names without values; invalid names/kinds/defaults, duplicate authored keys, and Server Host collisions fail before deployment. Requirements participate in the Agent Artifact fingerprint.
+  - `createAgentProjectBundle()` captures stable source bytes, preserves local tools, MCP auth/header callbacks, skills and the exact item-05 descriptor, embeds the full expected descriptor, rejects non-literal runtime loading and external package imports, and emits no absolute project path or source map.
+  - `llm-space build <project> --target oci --output <dir>` atomically emits exactly `Containerfile`, `agent.bundle.mjs`, `artifact.json`, `bootstrap.mjs`, `environment.json`, and `healthcheck.mjs` without invoking an OCI engine or overwriting an existing path.
+  - The bootstrap validates descriptor integrity, the locked Bun compiler identity, Host settings, Bearer principals, declared Agent environment, and runtime secret absence before dynamically importing authored code. It deletes `LLM_SPACE_SERVER_AUTH_KEYS` first and reports only sanitized startup stages.
+  - The generated image pins `oven/bun:1.3.14-debian` to index digest `sha256:9dba1a1b43ce28c9d7931bfc4eb00feb63b0114720a0277a8f939ae4dfc9db6f`, runs `1000:1000`, persists only `/var/lib/llm-space`, exposes `7331`, uses readiness healthcheck, and receives `SIGTERM` directly with an eight-second default drain.
+  - Only a loopback peer requesting loopback `/v1/health` or `/v1/ready` may bypass trusted-proxy HTTPS/Host proof; every business route retains ADR 0002 authentication, principal, continuation, and Session authorization.
+  - Non-release GitHub Actions run `29558014986` passes real `linux/amd64` and QEMU-backed `linux/arm64` image execution plus one two-platform OCI index. It proves image configuration/secret absence, health/readiness, authenticated Session stop/recreate persistence, fixed non-root volume access, bad-permission/artifact-mismatch/single-writer rejection, and clean ten-second `SIGTERM` stop. The optional live Pi provider smoke was explicitly skipped because no real credential was supplied.
+  - Final local gates pass 220 tests with 849 assertions, all seven TypeScript projects, full lint, Runtime browser bundles, Bun Server/OCI bootstrap bundles, renderer-only Vite, and `git diff --check`; final Standards and Spec reviews have no hard findings.
 - Boundary: one immutable project-specific Agent Deployment Image runs the existing protected Bun Server from a closed bundle, receives declared values only at runtime, exposes existing health/readiness semantics, persists Server Sessions only on the declared single-writer mount, and terminates through the bounded Server shutdown path.
 - Explicit non-goals: hosted control plane, Kubernetes operator, autoscaling, managed secrets, distributed/shared storage, dynamic multi-project loading, artifact registry product, SBOM/signing/attestation, or a new Agent message protocol.
-- Visible gaps: no build-context generator, environment schema, two-stage bundle/bootstrap, locked base image, Containerfile, OCI acceptance driver, or non-release two-platform workflow exists yet; this host still has no local OCI engine, so actual container evidence must come from the approved CI path unless an engine becomes available.
+- Visible gaps: registry publication, managed secret resolvers/files, SBOM/signing/attestation, deployment UI/control plane, distributed storage, autoscaling, backup/retention automation, and live paid-provider smoke remain outside V1. Docker Actions currently emits a non-failing Node 20 deprecation notice while being forced onto Node 24; future action upgrades are maintenance, not a capability gap.
 
 ## Agent Action Authoring
 

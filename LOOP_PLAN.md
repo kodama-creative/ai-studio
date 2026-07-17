@@ -70,7 +70,7 @@ Runtime architecture follows [ADR 0001](./docs/adr/0001-runtime-harness-over-pi-
   - Metric: equivalent fixture outcome and trace lineage across Desktop and Local Server profiles.
   - Decision (2026-07-17): ADR 0003 makes Runtime Profile authority immutable per Thread after first Run, keeps continuation credentials in a private Bun-only registry, preserves only non-secret Server lineage, represents Desktop Sandbox as unavailable without fallback, and requires a new empty Thread for another profile or artifact.
 
-- [ ] **08 — OCI deployment V1**
+- [x] **08 — OCI deployment V1**
   - Depends on: 06.
   - Run: `$kaizen-loop Package a compiled Agent as a platform-neutral OCI image running the Bun Server.`
   - Done when: a clean container starts from artifact plus declared environment, reports health/readiness, persists through a mounted storage contract, and shuts down cleanly.
