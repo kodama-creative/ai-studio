@@ -76,6 +76,7 @@ Runtime architecture follows [ADR 0001](./docs/adr/0001-runtime-harness-over-pi-
   - Done when: a clean container starts from artifact plus declared environment, reports health/readiness, persists through a mounted storage contract, and shuts down cleanly.
   - Boundary: no Vercel, Cloudflare, Kubernetes operator, autoscaling, managed secrets, or hosted control plane.
   - Metric: clean-environment deployment completion.
+  - Blocker (2026-07-17): the current compiled artifact is an in-memory executable snapshot plus a plain-data fingerprint descriptor, while `llm-space serve` reloads trusted Agent source at process startup. Human approval is required before choosing the OCI artifact/build boundary, declared environment and secret contract, non-root runtime identity and mounted-volume ownership, and the intended Linux architecture set.
 
 ## Studio Authoring And Project Lifecycle
 

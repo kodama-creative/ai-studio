@@ -1,7 +1,7 @@
 # LLM Space Capability Map
 
 - Last updated: 2026-07-17
-- Map status: refreshed after roadmap item 07. Studio now binds Agent Project Threads to explicit Desktop Direct or Local Server authority and hands Server lineage into existing Run History; Desktop Sandbox remains visibly unavailable until the later sandbox capability ships.
+- Map status: refreshed during roadmap item 08 discovery. Protected Local Server execution is confirmed, while OCI deployment is confirmed blocked on an approved executable-artifact/build, environment/secrets, non-root volume-ownership, and architecture contract.
 - Evidence rule: entries marked `confirmed` cite current rendered-product or current-code evidence. Entries marked `stale` rely on previous logs or code paths not fully re-inspected in this loop. Entries marked `unknown` need a future product-surface check before they can drive a recommendation.
 
 ## First-Run Model Setup
@@ -225,6 +225,22 @@
 - Boundary: users may bind one Agent Project Thread to Desktop Direct or one protected Local Server artifact/Session authority, understand the unavailable Sandbox boundary, submit Server-owned text Turns, recover from artifact drift through a new Thread, and inspect projected Server Runs in existing Run History.
 - Explicit non-goals: remote Server URL/token management, production fleet lifecycle, cloud control plane, sandbox implementation, raw provider payload retention, caller-supplied Server history/configuration, or copying secrets into Agent source, Thread JSON, Run snapshots, Trace data, or analytics.
 - Visible gaps: actual Desktop Sandbox execution, remote/fleet Server management, Keychain-backed credentials, transcript migration, raw event inspection, canonical item-32 Trace, and cloud lifecycle remain later roadmap capabilities.
+
+## OCI Agent Deployment
+
+- Status: blocked before V1 implementation
+- Freshness: confirmed
+- Last checked: 2026-07-17
+- Evidence:
+  - `loadAgentProject()` imports trusted TypeScript/JavaScript source and returns an in-memory `CompiledAgentProjectSnapshot`; executable local-tool functions and MCP auth/header callbacks remain inside that snapshot and are not represented by the plain-data artifact descriptor.
+  - The item-05 descriptor records logical source, dependency, capability, schema, runtime, and Bun-environment fingerprints, but intentionally excludes serialized executable callbacks and was explicitly scoped away from artifact files or registries.
+  - `llm-space serve` currently receives an Agent Project directory, calls `loadAgentProject()` at process startup, and only then starts one immutable Server snapshot. There is no OCI build command, Dockerfile/Containerfile, deployment manifest, serialized artifact loader, or checked-in clean-container fixture.
+  - ADR 0002 already provides reusable public `/v1/health` and `/v1/ready` endpoints, `SIGINT`/`SIGTERM` graceful shutdown through the CLI, an exclusive single-process repository, and `LLM_SPACE_SERVER_HOME`; it does not choose a container user/UID, volume ownership/bootstrap rule, image build unit, architecture set, or source-declared environment inventory.
+  - Current host discovery found no Docker, Podman, Buildah, or nerdctl executable, so later clean-container acceptance needs an available local engine or CI runner; this is a verification constraint rather than permission to weaken the contract.
+  - Current OCI Image Spec, Docker, and Bun primary documentation confirms that runtime user, environment, volume, entrypoint/stop signal, healthcheck compatibility, base image, and multi-platform manifest choices are explicit image/build concerns rather than defaults supplied by the Server.
+- Boundary: after approval, one immutable Agent deployment image should run the existing protected Bun Server, expose its existing health/readiness semantics, keep Server Sessions on one declared single-writer mount, receive secrets only at runtime, and terminate through the existing bounded Server shutdown path.
+- Explicit non-goals: hosted control plane, Kubernetes operator, autoscaling, managed secrets, distributed/shared storage, dynamic multi-project loading, artifact registry product, SBOM/signing/attestation, or a new Agent message protocol.
+- Visible gaps: human approval is required for whether the image itself is the immutable artifact or loads a serialized artifact, what exact files cross the trusted build boundary, how required environment names are declared without baking values, which UID/GID owns a fresh or existing mount, and whether V1 must publish both Linux amd64 and arm64 variants.
 
 ## Agent Action Authoring
 
