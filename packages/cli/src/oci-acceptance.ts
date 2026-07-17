@@ -41,6 +41,8 @@ async function _main(argv = process.argv.slice(2)): Promise<void> {
   await _command(["docker", "buildx", "version"]);
   const root = await mkdtemp(path.join(tmpdir(), "llm-space-oci-acceptance-"));
   const suffix = `${process.pid}-${Date.now()}`;
+  const liveProviderKey = process.env.LLM_SPACE_OCI_LIVE_OPENAI_API_KEY?.trim()
+    || undefined;
   const tags: string[] = [];
   const volumes: string[] = [];
   const containers: string[] = [];
@@ -71,7 +73,7 @@ async function _main(argv = process.argv.slice(2)): Promise<void> {
         platform,
         tag,
         volume,
-        liveProviderKey: process.env.LLM_SPACE_OCI_LIVE_OPENAI_API_KEY
+        liveProviderKey
       });
     }
     const primaryTag = tags[0];
