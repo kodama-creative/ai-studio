@@ -23,11 +23,13 @@ Object.defineProperty(globalThis, TYPEBOX_RUNTIME_KEY, {
 export async function loadAuthoredModule({
   projectRoot,
   sourcePath,
-  authoredSdk = false
+  authoredSdk = false,
+  validateEntrySource
 }: {
   authoredSdk?: boolean;
   projectRoot: string;
   sourcePath: string;
+  validateEntrySource?: (source: string, filePath: string) => void;
 }): Promise<{
   default?: unknown;
   dependencies: readonly AuthoredModuleDependencyFingerprint[];
@@ -36,7 +38,11 @@ export async function loadAuthoredModule({
 }> {
   const canonicalRoot = await realpath(projectRoot);
   const canonicalSource = await realpath(sourcePath);
-  const capturedInputs = new Map<string, Buffer>();
+  const entrySource = await readFile(canonicalSource);
+  validateEntrySource?.(entrySource.toString("utf8"), canonicalSource);
+  const capturedInputs = new Map<string, Buffer>([
+    [canonicalSource, entrySource]
+  ]);
   const plugins = [_sourceSnapshotPlugin(capturedInputs)];
   if (authoredSdk) { plugins.push(_authoredSdkPlugin()); }
   const result = await Bun.build({

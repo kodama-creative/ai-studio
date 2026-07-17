@@ -13,6 +13,7 @@ import {
   createAgentProjectArtifact
 } from "./create-agent-project-artifact";
 import { loadAuthoredModule } from "./load-authored-module";
+import { assertNoDuplicateObjectLiteralKeys } from "./validate-authored-source";
 import { normalizeAgentDefinition } from "../../internal/authored-definition/normalize-agent-definition";
 import { qualifyProjectMcpToolName } from "../../internal/project-mcp-tool-name";
 import { isMcpClientConnectionDefinition } from "../../public/definitions/connections/mcp";
@@ -112,7 +113,8 @@ async function _compileDefinition(
     const loaded = await loadAuthoredModule({
       projectRoot,
       sourcePath: sourceRef.absolutePath,
-      authoredSdk: true
+      authoredSdk: true,
+      validateEntrySource: assertNoDuplicateObjectLiteralKeys
     });
     _recordDependencies(dependencies, sourceRef.logicalPath, loaded.dependencies);
     sources.push({ id: sourceRef.logicalPath, content: loaded.source });

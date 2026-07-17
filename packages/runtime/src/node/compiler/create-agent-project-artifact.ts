@@ -29,6 +29,7 @@ const RUNTIME_DEPENDENCIES = [
     name: "@modelcontextprotocol/sdk",
     specifier: "@modelcontextprotocol/sdk/client/index.js"
   },
+  { name: "typescript", specifier: "typescript" },
   { name: "typebox", specifier: "typebox" }
 ] as const;
 

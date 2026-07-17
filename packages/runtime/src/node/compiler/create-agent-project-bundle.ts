@@ -50,10 +50,22 @@ export async function createAgentProjectBundle(
     if (!discovered.definition) {
       throw new Error("Agent project definition is unavailable");
     }
+    const helperPath = fileURLToPath(
+      new URL("./create-bundled-agent-project.ts", import.meta.url)
+    );
     const entryPath = path.join(temporaryRoot, "entry.mjs");
-    await writeFile(entryPath, _entrySource(discovered, project), "utf8");
+    await writeFile(
+      entryPath,
+      _entrySource(discovered, project, helperPath),
+      "utf8"
+    );
     const bundlePath = path.join(temporaryRoot, "agent.bundle.mjs");
-    await _buildInFreshBunProcess(entryPath, bundlePath);
+    await _buildInFreshBunProcess(
+      entryPath,
+      bundlePath,
+      bundleRoot,
+      helperPath
+    );
     const bundle = await readFile(bundlePath, "utf8");
     _assertClosedBundle(bundle);
     const verificationPath = path.join(temporaryRoot, "verify.mjs");
@@ -102,21 +114,75 @@ function _assertClosedBundle(bundle: string): void {
 
 async function _buildInFreshBunProcess(
   entryPath: string,
-  bundlePath: string
+  bundlePath: string,
+  authoredRoot: string,
+  helperPath: string
 ): Promise<void> {
   const scriptPath = `${bundlePath}.build.mjs`;
+  const validatorPath = fileURLToPath(
+    new URL("./validate-authored-source.ts", import.meta.url)
+  );
   await writeFile(scriptPath, `
-    const [ENTRY_PATH, BUNDLE_PATH, RESOLVE_ROOT] = process.argv.slice(2);
+    import path from "node:path";
+    import { builtinModules } from "node:module";
+    import { assertNoNonLiteralRuntimeImports } from ${JSON.stringify(validatorPath)};
+    const [ENTRY_PATH, BUNDLE_PATH, RESOLVE_ROOT, AUTHORED_ROOT, HELPER_PATH]
+      = process.argv.slice(2);
+    const AUTHORED_FILES = new Set();
+    const RUNTIME_FILES = new Set([ENTRY_PATH, HELPER_PATH]);
+    const NODE_BUILTINS = new Set(
+      builtinModules.map(name => name.replace(/^node:/, ""))
+    );
+    const BUN_COMPATIBILITY_BUILTINS = new Set(["node-fetch", "ws"]);
+    const RUNTIME_SPECIFIER = /^(?:@llm-space\\/runtime(?:\\/tools|\\/connections)?|typebox)$/;
     const PLUGIN = {
       name: "llm-space-deployment-dependencies",
       setup(build) {
-        build.onResolve(
-          { filter: /^(?:@llm-space\\/runtime(?:\\/tools|\\/connections)?|typebox)$/ },
-          args => ({ path: Bun.resolveSync(args.path, RESOLVE_ROOT) })
-        );
+        build.onResolve({ filter: /.*/ }, args => {
+          const builtin = args.path.startsWith("node:")
+            || args.path.startsWith("bun:")
+            || NODE_BUILTINS.has(args.path)
+            || BUN_COMPATIBILITY_BUILTINS.has(args.path);
+          if (builtin) { return; }
+          const runtimeSpecifier = RUNTIME_SPECIFIER.test(args.path);
+          const resolveFrom = runtimeSpecifier
+            ? RESOLVE_ROOT
+            : args.importer ? path.dirname(args.importer) : RESOLVE_ROOT;
+          const resolved = Bun.resolveSync(args.path, resolveFrom);
+          if (args.importer === ENTRY_PATH) {
+            if (resolved.startsWith(AUTHORED_ROOT + path.sep)) {
+              AUTHORED_FILES.add(resolved);
+            } else {
+              RUNTIME_FILES.add(resolved);
+            }
+          } else if (
+            runtimeSpecifier
+            || RUNTIME_FILES.has(args.importer)
+          ) {
+            RUNTIME_FILES.add(resolved);
+          } else if (
+            AUTHORED_FILES.has(args.importer)
+            || args.importer.startsWith(AUTHORED_ROOT + path.sep)
+          ) {
+            AUTHORED_FILES.add(resolved);
+          }
+          return { path: resolved };
+        });
+        build.onLoad({ filter: /\\.[cm]?[jt]sx?$/ }, async args => {
+          if (!AUTHORED_FILES.has(args.path)) { return; }
+          const source = await Bun.file(args.path).text();
+          assertNoNonLiteralRuntimeImports(source, args.path);
+          const extension = path.extname(args.path);
+          const loader = extension === ".tsx"
+            ? "tsx"
+            : extension === ".ts" || extension === ".mts" || extension === ".cts"
+              ? "ts"
+              : extension === ".jsx" ? "jsx" : "js";
+          return { contents: source, loader };
+        });
       }
     };
-    const result = await Bun.build({
+    const RESULT = await Bun.build({
       entrypoints: [ENTRY_PATH],
       format: "esm",
       minify: {
@@ -129,17 +195,19 @@ async function _buildInFreshBunProcess(
       write: false,
       plugins: [PLUGIN]
     });
-    if (!result.success || !result.outputs[0]) {
-      throw new Error(result.logs.map(log => log.message).join("\\n") || "Unable to build Agent deployment bundle");
+    if (!RESULT.success || !RESULT.outputs[0]) {
+      throw new Error(RESULT.logs.map(log => log.message).join("\\n") || "Unable to build Agent deployment bundle");
     }
-    await Bun.write(BUNDLE_PATH, result.outputs[0]);
+    await Bun.write(BUNDLE_PATH, RESULT.outputs[0]);
   `, "utf8");
   const child = Bun.spawn([
     process.execPath,
     scriptPath,
     entryPath,
     bundlePath,
-    import.meta.dir
+    import.meta.dir,
+    authoredRoot,
+    helperPath
   ], {
     stdout: "pipe",
     stderr: "pipe"
@@ -157,11 +225,9 @@ async function _buildInFreshBunProcess(
 
 function _entrySource(
   discovered: Awaited<ReturnType<typeof discoverAgentProject>>,
-  project: Awaited<ReturnType<typeof loadAgentProject>>
+  project: Awaited<ReturnType<typeof loadAgentProject>>,
+  helperPath: string
 ): string {
-  const helperPath = fileURLToPath(
-    new URL("./create-bundled-agent-project.ts", import.meta.url)
-  );
   const definitionPath = discovered.definition?.absolutePath;
   if (!definitionPath) { throw new Error("Agent definition is unavailable"); }
   const imports = [

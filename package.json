@@ -30,6 +30,7 @@
     "@modelcontextprotocol/sdk": "1.29.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "typescript": "^6.0.3",
     "typebox": "^1.2.8"
   },
   "overrides": {
@@ -49,7 +50,7 @@
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.1.1",
     "lefthook": "^2.1.9",
-    "typescript": "^6.0.3"
+    "typescript": "catalog:"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "catalog:",

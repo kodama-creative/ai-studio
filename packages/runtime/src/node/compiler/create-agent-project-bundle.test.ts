@@ -98,6 +98,28 @@ describe("createAgentProjectBundle", () => {
     );
     expect(built.bundle).toContain("changed after capture");
   });
+
+  test("rejects non-literal runtime imports in authored dependencies", async () => {
+    const root = await _fixture();
+    await writeFile(
+      join(root, "tools", "echo.ts"),
+      `import { defineTool } from "@llm-space/runtime/tools";
+      import { Type } from "typebox";
+      export default defineTool({
+        description: "Dynamic dependency fixture.",
+        inputSchema: Type.Object({ value: Type.String() }),
+        async execute({ value }) {
+          const dependency = "./runtime-dependency";
+          await import(dependency);
+          return { value };
+        }
+      });`
+    );
+
+    const error = await _rejection(createAgentProjectBundle(root));
+
+    expect(error.message).toContain("non-literal runtime import");
+  });
 });
 
 async function _fixture(): Promise<string> {
@@ -144,4 +166,13 @@ async function _fixture(): Promise<string> {
     `---\nname: bundle-proof\ndescription: Proves skill bytes survive bundling.\n---\n\nProof.\n`
   );
   return root;
+}
+
+async function _rejection(promise: Promise<unknown>): Promise<Error> {
+  try {
+    await promise;
+  } catch (error) {
+    return error instanceof Error ? error : new Error(String(error));
+  }
+  throw new Error("Expected operation to reject");
 }

@@ -24,7 +24,7 @@
         "eslint-plugin-react": "^7.37.5",
         "eslint-plugin-react-hooks": "^7.1.1",
         "lefthook": "^2.1.9",
-        "typescript": "^6.0.3",
+        "typescript": "catalog:",
       },
     },
     "apps/desktop": {
@@ -135,6 +135,7 @@
         "@earendil-works/pi-ai": "catalog:",
         "@modelcontextprotocol/sdk": "catalog:",
         "typebox": "catalog:",
+        "typescript": "catalog:",
       },
     },
     "packages/server": {
@@ -158,6 +159,7 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "typebox": "^1.2.8",
+    "typescript": "^6.0.3",
   },
   "packages": {
     "@alloc/quick-lru": ["@alloc/quick-lru@5.2.0", "https://registry.npmmirror.com/@alloc/quick-lru/-/quick-lru-5.2.0.tgz", {}, "sha512-UrcABB+4bUrFABwbluTIBErXwvbsU/V7TZWfmbgJfbkwiBuziS9gxdODUyuiecfdGQ85jglMW6juS3+z5TsKLw=="],

@@ -95,6 +95,31 @@ describe("loadAgentProject", () => {
     ]);
   });
 
+  test("rejects duplicate authored environment names before import", async () => {
+    const root = await _fixture();
+    await writeFile(join(root, "instructions.md"), "Test.\n");
+    await writeFile(
+      join(root, "agent.ts"),
+      `export default {
+        model: "fake/model",
+        environment: {
+          API_KEY: { kind: "secret", required: true },
+          API_KEY: { kind: "config", required: false }
+        }
+      };`
+    );
+
+    const snapshot = await loadAgentProject(root);
+
+    expect(snapshot.definition).toBeUndefined();
+    expect(snapshot.diagnostics).toEqual([
+      expect.objectContaining({
+        code: "definition_import_failed",
+        message: expect.stringContaining("Duplicate authored object key: API_KEY")
+      })
+    ]);
+  });
+
   test("discovers instructions, executable tools, and skills", async () => {
     const root = await _fixture();
     await writeFile(join(root, "instructions.md"), "You are helpful.\n");

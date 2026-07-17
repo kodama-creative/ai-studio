@@ -17,6 +17,7 @@
     "@earendil-works/pi-agent-core": "catalog:",
     "@earendil-works/pi-ai": "catalog:",
     "@modelcontextprotocol/sdk": "catalog:",
+    "typescript": "catalog:",
     "typebox": "catalog:"
   }
 }
