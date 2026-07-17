@@ -45,6 +45,7 @@ publishing it:
 
 ```sh
 docker buildx build \
+  --file ./oci-context/Containerfile \
   --platform linux/amd64,linux/arm64 \
   --output type=oci,dest=agent-image.tar \
   ./oci-context
@@ -54,7 +55,7 @@ For one local architecture, Docker, Podman, and Buildah consume the same
 context:
 
 ```sh
-docker build -t example-agent:local ./oci-context
+docker build -f ./oci-context/Containerfile -t example-agent:local ./oci-context
 podman build -f ./oci-context/Containerfile -t example-agent:local ./oci-context
 buildah bud -f ./oci-context/Containerfile -t example-agent:local ./oci-context
 ```
