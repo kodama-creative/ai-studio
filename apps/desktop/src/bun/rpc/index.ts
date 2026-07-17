@@ -1,6 +1,6 @@
 import { mkdirSync } from "node:fs";
 import { readFile, stat, writeFile } from "node:fs/promises";
-import path from "node:path";
+import nodePath from "node:path";
 import { BrowserView, type BrowserWindow, Utils } from "electrobun/bun";
 
 import type { ModelProviderGroup } from "@llm-space/core";
@@ -182,7 +182,7 @@ export function createMainWindowRPC({
           return { fullScreen: mainWindow.isFullScreen() };
         },
         ensureRootDir: async ({ relativePath }) => {
-          const dir = path.join(homePath, relativePath);
+          const dir = nodePath.join(homePath, relativePath);
           mkdirSync(dir, { recursive: true });
           return Promise.resolve({ path: dir });
         },
@@ -238,7 +238,7 @@ export function createMainWindowRPC({
           if (!found) {
             return { existed: false };
           }
-          const file = path.join(found.path, "SKILL.md");
+          const file = nodePath.join(found.path, "SKILL.md");
           try {
             await stat(file);
           } catch {
@@ -404,7 +404,9 @@ export function createMainWindowRPC({
         sendStreamThreadRequest: payload => {
           // Fire-and-forget: stream events back as `receiveStreamThreadResponse`
           // messages. `rpc` is initialized by the time this handler runs.
-          void streaming.run(payload, message => { rpc.send.receiveStreamThreadResponse(message); });
+          void streaming.run(payload, message => {
+            rpc.send.receiveStreamThreadResponse(message);
+          });
         },
         abortStreamThread: payload => { streaming.abort(payload); },
         agentSourceDirtyStateChanged: ({ dirty }) => { onAgentSourceDirtyStateChanged(dirty); },
@@ -414,6 +416,8 @@ export function createMainWindowRPC({
       }
     }
   });
-  externalAgentProjects.setOnChange(projectId => { rpc.send.externalAgentProjectChanged({ projectId }); });
+  externalAgentProjects.setOnChange(projectId => {
+    rpc.send.externalAgentProjectChanged({ projectId });
+  });
   return rpc;
 }

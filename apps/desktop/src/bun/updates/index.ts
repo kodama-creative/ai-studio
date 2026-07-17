@@ -27,16 +27,19 @@ export class UpdaterService {
   private _installedVersion: string | null = null;
   private _backgroundTimer: ReturnType<typeof setTimeout> | null = null;
   private _backgroundInterval: ReturnType<typeof setInterval> | null = null;
+  private readonly _sendUpdateStatus: (message: UpdateStatusMessage) => void;
 
-  constructor(
-    private readonly _sendUpdateStatus: (message: UpdateStatusMessage) => void
-  ) {}
+  constructor(sendUpdateStatus: (message: UpdateStatusMessage) => void) {
+    this._sendUpdateStatus = sendUpdateStatus;
+  }
 
   async checkForUpdates(manual: boolean): Promise<void> {
     if (this._isCheckInFlight) {
       if (manual && !this._isPassManual) {
         this._isPassManual = true;
-        if (this._lastStatus) { this._sendStatus(this._lastStatus); }
+        if (this._lastStatus) {
+          this._sendStatus(this._lastStatus);
+        }
       }
       return;
     }
@@ -82,7 +85,9 @@ export class UpdaterService {
       this._sendStatus({ state: "error", message });
       return;
     }
-    setTimeout(() => void this.checkForUpdates(true), APPLY_GRACE_MS);
+    setTimeout(() => {
+      void this.checkForUpdates(true);
+    }, APPLY_GRACE_MS);
   }
 
   getInstalledVersion(): string | null {
@@ -102,11 +107,17 @@ export class UpdaterService {
 
   async start(): Promise<void> {
     const { channel, hash, version } = await Updater.getLocalInfo();
-    if (channel === "dev") { return; }
+    if (channel === "dev") {
+      return;
+    }
 
     const lastSeen = await getLastSeenHash();
-    if (lastSeen && lastSeen !== hash) { this._installedVersion = version; }
-    if (lastSeen !== hash) { await setLastSeenHash(hash); }
+    if (lastSeen && lastSeen !== hash) {
+      this._installedVersion = version;
+    }
+    if (lastSeen !== hash) {
+      await setLastSeenHash(hash);
+    }
 
     this._applySchedule(await getUpdateMode());
   }
@@ -121,21 +132,31 @@ export class UpdaterService {
   }
 
   private _clearSchedule(): void {
-    if (this._backgroundTimer) { clearTimeout(this._backgroundTimer); }
-    if (this._backgroundInterval) { clearInterval(this._backgroundInterval); }
+    if (this._backgroundTimer) {
+      clearTimeout(this._backgroundTimer);
+    }
+    if (this._backgroundInterval) {
+      clearInterval(this._backgroundInterval);
+    }
     this._backgroundTimer = null;
     this._backgroundInterval = null;
   }
 
   private _applySchedule(mode: UpdateMode): void {
     this._clearSchedule();
-    if (mode !== "automatic") { return; }
+    if (mode !== "automatic") {
+      return;
+    }
     this._backgroundTimer = setTimeout(
-      () => void this.checkForUpdates(false),
+      () => {
+        void this.checkForUpdates(false);
+      },
       INITIAL_CHECK_DELAY_MS
     );
     this._backgroundInterval = setInterval(
-      () => void this.checkForUpdates(false),
+      () => {
+        void this.checkForUpdates(false);
+      },
       CHECK_INTERVAL_MS
     );
   }

@@ -28,7 +28,9 @@ export const DEFAULT_WINDOW_FRAME: WindowFrame = {
 };
 
 function isWindowFrame(value: unknown): value is WindowFrame {
-  if (typeof value !== "object" || value === null) { return false; }
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
   const frame = value as WindowFrame;
   return (
     typeof frame.x === "number"

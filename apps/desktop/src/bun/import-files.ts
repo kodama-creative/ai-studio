@@ -33,7 +33,9 @@ export async function importFilesWithNativePicker(
       allowsMultipleSelection: true
     })
   );
-  if (paths.length === 0) { return; }
+  if (paths.length === 0) {
+    return;
+  }
 
   const files = await Promise.all(paths.map(async path => _readImportFile(path)));
   sendCommand({

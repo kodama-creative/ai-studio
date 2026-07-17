@@ -49,7 +49,9 @@ export async function executeTool(
     };
   }
   if (tool.type === "project") {
-    if (!electrobun.rpc) { throw new Error("Desktop RPC is not available."); }
+    if (!electrobun.rpc) {
+      throw new Error("Desktop RPC is not available.");
+    }
     if (!context.callId) {
       throw new Error("Project tool calls require the model tool-call id.");
     }

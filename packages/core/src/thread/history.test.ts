@@ -33,7 +33,9 @@ function _createRubric(): EvaluationRubricRecord {
     { name: "Answer quality", criteria: CRITERIA },
     10
   );
-  if (!result) { throw new Error("rubric fixture failed"); }
+  if (!result) {
+    throw new Error("rubric fixture failed");
+  }
   return result.rubric;
 }
 

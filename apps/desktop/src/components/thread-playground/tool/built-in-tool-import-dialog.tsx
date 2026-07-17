@@ -23,7 +23,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
-import { getBuiltInToolIcon } from "./built-in-tool-icon";
+import { BuiltInToolIcon } from "./built-in-tool-icon";
 
 type BuiltInToolCategoryId = "fileSystem" | "misc" | "web";
 
@@ -216,7 +216,6 @@ const _BuiltInToolImportDialog = function BuiltInToolImportDialog({
                 : (
                   selectedTools.map(tool => {
                     const exists = existingToolNames.has(tool.name);
-                    const ToolIcon = getBuiltInToolIcon(tool);
                     const highlighted = highlightedToolName === tool.name;
                     return (
                       <div
@@ -233,11 +232,12 @@ const _BuiltInToolImportDialog = function BuiltInToolImportDialog({
                           }
                         }}
                       >
-                        <ToolIcon
+                        <BuiltInToolIcon
                           className={cn(
                             "size-4 shrink-0",
                             highlighted ? "text-primary" : "text-muted-foreground"
                           )}
+                          tool={tool}
                         />
                         <div className="min-w-0 flex-1">
                           <div className="truncate font-mono text-sm">

@@ -83,11 +83,17 @@ export class ToolExecutionPolicy {
     messages: AgentMessage[],
     mode: RuntimeExecutionMode
   ): AgentMessage[] {
-    if (mode !== "manual") { return messages; }
+    if (mode !== "manual") {
+      return messages;
+    }
     const last = messages.at(-1);
-    if (last?.role !== "assistant") { return messages; }
+    if (last?.role !== "assistant") {
+      return messages;
+    }
     const calls = last.content.filter(content => content.type === "toolCall");
-    if (calls.length === 0) { return messages; }
+    if (calls.length === 0) {
+      return messages;
+    }
     return [
       ...messages,
       ...calls.map((call): ToolResultMessage<{ marker: string; }> => ({
@@ -120,10 +126,16 @@ export class ToolExecutionPolicy {
         "Resolved tool results must match every pending tool call"
       );
     }
-    const replaced = messages.map(message =>
-      (this.isDeferredResultMessage(message)
-        ? replacements.get(message.toolCallId)!
-        : message));
+    const replaced = messages.map(message => {
+      if (!this.isDeferredResultMessage(message)) {
+        return message;
+      }
+      const replacement = replacements.get(message.toolCallId);
+      if (!replacement) {
+        throw new Error(`Missing tool result for ${message.toolCallId}`);
+      }
+      return replacement;
+    });
     this._deferredCalls.clear();
     return replaced;
   }

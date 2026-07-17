@@ -194,7 +194,9 @@ function AnalyticsRow() {
     let cancelled = false;
     void getAnalyticsSettings()
       .then(loaded => {
-        if (cancelled) { return; }
+        if (cancelled) {
+          return;
+        }
         setEnabled(loaded.enabled);
         setAvailable(loaded.available);
       })
@@ -236,7 +238,9 @@ function AnalyticsRow() {
         aria-label="Share anonymous usage analytics"
         checked={available ? enabled : false}
         disabled={!available}
-        onCheckedChange={next => void handleChange(next)}
+        onCheckedChange={next => {
+          void handleChange(next);
+        }}
       />
     </SettingsRow>
   );
@@ -249,7 +253,9 @@ function WorkspaceFolderLink() {
     let cancelled = false;
     void getWorkspacePath()
       .then(loaded => {
-        if (!cancelled) { setPath(loaded); }
+        if (!cancelled) {
+          setPath(loaded);
+        }
       })
       .catch(() => {
         // Non-fatal; leave the placeholder.

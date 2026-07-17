@@ -470,7 +470,7 @@ export const grepTool: BuiltinTool = {
 export async function grep(
   pattern: string,
   searchPath: string,
-  glob?: string,
+  globPattern?: string,
   caseInsensitive = false,
   contextLines?: number
 ): Promise<string> {
@@ -482,8 +482,8 @@ export async function grep(
   if (caseInsensitive) {
     args.push("--ignore-case");
   }
-  if (glob) {
-    args.push("--glob", glob);
+  if (globPattern) {
+    args.push("--glob", globPattern);
   }
   if (contextLines !== undefined && contextLines > 0) {
     args.push("--context", String(Math.floor(contextLines)));
@@ -828,11 +828,15 @@ async function _run(
       stderr += chunk;
     });
     child.on("error", error => {
-      if (timer) { clearTimeout(timer); }
+      if (timer) {
+        clearTimeout(timer);
+      }
       reject(error);
     });
     child.on("close", code => {
-      if (timer) { clearTimeout(timer); }
+      if (timer) {
+        clearTimeout(timer);
+      }
       if (timedOut) {
         reject(new Error(`Command timed out after ${timeoutMs}ms`));
         return;

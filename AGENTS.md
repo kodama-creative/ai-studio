@@ -152,12 +152,15 @@ Prefer dropping new images into the existing `src/mainview/public/images/` folde
 - **Identifiers**:
   - React components, classes, types, and interfaces are **PascalCase** (`ThreadPlayground`, `ModelManager`, `Command`, `FileNode`).
   - Functions, variables, hooks, and command `type` discriminants are **camelCase** (`createMainWindowRPC`, `useThreadTabs`, `newFile`, `closeTab`).
-  - Module-level constants are **UPPER_SNAKE_CASE** (`DOCS_URL`, `ZOOM_STEP`, `COMMAND_META`, `BUILTIN_PROVIDERS`).
+  - Module-level non-React constants are **UPPER_SNAKE_CASE** (`DOCS_URL`, `ZOOM_STEP`, `COMMAND_META`, `BUILTIN_PROVIDERS`).
+  - React contexts are **PascalCase** (`ToolExecutionContext`).
 - **Leading underscore for what's private**:
-  - Project-defined module-private (non-exported) functions: `_foo()`.
-  - Third-party APIs and their imported or destructured callables keep their upstream names (for example, `Type.Object()`). Do not add a leading underscore to them.
+  - Project-defined module-private (non-exported), non-component functions: `_foo()`.
+  - React components always use PascalCase without a leading underscore.
   - Private class members: `_config`, `_models`, `_loadConfig()` (see `ModelManager`).
-  - When a wrapper re-exports a primitive under the same name, alias the primitive with a leading underscore to avoid the collision (`import { Tooltip as _Tooltip } from "./ui/tooltip"` in `components/tooltip.tsx`).
+- **Callable names**:
+  - Values invoked without `new` must not use constructor-style PascalCase identifiers.
+  - When a wrapper re-exports a primitive under the same name, use a descriptive PascalCase alias (`import { Tooltip as TooltipPrimitive } from "./ui/tooltip"` in `components/tooltip.tsx`).
 
 ### UI elements
 
@@ -171,6 +174,6 @@ Prefer dropping new images into the existing `src/mainview/public/images/` folde
 
 **Weigh render performance on every change.** This UI streams events and re-renders hot lists (messages, tool calls), so:
 
-- Wrap components that re-render often or sit in a list in `memo()`. The house pattern is `export const Foo = memo(_Foo)` — the underscore-prefixed inner holds the implementation (see `MessageListItem`, `ThinkingView`, `CodeEditor`).
+- Wrap components that re-render often or sit in a list in `memo()`. The house pattern is `export const Foo = memo(FooImpl)`, where the PascalCase `FooImpl` component holds the implementation (see `MessageListItem`, `ThinkingView`, `CodeEditor`).
 - Keep memo effective: stabilize props with `useMemo`/`useCallback` and read the store through narrow `useThreadStore(selector)` slices so a component only re-renders on the state it uses.
 - Don't reach for `memo()` reflexively on cheap, rarely-rendered components — add it where a profile or the render path shows it pays off.

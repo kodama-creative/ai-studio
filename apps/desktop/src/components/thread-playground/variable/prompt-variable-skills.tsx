@@ -1,9 +1,4 @@
-import {
-  createContext,
-  createElement,
-  type ReactNode,
-  useContext
-} from "react";
+import { createContext, type ReactNode, useContext } from "react";
 
 import { getSkillsSettings, listSkills } from "@/client/skills";
 
@@ -35,13 +30,15 @@ export function PromptSkillsProvider({
   loader,
   children
 }: {
-  children: ReactNode;
-  loader?: PromptSkillsLoader;
+  readonly children: ReactNode;
+  readonly loader?: PromptSkillsLoader;
 }) {
-  return createElement(
-    PromptSkillsContext.Provider,
-    { value: loader ?? listEnabledPromptVariableSkills },
-    children
+  return (
+    <PromptSkillsContext.Provider
+      value={loader ?? listEnabledPromptVariableSkills}
+    >
+      {children}
+    </PromptSkillsContext.Provider>
   );
 }
 

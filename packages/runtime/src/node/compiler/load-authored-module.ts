@@ -86,7 +86,9 @@ export async function loadAuthoredModule({
   try {
     await writeFile(cachePath, source, { encoding: "utf8", flag: "wx" });
   } catch (error) {
-    if (!_hasCode(error, "EEXIST")) { throw error; }
+    if (!_hasCode(error, "EEXIST")) {
+      throw error;
+    }
   }
   const module: unknown = await import(
     `${pathToFileURL(cachePath).href}?v=${fingerprint}`

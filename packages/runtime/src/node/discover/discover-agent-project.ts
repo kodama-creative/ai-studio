@@ -102,7 +102,9 @@ async function _discoverConnections(
     }
     entries = await readdir(connectionsRoot, { withFileTypes: true });
   } catch (error) {
-    if (_hasCode(error, "ENOENT")) { return []; }
+    if (_hasCode(error, "ENOENT")) {
+      return [];
+    }
     diagnostics.push({
       severity: "error",
       code: "connection_import_failed",
@@ -112,9 +114,18 @@ async function _discoverConnections(
     return [];
   }
   const connections: AgentProjectSourceRef[] = [];
-  for (const entry of entries.sort((left, right) =>
-    (left.name < right.name ? -1 : left.name > right.name ? 1 : 0))) {
-    if (!entry.name.endsWith(".ts") && !entry.name.endsWith(".js")) { continue; }
+  for (const entry of entries.sort((left, right) => {
+    if (left.name < right.name) {
+      return -1;
+    }
+    if (left.name > right.name) {
+      return 1;
+    }
+    return 0;
+  })) {
+    if (!entry.name.endsWith(".ts") && !entry.name.endsWith(".js")) {
+      continue;
+    }
     const absolutePath = path.join(connectionsRoot, entry.name);
     if (entry.isSymbolicLink() || !entry.isFile()) {
       diagnostics.push({
@@ -206,7 +217,9 @@ async function _discoverTools(
     }
     entries = await readdir(toolsRoot, { withFileTypes: true });
   } catch (error) {
-    if (_hasCode(error, "ENOENT")) { return []; }
+    if (_hasCode(error, "ENOENT")) {
+      return [];
+    }
     diagnostics.push({
       severity: "error",
       code: "tool_import_failed",
@@ -216,8 +229,15 @@ async function _discoverTools(
     return [];
   }
   const tools: AgentProjectSourceRef[] = [];
-  for (const entry of entries.sort((left, right) =>
-    (left.name < right.name ? -1 : left.name > right.name ? 1 : 0))) {
+  for (const entry of entries.sort((left, right) => {
+    if (left.name < right.name) {
+      return -1;
+    }
+    if (left.name > right.name) {
+      return 1;
+    }
+    return 0;
+  })) {
     if (!entry.name.endsWith(".ts") && !entry.name.endsWith(".js")) {
       continue;
     }
@@ -252,7 +272,9 @@ async function _isSymlink(candidate: string): Promise<boolean> {
   try {
     return (await lstat(candidate)).isSymbolicLink();
   } catch (error) {
-    if (_hasCode(error, "ENOENT")) { return false; }
+    if (_hasCode(error, "ENOENT")) {
+      return false;
+    }
     throw error;
   }
 }
@@ -262,7 +284,9 @@ async function _findSymlinks(root: string): Promise<string[]> {
   try {
     entries = await readdir(root, { withFileTypes: true });
   } catch (error) {
-    if (_hasCode(error, "ENOENT")) { return []; }
+    if (_hasCode(error, "ENOENT")) {
+      return [];
+    }
     throw error;
   }
   const result: string[] = [];

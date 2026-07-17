@@ -55,9 +55,8 @@ export async function* streamAgent(
   const { models, signal, getApiKey, getBaseUrl, getHeaders } = options;
 
   if (request.context.messages.length > 0) {
-    const lastMessage =
-      request.context.messages[request.context.messages.length - 1]!;
-    if (lastMessage.role === "assistant") {
+    const lastMessage = request.context.messages.at(-1);
+    if (lastMessage?.role === "assistant") {
       throw new Error(RUN_LAST_MESSAGE_ERROR);
     }
   }

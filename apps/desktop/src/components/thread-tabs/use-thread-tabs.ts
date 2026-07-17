@@ -60,9 +60,15 @@ type PersistedTab =
 
 /** Derive a tab label from an app tab. */
 export function tabLabel(tab: AppTab): string {
-  if (tab.type === "thread") { return threadTitleFromPath(tab.path); }
-  if (tab.type === "trace") { return tab.title; }
-  if (tab.type === "externalProject") { return tab.title; }
+  if (tab.type === "thread") {
+    return threadTitleFromPath(tab.path);
+  }
+  if (tab.type === "trace") {
+    return tab.title;
+  }
+  if (tab.type === "externalProject") {
+    return tab.title;
+  }
   return tab.path.split("/").at(-1) ?? tab.path;
 }
 
@@ -137,7 +143,7 @@ export interface ThreadTabs {
    * Reopen the most recently closed tab group, silently skipping files or traces
    * that no longer exist.
    */
-  reopenClosed: () => void;
+  reopenClosed: () => Promise<void>;
 }
 
 const STORAGE_KEY = "llm-space:open-app-tabs";
@@ -224,7 +230,9 @@ function _fromPersisted(tab: PersistedTab): AppTab | null {
   if (tab.type === "thread" && tab.path) {
     return _createThreadTab(tab.path);
   }
-  if (tab.type === "source" && tab.path) { return _createSourceTab(tab.path); }
+  if (tab.type === "source" && tab.path) {
+    return _createSourceTab(tab.path);
+  }
   if (
     tab.type === "externalProject"
     && tab.projectId
@@ -239,25 +247,35 @@ function _fromPersisted(tab: PersistedTab): AppTab | null {
     });
   }
   if (tab.type === "trace" && tab.projectId && tab.traceKey) {
+    let title = tab.title;
+    if (!title) {
+      title = tab.traceKey;
+    }
     return _createTraceTab({
       projectId: tab.projectId,
       traceKey: tab.traceKey,
-      title: tab.title || tab.traceKey
+      title
     });
   }
   return null;
 }
 
 function _loadPersistedTabs(): AppTab[] {
-  if (typeof window === "undefined") { return []; }
+  if (typeof window === "undefined") {
+    return [];
+  }
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (raw !== null) {
       const parsed: unknown = JSON.parse(raw);
-      if (!Array.isArray(parsed)) { return []; }
+      if (!Array.isArray(parsed)) {
+        return [];
+      }
       return parsed
         .map((item): PersistedTab | null => {
-          if (!item || typeof item !== "object") { return null; }
+          if (!item || typeof item !== "object") {
+            return null;
+          }
           const t = item as PersistedTab;
           return t.type === "thread"
             || t.type === "trace"
@@ -271,7 +289,9 @@ function _loadPersistedTabs(): AppTab[] {
     }
 
     const legacyRaw = window.localStorage.getItem(LEGACY_STORAGE_KEY);
-    if (legacyRaw === null) { return []; }
+    if (legacyRaw === null) {
+      return [];
+    }
     const legacy: unknown = JSON.parse(legacyRaw);
     return Array.isArray(legacy)
       ? legacy
@@ -284,7 +304,9 @@ function _loadPersistedTabs(): AppTab[] {
 }
 
 function _savePersistedTabs(tabs: AppTab[]): void {
-  if (typeof window === "undefined") { return; }
+  if (typeof window === "undefined") {
+    return;
+  }
   try {
     window.localStorage.setItem(
       STORAGE_KEY,
@@ -296,11 +318,17 @@ function _savePersistedTabs(tabs: AppTab[]): void {
 }
 
 function _loadPersistedActive(tabs: AppTab[]): string | null {
-  if (typeof window === "undefined") { return null; }
+  if (typeof window === "undefined") {
+    return null;
+  }
   try {
     const active = window.localStorage.getItem(ACTIVE_KEY);
-    if (!active) { return tabs[0]?.id ?? null; }
-    if (tabs.some(tab => tab.id === active)) { return active; }
+    if (!active) {
+      return tabs[0]?.id ?? null;
+    }
+    if (tabs.some(tab => tab.id === active)) {
+      return active;
+    }
     const legacyThreadId = _threadTabId(active);
     return tabs.some(tab => tab.id === legacyThreadId)
       ? legacyThreadId
@@ -311,9 +339,15 @@ function _loadPersistedActive(tabs: AppTab[]): string | null {
 }
 
 function _savePersistedActive(id: string | null): void {
-  if (typeof window === "undefined") { return; }
+  if (typeof window === "undefined") {
+    return;
+  }
   try {
-    if (id === null) { window.localStorage.removeItem(ACTIVE_KEY); } else { window.localStorage.setItem(ACTIVE_KEY, id); }
+    if (id === null) {
+      window.localStorage.removeItem(ACTIVE_KEY);
+    } else {
+      window.localStorage.setItem(ACTIVE_KEY, id);
+    }
   } catch {
     // Best-effort persistence only.
   }
@@ -344,7 +378,9 @@ async function _traceExists(tab: TraceTab): Promise<boolean> {
 }
 
 async function _tabExists(tab: AppTab): Promise<boolean> {
-  if (tab.type === "trace") { return _traceExists(tab); }
+  if (tab.type === "trace") {
+    return _traceExists(tab);
+  }
   if (tab.type === "externalProject") {
     try {
       const project = await externalAgentProjects.inspect(tab.projectId);
@@ -386,13 +422,17 @@ export function useThreadTabs(): ThreadTabs {
 
   useEffect(() => {
     const rpc = electrobun.rpc;
-    if (!rpc) { return; }
+    if (!rpc) {
+      return;
+    }
     let mounted = true;
     const listener = ({ projectId }: { projectId: string; }) => {
       void externalAgentProjects
         .inspect(projectId)
         .then(project => {
-          if (!mounted) { return; }
+          if (!mounted) {
+            return;
+          }
           const threadTitles = new Map(
             project.threads.map(thread => [thread.id, thread.title])
           );
@@ -431,13 +471,17 @@ export function useThreadTabs(): ThreadTabs {
           });
         })
         .catch(() => {
-          if (!mounted) { return; }
+          if (!mounted) {
+            return;
+          }
           setTabs(current => {
             const next = current.filter(
               tab =>
                 tab.type !== "externalProject" || tab.projectId !== projectId
             );
-            if (next.length === current.length) { return current; }
+            if (next.length === current.length) {
+              return current;
+            }
             setActiveId(focused =>
               (focused && next.some(tab => tab.id === focused)
                 ? focused
@@ -461,14 +505,20 @@ export function useThreadTabs(): ThreadTabs {
   useEffect(() => {
     const restored = tabsRef.current;
     const restoredActive = activeId;
-    if (restored.length === 0) { return; }
+    if (restored.length === 0) {
+      return;
+    }
     let cancelled = false;
     void Promise.all(
       restored.map(async tab => ((await _tabExists(tab)) ? tab : null))
     ).then(checked => {
-      if (cancelled) { return; }
+      if (cancelled) {
+        return;
+      }
       const alive = checked.filter((tab): tab is AppTab => tab !== null);
-      if (alive.length !== restored.length) { setTabs(alive); }
+      if (alive.length !== restored.length) {
+        setTabs(alive);
+      }
       const aliveIds = alive.map(tab => tab.id);
       setActiveId(
         restoredActive !== null && aliveIds.includes(restoredActive)
@@ -565,21 +615,23 @@ export function useThreadTabs(): ThreadTabs {
   const activateSibling = useCallback((offset: -1 | 1) => {
     setActiveId(current => {
       const list = tabsRef.current;
-      if (list.length === 0) { return current; }
+      if (list.length === 0) {
+        return current;
+      }
       const index = list.findIndex(tab => tab.id === current);
       // No resolvable active tab: enter the cycle from the end being stepped
       // into, so "previous" still moves leftwards (to the last tab).
-      const next =
-        index === -1
-          ? offset === 1
-            ? list[0]
-            : list[list.length - 1]
-          : list[(index + offset + list.length) % list.length];
+      let next = list[(index + offset + list.length) % list.length];
+      if (index === -1) {
+        next = offset === 1 ? list[0] : list[list.length - 1];
+      }
       return next.id;
     });
   }, []);
 
-  const activateNext = useCallback(() => { activateSibling(1); }, [activateSibling]);
+  const activateNext = useCallback(() => {
+    activateSibling(1);
+  }, [activateSibling]);
 
   const activatePrevious = useCallback(
     () => { activateSibling(-1); },
@@ -590,10 +642,14 @@ export function useThreadTabs(): ThreadTabs {
     (id: string) => {
       setTabs(prev => {
         const index = prev.findIndex(tab => tab.id === id);
-        if (index === -1) { return prev; }
+        if (index === -1) {
+          return prev;
+        }
         const closed = prev[index];
         const next = prev.filter(tab => tab.id !== id);
-        if (closed) { pushClosed([closed]); }
+        if (closed) {
+          pushClosed([closed]);
+        }
         setActiveId(current =>
           (current === id
             ? (next[index - 1]?.id ?? next[index]?.id ?? null)
@@ -607,7 +663,9 @@ export function useThreadTabs(): ThreadTabs {
   const closeOthers = useCallback(
     (keep: string) => {
       setTabs(prev => {
-        if (!prev.some(tab => tab.id === keep)) { return prev; }
+        if (!prev.some(tab => tab.id === keep)) {
+          return prev;
+        }
         pushClosed(prev.filter(tab => tab.id !== keep));
         return prev.filter(tab => tab.id === keep);
       });
@@ -624,14 +682,18 @@ export function useThreadTabs(): ThreadTabs {
 
   const reopenClosed = useCallback(async () => {
     const group = closedStack.current.pop();
-    if (!group) { return; }
+    if (!group) {
+      return;
+    }
     const restored = group.map(_fromPersisted).filter(Boolean) as AppTab[];
     const alive = (
       await Promise.all(
         restored.map(async tab => ((await _tabExists(tab)) ? tab : null))
       )
     ).filter((tab): tab is AppTab => tab !== null);
-    if (alive.length === 0) { return; }
+    if (alive.length === 0) {
+      return;
+    }
     setTabs(prev => [
       ...prev,
       ...alive.filter(tab => !prev.some(current => current.id === tab.id))
@@ -641,8 +703,12 @@ export function useThreadTabs(): ThreadTabs {
 
   const reorder = useCallback((from: number, to: number) => {
     setTabs(prev => {
-      if (from === to || from < 0 || to < 0) { return prev; }
-      if (from >= prev.length || to >= prev.length) { return prev; }
+      if (from === to || from < 0 || to < 0) {
+        return prev;
+      }
+      if (from >= prev.length || to >= prev.length) {
+        return prev;
+      }
       const next = [...prev];
       const [moved] = next.splice(from, 1) as [AppTab];
       next.splice(to, 0, moved);
@@ -657,7 +723,9 @@ export function useThreadTabs(): ThreadTabs {
           (tab.type !== "thread" && tab.type !== "source")
           || !_isUnder(tab.path, removed)
       );
-      if (next.length === prev.length) { return prev; }
+      if (next.length === prev.length) {
+        return prev;
+      }
       setActiveId(current =>
         (current !== null
           && prev.some(
@@ -673,8 +741,15 @@ export function useThreadTabs(): ThreadTabs {
   }, []);
 
   const handleMove = useCallback((from: string, to: string) => {
-    const rewrite = (p: string): string =>
-      (p === from ? to : _isUnder(p, from) ? to + p.slice(from.length) : p);
+    const rewrite = (p: string): string => {
+      if (p === from) {
+        return to;
+      }
+      if (_isUnder(p, from)) {
+        return to + p.slice(from.length);
+      }
+      return p;
+    };
 
     setTabs(prev => {
       if (
@@ -750,6 +825,6 @@ export function useThreadTabs(): ThreadTabs {
     handleRemove,
     handleMove,
     handleTraceTitleChange,
-    reopenClosed: () => { void reopenClosed(); }
+    reopenClosed
   };
 }

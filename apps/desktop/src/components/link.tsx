@@ -26,14 +26,18 @@ export function Link({
 
   const handleClick = (event: MouseEvent<HTMLAnchorElement>) => {
     onClick?.(event);
-    if (event.defaultPrevented) { return; }
+    if (event.defaultPrevented) {
+      return;
+    }
     // The OS opens the URL or path; the webview must not navigate to it.
     event.preventDefault();
     if (command) {
       executeCommand(command);
       return;
     }
-    if (!href) { return; }
+    if (!href) {
+      return;
+    }
     executeCommand({ type: "openLink", args: { url: href } });
   };
 

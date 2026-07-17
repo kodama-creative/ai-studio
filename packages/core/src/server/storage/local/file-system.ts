@@ -53,7 +53,9 @@ export class LocalFileSystem implements FileSystem, ThreadStorage {
 
     // Directories first, then alphabetical, for a stable tree ordering.
     return nodes.sort((a, b) => {
-      if (a.type !== b.type) { return a.type === "directory" ? -1 : 1; }
+      if (a.type !== b.type) {
+        return a.type === "directory" ? -1 : 1;
+      }
       return a.name.localeCompare(b.name);
     });
   }

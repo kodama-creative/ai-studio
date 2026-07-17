@@ -54,7 +54,6 @@ export type BrandIconComponent = ComponentType<{
  */
 export interface BrandIcon {
   Icon: BrandIconComponent;
-  props?: Record<string, unknown>;
 }
 
 /**
@@ -286,9 +285,13 @@ export function resolveProviderIcon(
 ): BrandIcon | null {
   for (const candidate of candidates) {
     const key = candidate?.trim().toLowerCase();
-    if (!key) { continue; }
+    if (!key) {
+      continue;
+    }
     const brand = _providerIconByKeyword.get(key);
-    if (brand) { return brand; }
+    if (brand) {
+      return brand;
+    }
   }
   return null;
 }
@@ -305,7 +308,9 @@ export function resolveModelIcon(
 ): BrandIcon | null {
   for (const candidate of candidates) {
     const value = candidate?.trim();
-    if (!value) { continue; }
+    if (!value) {
+      continue;
+    }
     for (const item of MODEL_MAPPINGS) {
       if (item.keywords.some(keyword => matchesKeyword(keyword, value))) {
         return toBrandIcon(item);

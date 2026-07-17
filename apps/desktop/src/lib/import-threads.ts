@@ -36,7 +36,9 @@ export async function importThreadFileRecords(
 
   for (const file of files) {
     const thread = await registry.parse(file.name, file.text, { availableModels });
-    if (!thread) { continue; }
+    if (!thread) {
+      continue;
+    }
 
     const name = uniqueThreadFileName(existing, importStemFromFileName(file.name));
     existing.add(name);

@@ -83,7 +83,7 @@ function _parseAuroraThread(data: object): Thread | undefined {
     const text = _auroraText(content);
 
     // Unknown and missing roles are ignored by the default branch.
-    // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check
+
     switch (role) {
       case "system":
         if (text) {
@@ -127,26 +127,27 @@ function _parseAuroraThread(data: object): Thread | undefined {
         break;
       }
 
-      default:
+      case undefined:
         break;
     }
   }
 
   const tools = _auroraTools(root.Tools);
-  const thread: Thread = { context: {} };
+  const context: NonNullable<Thread["context"]> = {};
+  const thread: Thread = { context };
   const systemPrompt = systemParts.join("\n\n");
   if (systemPrompt) {
-    thread.context!.systemPrompt = systemPrompt;
+    context.systemPrompt = systemPrompt;
   }
   if (tools.length) {
-    thread.context!.tools = tools;
+    context.tools = tools;
   }
   if (messages.length) {
-    thread.context!.messages = messages;
+    context.messages = messages;
   }
-  return thread.context!.systemPrompt
-    || thread.context!.tools?.length
-    || thread.context!.messages?.length
+  return context.systemPrompt
+    || context.tools?.length
+    || context.messages?.length
     ? thread
     : undefined;
 }

@@ -9,6 +9,8 @@ export function resolveAgentRuntimeModel(
   selector: AgentModelSelector
 ): Model<Api> {
   const model = models.getModel(selector.provider, selector.id);
-  if (!model) { throw new AgentRuntimeModelUnavailableError(selector); }
+  if (!model) {
+    throw new AgentRuntimeModelUnavailableError(selector);
+  }
   return model;
 }

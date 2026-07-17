@@ -5,14 +5,18 @@
  * Pro Max" → "AD"); otherwise camelCase capitals for a single word (e.g.
  * "DeepSeek" → "DS", "MiniMax" → "MM").
  */
-export default function extractInitials(name: string): string {
+export function extractInitials(name: string): string {
   const normalizedName = name.replace(/-/, " ");
   const number = /\d+(?:\.\d+)?/.exec(normalizedName);
   if (number) { return number[0]; }
 
   const words = normalizedName.trim().split(/\s+/).filter(Boolean);
   if (words.length >= 2) {
-    return (words[0]![0]! + words[1]![0]!).toUpperCase();
+    const firstInitial = words[0]?.charAt(0);
+    const secondInitial = words[1]?.charAt(0);
+    if (firstInitial && secondInitial) {
+      return (firstInitial + secondInitial).toUpperCase();
+    }
   }
 
   const firstWord = words[0] ?? "";

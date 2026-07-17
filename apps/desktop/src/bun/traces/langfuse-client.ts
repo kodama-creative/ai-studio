@@ -150,31 +150,6 @@ export class LangfuseClient {
     ).slice(0, filters.limit ?? DEFAULT_REMOTE_TRACE_LIMIT);
   }
 
-  private async _listTraces({
-    filters,
-    limit,
-    orderBy
-  }: {
-    filters: LangfuseTraceFilter[];
-    limit: number;
-    orderBy: string;
-  }): Promise<TraceRemoteTraceSummary[]> {
-    const url = new URL(`${this._baseUrl}/api/public/traces`);
-    url.searchParams.set("fields", TRACE_LIST_FIELDS);
-    url.searchParams.set("limit", String(limit));
-    url.searchParams.set("orderBy", orderBy);
-    if (filters.length > 0) {
-      url.searchParams.set("filter", JSON.stringify(filters));
-    }
-    const body = await this._getJson(url);
-    const rows = Array.isArray(_asRecord(body)?.data)
-      ? (_asRecord(body)?.data as unknown[])
-      : [];
-    return rows
-      .map(row => _traceSummaryFromRow(_asRecord(row)))
-      .filter((row): row is TraceRemoteTraceSummary => row !== null);
-  }
-
   /** Fetch all observations for a remote trace id, bounded for V1 safety. */
   async getObservationsForTrace(
     traceId: string
@@ -215,6 +190,31 @@ export class LangfuseClient {
       pageCount,
       maxPages: MAX_OBSERVATION_PAGES
     };
+  }
+
+  private async _listTraces({
+    filters,
+    limit,
+    orderBy
+  }: {
+    filters: LangfuseTraceFilter[];
+    limit: number;
+    orderBy: string;
+  }): Promise<TraceRemoteTraceSummary[]> {
+    const url = new URL(`${this._baseUrl}/api/public/traces`);
+    url.searchParams.set("fields", TRACE_LIST_FIELDS);
+    url.searchParams.set("limit", String(limit));
+    url.searchParams.set("orderBy", orderBy);
+    if (filters.length > 0) {
+      url.searchParams.set("filter", JSON.stringify(filters));
+    }
+    const body = await this._getJson(url);
+    const rows = Array.isArray(_asRecord(body)?.data)
+      ? (_asRecord(body)?.data as unknown[])
+      : [];
+    return rows
+      .map(row => _traceSummaryFromRow(_asRecord(row)))
+      .filter((row): row is TraceRemoteTraceSummary => row !== null);
   }
 
   private async _getJson(input: string | URL): Promise<unknown> {
@@ -460,12 +460,12 @@ function _cleanTimestamp(
 }
 
 function _boundedTraceLimit(value: unknown): number {
-  const parsed =
-    typeof value === "number"
-      ? value
-      : typeof value === "string"
-        ? Number(value)
-        : DEFAULT_REMOTE_TRACE_LIMIT;
+  let parsed = DEFAULT_REMOTE_TRACE_LIMIT;
+  if (typeof value === "number") {
+    parsed = value;
+  } else if (typeof value === "string") {
+    parsed = Number(value);
+  }
   if (!Number.isFinite(parsed)) {
     return DEFAULT_REMOTE_TRACE_LIMIT;
   }

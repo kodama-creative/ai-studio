@@ -20,6 +20,11 @@ export class LocalAgentRuntime {
 
   private readonly _runtime: AgentRuntime;
 
+  private constructor(agentRoot: string, runtime: AgentRuntime) {
+    this.agentRoot = agentRoot;
+    this._runtime = runtime;
+  }
+
   static async create(
     options: LocalAgentRuntimeOptions
   ): Promise<LocalAgentRuntime> {
@@ -29,11 +34,6 @@ export class LocalAgentRuntime {
       project: await loadAgentProject(agentRoot)
     });
     return new LocalAgentRuntime(agentRoot, runtime);
-  }
-
-  private constructor(agentRoot: string, runtime: AgentRuntime) {
-    this.agentRoot = agentRoot;
-    this._runtime = runtime;
   }
 
   get project() {

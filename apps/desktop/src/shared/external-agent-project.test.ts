@@ -91,7 +91,9 @@ describe("external Agent Project run gate", () => {
       "staleToolSnapshot"
     );
     const [tool] = record.thread.context!.tools!;
-    if (tool?.type !== "project") { throw new Error("expected project tool"); }
+    if (tool?.type !== "project") {
+      throw new Error("expected project tool");
+    }
     tool.snapshot = PROJECT.snapshot;
     expect(getExternalAgentProjectRunBlockReason(PROJECT, record)).toBeNull();
   });

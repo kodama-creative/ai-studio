@@ -38,7 +38,7 @@ describe("ProjectMcpSession", () => {
           calls.push(name);
           return { contentText: "sunny", isError: false };
         },
-        async close() {}
+        async close() { }
       };
     };
     const connection = _connection({
@@ -88,7 +88,7 @@ describe("ProjectMcpSession", () => {
         async callTool() {
           throw new Error("not called");
         },
-        async close() {}
+        async close() { }
       })
     });
 
@@ -136,7 +136,7 @@ describe("ProjectMcpSession", () => {
               callCount += 1;
               throw new Error("response interrupted");
             },
-            async close() {}
+            async close() { }
           };
         }
       }
@@ -166,12 +166,18 @@ describe("ProjectMcpSession", () => {
         async callTool(_name, _input, signal) {
           observedSignal = signal;
           return new Promise((_resolve, reject) => {
-            signal?.addEventListener("abort", () => { reject(signal.reason); }, {
+            signal?.addEventListener("abort", () => {
+              reject(
+                signal.reason instanceof Error
+                  ? signal.reason
+                  : new Error(String(signal.reason))
+              );
+            }, {
               once: true
             });
           });
         },
-        async close() {}
+        async close() { }
       })
     });
     const controller = new AbortController();
@@ -204,12 +210,18 @@ describe("ProjectMcpSession", () => {
         async callTool(_name, _input, signal) {
           observedSignal = signal;
           return new Promise((_resolve, reject) => {
-            signal?.addEventListener("abort", () => { reject(signal.reason); }, {
+            signal?.addEventListener("abort", () => {
+              reject(
+                signal.reason instanceof Error
+                  ? signal.reason
+                  : new Error(String(signal.reason))
+              );
+            }, {
               once: true
             });
           });
         },
-        async close() {}
+        async close() { }
       })
     });
 

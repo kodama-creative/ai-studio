@@ -15,7 +15,9 @@ function _immutablePlainDataCopy<T>(
   path: string,
   ancestors: WeakSet<object>
 ): T {
-  if (value === null || typeof value !== "object") { return value; }
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
   const prototype = Object.getPrototypeOf(value) as object | null;
   if (
     !Array.isArray(value)
@@ -33,7 +35,9 @@ function _immutablePlainDataCopy<T>(
 
   const copy: object = Array.isArray(value) ? [] : {};
   for (const key of Reflect.ownKeys(value)) {
-    if (Array.isArray(value) && key === "length") { continue; }
+    if (Array.isArray(value) && key === "length") {
+      continue;
+    }
     const childPath = `${path}.${typeof key === "symbol" ? (key.description ?? key.toString()) : key}`;
     Object.defineProperty(copy, key, {
       value: _immutablePlainDataCopy(

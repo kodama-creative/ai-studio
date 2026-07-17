@@ -25,12 +25,11 @@ export function getOsLocale() {
         .toLowerCase();
     }
     // Linux / other: fall back to the standard locale environment variables.
-    return (
-      process.env.LC_ALL
-      || process.env.LC_MESSAGES
-      || process.env.LANG
-      || ""
-    ).toLowerCase();
+    return [
+      process.env.LC_ALL,
+      process.env.LC_MESSAGES,
+      process.env.LANG
+    ].find(value => Boolean(value))?.toLowerCase() ?? "";
   } catch {
     return "";
   }

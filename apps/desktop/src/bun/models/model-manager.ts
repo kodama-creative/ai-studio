@@ -191,10 +191,18 @@ export class ModelManager {
       throw new Error(`Provider not configured: ${providerId}`);
     }
     if (apiKey !== undefined) {
-      if (apiKey === null) { delete entry.apiKey; } else { entry.apiKey = apiKey; }
+      if (apiKey === null) {
+        delete entry.apiKey;
+      } else {
+        entry.apiKey = apiKey;
+      }
     }
     if (baseUrl !== undefined) {
-      if (baseUrl === null) { delete entry.baseUrl; } else { entry.baseUrl = baseUrl; }
+      if (baseUrl === null) {
+        delete entry.baseUrl;
+      } else {
+        entry.baseUrl = baseUrl;
+      }
     }
     if (headers !== undefined) {
       if (headers === null || Object.keys(headers).length === 0) {
@@ -204,13 +212,25 @@ export class ModelManager {
       }
     }
     if (name !== undefined) {
-      if (name === null) { delete entry.name; } else { entry.name = name; }
+      if (name === null) {
+        delete entry.name;
+      } else {
+        entry.name = name;
+      }
     }
     if (api !== undefined) {
-      if (api === null) { delete entry.api; } else { entry.api = api; }
+      if (api === null) {
+        delete entry.api;
+      } else {
+        entry.api = api;
+      }
     }
     if (icon !== undefined) {
-      if (icon === null) { delete entry.icon; } else { entry.icon = icon; }
+      if (icon === null) {
+        delete entry.icon;
+      } else {
+        entry.icon = icon;
+      }
     }
     // Rebuild the registry so a cleared baseUrl restores the model's default
     // (the cached model instance would otherwise keep the mutated value).
@@ -282,7 +302,9 @@ export class ModelManager {
    * record verbatim.
    */
   isBuiltinCatalogModel(providerId: string, modelId: string): boolean {
-    if (!this.isBuiltin(providerId)) { return false; }
+    if (!this.isBuiltin(providerId)) {
+      return false;
+    }
     const provider = BUILTIN_PROVIDERS[providerId];
     return provider
       ? provider.getModels().some(model => model.id === modelId)
@@ -409,17 +431,23 @@ export class ModelManager {
     }
     if (entry.models) {
       entry.models = entry.models.filter(model => model.id !== modelId);
-      if (entry.models.length === 0) { delete entry.models; }
+      if (entry.models.length === 0) {
+        delete entry.models;
+      }
     }
     if (entry.customModels) {
       entry.customModels = entry.customModels.filter(id => id !== modelId);
-      if (entry.customModels.length === 0) { delete entry.customModels; }
+      if (entry.customModels.length === 0) {
+        delete entry.customModels;
+      }
     }
     if (entry.disabledModels) {
       entry.disabledModels = entry.disabledModels.filter(
         id => id !== modelId
       );
-      if (entry.disabledModels.length === 0) { delete entry.disabledModels; }
+      if (entry.disabledModels.length === 0) {
+        delete entry.disabledModels;
+      }
     }
     this._models = null;
     this._saveConfig();

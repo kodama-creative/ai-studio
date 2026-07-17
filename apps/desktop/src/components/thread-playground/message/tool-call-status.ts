@@ -33,7 +33,9 @@ export function isToolCallOutcomeUnknown(toolCall: ToolCall): boolean {
  * Derive the user-facing state from existing thread data; no extra schema.
  */
 export function getToolCallStatus(toolCall: ToolCall): ToolCallStatus {
-  if (!toolCall.output) { return "needsResponse"; }
+  if (!toolCall.output) {
+    return "needsResponse";
+  }
   return toolCall.output.isError ? "error" : "ready";
 }
 

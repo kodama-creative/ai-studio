@@ -99,7 +99,9 @@ export class ProjectMcpSession {
         options.abortSignal
       );
       statuses.push(activated.status);
-      if (!activated.client) { continue; }
+      if (!activated.client) {
+        continue;
+      }
       clients.push(activated.client);
       for (const tool of activated.tools) {
         tools.push(tool);
@@ -150,7 +152,9 @@ export class ProjectMcpSession {
 }
 
 function _checkJsonSchema(schema: unknown, value: unknown): boolean {
-  if (!schema || typeof schema !== "object") { return true; }
+  if (!schema || typeof schema !== "object") {
+    return true;
+  }
   const definition = schema as {
     allOf?: unknown[];
     anyOf?: unknown[];
@@ -162,7 +166,9 @@ function _checkJsonSchema(schema: unknown, value: unknown): boolean {
     required?: string[];
     type?: string | string[];
   };
-  if (definition.const !== undefined && value !== definition.const) { return false; }
+  if (definition.const !== undefined && value !== definition.const) {
+    return false;
+  }
   if (definition.enum && !definition.enum.some(item => item === value)) {
     return false;
   }
@@ -183,17 +189,16 @@ function _checkJsonSchema(schema: unknown, value: unknown): boolean {
       return false;
     }
   }
-  const types = Array.isArray(definition.type)
-    ? definition.type
-    : definition.type
-      ? [definition.type]
-      : [];
+  let types = definition.type;
+  if (!Array.isArray(types)) {
+    types = types ? [types] : [];
+  }
   if (types.length > 1) {
     return types.some(type =>
       _checkJsonSchema({ ...definition, type }, value));
   }
   // A missing schema type accepts the value through the default branch.
-  // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check
+
   switch (types[0]) {
     case "array":
       return (
@@ -214,7 +219,9 @@ function _checkJsonSchema(schema: unknown, value: unknown): boolean {
         return false;
       }
       const record = value as Record<string, unknown>;
-      if (definition.required?.some(key => !(key in record))) { return false; }
+      if (definition.required?.some(key => !(key in record))) {
+        return false;
+      }
       return Object.entries(definition.properties ?? {}).every(
         ([key, child]) =>
           !(key in record) || _checkJsonSchema(child, record[key])
@@ -222,6 +229,8 @@ function _checkJsonSchema(schema: unknown, value: unknown): boolean {
     }
     case "string":
       return typeof value === "string";
+    case undefined:
+      return true;
     default:
       return true;
   }
@@ -280,7 +289,10 @@ async function _activateConnection(
         };
       }
       const tools = definition.tools.allow.map(remoteToolName => {
-        const remote = byName.get(remoteToolName)!;
+        const remote = byName.get(remoteToolName);
+        if (!remote) {
+          throw new Error(`Allowlisted MCP tool not found: ${remoteToolName}`);
+        }
         return {
           name: qualifyProjectMcpToolName(
             connection.name,
@@ -307,7 +319,9 @@ async function _activateConnection(
       };
     } catch (error) {
       await client?.close().catch(() => undefined);
-      if (attempt === 0 && _isMetadataAuthError(error)) { continue; }
+      if (attempt === 0 && _isMetadataAuthError(error)) {
+        continue;
+      }
       return {
         tools: [],
         status: {
@@ -346,14 +360,18 @@ function _canonicalJson(value: unknown): string {
 }
 
 function _isMetadataAuthError(error: unknown): boolean {
-  if (!error || typeof error !== "object") { return false; }
-  const status =
-    "status" in error
-      ? error.status
-      : "code" in error
-        ? error.code
-        : undefined;
-  if (status === 401 || status === 403 || status === "401" || status === "403") { return true; }
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+  let status: unknown;
+  if ("status" in error) {
+    status = error.status;
+  } else if ("code" in error) {
+    status = error.code;
+  }
+  if (status === 401 || status === 403 || status === "401" || status === "403") {
+    return true;
+  }
   const message = error instanceof Error ? error.message : "";
   return /\b(?:401|403)\b/.test(message);
 }

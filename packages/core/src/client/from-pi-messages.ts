@@ -76,7 +76,9 @@ export function convertFromPiMessages(
             : {}))
       };
       const ownerIndex = result.length;
-      for (const call of toolCalls) { toolCallOwners.set(call.id, ownerIndex); }
+      for (const call of toolCalls) {
+        toolCallOwners.set(call.id, ownerIndex);
+      }
       result.push(assistant);
       visibleIndex += 1;
       continue;
@@ -84,9 +86,13 @@ export function convertFromPiMessages(
 
     if (message.role === "toolResult") {
       const ownerIndex = toolCallOwners.get(message.toolCallId);
-      if (ownerIndex === undefined) { continue; }
+      if (ownerIndex === undefined) {
+        continue;
+      }
       const owner = result[ownerIndex];
-      if (owner?.role !== "assistant") { continue; }
+      if (owner?.role !== "assistant") {
+        continue;
+      }
       result[ownerIndex] = {
         ...owner,
         toolCalls: owner.toolCalls?.map(call =>

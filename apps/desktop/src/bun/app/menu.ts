@@ -243,6 +243,8 @@ export function registerMenuActions(
   ApplicationMenu.on("application-menu-clicked", event => {
     const { action } = (event as { data: { action: string; }; }).data;
     const command = MENU_ACTION_COMMANDS[action];
-    if (command) { executeCommand(command, window); }
+    if (command) {
+      executeCommand(command, window);
+    }
   });
 }

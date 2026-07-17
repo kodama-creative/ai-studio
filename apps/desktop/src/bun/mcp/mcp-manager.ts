@@ -434,14 +434,18 @@ export class McpManager {
     try {
       endpoint = new URL(server.url ?? "");
     } catch (error) {
-      if (diagnostic) { _markInvalidConfigFailure(diagnostic, error, server); }
+      if (diagnostic) {
+        _markInvalidConfigFailure(diagnostic, error, server);
+      }
       throw error;
     }
     let headers: Record<string, string>;
     try {
       headers = this._resolveValueMap(server.headers ?? {});
     } catch (error) {
-      if (diagnostic) { _markSecretFailure(diagnostic, error, server); }
+      if (diagnostic) {
+        _markSecretFailure(diagnostic, error, server);
+      }
       throw error;
     }
     if (diagnostic) {
@@ -470,7 +474,9 @@ export class McpManager {
       this._clients.set(server.id, entry);
       return entry;
     } catch (error) {
-      if (diagnostic) { _markConnectFailure(diagnostic, error, server); }
+      if (diagnostic) {
+        _markConnectFailure(diagnostic, error, server);
+      }
       throw error;
     }
   }
@@ -481,6 +487,10 @@ export class McpManager {
   ) {
     if (server.transport === "stdio") {
       let env: Record<string, string>;
+      let cwd = server.cwd;
+      if (!cwd) {
+        cwd = undefined;
+      }
       try {
         env = this._resolveValueMap(server.env ?? {});
       } catch (error) {
@@ -499,7 +509,7 @@ export class McpManager {
       return new StdioClientTransport({
         command: server.command ?? "",
         args: server.args ?? [],
-        cwd: server.cwd || undefined,
+        cwd,
         env: {
           ...getDefaultEnvironment(),
           ...env
@@ -563,6 +573,12 @@ export class McpManager {
       const normalizedToolName = normalizedNames[index] ?? "";
       const collision = (normalizedCounts.get(normalizedToolName) ?? 0) > 1;
       const available = normalizedToolName !== "" && !collision;
+      let disabledReason: string | undefined;
+      if (normalizedToolName === "") {
+        disabledReason = "Tool name normalizes to an empty string";
+      } else if (collision) {
+        disabledReason = "Tool name collides after normalization";
+      }
       return {
         serverId: server.id,
         serverName: server.serverName,
@@ -577,12 +593,7 @@ export class McpManager {
         inputSchema: tool.inputSchema,
         ..._summarizeInputSchema(tool.inputSchema),
         available,
-        disabledReason:
-          normalizedToolName === ""
-            ? "Tool name normalizes to an empty string"
-            : collision
-              ? "Tool name collides after normalization"
-              : undefined
+        disabledReason
       };
     });
   }
@@ -638,6 +649,11 @@ export class McpManager {
     }
     if (draft.transport === "stdio") {
       const command = draft.command?.trim();
+      const cwd = draft.cwd?.trim();
+      let normalizedCwd: string | null = cwd ?? null;
+      if (normalizedCwd === "") {
+        normalizedCwd = null;
+      }
       if (!command) {
         throw new Error("Stdio MCP servers require a command.");
       }
@@ -648,7 +664,7 @@ export class McpManager {
         transport: "stdio",
         command,
         args: (draft.args ?? []).map(arg => arg.trim()).filter(Boolean),
-        cwd: draft.cwd?.trim() || null,
+        cwd: normalizedCwd,
         env: _cleanRecord(draft.env)
       };
     }

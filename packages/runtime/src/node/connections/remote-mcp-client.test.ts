@@ -90,12 +90,18 @@ function _processEnv(): Record<string, string> {
 
 async function _waitUntilReady(process: Bun.Subprocess): Promise<void> {
   const reader = (process.stdout as ReadableStream<Uint8Array>).getReader();
-  const timeout = setTimeout(() => { process.kill(); }, 5_000);
+  const timeout = setTimeout(() => {
+    process.kill();
+  }, 5_000);
   try {
     while (true) {
       const chunk = await reader.read();
-      if (chunk.done) { throw new Error("MCP fixture exited before startup"); }
-      if (new TextDecoder().decode(chunk.value).includes("listening")) { return; }
+      if (chunk.done) {
+        throw new Error("MCP fixture exited before startup");
+      }
+      if (new TextDecoder().decode(chunk.value).includes("listening")) {
+        return;
+      }
     }
   } finally {
     clearTimeout(timeout);

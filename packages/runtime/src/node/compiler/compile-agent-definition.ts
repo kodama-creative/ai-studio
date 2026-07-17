@@ -5,12 +5,13 @@ export function compileAgentDefinition(
   definition: AgentDefinition
 ): CompiledAgentDefinition {
   const separator = definition.model.indexOf("/");
-  const reasoning =
-    definition.reasoning === "none"
-      ? "off"
-      : definition.reasoning === "provider-default"
-        ? undefined
-        : definition.reasoning;
+  let reasoning: "off" | AgentDefinition["reasoning"] | undefined =
+    definition.reasoning;
+  if (reasoning === "none") {
+    reasoning = "off";
+  } else if (reasoning === "provider-default") {
+    reasoning = undefined;
+  }
   return {
     model: {
       provider: definition.model.slice(0, separator),

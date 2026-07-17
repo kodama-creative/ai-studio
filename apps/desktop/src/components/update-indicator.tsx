@@ -23,7 +23,9 @@ import { useUpdateStatus } from "@/components/update-status-provider";
 export function UpdateIndicator() {
   const { readyVersion } = useUpdateStatus();
   const { executeCommand } = useCommands();
-  if (!readyVersion) { return null; }
+  if (!readyVersion) {
+    return null;
+  }
 
   return (
     <Popover>

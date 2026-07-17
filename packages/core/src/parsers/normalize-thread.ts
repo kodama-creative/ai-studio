@@ -82,7 +82,7 @@ export function normalizeToThread(
     const role = typeof m.role === "string" ? m.role : undefined;
 
     // Unknown and missing roles are ignored by the default branch.
-    // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check
+
     switch (role) {
       case "system":
       case "developer": {
@@ -128,7 +128,7 @@ export function normalizeToThread(
         break;
       }
 
-      default:
+      case undefined:
         break;
     }
   }
@@ -285,7 +285,7 @@ function _resolveContent(content: unknown): ResolvedContent {
     const type = typeof b.type === "string" ? b.type : undefined;
 
     // Unknown and missing block types are ignored by the default branch.
-    // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check
+
     switch (type) {
       case "text":
       case "input_text":
@@ -353,7 +353,7 @@ function _resolveContent(content: unknown): ResolvedContent {
         break;
       }
 
-      default:
+      case undefined:
         break;
     }
   }
@@ -373,12 +373,12 @@ function _resolveOpenAiToolCalls(toolCalls: unknown): ToolCall[] {
       continue;
     }
     const fn = _asRecord(tc.function);
-    const name =
-      fn && typeof fn.name === "string"
-        ? fn.name
-        : typeof tc.name === "string"
-          ? tc.name
-          : "";
+    let name = "";
+    if (fn && typeof fn.name === "string") {
+      name = fn.name;
+    } else if (typeof tc.name === "string") {
+      name = tc.name;
+    }
     const { args, partial } = _parseArguments(fn ? fn.arguments : tc.arguments);
     const input: ToolCall["input"] = { name, arguments: args };
     if (partial !== undefined) {

@@ -41,7 +41,11 @@ export function ExamplesMenu<T extends ExampleItem>({
       <DropdownMenuContent align={align}>
         {items.map((item, index) => {
           if (item.type === "separator") {
-            return <DropdownMenuSeparator key={`sep-${index}`} />;
+            const nextItem = items[index + 1];
+            const separatorKey = nextItem && "label" in nextItem
+              ? `before-${nextItem.label}`
+              : "separator-end";
+            return <DropdownMenuSeparator key={separatorKey} />;
           }
           const example = item as T;
           const Icon = example.icon;

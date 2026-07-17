@@ -19,7 +19,9 @@ import { lstat, stat } from "node:fs/promises";
  * caller can surface the error.
  */
 export async function moveToTrash(abs: string): Promise<void> {
-  if (!(await _exists(abs))) { return; }
+  if (!(await _exists(abs))) {
+    return;
+  }
   if (process.platform === "darwin") {
     // AppleScript string literals quote/escape like JSON, which is safe for the
     // paths we handle (under the workspace root).

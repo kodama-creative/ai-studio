@@ -40,7 +40,9 @@ function _convertToPiMessages(messages: Message[]) {
     }
     if (message.role === "assistant" && message.toolCalls) {
       for (const toolCall of message.toolCalls) {
-        if (!toolCall.output) { continue; }
+        if (!toolCall.output) {
+          continue;
+        }
         result.push({
           role: "toolResult",
           toolCallId: toolCall.id,

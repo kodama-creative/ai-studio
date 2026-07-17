@@ -63,7 +63,9 @@ export function EvaluationRubricEditor({
     return new Set(
       normalizedNames.filter(value => {
         if (!value || !seen.has(value)) {
-          if (value) { seen.add(value); }
+          if (value) {
+            seen.add(value);
+          }
           return false;
         }
         return true;

@@ -60,7 +60,11 @@ export class AgentRuntime {
     available: boolean;
     selector: AgentModelSelector;
   } {
-    const selector = this._project.definition!.model;
+    const definition = this._project.definition;
+    if (!definition) {
+      throw new Error("Agent runtime definition is unavailable");
+    }
+    const selector = definition.model;
     return {
       selector,
       available: Boolean(this._models.getModel(selector.provider, selector.id))
@@ -70,10 +74,14 @@ export class AgentRuntime {
   async createSession(
     options: CreateAgentSessionOptions = {}
   ): Promise<AgentSession> {
-    const selector = options.model ?? this._project.definition!.model;
+    const definition = this._project.definition;
+    if (!definition) {
+      throw new Error("Agent runtime definition is unavailable");
+    }
+    const selector = options.model ?? definition.model;
     const reasoning = Object.hasOwn(options, "reasoning")
       ? options.reasoning
-      : this._project.definition!.reasoning;
+      : definition.reasoning;
     return Promise.resolve(
       new AgentSession({
         id: options.id,

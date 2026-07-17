@@ -6,7 +6,9 @@ export function requestExternalProjectSource(
   path: string
 ): void {
   PENDING_SOURCES.set(projectId, path);
-  for (const listener of SOURCE_LISTENERS.get(projectId) ?? []) { listener(path); }
+  for (const listener of SOURCE_LISTENERS.get(projectId) ?? []) {
+    listener(path);
+  }
 }
 
 export function subscribeExternalProjectSource(
@@ -17,10 +19,16 @@ export function subscribeExternalProjectSource(
   projectListeners.add(listener);
   SOURCE_LISTENERS.set(projectId, projectListeners);
   const pending = PENDING_SOURCES.get(projectId);
-  if (pending) { queueMicrotask(() => { listener(pending); }); }
+  if (pending) {
+    queueMicrotask(() => {
+      listener(pending);
+    });
+  }
   return () => {
     projectListeners.delete(listener);
-    if (projectListeners.size === 0) { SOURCE_LISTENERS.delete(projectId); }
+    if (projectListeners.size === 0) {
+      SOURCE_LISTENERS.delete(projectId);
+    }
   };
 }
 

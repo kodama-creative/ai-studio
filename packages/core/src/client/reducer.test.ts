@@ -12,7 +12,9 @@ describe("reduceMessages tool calls", () => {
       { type: "message_start", message: partial },
       {}
     );
-    if (!started) { throw new Error("Expected message start"); }
+    if (!started) {
+      throw new Error("Expected message start");
+    }
     const toolCallStarted = reduceMessages(
       {
         type: "message_update",
@@ -25,7 +27,9 @@ describe("reduceMessages tool calls", () => {
       },
       { streamingMessage: started.message, content: started.content }
     );
-    if (!toolCallStarted) { throw new Error("Expected tool call start"); }
+    if (!toolCallStarted) {
+      throw new Error("Expected tool call start");
+    }
 
     const toolCallEnded = reduceMessages(
       {

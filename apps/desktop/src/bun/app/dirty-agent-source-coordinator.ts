@@ -23,16 +23,22 @@ export function createDirtyAgentSourceCoordinator({
         onDiscard();
         return;
       }
-      if (pending) { return; }
+      if (pending) {
+        return;
+      }
       const requestId = crypto.randomUUID();
       pending = { requestId, onDiscard };
       sendRequest({ requestId, reason });
     },
     resolve(requestId: string, discard: boolean): void {
-      if (pending?.requestId !== requestId) { return; }
+      if (pending?.requestId !== requestId) {
+        return;
+      }
       const request = pending;
       pending = undefined;
-      if (!discard) { return; }
+      if (!discard) {
+        return;
+      }
       dirty = false;
       request.onDiscard();
     }

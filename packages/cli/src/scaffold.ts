@@ -22,7 +22,9 @@ export async function scaffoldAgentProject(options: {
   try {
     await lstat(root);
   } catch (error) {
-    if (!_hasCode(error, "ENOENT")) { throw error; }
+    if (!_hasCode(error, "ENOENT")) {
+      throw error;
+    }
     await mkdir(root, { recursive: true });
     createdRoot = true;
   }
@@ -39,10 +41,16 @@ export async function scaffoldAgentProject(options: {
     await rm(stage, { recursive: true, force: true });
     return root;
   } catch (error) {
-    if (movedManifest) { await rm(manifestPath, { force: true }); }
-    if (movedAgent) { await rm(agentPath, { recursive: true, force: true }); }
+    if (movedManifest) {
+      await rm(manifestPath, { force: true });
+    }
+    if (movedAgent) {
+      await rm(agentPath, { recursive: true, force: true });
+    }
     await rm(stage, { recursive: true, force: true });
-    if (createdRoot) { await rm(root, { recursive: true, force: true }); }
+    if (createdRoot) {
+      await rm(root, { recursive: true, force: true });
+    }
     throw error;
   }
 }
@@ -118,7 +126,9 @@ async function _assertMissing(target: string): Promise<void> {
   try {
     await lstat(target);
   } catch (error) {
-    if (_hasCode(error, "ENOENT")) { return; }
+    if (_hasCode(error, "ENOENT")) {
+      return;
+    }
     throw error;
   }
   throw new Error(`Refusing to overwrite existing path: ${target}`);

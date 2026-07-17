@@ -114,9 +114,13 @@ export function usePromptVariableExtensionForContext(
         listVariables: () => listPromptVariableCompletions(context)
       });
     }
-    if (!resolvedStore) { return EMPTY; }
+    if (!resolvedStore) {
+      return EMPTY;
+    }
     // `executeCommand` is app-stable; the tooltip's "view details" button routes
     // through the `openVariables` command handled by the active thread.
-    return getExtensionForStore(resolvedStore, placeKey, name => { executeCommand({ type: "openVariables", args: { variableName: name } }); });
+    return getExtensionForStore(resolvedStore, placeKey, name => {
+      executeCommand({ type: "openVariables", args: { variableName: name } });
+    });
   }, [context, placeKey, resolvedStore, executeCommand]);
 }

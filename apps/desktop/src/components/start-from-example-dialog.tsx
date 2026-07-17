@@ -59,7 +59,11 @@ export function StartFromExampleDialog({
           <ItemGroup className="gap-1 pr-3">
             {PROMPT_EXAMPLES.map((item, index) => {
               if (!isPromptExample(item)) {
-                return <ItemSeparator className="my-1" key={`sep-${index}`} />;
+                const nextItem = PROMPT_EXAMPLES[index + 1];
+                const separatorKey = nextItem && isPromptExample(nextItem)
+                  ? `before-${nextItem.id}`
+                  : "separator-end";
+                return <ItemSeparator className="my-1" key={separatorKey} />;
               }
               const Icon = item.icon;
               return (

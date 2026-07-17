@@ -74,7 +74,9 @@ export async function loadAgentProjectManifest(
     }
     agentRoot = await realpath(candidate);
   } catch (error) {
-    if (error instanceof AgentProjectManifestError) { throw error; }
+    if (error instanceof AgentProjectManifestError) {
+      throw error;
+    }
     if (_hasCode(error, "ENOENT")) {
       throw new AgentProjectManifestError(
         `The configured Agent source directory does not exist: ${manifest.agent}`
@@ -106,7 +108,9 @@ async function _canonicalDirectory(input: string, label: string) {
     }
     return await realpath(resolved);
   } catch (error) {
-    if (error instanceof AgentProjectManifestError) { throw error; }
+    if (error instanceof AgentProjectManifestError) {
+      throw error;
+    }
     throw new AgentProjectManifestError(
       `Unable to open ${label.toLowerCase()} root: ${_message(error)}`
     );

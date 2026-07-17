@@ -5,7 +5,7 @@ export type DesktopModuleCleanup = () => Promise<void> | void;
 export interface DesktopModule {
   id: string;
   register(tools: ToolRegistry): void;
-  start?(): DesktopModuleCleanup | Promise<DesktopModuleCleanup | void> | void;
+  start?(): DesktopModuleCleanup | Promise<DesktopModuleCleanup | undefined> | undefined;
 }
 
 export class DesktopHost {
@@ -67,11 +67,10 @@ export class DesktopHost {
   }
 
   async stop(): Promise<void> {
-    for (let index = this._cleanups.length - 1; index >= 0; index -= 1) {
-      const { moduleId, cleanup } = this._cleanups[index];
+    for (const { moduleId, cleanup } of this._cleanups.toReversed()) {
       try {
         // The cleanup union is callable; typed lint cannot resolve void | Promise<void> here.
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+
         await cleanup();
       } catch (error) {
         this._onShutdownError(moduleId, _asError(error));

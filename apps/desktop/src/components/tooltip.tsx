@@ -1,6 +1,6 @@
 import {
-  Tooltip as _Tooltip,
   TooltipContent,
+  Tooltip as TooltipPrimitive,
   TooltipTrigger
 } from "./ui/tooltip";
 
@@ -12,9 +12,9 @@ export function Tooltip({
   readonly content: React.ReactNode;
 }) {
   return (
-    <_Tooltip delayDuration={800}>
+    <TooltipPrimitive delayDuration={800}>
       <TooltipTrigger asChild>{children}</TooltipTrigger>
       <TooltipContent>{content}</TooltipContent>
-    </_Tooltip>
+    </TooltipPrimitive>
   );
 }

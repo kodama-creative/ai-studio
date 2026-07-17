@@ -2,7 +2,7 @@ import type { BuiltinTool } from "@llm-space/core";
 
 export interface ToolEntry {
   tool: BuiltinTool;
-  execute(this: void, args: Record<string, unknown>): Promise<unknown>;
+  execute: (args: Record<string, unknown>) => Promise<unknown>;
 }
 
 export interface ToolContribution {

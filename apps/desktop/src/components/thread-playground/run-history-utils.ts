@@ -61,7 +61,11 @@ export function summarizeRun(thread: ThreadSnapshot): string {
   const messages = thread.context?.messages ?? [];
   const last = messages[messages.length - 1];
   if (!last) {
-    return thread.context?.systemPrompt?.trim() || "Empty thread";
+    let systemPrompt = thread.context?.systemPrompt?.trim();
+    if (!systemPrompt) {
+      systemPrompt = "Empty thread";
+    }
+    return systemPrompt;
   }
   if (last.role === "assistant" && last.toolCalls?.length) {
     return last.toolCalls
@@ -78,7 +82,9 @@ export function summarizeRun(thread: ThreadSnapshot): string {
 
 /** The model label for a run snapshot, separated so it can truncate safely. */
 export function runModelLabel(thread: ThreadSnapshot): string {
-  if (!thread.model) { return "No model"; }
+  if (!thread.model) {
+    return "No model";
+  }
   const reasoning = thread.model.params?.reasoning;
   return `${thread.model.provider}/${thread.model.id}${reasoning ? ` · reasoning: ${reasoning}` : ""}`;
 }

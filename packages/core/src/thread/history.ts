@@ -400,16 +400,26 @@ function _normalizeRunScores(
   ) {
     return null;
   }
-  return [leftRunId, rightRunId].map(runId => {
-    const scores = scoreByRunId.get(runId)!;
-    return {
+  const runScores: EvaluationRunScores[] = [];
+  for (const runId of [leftRunId, rightRunId]) {
+    const scores = scoreByRunId.get(runId);
+    if (!scores) {
+      return null;
+    }
+    const criterionScores: EvaluationRunScores["scores"] = [];
+    for (const criterion of rubric.criteria) {
+      const score = scores.get(criterion.id);
+      if (score === undefined) {
+        return null;
+      }
+      criterionScores.push({ criterionId: criterion.id, score });
+    }
+    runScores.push({
       runId,
-      scores: rubric.criteria.map(criterion => ({
-        criterionId: criterion.id,
-        score: scores.get(criterion.id)!
-      }))
-    };
-  });
+      scores: criterionScores
+    });
+  }
+  return runScores;
 }
 
 /** Check whether a value is a supported persisted evaluation verdict. */
@@ -490,7 +500,10 @@ export function normalizeEvaluations(
   const seenPairs = new Set<string>();
   const deduped: EvaluationRecord[] = [];
   for (let index = normalized.length - 1; index >= 0; index--) {
-    const evaluation = normalized[index]!;
+    const evaluation = normalized[index];
+    if (!evaluation) {
+      continue;
+    }
     const pairKey = JSON.stringify(
       [evaluation.leftRunId, evaluation.rightRunId].sort()
     );
@@ -727,12 +740,16 @@ export function upsertEvaluation(
   ) {
     return null;
   }
+  let note = input.note?.trim();
+  if (!note) {
+    note = undefined;
+  }
   const baseEvaluation = {
     id: existing?.id ?? requestedId ?? uuid(),
     leftRunId: input.leftRunId,
     rightRunId: input.rightRunId,
     verdict: input.verdict,
-    note: input.note?.trim() || undefined,
+    note,
     createdAt: existing?.createdAt ?? timestamp,
     updatedAt: timestamp
   };

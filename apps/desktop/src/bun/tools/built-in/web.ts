@@ -108,16 +108,10 @@ function _resolveApiKey(
  * friendly dialog).
  */
 class FirecrawlSearchProvider implements SearchProvider {
-  constructor(private readonly _apiKey: string) {}
+  private readonly _apiKey: string;
 
-  private _headers(): Record<string, string> {
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json"
-    };
-    if (this._apiKey) {
-      headers.Authorization = `Bearer ${this._apiKey}`;
-    }
-    return headers;
+  constructor(apiKey: string) {
+    this._apiKey = apiKey;
   }
 
   async fetch(url: string): Promise<WebFetchResult> {
@@ -182,83 +176,85 @@ class FirecrawlSearchProvider implements SearchProvider {
           : undefined
     }));
   }
+
+  private _headers(): Record<string, string> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json"
+    };
+    if (this._apiKey) {
+      headers.Authorization = `Bearer ${this._apiKey}`;
+    }
+    return headers;
+  }
 }
 
 /** Tavily-backed provider. Requires an API key (no free unauthenticated tier). */
-class TavilySearchProvider implements SearchProvider {
-  constructor(private readonly _apiKey: string) {
-    if (!_apiKey) {
-      throw new Error(
-        "Tavily API key is not configured. Add one in Settings → Search."
-      );
-    }
+function _createTavilySearchProvider(apiKey: string): SearchProvider {
+  if (!apiKey) {
+    throw new Error(
+      "Tavily API key is not configured. Add one in Settings → Search."
+    );
   }
+  const headers = {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${apiKey}`
+  };
+  return {
+    async fetch(url): Promise<WebFetchResult> {
+      const res = await fetch(`${TAVILY_BASE_URL}/extract`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ urls: url, format: "markdown" })
+      });
 
-  private _headers(): Record<string, string> {
-    return {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${this._apiKey}`
-    };
-  }
+      const json = (await res.json()) as TavilyExtractResponse;
 
-  async fetch(url: string): Promise<WebFetchResult> {
-    const res = await fetch(`${TAVILY_BASE_URL}/extract`, {
-      method: "POST",
-      headers: this._headers(),
-      body: JSON.stringify({ urls: url, format: "markdown" })
-    });
+      if (!res.ok) {
+        throw new Error(`web_fetch failed: ${res.status}`);
+      }
 
-    const json = (await res.json()) as TavilyExtractResponse;
+      const result = json.results?.[0];
+      if (!result?.raw_content) {
+        const failure = json.failed_results?.[0];
+        throw new Error(
+          failure?.error ?? `web_fetch failed: could not extract ${url}`
+        );
+      }
 
-    if (!res.ok) {
-      throw new Error(`web_fetch failed: ${res.status}`);
+      return {
+        url: result.url ?? url,
+        content: _truncateText(result.raw_content, 20_000)
+      };
+    },
+
+    async search(query, limit, includeContent): Promise<WebSearchResult[]> {
+      const res = await fetch(`${TAVILY_BASE_URL}/search`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          query,
+          max_results: limit,
+          include_raw_content: includeContent ? "markdown" : false
+        })
+      });
+
+      const json = (await res.json()) as TavilySearchResponse;
+
+      if (!res.ok) {
+        throw new Error(`web_search failed: ${res.status}`);
+      }
+
+      return (json.results ?? []).map(item => ({
+        title: item.title ?? "Untitled",
+        url: item.url ?? "",
+        snippet: item.content,
+        content:
+          includeContent && item.raw_content
+            ? _truncateText(item.raw_content, 2_000)
+            : undefined
+      }));
     }
-
-    const result = json.results?.[0];
-    if (!result?.raw_content) {
-      const failure = json.failed_results?.[0];
-      throw new Error(
-        failure?.error ?? `web_fetch failed: could not extract ${url}`
-      );
-    }
-
-    return {
-      url: result.url ?? url,
-      content: _truncateText(result.raw_content, 20_000)
-    };
-  }
-
-  async search(
-    query: string,
-    limit: number,
-    includeContent: boolean
-  ): Promise<WebSearchResult[]> {
-    const res = await fetch(`${TAVILY_BASE_URL}/search`, {
-      method: "POST",
-      headers: this._headers(),
-      body: JSON.stringify({
-        query,
-        max_results: limit,
-        include_raw_content: includeContent ? "markdown" : false
-      })
-    });
-
-    const json = (await res.json()) as TavilySearchResponse;
-
-    if (!res.ok) {
-      throw new Error(`web_search failed: ${res.status}`);
-    }
-
-    return (json.results ?? []).map(item => ({
-      title: item.title ?? "Untitled",
-      url: item.url ?? "",
-      snippet: item.content,
-      content:
-        includeContent && item.raw_content
-          ? _truncateText(item.raw_content, 2_000)
-          : undefined
-    }));
-  }
+  };
 }
 
 /** Build the provider selected in `settings/search.json` with its resolved key. */
@@ -268,7 +264,9 @@ function _getSearchProvider({
 }: WebBuiltInToolsDependencies): SearchProvider {
   const settings = getSearchSettings();
   if (settings.provider === "tavily") {
-    return new TavilySearchProvider(_resolveApiKey(settings.tavilyApiKey, env));
+    return _createTavilySearchProvider(
+      _resolveApiKey(settings.tavilyApiKey, env)
+    );
   }
   return new FirecrawlSearchProvider(
     _resolveApiKey(settings.firecrawlApiKey, env)

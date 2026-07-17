@@ -1,7 +1,11 @@
 "use client";
 
 import { Eye, EyeOff } from "lucide-react";
-import { type ComponentProps, type ReactNode, useState } from "react";
+import {
+  type ComponentProps,
+  type ReactNode,
+  useState
+} from "react";
 
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -19,7 +23,11 @@ export function ApiKeyField({
   description,
   className,
   "aria-label": ariaLabel,
-  ...inputProps
+  defaultValue,
+  onBlur,
+  onChange,
+  placeholder,
+  value
 }: {
   readonly label: string;
 
@@ -28,7 +36,16 @@ export function ApiKeyField({
 
   /** Helper text rendered under the input. */
   readonly description?: ReactNode;
-} & ComponentProps<typeof Input>) {
+} & Pick<
+  ComponentProps<typeof Input>,
+  | "aria-label"
+  | "className"
+  | "defaultValue"
+  | "onBlur"
+  | "onChange"
+  | "placeholder"
+  | "value"
+>) {
   const [visible, setVisible] = useState(false);
   return (
     <div className="flex flex-col gap-2">
@@ -47,10 +64,14 @@ export function ApiKeyField({
       </div>
       <div className="relative">
         <Input
-          {...inputProps}
           aria-label={ariaLabel ?? label}
           className={cn("pr-9", className)}
+          defaultValue={defaultValue}
+          onBlur={onBlur}
+          onChange={onChange}
+          placeholder={placeholder}
           type={visible ? "text" : "password"}
+          value={value}
         />
         <button
           aria-label={visible ? `Hide ${label}` : `Show ${label}`}

@@ -215,7 +215,11 @@ export function NodeActions({
             : null}
           <DropdownMenuSeparator />
           {!isDir && (
-            <DropdownMenuItem onSelect={() => void copyToClipboard()}>
+            <DropdownMenuItem
+              onSelect={() => {
+                void copyToClipboard();
+              }}
+            >
               <ClipboardCopy />
               Copy
             </DropdownMenuItem>

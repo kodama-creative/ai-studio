@@ -10,7 +10,9 @@ import type {
 } from "@/shared/external-agent-project";
 
 function _rpc() {
-  if (!electrobun.rpc) { throw new Error("Desktop RPC is not initialized."); }
+  if (!electrobun.rpc) {
+    throw new Error("Desktop RPC is not initialized.");
+  }
   return electrobun.rpc;
 }
 

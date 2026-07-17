@@ -176,7 +176,7 @@ export function ModelParamsPopover({
             <Button
               aria-expanded={popoverOpen}
               aria-label="Configure model parameters"
-              disabled={readonly || !model}
+              disabled={Boolean(readonly) || !model}
               size="icon-xs"
               variant="ghost"
             >

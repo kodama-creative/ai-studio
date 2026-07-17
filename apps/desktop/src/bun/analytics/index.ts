@@ -74,7 +74,9 @@ export class Analytics {
    * lets the next `capture` re-create it lazily.
    */
   setEnabled(enabled: boolean): AnalyticsStatus {
-    if (enabled === this._enabled) { return this.getSettings(); }
+    if (enabled === this._enabled) {
+      return this.getSettings();
+    }
     this._enabled = enabled;
     this._saveConfig();
     if (!enabled && this._client) {
@@ -95,7 +97,9 @@ export class Analytics {
     event: K,
     properties: AnalyticsEventMap[K]
   ): void {
-    if (!this._available || !this._enabled) { return; }
+    if (!this._available || !this._enabled) {
+      return;
+    }
     try {
       // Desktop app: flush eagerly so events aren't lost when the window closes.
       if (!this._client) {

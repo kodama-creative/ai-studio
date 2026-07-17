@@ -97,14 +97,15 @@ export function listPromptVariableCompletions(
   const state = normalizePromptVariableState(context);
   const items: PromptVariableCompletion[] = [];
   for (const [name, variable] of Object.entries(state.variables)) {
-    const hint =
-      variable.type === "currentDate"
-        ? formatCurrentDateVariable(variable.format)
-        : variable.skillNames.length === 0
-          ? "All enabled skills"
-          : `${variable.skillNames.length} selected skill${
-            variable.skillNames.length === 1 ? "" : "s"
-          }`;
+    let hint: string;
+    if (variable.type === "currentDate") {
+      hint = formatCurrentDateVariable(variable.format);
+    } else if (variable.skillNames.length === 0) {
+      hint = "All enabled skills";
+    } else {
+      const suffix = variable.skillNames.length === 1 ? "" : "s";
+      hint = `${variable.skillNames.length} selected skill${suffix}`;
+    }
     items.push({ name, hint });
   }
   const customValues =

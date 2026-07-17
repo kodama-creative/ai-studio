@@ -33,7 +33,7 @@ export function BrandAvatar({
   readonly fallbackClassName: string;
 }) {
   if (brand) {
-    const { Icon, props } = brand;
+    const { Icon } = brand;
     return (
       <div
         className={cn(
@@ -43,7 +43,7 @@ export function BrandAvatar({
         )}
         style={{ width: size, height: size }}
       >
-        <Icon size={Math.round(size * 0.9)} {...props} />
+        <Icon size={Math.round(size * 0.9)} />
       </div>
     );
   }

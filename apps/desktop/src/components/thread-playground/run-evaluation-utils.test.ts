@@ -136,7 +136,9 @@ describe("evaluation score derivation", () => {
     );
     expect(averageScoreForRun(RUBRIC, scores ?? undefined, "run-a")).toBe(4);
     expect(averageScoreForRun(RUBRIC, scores ?? undefined, "run-b")).toBe(3);
-    if (!scores) { throw new Error("score fixture failed"); }
+    if (!scores) {
+      throw new Error("score fixture failed");
+    }
     expect(evaluationScoreDelta({ ...EVALUATION, runScores: scores })).toBe(-1);
   });
 

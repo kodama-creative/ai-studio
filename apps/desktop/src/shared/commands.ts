@@ -429,10 +429,7 @@ export type CommandArgs<T extends CommandType> = Extract<
  * zoom / reload). `label` is the human-facing name in Title Case (e.g. for a
  * command palette or context menu), matching dropdown/context/native menus.
  */
-export const COMMAND_META: Record<
-  CommandType,
-  { label: string; target: "bun" | "webview"; }
-> = {
+export const COMMAND_META = {
   newFile: { label: "New File", target: "webview" },
   newFileFromPromptExample: {
     label: "Start from Example",
@@ -540,4 +537,7 @@ export const COMMAND_META: Record<
   openWorkspaceFolder: { label: "Open Workspace Folder", target: "bun" },
   checkForUpdates: { label: "Check for Updates...", target: "bun" },
   applyUpdateAndRestart: { label: "Restart to Update", target: "bun" }
-};
+} satisfies Record<
+  CommandType,
+  { label: string; target: "bun" | "webview"; }
+>;

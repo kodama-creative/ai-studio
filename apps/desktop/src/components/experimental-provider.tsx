@@ -47,31 +47,36 @@ function _readStoredReactScanEnabled(): boolean {
 }
 
 export function ExperimentalProvider({ children }: { readonly children: ReactNode; }) {
-  const [tracingEnabled, setTracingEnabledState] = useState<boolean>(
+  const [storedTracingEnabled, setStoredTracingEnabled] = useState<boolean>(
     _readStoredTracingEnabled
   );
-  const [reactScanEnabled, setReactScanEnabledState] = useState<boolean>(
+  const [storedReactScanEnabled, setStoredReactScanEnabled] = useState<boolean>(
     _readStoredReactScanEnabled
   );
 
   const setTracingEnabled = useCallback((next: boolean) => {
     localStorage.setItem(TRACING_ENABLED_STORAGE_KEY, String(next));
-    setTracingEnabledState(next);
+    setStoredTracingEnabled(next);
   }, []);
 
   const setReactScanEnabled = useCallback((next: boolean) => {
     localStorage.setItem(REACT_SCAN_ENABLED_STORAGE_KEY, String(next));
-    setReactScanEnabledState(next);
+    setStoredReactScanEnabled(next);
   }, []);
 
   const value = useMemo(
     (): ExperimentalContextValue => ({
-      tracingEnabled,
+      tracingEnabled: storedTracingEnabled,
       setTracingEnabled,
-      reactScanEnabled,
+      reactScanEnabled: storedReactScanEnabled,
       setReactScanEnabled
     }),
-    [tracingEnabled, setTracingEnabled, reactScanEnabled, setReactScanEnabled]
+    [
+      storedTracingEnabled,
+      setTracingEnabled,
+      storedReactScanEnabled,
+      setReactScanEnabled
+    ]
   );
 
   return (

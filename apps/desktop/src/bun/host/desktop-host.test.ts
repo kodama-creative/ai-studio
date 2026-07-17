@@ -9,7 +9,7 @@ describe("DesktopHost", () => {
       modules: [
         {
           id: "fixture.first",
-          register: () => events.push("register:first"),
+          register: () => { events.push("register:first"); },
           start: () => {
             events.push("start:first");
             return () => {
@@ -19,7 +19,7 @@ describe("DesktopHost", () => {
         },
         {
           id: "fixture.second",
-          register: () => events.push("register:second"),
+          register: () => { events.push("register:second"); },
           start: () => {
             events.push("start:second");
             return () => {
@@ -47,8 +47,14 @@ describe("DesktopHost", () => {
     const events: string[] = [];
     const host = new DesktopHost({
       modules: [
-        { id: "fixture.duplicate", register: () => events.push("first") },
-        { id: "fixture.duplicate", register: () => events.push("second") }
+        {
+          id: "fixture.duplicate",
+          register: () => { events.push("first"); }
+        },
+        {
+          id: "fixture.duplicate",
+          register: () => { events.push("second"); }
+        }
       ]
     });
 
@@ -106,8 +112,9 @@ describe("DesktopHost", () => {
           }
         }
       ],
-      onShutdownError: (moduleId, error) =>
-        errors.push(`${moduleId}:${error.message}`)
+      onShutdownError: (moduleId, error) => {
+        errors.push(`${moduleId}:${error.message}`);
+      }
     });
 
     await host.start();
@@ -140,7 +147,7 @@ describe("DesktopHost", () => {
       modules: [
         {
           id: "fixture.restartable",
-          register: () => events.push("register"),
+          register: () => { events.push("register"); },
           start: () => {
             events.push("start");
             return () => {

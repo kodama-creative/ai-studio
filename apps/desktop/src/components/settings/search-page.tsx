@@ -67,8 +67,9 @@ export function SearchPage() {
         <div className="flex h-14 items-center justify-between gap-4">
           <span className="text-sm">Search provider</span>
           <Select
-            onValueChange={value =>
-              void persist({ ...settings, provider: value as SearchProviderId })}
+            onValueChange={value => {
+              void persist({ ...settings, provider: value as SearchProviderId });
+            }}
             value={settings.provider}
           >
             <SelectTrigger aria-label="Search provider" className="w-40">
@@ -86,7 +87,9 @@ export function SearchPage() {
         <ApiKeyField
           getKeyUrl="https://www.firecrawl.dev/app/api-keys"
           label="Firecrawl API key"
-          onBlur={() => void persist(settings)}
+          onBlur={() => {
+            void persist(settings);
+          }}
           onChange={e => { setSettings({ ...settings, firecrawlApiKey: e.target.value }); }}
           value={settings.firecrawlApiKey}
         />
@@ -94,7 +97,9 @@ export function SearchPage() {
         <ApiKeyField
           getKeyUrl="https://app.tavily.com/home"
           label="Tavily API key"
-          onBlur={() => void persist(settings)}
+          onBlur={() => {
+            void persist(settings);
+          }}
           onChange={e => { setSettings({ ...settings, tavilyApiKey: e.target.value }); }}
           value={settings.tavilyApiKey}
         />

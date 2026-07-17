@@ -92,7 +92,9 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
   const dirtyAgentSources = createDirtyAgentSourceCoordinator({
     sendRequest: request => { getRpc().send.requestDiscardDirtyAgentSources(request); }
   });
-  const updater = new UpdaterService(message => { getRpc().send.updateStatusChanged(message); });
+  const updater = new UpdaterService(message => {
+    getRpc().send.updateStatusChanged(message);
+  });
   const commandDependencies = {
     sendToWebview: (command: Command) => { getRpc().send.executeCommand(command); },
     updater,
@@ -100,7 +102,9 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
   };
   const executeCommand = (command: Command, window: BrowserWindow): void => {
     if (command.type === "reload" && dirtyAgentSources.dirty) {
-      dirtyAgentSources.request("reload", () => { executeCommandInBun(command, window, commandDependencies); });
+      dirtyAgentSources.request("reload", () => {
+        executeCommandInBun(command, window, commandDependencies);
+      });
       return;
     }
     executeCommandInBun(command, window, commandDependencies);
@@ -157,7 +161,9 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
       (event: ElectrobunEvent<Record<string, never>, { allow: boolean; }>) => {
         if (dirtyAgentSources.dirty) {
           event.response = { allow: false };
-          dirtyAgentSources.request("quit", () => { app.quit(); });
+          dirtyAgentSources.request("quit", () => {
+            app.quit();
+          });
           return;
         }
         handleBeforeQuit(event);

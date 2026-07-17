@@ -119,7 +119,9 @@ export function getExternalAgentProjectRunBlockReason(
   project: ExternalAgentProjectView,
   record: ExternalAgentProjectThreadRecord
 ): ExternalAgentProjectRunBlockReason | null {
-  if (project.status !== "ready") { return "sourceUnavailable"; }
+  if (project.status !== "ready") {
+    return "sourceUnavailable";
+  }
   if (hasPendingExternalAgentProjectToolResult(record)) {
     return "pendingToolResult";
   }

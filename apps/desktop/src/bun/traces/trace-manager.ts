@@ -686,11 +686,15 @@ function _extractLangfuseRows(text: string): LangfuseObservation[] | null {
   } catch {
     return null;
   }
-  const rows = Array.isArray(parsed)
-    ? parsed
-    : _asRecord(parsed) && Array.isArray(_asRecord(parsed)?.data)
-      ? (_asRecord(parsed)?.data as unknown[])
-      : null;
+  let rows: unknown[] | null = null;
+  if (Array.isArray(parsed)) {
+    rows = parsed;
+  } else {
+    const record = _asRecord(parsed);
+    if (Array.isArray(record?.data)) {
+      rows = record.data;
+    }
+  }
   if (!rows) {
     return null;
   }
@@ -1206,13 +1210,14 @@ function _toolCallFromSpan(row: LangfuseObservation): ToolCall {
 function _extractInputMessages(value: unknown): LangfuseObservation[] {
   const decoded = _jsonDecodedValue(value);
   const root = _asRecord(decoded);
-  const rawMessages = Array.isArray(decoded)
-    ? decoded
-    : root && Array.isArray(root.messages)
-      ? root.messages
-      : root && Array.isArray(root.input)
-        ? root.input
-        : [];
+  let rawMessages: unknown[] = [];
+  if (Array.isArray(decoded)) {
+    rawMessages = decoded;
+  } else if (Array.isArray(root?.messages)) {
+    rawMessages = root.messages;
+  } else if (Array.isArray(root?.input)) {
+    rawMessages = root.input;
+  }
   return rawMessages
     .map(_asRecord)
     .filter((row): row is LangfuseObservation => Boolean(row));
@@ -1523,12 +1528,14 @@ function _textFromValue(value: unknown): string {
     return value
       .flatMap(item => {
         const record = _asRecord(item);
-        const text =
-          record?.text !== undefined
-            ? _textFromValue(record.text)
-            : record?.content !== undefined
-              ? _textFromValue(record.content)
-              : _textFromValue(item);
+        let text: string;
+        if (record?.text !== undefined) {
+          text = _textFromValue(record.text);
+        } else if (record?.content !== undefined) {
+          text = _textFromValue(record.content);
+        } else {
+          text = _textFromValue(item);
+        }
         return text ? [text] : [];
       })
       .join("\n");

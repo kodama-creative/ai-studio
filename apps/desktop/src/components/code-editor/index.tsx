@@ -247,26 +247,99 @@ const PlainTextCodeEditor = forwardRef<
 });
 
 export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(
-  (props, ref) => {
+  (
+    {
+      className,
+      autoFocus,
+      placeholder,
+      hideBorder,
+      hideFocusRing,
+      scrollOnFocus,
+      plain,
+      language,
+      streaming,
+      value,
+      readonly,
+      extraExtensions,
+      onDraftChange,
+      onChange,
+      onKeyDown,
+      onPaste
+    },
+    ref
+  ) => {
     const [retryKey, setRetryKey] = useState(0);
     // "Lite" rendering fidelity: skip CodeMirror and use the lightweight
     // plain-text editor (a <textarea>) — still editable, just no highlighting.
-    if (props.plain) {
-      return <PlainTextCodeEditor {...props} ref={ref} />;
+    if (plain) {
+      return (
+        <PlainTextCodeEditor
+          autoFocus={autoFocus}
+          className={className}
+          hideBorder={hideBorder}
+          onChange={onChange}
+          onDraftChange={onDraftChange}
+          onKeyDown={onKeyDown}
+          onPaste={onPaste}
+          placeholder={placeholder}
+          readonly={readonly}
+          ref={ref}
+          scrollOnFocus={scrollOnFocus}
+          value={value}
+        />
+      );
     }
     return (
       <CodeEditorErrorBoundary
         fallback={
           <PlainTextCodeEditor
-            {...props}
+            autoFocus={autoFocus}
+            className={className}
+            hideBorder={hideBorder}
+            onChange={onChange}
+            onDraftChange={onDraftChange}
+            onKeyDown={onKeyDown}
+            onPaste={onPaste}
             onRetry={() => { setRetryKey(key => key + 1); }}
+            placeholder={placeholder}
+            readonly={readonly}
             ref={ref}
+            scrollOnFocus={scrollOnFocus}
+            value={value}
           />
         }
         resetKey={retryKey}
       >
-        <Suspense fallback={<CodeEditorLoadingFallback {...props} />}>
-          <LazyCodeEditor key={retryKey} {...props} ref={ref} />
+        <Suspense
+          fallback={
+            <CodeEditorLoadingFallback
+              className={className}
+              hideBorder={hideBorder}
+              placeholder={placeholder}
+              readonly={readonly}
+              value={value}
+            />
+          }
+        >
+          <LazyCodeEditor
+            autoFocus={autoFocus}
+            className={className}
+            extraExtensions={extraExtensions}
+            hideBorder={hideBorder}
+            hideFocusRing={hideFocusRing}
+            key={retryKey}
+            language={language}
+            onChange={onChange}
+            onDraftChange={onDraftChange}
+            onKeyDown={onKeyDown}
+            onPaste={onPaste}
+            placeholder={placeholder}
+            readonly={readonly}
+            ref={ref}
+            scrollOnFocus={scrollOnFocus}
+            streaming={streaming}
+            value={value}
+          />
         </Suspense>
       </CodeEditorErrorBoundary>
     );

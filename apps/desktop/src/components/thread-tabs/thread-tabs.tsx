@@ -51,10 +51,14 @@ const ExternalProjectTabPane = lazy(async () =>
 
 // Suppress focus on mouse-down so a click doesn't leave these toolbar icons
 // with the focus-visible ring stuck; keyboard focus (Tab) still rings them.
-const _preventFocusSteal = (e: MouseEvent) => { e.preventDefault(); };
+const _preventFocusSteal = (e: MouseEvent) => {
+  e.preventDefault();
+};
 
 function _tabIdFromEventTarget(target: EventTarget | null): string | null {
-  if (!(target instanceof HTMLElement)) { return null; }
+  if (!(target instanceof HTMLElement)) {
+    return null;
+  }
   return (
     target
       .closest<HTMLElement>(".chrome-tab[data-tab-id]")
@@ -122,14 +126,20 @@ export function ThreadTabs({
   const contextMenuTab = tabs.find(tab => tab.id === contextMenuId) ?? null;
   useEffect(() => {
     const root = containerRef.current;
-    if (!root) { return; }
+    if (!root) {
+      return;
+    }
     root
       .querySelectorAll<HTMLElement>(".chrome-tab[data-tab-id]")
       .forEach(el => {
         const id = el.getAttribute("data-tab-id");
-        if (!id) { return; }
-        const tab = tabs.find(tab => tab.id === id);
-        if (!tab) { return; }
+        if (!id) {
+          return;
+        }
+        const tab = tabs.find(candidate => candidate.id === id);
+        if (!tab) {
+          return;
+        }
         const label = tabLabel(tab);
         el.title = id;
         el.tabIndex = 0;
@@ -157,9 +167,13 @@ export function ThreadTabs({
 
   useLayoutEffect(() => {
     const root = containerRef.current;
-    if (!root) { return; }
+    if (!root) {
+      return;
+    }
     const tabsContainer = root.querySelector(".chrome-tabs");
-    if (!tabsContainer) { return; }
+    if (!tabsContainer) {
+      return;
+    }
 
     if (
       !tabsContainer.classList.contains("electrobun-webkit-app-region-drag")
@@ -207,11 +221,17 @@ export function ThreadTabs({
   const middlePressedTabIdRef = useRef<string | null>(null);
   const handleMouseDownCapture = useCallback(
     (event: MouseEvent<HTMLDivElement>) => {
-      if (event.button !== 1) { return; }
+      if (event.button !== 1) {
+        return;
+      }
       middlePressedTabIdRef.current = null;
-      if ((event.buttons & 1) !== 0) { return; }
+      if ((event.buttons & 1) !== 0) {
+        return;
+      }
       const id = _tabIdFromEventTarget(event.target);
-      if (id === null) { return; }
+      if (id === null) {
+        return;
+      }
       middlePressedTabIdRef.current = id;
       event.preventDefault();
       event.stopPropagation();
@@ -221,12 +241,18 @@ export function ThreadTabs({
 
   const handleMouseUp = useCallback(
     (event: MouseEvent<HTMLDivElement>) => {
-      if (event.button !== 1) { return; }
+      if (event.button !== 1) {
+        return;
+      }
       const pressed = middlePressedTabIdRef.current;
       middlePressedTabIdRef.current = null;
-      if ((event.buttons & 1) !== 0) { return; }
+      if ((event.buttons & 1) !== 0) {
+        return;
+      }
       const id = _tabIdFromEventTarget(event.target);
-      if (id !== null && id === pressed) { close(id); }
+      if (id !== null && id === pressed) {
+        close(id);
+      }
     },
     [close]
   );
@@ -250,11 +276,7 @@ export function ThreadTabs({
                 // area, so its color must match that bar (--tab-bar-bottom), not
                 // the default --border.
                 "flex h-full items-center border-b-4 [border-color:var(--tab-bar-bottom)] pt-1 transition-[width]",
-                fullScreen
-                  ? "w-6 pl-1"
-                  : sidebarOpen
-                    ? "w-6 pl-1"
-                    : "w-23 pl-18"
+                fullScreen || sidebarOpen ? "w-6 pl-1" : "w-23 pl-18"
               )}
             >
               <Tooltip

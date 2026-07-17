@@ -11,7 +11,7 @@ import React, { memo, useCallback, useMemo } from "react";
 import type { Tool } from "@llm-space/core";
 
 import { cn } from "@/lib/utils";
-import { getBuiltInToolIcon } from "./built-in-tool-icon";
+import { BuiltInToolIcon } from "./built-in-tool-icon";
 import { Tooltip } from "../../tooltip";
 
 const _ToolListItem = function ToolListItem({
@@ -47,14 +47,6 @@ const _ToolListItem = function ToolListItem({
     },
     [onRemove, tool]
   );
-  const ToolIcon =
-    tool.type === "mcp"
-      ? CableIcon
-      : tool.type === "builtin"
-        ? getBuiltInToolIcon(tool)
-        : tool.type === "project"
-          ? PackageIcon
-          : FunctionSquareIcon;
   const editDisabled =
     tool.type === "project" ? !projectSourceNavigable : readonly;
 
@@ -102,7 +94,20 @@ const _ToolListItem = function ToolListItem({
             onClick={() => { onEdit(tool); }}
             type="button"
           >
-            <ToolIcon className="size-3.5 shrink-0 opacity-70" />
+            {tool.type === "mcp"
+              ? <CableIcon className="size-3.5 shrink-0 opacity-70" />
+              : tool.type === "builtin"
+                ? (
+                  <BuiltInToolIcon
+                    className="size-3.5 shrink-0 opacity-70"
+                    tool={tool}
+                  />
+                )
+                : tool.type === "project"
+                  ? <PackageIcon className="size-3.5 shrink-0 opacity-70" />
+                  : (
+                    <FunctionSquareIcon className="size-3.5 shrink-0 opacity-70" />
+                  )}
             <span className="font-mono">{tool.name}</span>
           </button>
         </span>

@@ -97,12 +97,18 @@ export function useStreamText({
   useEffect(() => () => controllerRef.current?.abort(), []);
 
   const run = useCallback(async (overrides?: Partial<UseStreamTextArgs>) => {
-    const { systemPrompt, messages, userPrompt, reasoning, model } = {
+    const {
+      systemPrompt: resolvedSystemPrompt,
+      messages: resolvedMessages,
+      userPrompt: resolvedUserPrompt,
+      reasoning: resolvedReasoning,
+      model: resolvedModel
+    } = {
       ...argsRef.current,
       ...overrides
     };
     // An explicit `model` overrides the default text-generation model.
-    const base = model ?? defaultModelRef.current;
+    const base = resolvedModel ?? defaultModelRef.current;
     if (!base) {
       setError("No model available");
       return;
@@ -133,16 +139,16 @@ export function useStreamText({
     }, PREVIEW_THROTTLE_MS);
 
     const context = {
-      systemPrompt,
+      systemPrompt: resolvedSystemPrompt,
       messages: [
-        ...(messages ?? []),
-        ...(userPrompt === undefined
+        ...(resolvedMessages ?? []),
+        ...(resolvedUserPrompt === undefined
           ? []
           : [
             {
               id: uuid(),
               role: "user" as const,
-              content: [{ type: "text" as const, text: userPrompt }]
+              content: [{ type: "text" as const, text: resolvedUserPrompt }]
             }
           ])
       ]
@@ -152,7 +158,9 @@ export function useStreamText({
       params: {
         ...base.params,
         maxTokens: MAX_TOKENS,
-        ...(reasoning === undefined ? {} : { reasoning })
+        ...(resolvedReasoning === undefined
+          ? {}
+          : { reasoning: resolvedReasoning })
       }
     };
 

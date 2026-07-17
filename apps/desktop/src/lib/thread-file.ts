@@ -67,9 +67,13 @@ export function uniqueThreadFileName(
   stem: string
 ): string {
   const first = ensureJson(stem);
-  if (!existing.has(first)) { return first; }
+  if (!existing.has(first)) {
+    return first;
+  }
   let n = 1;
-  while (existing.has(`${stem}-${n}${THREAD_FILE_EXTENSION}`)) { n++; }
+  while (existing.has(`${stem}-${n}${THREAD_FILE_EXTENSION}`)) {
+    n++;
+  }
   return `${stem}-${n}${THREAD_FILE_EXTENSION}`;
 }
 

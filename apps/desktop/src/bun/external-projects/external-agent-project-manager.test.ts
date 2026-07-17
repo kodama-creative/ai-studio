@@ -228,7 +228,9 @@ export default defineTool({
     const before = await manager.readThread(opened.id, threadId);
     expect(before.syncedPrompt).toBe("Use echo for every request.\n");
     const skills = before.thread.context?.variables?.available_skills;
-    if (skills?.type !== "skills") { throw new Error("Missing skills variable"); }
+    if (skills?.type !== "skills") {
+      throw new Error("Missing skills variable");
+    }
     await manager.writeThread(opened.id, threadId, {
       ...before,
       thread: {
@@ -318,7 +320,9 @@ export default defineTool({
   test("migrates matching legacy model values as an explicit Thread override", async () => {
     const { home, manager, project } = await _fixture();
     const opened = await manager.trustAndOpen(project);
-    if (!opened.definition) { throw new Error("Missing Agent definition"); }
+    if (!opened.definition) {
+      throw new Error("Missing Agent definition");
+    }
     const threadId = opened.threads[0].id;
     const threadFile = path.join(
       home,
@@ -447,10 +451,18 @@ export default defineTool({
           ];
         },
         async callTool(_name, _input, signal) {
-          if (!signal) { throw new Error("Missing Project MCP abort signal"); }
+          if (!signal) {
+            throw new Error("Missing Project MCP abort signal");
+          }
           resolveStarted(signal);
           return new Promise((_resolve, reject) => {
-            signal.addEventListener("abort", () => { reject(signal.reason); }, {
+            signal.addEventListener("abort", () => {
+              reject(
+                signal.reason instanceof Error
+                  ? signal.reason
+                  : new Error("Project MCP call aborted")
+              );
+            }, {
               once: true
             });
           });
@@ -593,7 +605,9 @@ export default defineMcpClientConnection({
             return { contentText: "sunny", isError: false };
           },
           async close() {
-            if (clientNumber !== 1) { return; }
+            if (clientNumber !== 1) {
+              return;
+            }
             signalFirstCloseStarted();
             await firstCloseReleased;
           }
@@ -698,7 +712,9 @@ export default defineMcpClientConnection({
     let closeCount = 0;
     const connector: ProjectMcpConnector = async () => ({
       async listTools() {
-        if (!connectionAvailable) { return []; }
+        if (!connectionAvailable) {
+          return [];
+        }
         return [
           {
             name: "forecast",

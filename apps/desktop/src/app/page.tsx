@@ -392,7 +392,7 @@ function PageInner() {
     closeAllTabs: async () => {
       if (await canCloseTabs(tabs.tabs.map(tab => tab.id))) { closeAll(); }
     },
-    reopenClosedTab: () => { reopenClosed(); },
+    reopenClosedTab: () => { void reopenClosed(); },
     selectNextTab: () => { activateNext(); },
     selectPreviousTab: () => { activatePrevious(); },
     toggleSidebar: () => { toggleSidebar(); },
