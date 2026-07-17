@@ -14,7 +14,7 @@ import path from "node:path";
 
 const AUTH_TOKEN = "oci-acceptance-auth-token-with-at-least-thirty-two-bytes";
 const FAKE_PROVIDER_KEY = "oci-acceptance-provider-key";
-const CONTINUATION_TOKEN = "oci-acceptance-continuation-token-000000000000000000000000";
+const CONTINUATION_TOKEN = Buffer.alloc(32, 7).toString("base64url");
 const PUBLIC_HOST = "agent.example";
 const PLATFORMS = ["linux/amd64", "linux/arm64"] as const;
 
