@@ -94,6 +94,7 @@ Runtime architecture follows [ADR 0001](./docs/adr/0001-runtime-harness-over-pi-
   - Done when: promotion previews and atomically materializes portable model, reasoning, prompt, variables, tools, examples, and evaluation intent into source plus an initial Project Thread.
   - Boundary: one-way conversion; original Thread remains independent; no hidden metadata, live sync, secret copy, or silent tool substitution.
   - Metric: Thread-to-buildable-Agent completion without manual source repair.
+  - Blocker (2026-07-17): current source contracts do not define portable representations for Thread variables, conversation examples, or evaluation intent, and current Thread tool kinds do not share one lossless authoring path: manual function tools have schemas but no implementation, Desktop built-ins carry Host authority, MCP settings may contain unsupported transports and private Host configuration, and project tools belong to another source tree. Human approval is required for the eligible-Thread/tool matrix, source representation and future item-29 boundary, sensitive-value preview/copy policy, and initial Project Thread semantics before promotion can be implemented without silent substitution or data leakage.
 
 - [ ] **11 — Explicit source and artifact migrations**
   - Depends on: 05 and a real schema evolution.

@@ -309,6 +309,23 @@
 - Explicit non-goals: no marketplace, remote/community templates, duplicated full templates, unshipped capability presets, dependency installer, Git setup, auth/OAuth/stdio MCP, secret values, network validation, source mutation after creation, or silent overwrite/merge.
 - Visible gaps: portable generated Eval suites remain item 29, Thread promotion remains item 10, and native folder selection is not automated in the CEF audit. Remote templates, dependency management, and source merge/adoption require separate future product decisions.
 
+## Thread-To-Agent Project Promotion
+
+- Status: blocked before V1
+- Freshness: confirmed
+- Last checked: 2026-07-17
+- Evidence:
+  - A current isolated Electrobun CEF run at 1280×800 created a real blank standalone Thread. The Thread surface exposes model, tools, variables, system prompt, editable messages, run history, and evaluations, but Welcome, Thread toolbar, menus, Command Palette metadata, typed RPC, and Bun managers contain no promotion command, preview, or materializer.
+  - Core `Thread` stores optional model/reasoning parameters, system-prompt and message templates, built-in/custom variable state, four distinct tool kinds, Runtime snapshots, run history, reusable rubrics, and manual evaluations. These are Desktop development/session records rather than portable Agent source.
+  - Runtime Agent Project discovery compiles only `agent.ts`, `instructions.md`, `tools/*`, `connections/*`, and `skills/*`. It has no variable, example, promotion-intent, or Eval source slot; adding one would change the authored source and artifact contract.
+  - Thread `function` tools carry schema/description but no executable implementation. `builtin` tools execute through the trusted Desktop registry, `mcp` tools reference Settings-owned server identity/transport/auth, and `project` tools reference another trusted project snapshot. Copying any of them as a local authored tool would be a silent substitution or authority expansion.
+  - Thread custom variables are literal Desktop values that may contain private data; built-in values such as current date and available skills are Host/runtime-derived. The current project Runtime does not resolve Thread variable definitions in portable instructions.
+  - Manual evaluation rubrics, run scores, verdicts, and notes are explicitly Thread-owned evidence. ADR 0005 says generated projects carry no test/Eval protocol before roadmap item 29, so item 10 cannot invent one or silently reinterpret comparison history as portable assertions.
+  - Dify and Langflow primary docs make export contents, credentials/variable references, version compatibility, and non-exported logs/conversations explicit. Promptfoo requires authored test cases and assertions rather than inferring evaluation contracts from past runs.
+- Boundary: today a standalone Thread and an Agent Project remain independent product objects. A user can create a new canonical project or manually author equivalent source, but cannot preview and atomically promote a Thread while preserving an explainable mapping.
+- Explicit non-goals: no hidden promotion metadata, live Thread/source synchronization, secret or credential copying, implicit Desktop built-in authority, generated fake tool implementations, source overwrite/merge, transcript migration, or premature portable Eval protocol.
+- Visible gaps: owner decisions are required for (1) strict eligibility versus pulling later tool capabilities forward, (2) variable/example/evaluation-intent source representation and item-29 compatibility, (3) sensitive-value inclusion/redaction, and (4) the new Project Thread's transcript/runtime/evaluation state. Any approved UI must later define preview diffs, unsupported diagnoses, destination selection, cancellation/failure states, keyboard behavior, and CEF audit evidence.
+
 ## Agent And Thread Workbench Navigation
 
 - Status: shipped One Agent Model And Source Workspace V1
