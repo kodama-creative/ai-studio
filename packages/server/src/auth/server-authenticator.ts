@@ -4,6 +4,10 @@ export interface ServerPrincipal {
   readonly issuer: string;
   readonly principalId: string;
   readonly principalType: "service" | "user";
+  readonly tenant?: {
+    readonly issuer: string;
+    readonly tenantId: string;
+  };
 }
 
 export interface ServerAuthenticator {
@@ -23,15 +27,26 @@ export function createStaticBearerAuthenticator(
     const principal: ServerPrincipal = {
       issuer: configured.issuer,
       principalId: configured.principalId,
-      principalType: configured.principalType
+      principalType: configured.principalType,
+      ...(configured.tenant ? { tenant: { ...configured.tenant } } : {})
     };
     if (
       typeof principal.issuer !== "string"
       || principal.issuer.length === 0
+      || principal.issuer.length > 256
       || typeof principal.principalId !== "string"
       || principal.principalId.length === 0
+      || principal.principalId.length > 256
       || (principal.principalType !== "service"
         && principal.principalType !== "user")
+      || (principal.tenant !== undefined && (
+        typeof principal.tenant.issuer !== "string"
+        || principal.tenant.issuer.length === 0
+        || principal.tenant.issuer.length > 256
+        || typeof principal.tenant.tenantId !== "string"
+        || principal.tenant.tenantId.length === 0
+        || principal.tenant.tenantId.length > 256
+      ))
     ) {
       throw new TypeError("Static Bearer principals must have a valid identity");
     }

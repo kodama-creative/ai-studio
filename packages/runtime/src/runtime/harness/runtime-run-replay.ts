@@ -50,7 +50,8 @@ export function replayRuntimeRunEvents(
     : 0;
   const events = session.journal
     .filter(entry =>
-      entry.runId === authorization.runId
+      entry.type !== "sessionStateReplaced"
+      && entry.runId === authorization.runId
       && entry.sequence > afterSequence)
     .map(entry => ({
       entry,
@@ -88,7 +89,11 @@ function _validatedCursorSequence(
     );
   }
   const entry = session.journal[cursor.sequence - 1];
-  if (entry?.sequence !== cursor.sequence || entry.runId !== cursor.runId) {
+  if (
+    entry?.sequence !== cursor.sequence
+    || entry.type === "sessionStateReplaced"
+    || entry.runId !== cursor.runId
+  ) {
     throw new SessionStoreInvariantError(
       "Runtime Run replay cursor does not identify a durable entry in scope"
     );

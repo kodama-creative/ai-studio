@@ -12,6 +12,7 @@ import {
   type AgentProjectSnapshot,
   AgentRuntime,
   type AgentSession,
+  AgentStateCommitUnknownError,
   type PreparedAgentTool
 } from "@llm-space/runtime/node";
 
@@ -19,6 +20,7 @@ import type {
   AgentMessage,
   StreamFn
 } from "@earendil-works/pi-agent-core";
+import type { StoredRuntimeSession } from "@llm-space/runtime/harness";
 
 import { agentDefinitionFingerprint } from "../external-projects/agent-definition-fingerprint";
 
@@ -99,7 +101,10 @@ export class StreamThreadController {
       send({
         streamId,
         type: "error",
-        message: error instanceof Error ? error.message : "Internal error"
+        message: error instanceof Error ? error.message : "Internal error",
+        ...(error instanceof AgentStateCommitUnknownError
+          ? { code: "outcomeUnknown" as const }
+          : {})
       });
     } finally {
       this._activeStreams.delete(streamId);
@@ -205,8 +210,22 @@ export class StreamThreadController {
       models: await this._modelManager.getAvailableModels(),
       project
     });
+    const desktopPrincipal = {
+      issuer: "llm-space-desktop",
+      principalId: "local-user",
+      principalType: "user" as const
+    };
     const session = await runtime.createSession({
       id: payload.streamId,
+      context: {
+        id: payload.streamId,
+        auth: {
+          initiator: desktopPrincipal,
+          current: desktopPrincipal
+        },
+        channel: { kind: "desktop" },
+        turn: { id: payload.streamId, sequence: 1 }
+      },
       model: payload.request.model,
       reasoning: payload.request.config?.model?.reasoning,
       initialMessages: payload.request.context.messages as AgentMessage[],
@@ -267,10 +286,58 @@ export class StreamThreadController {
           }
         }))
     );
+    const runtimeState = await this._externalAgentProjects
+      .requiresStructuredSessionState(
+        payload.runtime.projectId,
+        payload.runtime.threadId
+      )
+      ? await this._externalAgentProjects.createRuntimeSessionStore(
+        payload.runtime.projectId,
+        payload.runtime.threadId
+      )
+      : null;
+    const activeRunId = runtimeState?.session.snapshot.activeRunId;
+    const turnSequence = runtimeState?.session.snapshot.runs.findIndex(
+      run => run.id === activeRunId
+    ) ?? -1;
+    if (runtimeState && (!activeRunId || turnSequence < 0)) {
+      throw new Error("Project Thread has no active Runtime Run.");
+    }
+    const desktopPrincipal = {
+      issuer: "llm-space-desktop",
+      principalId: "local-user",
+      principalType: "user" as const
+    };
+    const sessionId = runtimeState?.session.snapshot.id
+      ?? payload.runtime.threadId;
     const session = await this._externalAgentProjects.createRuntimeSession(
       payload.runtime.projectId,
       {
-        id: payload.runtime.threadId,
+        id: sessionId,
+        context: {
+          id: sessionId,
+          auth: {
+            initiator: desktopPrincipal,
+            current: desktopPrincipal
+          },
+          channel: { kind: "desktop", id: payload.runtime.threadId },
+          turn: {
+            id: activeRunId ?? payload.streamId,
+            sequence: turnSequence >= 0 ? turnSequence + 1 : 1
+          }
+        },
+        ...(runtimeState && activeRunId
+          ? {
+            sessionStore: runtimeState.store,
+            onStateCommitted: (runtimeSession: StoredRuntimeSession) => {
+              send({
+                streamId: payload.streamId,
+                type: "runtimeSession",
+                runtimeSession
+              });
+            }
+          }
+          : {}),
         model: payload.request.model,
         reasoning: payload.request.config?.model?.reasoning,
         initialMessages: payload.request.context.messages as AgentMessage[],

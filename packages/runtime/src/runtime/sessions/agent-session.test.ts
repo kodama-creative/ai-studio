@@ -28,6 +28,7 @@ describe("AgentSession Pi Agent ownership", () => {
       }
     };
     const firstSession = await runtime.createSession({
+      context: _context("manual-session"),
       executionMode: "manual",
       persistence,
       streamFn: _manualStream
@@ -41,6 +42,7 @@ describe("AgentSession Pi Agent ownership", () => {
     ]);
 
     const reloadedSession = await runtime.createSession({
+      context: _context("manual-session"),
       executionMode: "manual",
       initialMessages: persisted,
       persistence,
@@ -68,6 +70,7 @@ describe("AgentSession Pi Agent ownership", () => {
   test("persists the public transcript before publishing agent_end", async () => {
     const order: string[] = [];
     const session = await _runtime().createSession({
+      context: _context("persistence-session"),
       persistence: {
         replaceMessages(messages) {
           order.push(`persist:${messages.map(message => message.role).join(",")}`);
@@ -121,6 +124,7 @@ describe("AgentSession Pi Agent ownership", () => {
       return stream;
     };
     const session = await _runtime().createSession({
+      context: _context("abort-session"),
       persistence: {
         replaceMessages(messages) {
           persisted.push(messages);
@@ -153,6 +157,20 @@ describe("AgentSession Pi Agent ownership", () => {
 
 function _runtime(): AgentRuntime {
   return new AgentRuntime({ models: _models(), project: _project() });
+}
+
+function _context(id: string) {
+  const principal = {
+    issuer: "test",
+    principalId: "session-test",
+    principalType: "runtime" as const
+  };
+  return {
+    id,
+    auth: { initiator: principal, current: principal },
+    channel: { kind: "test" },
+    turn: { id: `turn-${id}`, sequence: 1 }
+  };
 }
 
 function _models(): Models {

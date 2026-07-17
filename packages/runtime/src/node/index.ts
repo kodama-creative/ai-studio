@@ -8,6 +8,7 @@ export {
 export {
   type AgentProjectSnapshot,
   type CompiledAgentProjectSnapshot,
+  type CompiledAgentStateDefinition,
   type CompiledMcpConnection,
   type CompiledProjectTool
 } from "../runtime/agent/agent-project-snapshot";
@@ -24,6 +25,10 @@ export {
   type AgentSessionOptions,
   type AgentSessionPersistence
 } from "../runtime/sessions/agent-session";
+export {
+  AgentStateCommitUnknownError,
+  getActiveAgentSessionContext
+} from "../runtime/state/agent-session-state";
 export {
   type AgentProjectBundle,
   createAgentProjectBundle
@@ -53,6 +58,7 @@ export {
   type ResolvedAgentProjectManifest
 } from "./discover/manifest";
 export {
+  type CreateLocalAgentSessionOptions,
   LocalAgentRuntime,
   type LocalAgentRuntimeOptions
 } from "./local-agent-runtime";

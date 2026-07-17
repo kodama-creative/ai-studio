@@ -17,7 +17,10 @@ import {
   type AgentServerStreamEvent,
   createAgentServerClient
 } from "@llm-space/runtime/client";
+import { getActiveAgentSessionContext } from "@llm-space/runtime/server";
+import { defineState } from "@llm-space/runtime/state";
 import { afterEach, describe, expect, test } from "bun:test";
+import { Type } from "typebox";
 
 import type { CompiledAgentProjectSnapshot } from "@llm-space/runtime/node";
 
@@ -457,6 +460,118 @@ describe("Agent Server HTTP protocol", () => {
     );
     expect(events.filter(event =>
       event.event === "control" && event.data.type === "runTerminal")).toHaveLength(1);
+  });
+
+  test("isolates verified principal state and recovers it after restart", async () => {
+    const root = await mkdtemp(join(tmpdir(), "llm-space-server-state-"));
+    roots.push(root);
+    const fingerprint = "7".repeat(64);
+    const authenticator = createStaticBearerAuthenticator([
+      {
+        issuer: "test",
+        principalId: "principal-one",
+        principalType: "user",
+        tenant: { issuer: "test", tenantId: "tenant-one" },
+        token: "principal-one-token-with-thirty-two-bytes"
+      },
+      {
+        issuer: "test",
+        principalId: "principal-two",
+        principalType: "user",
+        tenant: { issuer: "test", tenantId: "tenant-two" },
+        token: "principal-two-token-with-thirty-two-bytes"
+      }
+    ]);
+    const options = {
+      artifactFingerprint: fingerprint,
+      authenticator,
+      hostname: "127.0.0.1" as const,
+      localDev: true,
+      models: _models(),
+      port: 0,
+      project: _statefulProject(fingerprint, "server-state-v1"),
+      repositoryRoot: root
+    };
+    const first = await startAgentServer(options);
+    const firstClient = createAgentServerClient({
+      baseUrl: first.url,
+      authorization: "principal-one-token-with-thirty-two-bytes"
+    });
+    const secondClient = createAgentServerClient({
+      baseUrl: first.url,
+      authorization: "principal-two-token-with-thirty-two-bytes"
+    });
+    const firstSession = await firstClient.createSession({
+      continuationToken: _continuationToken(21),
+      idempotencyKey: "principal-one-session"
+    });
+    const secondSession = await secondClient.createSession({
+      continuationToken: _continuationToken(22),
+      idempotencyKey: "principal-two-session"
+    });
+    await _completeClientRun(firstClient, firstSession, "first-run");
+    await _completeClientRun(secondClient, secondSession, "second-run");
+
+    expect(await _rejection(secondClient.createRun({
+      sessionId: firstSession.sessionId,
+      continuationToken: firstSession.continuationToken,
+      idempotencyKey: "cross-principal-run",
+      text: "increment"
+    }))).toMatchObject({ status: 404 });
+    expect(await _storedServerState(root, firstSession.sessionId)).toEqual({
+      count: 1,
+      initiatorId: "principal-one",
+      principalId: "principal-one",
+      tenantId: "tenant-one",
+      channel: "http",
+      turnSequence: 1
+    });
+    expect(await _storedServerState(root, secondSession.sessionId)).toEqual({
+      count: 1,
+      initiatorId: "principal-two",
+      principalId: "principal-two",
+      tenantId: "tenant-two",
+      channel: "http",
+      turnSequence: 1
+    });
+
+    await first.stop();
+    const restarted = await startAgentServer(options);
+    const recoveredClient = createAgentServerClient({
+      baseUrl: restarted.url,
+      authorization: "principal-one-token-with-thirty-two-bytes"
+    });
+    await _completeClientRun(recoveredClient, firstSession, "recovered-run");
+    expect(await _storedServerState(root, firstSession.sessionId)).toEqual({
+      count: 2,
+      initiatorId: "principal-one",
+      principalId: "principal-one",
+      tenantId: "tenant-one",
+      channel: "http",
+      turnSequence: 2
+    });
+    await restarted.stop();
+
+    const drifted = await startAgentServer({
+      ...options,
+      project: _statefulProject(fingerprint, "server-state-v2")
+    });
+    servers.push(drifted);
+    const driftedClient = createAgentServerClient({
+      baseUrl: drifted.url,
+      authorization: "principal-one-token-with-thirty-two-bytes"
+    });
+    const terminal = await _completeClientRun(
+      driftedClient,
+      firstSession,
+      "schema-drift-run"
+    );
+    expect(terminal).toMatchObject({
+      event: "control",
+      data: { type: "runTerminal", outcome: "failed" }
+    });
+    expect((await _storedServerState(root, firstSession.sessionId)).count)
+      .toBe(2);
   });
 
   test("terminalizes interrupted model work as outcomeUnknown on restart", async () => {
@@ -1253,6 +1368,15 @@ function _continuationToken(seed: number): string {
   return Buffer.from(bytes).toString("base64url");
 }
 
+async function _rejection(promise: Promise<unknown>): Promise<unknown> {
+  try {
+    await promise;
+  } catch (error) {
+    return error;
+  }
+  throw new Error("Expected operation to reject");
+}
+
 function _headers(continuation: string, idempotencyKey: string) {
   return {
     authorization: "Bearer auth-token-with-at-least-thirty-two-bytes",
@@ -1303,6 +1427,115 @@ function _project(fingerprint: string): CompiledAgentProjectSnapshot {
     diagnostics: [],
     fingerprint
   };
+}
+
+const SERVER_STATE = defineState({
+  name: "server.session",
+  version: 1,
+  schema: Type.Object({
+    count: Type.Number(),
+    initiatorId: Type.String(),
+    principalId: Type.String(),
+    tenantId: Type.String(),
+    channel: Type.String(),
+    turnSequence: Type.Number()
+  }),
+  initial: {
+    count: 0,
+    initiatorId: "",
+    principalId: "",
+    tenantId: "",
+    channel: "",
+    turnSequence: 0
+  }
+});
+
+function _statefulProject(
+  fingerprint: string,
+  schemaFingerprint: string
+): CompiledAgentProjectSnapshot {
+  const project = _project(fingerprint);
+  return {
+    ...project,
+    stateDefinitions: [{
+      name: SERVER_STATE.name,
+      version: SERVER_STATE.version,
+      schema: SERVER_STATE.schema,
+      schemaFingerprint,
+      initial: SERVER_STATE.initial,
+      sourcePath: "state/session.ts"
+    }],
+    tools: [{
+      name: "increment",
+      label: "Increment",
+      description: "Increment durable Session state.",
+      parameters: { type: "object", properties: {} },
+      async execute() {
+        const context = getActiveAgentSessionContext();
+        SERVER_STATE.update(current => ({
+          count: current.count + 1,
+          initiatorId: context.auth.initiator.principalId,
+          principalId: context.auth.current.principalId,
+          tenantId: context.tenant?.tenantId ?? "",
+          channel: context.channel.kind,
+          turnSequence: context.turn.sequence
+        }));
+        const value = SERVER_STATE.get();
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(value) }],
+          details: value
+        };
+      }
+    }]
+  };
+}
+
+async function _completeClientRun(
+  client: ReturnType<typeof createAgentServerClient>,
+  session: { continuationToken: string; sessionId: string; },
+  idempotencyKey: string
+): Promise<AgentServerStreamEvent | undefined> {
+  const run = await client.createRun({
+    sessionId: session.sessionId,
+    continuationToken: session.continuationToken,
+    idempotencyKey,
+    text: "increment"
+  });
+  const events: AgentServerStreamEvent[] = [];
+  for await (const event of client.streamRun({
+    sessionId: session.sessionId,
+    runId: run.runId,
+    continuationToken: session.continuationToken
+  })) {
+    events.push(event);
+  }
+  return events.at(-1);
+}
+
+async function _storedServerState(
+  root: string,
+  sessionId: string
+): Promise<{
+  channel: string;
+  count: number;
+  initiatorId: string;
+  principalId: string;
+  tenantId: string;
+  turnSequence: number;
+}> {
+  const envelope = JSON.parse(
+    await readFile(join(root, `${sessionId}.json`), "utf8")
+  ) as {
+    runtime: {
+      snapshot: {
+        state: {
+          values: Record<string, { value: unknown; }>;
+        };
+      };
+    };
+  };
+  return envelope.runtime.snapshot.state.values[SERVER_STATE.name]!.value as
+    Awaited<ReturnType<typeof _storedServerState>>;
 }
 
 function _models(configured = true): Models {
@@ -1370,6 +1603,33 @@ function _stream(context: Context, signal?: AbortSignal) {
         type: "toolCall",
         id: "unsafe-call",
         name: "unsafe",
+        arguments: {}
+      }],
+      stopReason: "toolUse"
+    };
+    queueMicrotask(() => {
+      stream.push({ type: "start", partial });
+      stream.push({ type: "toolcall_start", contentIndex: 0, partial });
+      stream.push({
+        type: "toolcall_end",
+        contentIndex: 0,
+        toolCall: partial.content[0] as Extract<
+          AssistantMessage["content"][number],
+          { type: "toolCall"; }
+        >,
+        partial
+      });
+      stream.push({ type: "done", reason: "toolUse", message: partial });
+    });
+    return stream;
+  }
+  if (prompt === "increment") {
+    const partial: AssistantMessage = {
+      ..._partial(""),
+      content: [{
+        type: "toolCall",
+        id: `increment-${crypto.randomUUID()}`,
+        name: "increment",
         arguments: {}
       }],
       stopReason: "toolUse"

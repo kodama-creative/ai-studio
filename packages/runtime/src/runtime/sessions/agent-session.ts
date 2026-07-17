@@ -4,11 +4,14 @@ import type { Api, Model, Models, ToolResultMessage } from "@earendil-works/pi-a
 
 import { AgentEventProjector, type AgentSessionEvent, type AgentSessionPersistence } from "../../execution/agent-event-projector";
 import { ToolExecutionPolicy } from "../../execution/tool-execution-policy";
+import { AgentSessionState } from "../state/agent-session-state";
 
 import type { AgentModelSelector } from "../../shared/agent-definition";
+import type { AgentSessionContext } from "../../shared/agent-session-context";
 import type { RuntimeExecutionMode } from "../../shared/runtime-execution-mode";
 import type { AgentProjectSnapshot } from "../agent/agent-project-snapshot";
 import type { PreparedAgentTool } from "../agent/prepared-agent-tool";
+import type { SessionStore, StoredRuntimeSession } from "../harness/session-store";
 
 export type { AgentSessionEvent, AgentSessionPersistence };
 
@@ -25,6 +28,9 @@ export interface AgentSessionOptions {
   instructionsPrefix: string;
   systemPrompt?: string;
   executionMode: RuntimeExecutionMode;
+  context: AgentSessionContext;
+  sessionStore?: SessionStore;
+  onStateCommitted?: (session: StoredRuntimeSession) => Promise<void> | void;
   persistence?: AgentSessionPersistence;
   streamFn?: StreamFn;
 }
@@ -36,6 +42,8 @@ export class AgentSession {
   private readonly _reasoning?: ThinkingLevel;
   private readonly _toolPolicy: ToolExecutionPolicy;
   private readonly _eventProjector: AgentEventProjector;
+  private readonly _sessionState: AgentSessionState;
+  private _terminalError: Error | null = null;
   private _executionMode: RuntimeExecutionMode;
 
   constructor(options: AgentSessionOptions) {
@@ -43,8 +51,21 @@ export class AgentSession {
     this._modelSelector = options.modelSelector;
     this._reasoning = options.reasoning;
     this._executionMode = options.executionMode;
+    this._sessionState = new AgentSessionState({
+      context: options.context,
+      definitions: options.project.stateDefinitions ?? [],
+      sessionStore: options.sessionStore,
+      onCommitted: options.onStateCommitted
+    });
     this._toolPolicy = new ToolExecutionPolicy({
-      tools: options.tools,
+      tools: options.tools.map(tool => (tool.kind === "executable"
+        ? {
+          ...tool,
+          execute: async (...args) => this._sessionState.executeTool(
+            async () => tool.execute(...args)
+          )
+        }
+        : tool)),
       activeToolNames: options.activeToolNames
     });
     this._agent = new Agent({
@@ -64,7 +85,20 @@ export class AgentSession {
       streamFn:
         options.streamFn
         ?? ((model, context, streamOptions) =>
-          options.models.streamSimple(model, context, streamOptions))
+          options.models.streamSimple(model, context, streamOptions)),
+      prepareNextTurnWithContext: async ({ toolResults }) => {
+        try {
+          await this._sessionState.completeStep(toolResults, {
+            deferred: toolResults.some(result =>
+              this._toolPolicy.isDeferredToolResult(result))
+          });
+        } catch (error) {
+          this._terminalError = error instanceof Error
+            ? error
+            : new Error(String(error));
+          throw error;
+        }
+      }
     });
     this._eventProjector = new AgentEventProjector(
       () => this._executionMode,
@@ -95,6 +129,11 @@ export class AgentSession {
     return this._toolPolicy.publicMessages(this._agent.state.messages);
   }
 
+  async validateState(): Promise<void> {
+    if (this._executionMode === "manual") { return; }
+    await this._sessionState.validateSession();
+  }
+
   setExecutionMode(mode: RuntimeExecutionMode): void {
     if (this._agent.state.isStreaming) {
       throw new Error(
@@ -106,7 +145,10 @@ export class AgentSession {
   }
 
   async prompt(message: AgentMessage | AgentMessage[] | string): Promise<void> {
-    return this._agent.prompt(message as AgentMessage | AgentMessage[]);
+    this._terminalError = null;
+    await this.validateState();
+    await this._agent.prompt(message as AgentMessage | AgentMessage[]);
+    this._throwTerminalError();
   }
 
   async resolveToolResults(results: ToolResultMessage[]): Promise<void> {
@@ -123,10 +165,14 @@ export class AgentSession {
   }
 
   async continue(): Promise<void> {
-    return this._agent.continue();
+    this._terminalError = null;
+    await this.validateState();
+    await this._agent.continue();
+    this._throwTerminalError();
   }
 
   abort(): void {
+    this._sessionState.discardStep();
     this._agent.abort();
   }
 
@@ -138,6 +184,12 @@ export class AgentSession {
     listener: (event: AgentSessionEvent) => Promise<void> | void
   ): () => void {
     return this._eventProjector.subscribe(listener);
+  }
+
+  private _throwTerminalError(): void {
+    const error = this._terminalError;
+    this._terminalError = null;
+    if (error) { throw error; }
   }
 }
 

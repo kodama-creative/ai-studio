@@ -15,6 +15,7 @@ export interface DiscoveredAgentProject {
   readonly root: string;
   readonly definition?: AgentProjectSourceRef;
   readonly instructions?: AgentProjectSourceRef;
+  readonly states: readonly AgentProjectSourceRef[];
   readonly tools: readonly AgentProjectSourceRef[];
   readonly connections: readonly AgentProjectSourceRef[];
   readonly skillsRoot?: string;
@@ -41,6 +42,7 @@ export async function discoverAgentProject(
     diagnostics
   });
   const tools = await _discoverTools(root, diagnostics);
+  const states = await _discoverStates(root, diagnostics);
   const connections = await _discoverConnections(root, diagnostics);
   const skillsRootCandidate = path.join(root, "skills");
   let skillsRoot: string | undefined = skillsRootCandidate;
@@ -77,11 +79,63 @@ export async function discoverAgentProject(
     root,
     definition,
     instructions,
+    states,
     tools,
     connections,
     skillsRoot,
     diagnostics
   };
+}
+
+async function _discoverStates(
+  root: string,
+  diagnostics: AgentProjectDiagnostic[]
+): Promise<AgentProjectSourceRef[]> {
+  const statesRoot = path.join(root, "state");
+  let entries;
+  try {
+    if (await _isSymlink(statesRoot)) {
+      diagnostics.push({
+        severity: "error",
+        code: "state_import_failed",
+        message: "The state source directory cannot be a symbolic link",
+        path: statesRoot
+      });
+      return [];
+    }
+    entries = await readdir(statesRoot, { withFileTypes: true });
+  } catch (error) {
+    if (_hasCode(error, "ENOENT")) { return []; }
+    diagnostics.push({
+      severity: "error",
+      code: "state_import_failed",
+      message: `Unable to list state definitions: ${_errorMessage(error)}`,
+      path: statesRoot
+    });
+    return [];
+  }
+  const states: AgentProjectSourceRef[] = [];
+  for (const entry of entries.sort((left, right) =>
+    (left.name < right.name ? -1 : left.name > right.name ? 1 : 0))) {
+    if (!entry.name.endsWith(".ts") && !entry.name.endsWith(".js")) {
+      continue;
+    }
+    const absolutePath = path.join(statesRoot, entry.name);
+    if (entry.isSymbolicLink() || !entry.isFile()) {
+      diagnostics.push({
+        severity: "error",
+        code: "state_import_failed",
+        message: `State source must be a regular file: ${entry.name}`,
+        path: absolutePath
+      });
+      continue;
+    }
+    states.push({
+      absolutePath,
+      logicalPath: path.posix.join("state", entry.name)
+    });
+  }
+  return states;
 }
 
 async function _discoverConnections(

@@ -23,6 +23,7 @@ import type {
   ThreadAgentRuntimeProvenance,
   ThreadServerRunLineage
 } from "@llm-space/core";
+import type { StoredRuntimeSession } from "@llm-space/runtime/harness";
 
 import { createRpcTransport, externalAgentProjects } from "@/client";
 import {
@@ -129,6 +130,7 @@ const _ProjectThreadPane = function ProjectThreadPane({
   const pending = useRef<ExternalAgentProjectThreadRecord | null>(null);
   const recordRef = useRef(record);
   const activeRunProvenance = useRef<ThreadAgentRuntimeProvenance | null>(null);
+  const activeRuntimeSession = useRef<StoredRuntimeSession | null>(null);
   const activeServerRun = useRef<{
     lineage: ThreadServerRunLineage;
     terminalOutcome?: "cancelled" | "completed" | "failed" | "outcomeUnknown";
@@ -138,6 +140,7 @@ const _ProjectThreadPane = function ProjectThreadPane({
     () =>
       createRpcTransport({
         runtime: () => {
+          activeRuntimeSession.current = null;
           const current = recordRef.current?.thread;
           return current
             && getThreadRuntimeProfile(current).type === "localServer"
@@ -164,6 +167,9 @@ const _ProjectThreadPane = function ProjectThreadPane({
         },
         onRuntimeResolved: runtime => {
           activeRunProvenance.current = runtime;
+        },
+        onRuntimeSessionCommitted: session => {
+          activeRuntimeSession.current = session;
         },
         onLocalServerStatus: status => {
           setRuntimeStatus(status);
@@ -527,7 +533,11 @@ const _ProjectThreadPane = function ProjectThreadPane({
   }, [refreshProject]);
 
   const resolveTransportRuntimeCheckpoint = useCallback(
-    (outcome: "cancelled" | "completed" | "failed") => {
+    (outcome:
+      | "cancelled"
+      | "completed"
+      | "failed"
+      | "outcomeUnknown") => {
       const serverRun = activeServerRun.current;
       if (!serverRun) {
         return null;
@@ -796,6 +806,11 @@ const _ProjectThreadPane = function ProjectThreadPane({
         prepareRunSnapshot={prepareRunSnapshot}
         preserveSavedModel
         renderPromptVariables={!localServer}
+        resolveCommittedRuntimeSession={
+          localServer
+            ? undefined
+            : () => activeRuntimeSession.current ?? undefined
+        }
         resolveTransportRuntimeCheckpoint={
           localServer ? resolveTransportRuntimeCheckpoint : undefined
         }

@@ -858,15 +858,26 @@ async function _authenticate(
   const identity: ServerPrincipal = {
     issuer: principal.issuer,
     principalId: principal.principalId,
-    principalType: principal.principalType
+    principalType: principal.principalType,
+    ...(principal.tenant ? { tenant: { ...principal.tenant } } : {})
   };
   if (
     typeof identity.issuer !== "string"
     || identity.issuer.length === 0
+    || identity.issuer.length > 256
     || typeof identity.principalId !== "string"
     || identity.principalId.length === 0
+    || identity.principalId.length > 256
     || (identity.principalType !== "service"
       && identity.principalType !== "user")
+    || (identity.tenant !== undefined && (
+      typeof identity.tenant.issuer !== "string"
+      || identity.tenant.issuer.length === 0
+      || identity.tenant.issuer.length > 256
+      || typeof identity.tenant.tenantId !== "string"
+      || identity.tenant.tenantId.length === 0
+      || identity.tenant.tenantId.length > 256
+    ))
   ) {
     throw new TypeError("Server authenticator returned an invalid principal");
   }

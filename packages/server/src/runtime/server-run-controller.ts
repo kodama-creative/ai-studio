@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   AgentRuntime,
+  AgentStateCommitUnknownError,
   type CompiledAgentProjectSnapshot
 } from "@llm-space/runtime/server";
 
@@ -178,6 +179,17 @@ export class ServerRunController {
     try {
       const session = await this._runtime.createSession({
         id: run.sessionId,
+        context: {
+          id: run.sessionId,
+          auth: {
+            initiator: run.initiator,
+            current: run.owner
+          },
+          ...(run.owner.tenant ? { tenant: run.owner.tenant } : {}),
+          channel: { kind: "http" },
+          turn: { id: run.runId, sequence: run.turnSequence }
+        },
+        sessionStore: this._repository,
         executionMode: "react",
         initialMessages: run.transcript as AgentMessage[],
         persistence: {
@@ -234,6 +246,9 @@ export class ServerRunController {
     } catch (error) {
       if (this._abortedRuns.has(run.runId)) {
         outcome = "cancelled";
+      } else if (error instanceof AgentStateCommitUnknownError) {
+        outcome = "outcomeUnknown";
+        code = "session_state_commit_unknown";
       } else {
         outcome = "failed";
         code = error instanceof ServerEventTooLargeError

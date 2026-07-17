@@ -374,6 +374,111 @@ describe("InMemorySessionStore", () => {
     }).toThrow();
   });
 
+  test("atomically replaces bounded JSON Session state and preserves legacy records", async () => {
+    const store = new InMemorySessionStore();
+    const legacy = await store.commit({
+      sessionId: "session-state",
+      expectedVersion: null,
+      mutations: [_start("run-state", _configuration())]
+    });
+    expect(legacy.snapshot.state).toBeUndefined();
+
+    const stateful = await store.commit({
+      sessionId: "session-state",
+      expectedVersion: legacy.version,
+      mutations: [{
+        type: "replaceState",
+        values: {
+          "demo.counter": {
+            definitionVersion: 1,
+            schemaFingerprint: "counter-schema-v1",
+            value: { count: 1 }
+          }
+        }
+      }]
+    });
+
+    expect(stateful.snapshot.state).toEqual({
+      schemaVersion: 1,
+      revision: 1,
+      values: {
+        "demo.counter": {
+          definitionVersion: 1,
+          schemaFingerprint: "counter-schema-v1",
+          value: { count: 1 }
+        }
+      }
+    });
+    expect(stateful.journal.at(-1)).toMatchObject({
+      type: "sessionStateReplaced",
+      revision: 1,
+      sessionVersion: 2
+    });
+    expect(Object.isFrozen(stateful.snapshot.state?.values["demo.counter"]
+      ?.value)).toBe(true);
+  });
+
+  test("rejects non-JSON and oversized Session state without a partial write", async () => {
+    const store = new InMemorySessionStore();
+    const invalidValues = [
+      { value: Number.NaN, message: "non-finite" },
+      { value: undefined, message: "non-JSON" },
+      { value: "x".repeat((64 * 1024) + 1), message: "exceeds 65536" }
+    ];
+    for (const [index, fixture] of invalidValues.entries()) {
+      const result = await _rejection(store.commit({
+        sessionId: "session-invalid-state",
+        expectedVersion: null,
+        mutations: [{
+          type: "replaceState",
+          values: {
+            [`demo.invalid-${index}`]: {
+              definitionVersion: 1,
+              schemaFingerprint: "schema",
+              value: fixture.value as never
+            }
+          }
+        }]
+      }));
+      expect(result).toMatchObject({
+        message: expect.stringContaining(fixture.message)
+      });
+      expect(await store.load("session-invalid-state")).toBeNull();
+    }
+  });
+
+  test("enforces Session state slot-count and aggregate byte limits", async () => {
+    const entry = (value: string) => ({
+      definitionVersion: 1,
+      schemaFingerprint: "schema",
+      value
+    });
+    for (const [values, message] of [
+      [Object.fromEntries(
+        Array.from({ length: 65 }, (_item, index) => [
+          `demo.slot-${index}`,
+          entry("")
+        ])
+      ), "at most 64 slots"],
+      [Object.fromEntries(
+        Array.from({ length: 5 }, (_item, index) => [
+          `demo.total-${index}`,
+          entry("x".repeat(60 * 1024))
+        ])
+      ), "exceeds 262144 bytes"]
+    ] as const) {
+      const store = new InMemorySessionStore();
+      expect(await _rejection(store.commit({
+        sessionId: "session-state-limits",
+        expectedVersion: null,
+        mutations: [{ type: "replaceState", values }]
+      }))).toMatchObject({
+        message: expect.stringContaining(message)
+      });
+      expect(await store.load("session-state-limits")).toBeNull();
+    }
+  });
+
   test("rejects illegal and terminal transitions without changing the Session", async () => {
     const store = new InMemorySessionStore();
     const created = await store.commit({

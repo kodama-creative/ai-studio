@@ -9,10 +9,13 @@ import {
   type Models
 } from "@earendil-works/pi-ai";
 import { describe, expect, test } from "bun:test";
+import { Type } from "typebox";
 
 import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
 
 import { AgentRuntime } from "./agent-runtime";
+import { defineState } from "../../public/definitions/state";
+import { InMemorySessionStore } from "../harness/in-memory-session-store";
 
 import type { AgentProjectSnapshot } from "./agent-project-snapshot";
 
@@ -38,6 +41,16 @@ describe("AgentRuntime", () => {
     expect(runtime.defaultModel).toEqual({
       selector: { provider: "fake", id: "fake-model" },
       available: true
+    });
+  });
+
+  test("requires the Host to supply verified Session context", async () => {
+    const runtime = new AgentRuntime({ models: _models(), project: _project() });
+
+    expect(await _rejection(runtime.createSession(
+      undefined as never
+    ))).toMatchObject({
+      message: "Agent Runtime Sessions require Host-verified Session context"
     });
   });
 
@@ -74,6 +87,7 @@ describe("AgentRuntime", () => {
 
     const session = await runtime.createSession({
       id: "thread-one",
+      context: _context("thread-one"),
       executionMode: "react",
       persistence: {
         replaceMessages(messages) {
@@ -93,8 +107,118 @@ describe("AgentRuntime", () => {
     expect(session.model).toEqual({ provider: "fake", id: "fake-model" });
   });
 
+  test("commits authored state before Pi starts the next model turn", async () => {
+    const store = new InMemorySessionStore();
+    let providerCalls = 0;
+    const runtime = new AgentRuntime({
+      models: _reactModels(),
+      project: {
+        ..._project(),
+        stateDefinitions: [{
+          name: RUNTIME_COUNTER.name,
+          version: RUNTIME_COUNTER.version,
+          schema: RUNTIME_COUNTER.schema,
+          schemaFingerprint: "runtime-counter-v1",
+          initial: RUNTIME_COUNTER.initial,
+          sourcePath: "state/runtime-counter.ts"
+        }],
+        tools: [{
+          ..._tool("echo"),
+          async execute() {
+            RUNTIME_COUNTER.update(current => ({ count: current.count + 1 }));
+            return {
+              content: [{ type: "text" as const, text: "updated" }],
+              details: {}
+            };
+          }
+        }]
+      }
+    });
+    const session = await runtime.createSession({
+      id: "stateful-runtime-session",
+      context: _context("stateful-runtime-session"),
+      sessionStore: store,
+      streamFn: async (_model, context) => {
+        providerCalls += 1;
+        expect(JSON.stringify(context)).not.toContain(
+          "stateful-runtime-session"
+        );
+        expect(JSON.stringify(context)).not.toContain(RUNTIME_COUNTER.name);
+        if (providerCalls === 2) {
+          expect((await store.load("stateful-runtime-session"))
+            ?.snapshot.state?.values[RUNTIME_COUNTER.name]?.value)
+            .toEqual({ count: 1 });
+        }
+        return _stream(context);
+      }
+    });
+    const events: unknown[] = [];
+    session.subscribe(event => { events.push(event); });
+
+    await session.prompt("hello");
+
+    expect(providerCalls).toBe(2);
+    expect(JSON.stringify(events)).not.toContain(RUNTIME_COUNTER.name);
+    expect(JSON.stringify(events)).not.toContain("stateful-runtime-session");
+  });
+
+  test("rolls back automatic state updates while preserving Pi tool-error recovery", async () => {
+    const store = new InMemorySessionStore();
+    const runtime = new AgentRuntime({
+      models: _reactModels(),
+      project: {
+        ..._project(),
+        stateDefinitions: [{
+          name: RUNTIME_COUNTER.name,
+          version: RUNTIME_COUNTER.version,
+          schema: RUNTIME_COUNTER.schema,
+          schemaFingerprint: "runtime-counter-v1",
+          initial: RUNTIME_COUNTER.initial,
+          sourcePath: "state/runtime-counter.ts"
+        }],
+        tools: [{
+          ..._tool("echo"),
+          async execute() {
+            RUNTIME_COUNTER.update(() => ({ count: 9 }));
+            throw new Error("tool failed");
+          }
+        }]
+      }
+    });
+    const session = await runtime.createSession({
+      context: _context("recoverable-tool-error"),
+      sessionStore: store
+    });
+
+    await session.prompt("hello");
+
+    expect(session.messages.map(message => message.role)).toEqual([
+      "user",
+      "assistant",
+      "toolResult",
+      "assistant"
+    ]);
+    expect(session.messages[2]).toMatchObject({ isError: true });
+    expect(await store.load("recoverable-tool-error")).toBeNull();
+  });
+
   test("keeps manual placeholders internal and continues from resolved results", async () => {
     let executions = 0;
+    const store = new InMemorySessionStore();
+    await store.commit({
+      sessionId: "manual-session",
+      expectedVersion: null,
+      mutations: [{
+        type: "replaceState",
+        values: {
+          [RUNTIME_COUNTER.name]: {
+            definitionVersion: 1,
+            schemaFingerprint: "stale-schema",
+            value: { count: 2 }
+          }
+        }
+      }]
+    });
     const tool: AgentTool = {
       name: "echo",
       label: "Echo",
@@ -107,6 +231,7 @@ describe("AgentRuntime", () => {
       },
       async execute() {
         executions += 1;
+        RUNTIME_COUNTER.update(current => ({ count: current.count + 1 }));
         return Promise.resolve({
           content: [{ type: "text", text: "should not execute" }],
           details: undefined
@@ -115,11 +240,24 @@ describe("AgentRuntime", () => {
     };
     const runtime = new AgentRuntime({
       models: _reactModels(),
-      project: { ..._project(), tools: [tool] }
+      project: {
+        ..._project(),
+        stateDefinitions: [{
+          name: RUNTIME_COUNTER.name,
+          version: RUNTIME_COUNTER.version,
+          schema: RUNTIME_COUNTER.schema,
+          schemaFingerprint: "runtime-counter-v1",
+          initial: RUNTIME_COUNTER.initial,
+          sourcePath: "state/runtime-counter.ts"
+        }],
+        tools: [tool]
+      }
     });
     const persisted: AgentMessage[][] = [];
     const session = await runtime.createSession({
+      context: _context("manual-session"),
       executionMode: "manual",
+      sessionStore: store,
       persistence: {
         replaceMessages(messages) {
           persisted.push(messages);
@@ -136,6 +274,12 @@ describe("AgentRuntime", () => {
     await session.prompt("hello");
 
     expect(executions).toBe(0);
+    expect((await store.load("manual-session"))?.snapshot.state?.values[
+      RUNTIME_COUNTER.name
+    ]).toMatchObject({
+      schemaFingerprint: "stale-schema",
+      value: { count: 2 }
+    });
     expect(deferred).toEqual(["call-one"]);
     expect(session.messages.map(message => message.role)).toEqual([
       "user",
@@ -165,6 +309,12 @@ describe("AgentRuntime", () => {
       "toolResult",
       "assistant"
     ]);
+    expect((await store.load("manual-session"))?.snapshot.state?.values[
+      RUNTIME_COUNTER.name
+    ]).toMatchObject({
+      schemaFingerprint: "stale-schema",
+      value: { count: 2 }
+    });
   });
 
   test("executes one real tool batch without a second model turn in autoOnce", async () => {
@@ -191,7 +341,10 @@ describe("AgentRuntime", () => {
       models: _reactModels(),
       project: { ..._project(), tools: [tool] }
     });
-    const session = await runtime.createSession({ executionMode: "autoOnce" });
+    const session = await runtime.createSession({
+      context: _context("auto-once-session"),
+      executionMode: "autoOnce"
+    });
 
     await session.prompt("hello");
 
@@ -209,6 +362,7 @@ describe("AgentRuntime", () => {
       project: _project()
     });
     const session = await runtime.createSession({
+      context: _context("deferred-session"),
       executionMode: "react",
       extraTools: [
         {
@@ -243,6 +397,52 @@ describe("AgentRuntime", () => {
     ]);
   });
 
+  test("does not commit automatic step state when a sibling result is deferred", async () => {
+    const store = new InMemorySessionStore();
+    const runtime = new AgentRuntime({
+      models: _reactModels(),
+      project: {
+        ..._project(),
+        stateDefinitions: [{
+          name: RUNTIME_COUNTER.name,
+          version: RUNTIME_COUNTER.version,
+          schema: RUNTIME_COUNTER.schema,
+          schemaFingerprint: "runtime-counter-v1",
+          initial: RUNTIME_COUNTER.initial,
+          sourcePath: "state/runtime-counter.ts"
+        }],
+        tools: [{
+          ..._tool("remember"),
+          async execute() {
+            RUNTIME_COUNTER.update(() => ({ count: 4 }));
+            return {
+              content: [{ type: "text" as const, text: "remembered" }],
+              details: {}
+            };
+          }
+        }]
+      }
+    });
+    const session = await runtime.createSession({
+      context: _context("mixed-deferred-session"),
+      extraTools: [{
+        kind: "deferred",
+        definition: {
+          name: "host_action",
+          label: "Host action",
+          description: "Wait for the Host.",
+          parameters: { type: "object", properties: {} }
+        }
+      }],
+      sessionStore: store,
+      streamFn: _mixedToolStream
+    });
+
+    await session.prompt("hello");
+
+    expect(await store.load("mixed-deferred-session")).toBeNull();
+  });
+
   test("blocks an unavailable definition default but accepts an explicit override", async () => {
     const project = {
       ..._project(),
@@ -258,7 +458,7 @@ describe("AgentRuntime", () => {
       available: false
     });
     try {
-      await runtime.createSession();
+      await runtime.createSession({ context: _context("missing-session") });
       throw new Error("Expected the unavailable default to reject.");
     } catch (error) {
       expect(error).toMatchObject({
@@ -267,6 +467,7 @@ describe("AgentRuntime", () => {
       });
     }
     const session = await runtime.createSession({
+      context: _context("override-session"),
       model: { provider: "fake", id: "fake-model" }
     });
     expect(session.model).toEqual({ provider: "fake", id: "fake-model" });
@@ -278,8 +479,11 @@ describe("AgentRuntime", () => {
       project: _project()
     });
 
-    const inherited = await runtime.createSession();
+    const inherited = await runtime.createSession({
+      context: _context("inherited-session")
+    });
     const providerDefault = await runtime.createSession({
+      context: _context("provider-default-session"),
       reasoning: undefined
     });
 
@@ -311,6 +515,27 @@ describe("AgentRuntime", () => {
     ).toThrow("plain data objects");
   });
 });
+
+const RUNTIME_COUNTER = defineState({
+  name: "test.runtime-counter",
+  version: 1,
+  schema: Type.Object({ count: Type.Number() }),
+  initial: { count: 0 }
+});
+
+function _context(id: string) {
+  const principal = {
+    issuer: "test",
+    principalId: "runtime-test",
+    principalType: "runtime" as const
+  };
+  return {
+    id,
+    auth: { initiator: principal, current: principal },
+    channel: { kind: "test" },
+    turn: { id: `turn-${id}`, sequence: 1 }
+  };
+}
 
 function _project(): AgentProjectSnapshot {
   return {
@@ -420,4 +645,57 @@ function _stream(context: Context) {
     });
   });
   return stream;
+}
+
+function _mixedToolStream(_model: Model<Api>, context: Context) {
+  const stream = createAssistantMessageEventStream();
+  const hasToolResult = context.messages.at(-1)?.role === "toolResult";
+  const message: AssistantMessage = {
+    role: "assistant",
+    content: hasToolResult ? [{ type: "text", text: "done" }] : [
+      {
+        type: "toolCall",
+        id: "call-remember",
+        name: "remember",
+        arguments: {}
+      },
+      {
+        type: "toolCall",
+        id: "call-host",
+        name: "host_action",
+        arguments: {}
+      }
+    ],
+    api: "fake",
+    provider: "fake",
+    model: "fake-model",
+    usage: {
+      input: 1,
+      output: 1,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 2,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
+    },
+    stopReason: hasToolResult ? "stop" : "toolUse",
+    timestamp: Date.now()
+  };
+  queueMicrotask(() => {
+    stream.push({ type: "start", partial: message });
+    stream.push({
+      type: "done",
+      reason: hasToolResult ? "stop" : "toolUse",
+      message
+    });
+  });
+  return stream;
+}
+
+async function _rejection(promise: Promise<unknown>): Promise<unknown> {
+  try {
+    await promise;
+  } catch (error) {
+    return error;
+  }
+  throw new Error("Expected operation to reject");
 }

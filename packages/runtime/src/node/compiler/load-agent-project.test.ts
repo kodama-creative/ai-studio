@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
 
 import { loadAgentProject } from "./load-agent-project";
+import { AgentSessionState } from "../../runtime/state/agent-session-state";
 
 const ROOTS: string[] = [];
 
@@ -71,6 +72,97 @@ describe("loadAgentProject", () => {
       "agent-env:PROVIDER_API_KEY",
       "bun@>=1.3.14"
     ]);
+  });
+
+  test("compiles named versioned state into artifact capability and schema identity", async () => {
+    const root = await _fixture();
+    await writeFile(join(root, "instructions.md"), "Track a counter.\n");
+    await mkdir(join(root, "state"));
+    await writeFile(
+      join(root, "state", "counter.ts"),
+      `import { defineState } from "@llm-space/runtime/state";
+      import { Type } from "typebox";
+      export default defineState({
+        name: "demo.counter",
+        version: 1,
+        schema: Type.Object({ count: Type.Number() }),
+        initial: { count: 0 }
+      });`
+    );
+
+    const snapshot = await loadAgentProject(root);
+
+    expect(snapshot.diagnostics).toEqual([]);
+    expect(snapshot.stateDefinitions).toEqual([
+      expect.objectContaining({
+        name: "demo.counter",
+        version: 1,
+        initial: { count: 0 },
+        sourcePath: "state/counter.ts",
+        schemaFingerprint: expect.stringMatching(/^[0-9a-f]{64}$/)
+      })
+    ]);
+    expect(Object.isFrozen(snapshot.stateDefinitions)).toBe(true);
+    expect(snapshot.artifact.fingerprints.capabilities.entries)
+      .toContainEqual(expect.objectContaining({ id: "state:demo.counter" }));
+    expect(snapshot.artifact.fingerprints.schemas.entries)
+      .toContainEqual(expect.objectContaining({ id: "state:demo.counter" }));
+  });
+
+  test("rejects invalid, duplicate, reserved, and oversized state declarations", async () => {
+    const root = await _fixture();
+    await writeFile(join(root, "instructions.md"), "State validation.\n");
+    await mkdir(join(root, "state"));
+    const definition = (name: string, version: string, initial: string) =>
+      `import { defineState } from "@llm-space/runtime/state";
+      import { Type } from "typebox";
+      export default defineState({
+        name: ${JSON.stringify(name)},
+        version: ${version},
+        schema: Type.Object({ value: Type.String() }),
+        initial: ${initial}
+      });`;
+    await Promise.all([
+      writeFile(
+        join(root, "state", "duplicate-a.ts"),
+        definition("demo.duplicate", "1", `{ value: "a" }`)
+      ),
+      writeFile(
+        join(root, "state", "duplicate-b.ts"),
+        definition("demo.duplicate", "1", `{ value: "b" }`)
+      ),
+      writeFile(
+        join(root, "state", "reserved.ts"),
+        definition("llm-space.internal", "1", `{ value: "x" }`)
+      ),
+      writeFile(
+        join(root, "state", "version.ts"),
+        definition("demo.version", "0", `{ value: "x" }`)
+      ),
+      writeFile(
+        join(root, "state", "invalid.ts"),
+        definition("demo.invalid", "1", `{ value: 2 }`)
+      ),
+      writeFile(
+        join(root, "state", "oversized.ts"),
+        definition(
+          "demo.oversized",
+          "1",
+          `{ value: ${JSON.stringify("x".repeat(65 * 1024))} }`
+        )
+      )
+    ]);
+
+    const snapshot = await loadAgentProject(root);
+    const messages = snapshot.diagnostics.map(item => item.message).join("\n");
+
+    expect(snapshot.diagnostics.map(item => item.code)).toContain(
+      "state_name_duplicate"
+    );
+    expect(messages).toContain("reserved");
+    expect(messages).toContain("positive integer");
+    expect(messages).toContain("does not match its schema");
+    expect(messages).toContain("exceeds 65536 bytes");
   });
 
   test("rejects invalid Agent environment requirement declarations", async () => {
@@ -397,7 +489,9 @@ describe("loadAgentProject", () => {
     const second = await loadAgentProject(root);
 
     expect(second.fingerprint).not.toBe(first.fingerprint);
-    expect((await second.tools[0]!.execute("call", {})).content[0]).toEqual({
+    expect((await _executeInScope(
+      async () => second.tools[0]!.execute("call", {})
+    )).content[0]).toEqual({
       type: "text",
       text: "two"
     });
@@ -516,7 +610,9 @@ describe("loadAgentProject", () => {
 
     expect(first.diagnostics).toEqual([]);
     expect(first.artifact).toEqual(rebuilt.artifact);
-    expect((await first.tools[0]!.execute("call", {})).content[0]).toEqual({
+    expect((await _executeInScope(
+      async () => first.tools[0]!.execute("call", {})
+    )).content[0]).toEqual({
       type: "text",
       text: "compiled"
     });
@@ -556,7 +652,9 @@ describe("loadAgentProject", () => {
       .toBe(first.artifact.fingerprints.runtime.fingerprint);
     expect(second.artifact.fingerprints.environmentRequirements.fingerprint)
       .toBe(first.artifact.fingerprints.environmentRequirements.fingerprint);
-    expect((await second.tools[0]!.execute("call", {})).content[0]).toEqual({
+    expect((await _executeInScope(
+      async () => second.tools[0]!.execute("call", {})
+    )).content[0]).toEqual({
       type: "text",
       text: "two"
     });
@@ -628,4 +726,27 @@ async function _fixture(): Promise<string> {
     `export default { model: "fake/fake-model" };`
   );
   return root;
+}
+
+async function _executeInScope<T>(run: () => Promise<T>): Promise<T> {
+  return new AgentSessionState({
+    context: {
+      id: "compiler-test-session",
+      auth: {
+        initiator: {
+          issuer: "test",
+          principalId: "test",
+          principalType: "runtime"
+        },
+        current: {
+          issuer: "test",
+          principalId: "test",
+          principalType: "runtime"
+        }
+      },
+      channel: { kind: "test" },
+      turn: { id: "turn-1", sequence: 1 }
+    },
+    definitions: []
+  }).executeTool(run);
 }

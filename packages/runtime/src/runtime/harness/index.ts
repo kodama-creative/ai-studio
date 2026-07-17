@@ -24,11 +24,18 @@ export {
   type RuntimeSessionRecoveryResult
 } from "./runtime-session-recovery";
 export {
+  MAX_SESSION_STATE_BYTES,
+  MAX_SESSION_STATE_SLOT_BYTES,
+  MAX_SESSION_STATE_SLOTS,
   RUNTIME_SESSION_SCHEMA_VERSION,
+  RUNTIME_SESSION_STATE_SCHEMA_VERSION,
   type RuntimeRunConfigurationSnapshot,
   type RuntimeRunJournalEntry,
   type RuntimeSessionMutation,
   type RuntimeSessionSnapshot,
+  type RuntimeSessionStateEntry,
+  type RuntimeSessionStateSnapshot,
+  type RuntimeSessionStateValue,
   type SessionStore,
   type SessionStoreCommit,
   SessionStoreConflictError,

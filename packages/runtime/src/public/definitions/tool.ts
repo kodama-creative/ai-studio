@@ -2,6 +2,8 @@ import type { Static, TSchema } from "typebox";
 
 import { defineToolRuntime } from "../../internal/authored-action-definitions";
 
+import type { AgentSessionContext } from "../../shared/agent-session-context";
+
 const TOOL_DEFINITION_BRAND = Symbol.for("llm-space.tool-definition");
 
 export type JsonValue =
@@ -15,6 +17,7 @@ export type JsonValue =
 export interface ToolContext {
   readonly abortSignal: AbortSignal;
   readonly callId: string;
+  readonly session: AgentSessionContext;
   readonly toolName: string;
 }
 

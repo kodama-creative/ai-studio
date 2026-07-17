@@ -10,6 +10,11 @@ import {
   createProvider,
   type Model
 } from "@earendil-works/pi-ai";
+import {
+  InMemorySessionStore,
+  type RuntimeRunConfigurationSnapshot,
+  type StoredRuntimeSession
+} from "@llm-space/runtime/harness";
 import { afterEach, describe, expect, test } from "bun:test";
 
 import type { AgentEvent } from "@earendil-works/pi-agent-core";
@@ -39,6 +44,80 @@ afterEach(async () => {
 });
 
 describe("StreamThreadController Agent Project runtime", () => {
+  test("commits Project state to the Thread before the next model turn and reopens it", async () => {
+    const { home, models, manager, opened, project, threadId, workspace } =
+      await _fixture({
+        instructions: "Increment state.\n",
+        stateful: true,
+        toolCall: { name: "increment", arguments: {} }
+      });
+    const begun = await _beginProjectRun(manager, opened.id, threadId);
+    const controller = new StreamThreadController(
+      _modelManager(models),
+      { capture: () => undefined } as never,
+      manager
+    );
+    let committed: StoredRuntimeSession | undefined;
+
+    await controller.run(
+      {
+        streamId: "stream-stateful-project",
+        runtime: {
+          type: "agentProject",
+          projectId: opened.id,
+          threadId,
+          executionMode: "react",
+          modelSource: "agent"
+        },
+        request: {
+          model: { provider: "fake", id: "fake-model" },
+          context: {
+            systemPrompt: opened.instructions,
+            messages: [{
+              role: "user",
+              content: [{ type: "text", text: "increment" }],
+              timestamp: Date.now()
+            }],
+            tools: opened.tools,
+            sourceTools: opened.tools
+          }
+        }
+      },
+      message => {
+        if (message.type === "runtimeSession") {
+          committed = message.runtimeSession;
+        }
+      }
+    );
+
+    const persisted = await manager.readThread(opened.id, threadId);
+    expect(committed?.version).toBe(begun.version + 1);
+    expect((persisted.thread.runtimeSession as StoredRuntimeSession)
+      .snapshot.state?.values["desktop.counter"]?.value).toEqual({
+      count: 1,
+      principalId: "local-user",
+      channel: "desktop"
+    });
+    await manager.shutdown();
+    const reopened = new ExternalAgentProjectManager({
+      homePath: home,
+      workspaceRoot: workspace,
+      getModels: async () => Promise.resolve(models)
+    });
+    managers.push(reopened);
+    await reopened.trustAndOpen(project);
+    const runtimeState = await reopened.createRuntimeSessionStore(
+      opened.id,
+      threadId
+    );
+    expect(runtimeState.session.snapshot.state?.values["desktop.counter"]?.value)
+      .toEqual({
+        count: 1,
+        principalId: "local-user",
+        channel: "desktop"
+      });
+  });
+
   test("runs the same compiled Agent through a restart-safe Local Server authority", async () => {
     const { home, models, manager, opened, threadId, workspace } = await _fixture({
       instructions: "Use echo.\n",
@@ -551,10 +630,12 @@ describe("StreamThreadController standalone Runtime Harness", () => {
 async function _fixture({
   instructions,
   toolCall,
-  projectTool = false
+  projectTool = false,
+  stateful = false
 }: {
   instructions: string;
   projectTool?: boolean;
+  stateful?: boolean;
   toolCall?: { arguments: Record<string, unknown>; name: string; };
 }) {
   const root = await mkdtemp(path.join(tmpdir(), "llm-space-stream-runtime-"));
@@ -563,7 +644,7 @@ async function _fixture({
   const workspace = path.join(home, "workspace");
   const project = path.join(root, "project");
   const agent = path.join(project, "agent");
-  await mkdir(projectTool ? path.join(agent, "tools") : agent, {
+  await mkdir(projectTool || stateful ? path.join(agent, "tools") : agent, {
     recursive: true
   });
   await mkdir(workspace, { recursive: true });
@@ -588,6 +669,42 @@ async function _fixture({
       });`
     );
   }
+  if (stateful) {
+    await mkdir(path.join(agent, "state"));
+    await writeFile(
+      path.join(agent, "state", "counter.ts"),
+      `import { defineState } from "@llm-space/runtime/state";
+      import { Type } from "typebox";
+      export default defineState({
+        name: "desktop.counter",
+        version: 1,
+        schema: Type.Object({
+          count: Type.Number(),
+          principalId: Type.String(),
+          channel: Type.String()
+        }),
+        initial: { count: 0, principalId: "", channel: "" }
+      });`
+    );
+    await writeFile(
+      path.join(agent, "tools", "increment.ts"),
+      `import { defineTool } from "@llm-space/runtime/tools";
+      import { Type } from "typebox";
+      import counter from "../state/counter";
+      export default defineTool({
+        description: "Increment durable state.",
+        inputSchema: Type.Object({}),
+        execute(_input, context) {
+          counter.update(current => ({
+            count: current.count + 1,
+            principalId: context.session.auth.current.principalId,
+            channel: context.session.channel.kind
+          }));
+          return counter.get();
+        }
+      });`
+    );
+  }
   const models = _models(toolCall);
   const manager = new ExternalAgentProjectManager({
     homePath: home,
@@ -605,6 +722,52 @@ async function _fixture({
     threadId: opened.threads[0].id,
     workspace
   };
+}
+
+async function _beginProjectRun(
+  manager: ExternalAgentProjectManager,
+  projectId: string,
+  threadId: string
+): Promise<StoredRuntimeSession> {
+  const record = await manager.readThread(projectId, threadId);
+  const persisted = record.thread.runtimeSession as
+    StoredRuntimeSession | undefined;
+  const store = new InMemorySessionStore(persisted ? [persisted] : []);
+  let current = persisted;
+  if (current?.snapshot.activeRunId) {
+    current = await store.commit({
+      sessionId: current.snapshot.id,
+      expectedVersion: current.version,
+      mutations: [{
+        type: "transitionRun",
+        runId: current.snapshot.activeRunId,
+        to: "completed"
+      }]
+    });
+  }
+  const sessionId = current?.snapshot.id ?? `session-${crypto.randomUUID()}`;
+  const configuration: RuntimeRunConfigurationSnapshot = {
+    id: `configuration-${crypto.randomUUID()}`,
+    agentSnapshotFingerprint: "desktop-test-agent",
+    contextFingerprint: "desktop-test-context",
+    executionMode: "react",
+    model: { provider: "fake", id: "fake-model" },
+    toolConfigurationFingerprint: "desktop-test-tools"
+  };
+  const begun = await store.commit({
+    sessionId,
+    expectedVersion: current?.version ?? null,
+    mutations: [{
+      type: "startRun",
+      runId: `run-${crypto.randomUUID()}`,
+      configuration
+    }]
+  });
+  await manager.writeThread(projectId, threadId, {
+    ...record,
+    thread: { ...record.thread, runtimeSession: begun }
+  });
+  return begun;
 }
 
 function _localServerRequest(

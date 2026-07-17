@@ -1,7 +1,8 @@
 # Example Agent
 
 A portable LLM Space Agent Project for validating the definition, manifest,
-local tool, source-declared MCP connection, skill, and desktop import workflow.
+local tool, durable typed Session state, source-declared MCP connection, skill,
+and desktop import workflow.
 Its weather data and optional MCP fixture are deterministic and use no
 credentials or live model.
 
@@ -16,7 +17,7 @@ credentials or live model.
 4. Select this `apps/example-agent` directory.
 5. Review the warning, then choose **Trust and open**. Agent Project tools are
    local code and run with your user permissions.
-6. Open the default Thread. Confirm `get-weather` and
+6. Open the default Thread. Confirm `get-weather`, `remember-city`, and
    `fixture__remote_echo`, then inspect their source chips and explicit calls.
 
 LLM Space watches the files under `agent/`. Project Threads, messages, tool
@@ -34,9 +35,11 @@ bun test apps/example-agent
 The test loads this exact project through `@llm-space/runtime`, resolves the
 model/reasoning defaults from `agent.ts`, discovers the `weather-brief` skill,
 compiles the source-owned `fixture__remote_echo` allowlist without connecting,
-verifies all six inspectable compiled-artifact fingerprint sections, and checks
-that `get-weather({ city: "Shanghai" })` returns structured, JSON-compatible
-weather data.
+verifies the named/versioned `example.weather-session` definition across all
+six inspectable compiled-artifact fingerprint sections, and checks that
+`get-weather({ city: "Shanghai" })` returns structured, JSON-compatible weather
+data. `remember-city` demonstrates step-atomic state updates when run through a
+Runtime Session.
 
 This project is example code for local development. It does not provide live
 weather data, sandbox tool execution, or production deployment guarantees.

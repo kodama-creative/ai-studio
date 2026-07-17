@@ -1,19 +1,25 @@
 import { Compile } from "typebox/compile";
 
 import { compileAgentDefinition } from "./compile-agent-definition";
+import { compileAgentStateDefinition } from "./compile-agent-state-definition";
 import { normalizeAgentDefinition } from "../../internal/authored-definition/normalize-agent-definition";
+import { getActiveAgentSessionContextRuntime } from "../../internal/authored-state-definitions";
 import { qualifyProjectMcpToolName } from "../../internal/project-mcp-tool-name";
 import { isMcpClientConnectionDefinition } from "../../public/definitions/connections/mcp";
+import { isStateDefinition } from "../../public/definitions/state";
 import { isToolDefinition } from "../../public/definitions/tool";
 import { createImmutableAgentProjectSnapshot } from "../../runtime/agent/create-immutable-agent-project-snapshot";
+import { assertRuntimeSessionStateValues } from "../../runtime/harness/in-memory-session-store";
 
 import type { AgentProjectArtifact } from "../../runtime/agent/agent-project-artifact";
 import type {
   CompiledAgentProjectSnapshot,
   CompiledAgentSkill,
+  CompiledAgentStateDefinition,
   CompiledMcpConnection,
   CompiledProjectTool
 } from "../../runtime/agent/agent-project-snapshot";
+import type { AgentSessionContext } from "../../shared/agent-session-context";
 
 export interface BundledAgentProjectInput {
   readonly connections: ReadonlyArray<{
@@ -24,6 +30,10 @@ export interface BundledAgentProjectInput {
   readonly definition: unknown;
   readonly instructions: string;
   readonly skills: readonly CompiledAgentSkill[];
+  readonly states: ReadonlyArray<{
+    readonly definition: unknown;
+    readonly sourcePath: string;
+  }>;
   readonly tools: ReadonlyArray<{
     readonly definition: unknown;
     readonly name: string;
@@ -40,6 +50,7 @@ export function createBundledAgentProject(
     "Bundled Agent definition is invalid"
   ));
   const tools = _compileTools(input.tools);
+  const stateDefinitions = _compileStates(input.states);
   const connections = _compileConnections(input.connections, tools);
   return createImmutableAgentProjectSnapshot({
     artifact,
@@ -49,9 +60,35 @@ export function createBundledAgentProject(
     tools,
     connections,
     resources: { skills: input.skills },
+    stateDefinitions,
     diagnostics: [],
     fingerprint: artifact.fingerprint
   });
+}
+
+function _compileStates(
+  inputs: BundledAgentProjectInput["states"]
+): CompiledAgentStateDefinition[] {
+  const names = new Set<string>();
+  const definitions = inputs.map(input => {
+    if (!isStateDefinition(input.definition)) {
+      throw new TypeError(`Bundled state is invalid: ${input.sourcePath}`);
+    }
+    const definition = input.definition;
+    if (names.has(definition.name)) {
+      throw new TypeError(`Duplicate bundled state name: ${definition.name}`);
+    }
+    names.add(definition.name);
+    return compileAgentStateDefinition(definition, input.sourcePath);
+  });
+  assertRuntimeSessionStateValues(Object.fromEntries(
+    definitions.map(definition => [definition.name, {
+      definitionVersion: definition.version,
+      schemaFingerprint: definition.schemaFingerprint,
+      value: definition.initial
+    }])
+  ));
+  return definitions;
 }
 
 function _compileTools(
@@ -85,7 +122,10 @@ function _compileTools(
         const output = await definition.execute(value, {
           abortSignal: signal ?? new AbortController().signal,
           callId: toolCallId,
-          toolName: input.name
+          toolName: input.name,
+          get session() {
+            return getActiveAgentSessionContextRuntime() as AgentSessionContext;
+          }
         });
         if (outputValidator && !outputValidator.Check(output)) {
           throw new TypeError(`Invalid output from tool "${input.name}"`);

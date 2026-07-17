@@ -54,9 +54,9 @@ apps/
 ```
 
 To exercise the Agent Project import workflow, start the desktop app, choose
-**Open Agent Project**, and select `apps/example-agent`. The example includes a
-deterministic tool and skill, so its source contract can also be checked without
-a configured model:
+**Open Agent Project**, and select `apps/example-agent`. The example includes
+deterministic tools, typed Session state, and a skill, so its source contract
+can also be checked without a configured model:
 
 ```bash
 bun test apps/example-agent

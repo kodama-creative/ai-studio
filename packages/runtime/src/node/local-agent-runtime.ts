@@ -9,6 +9,11 @@ import {
 } from "../runtime/agent/agent-runtime";
 
 import type { AgentSession } from "../runtime/sessions/agent-session";
+import type { AgentSessionContext } from "../shared/agent-session-context";
+
+export type CreateLocalAgentSessionOptions = {
+  context?: AgentSessionContext;
+} & Omit<CreateAgentSessionOptions, "context">;
 
 export interface LocalAgentRuntimeOptions {
   agentRoot: string;
@@ -45,8 +50,24 @@ export class LocalAgentRuntime {
   }
 
   async createSession(
-    options: CreateAgentSessionOptions = {}
+    options: CreateLocalAgentSessionOptions = {}
   ): Promise<AgentSession> {
-    return this._runtime.createSession(options);
+    const id = options.context?.id
+      ?? options.id
+      ?? `session-${globalThis.crypto.randomUUID()}`;
+    const principal = {
+      issuer: "llm-space-local-runtime",
+      principalId: "local-process",
+      principalType: "runtime" as const
+    };
+    return this._runtime.createSession({
+      ...options,
+      context: options.context ?? {
+        id,
+        auth: { initiator: principal, current: principal },
+        channel: { kind: "local-runtime" },
+        turn: { id: `turn-${globalThis.crypto.randomUUID()}`, sequence: 1 }
+      }
+    });
   }
 }

@@ -27,6 +27,9 @@ The runtime owns three boundaries:
   it does not import Bun/Node Server code or persist credentials automatically.
 - `@llm-space/runtime/tools` is the authored local-action contract. It exports
   `defineTool()` and the bounded `ToolContext`.
+- `@llm-space/runtime/state` is the authored structured-state contract. It
+  exports `defineState()` handles whose live values exist only inside a
+  Host-verified Runtime Session scope.
 - `@llm-space/runtime/connections` is the authored remote-action contract. It
   exports `defineMcpClientConnection()` for Streamable HTTP MCP connections.
 - `@llm-space/runtime/server` is a minimal Bun-only type surface used by a
@@ -46,6 +49,7 @@ node/discover/               non-executing source discovery and diagnostics
 node/compiler/               trusted Bun compilation and normalization
 runtime/agent/               immutable Agent snapshot and model preparation
 runtime/sessions/            stateful Agent session interface and lifecycle
+runtime/state/               verified context and step-atomic structured state
 runtime/harness/             durable Run state and transactional Session Store
 execution/                   Pi tool policy, deferred state, and event projection
 ```
@@ -68,8 +72,8 @@ from six independently inspectable SHA-256 sections:
 
 - portable source files by logical path;
 - authored bundled dependencies, separate from their entry source;
-- compiled Agent, instruction, tool, connection, and skill capabilities;
-- local tool input/output schemas;
+- compiled Agent, instruction, tool, connection, skill, and state capabilities;
+- local tool input/output schemas and named/versioned state schemas;
 - the exact Bun compiler, resolved runtime dependencies, and production runtime
   source build;
 - the minimum Bun environment requirement.
@@ -93,6 +97,8 @@ agent/
 ├── agent.ts
 ├── instructions.md
 ├── tools/
+│   └── *.ts
+├── state/
 │   └── *.ts
 ├── connections/
 │   └── *.ts
@@ -143,7 +149,8 @@ export default defineTool({
   description: "Return the weather for a city.",
   inputSchema: Type.Object({ city: Type.String() }),
   outputSchema: Type.Object({ city: Type.String(), summary: Type.String() }),
-  execute({ city }, { abortSignal, callId, toolName }) {
+  execute({ city }, { abortSignal, callId, session, toolName }) {
+    console.log(session.auth.current.principalId, session.turn.id);
     return { city, summary: `${city} is sunny` };
   },
 });
@@ -196,6 +203,52 @@ durable transcript through `initialMessages` and the optional persistence
 driver. Desktop Project Threads are the durable authority; runtime sessions
 own live prompt/tool/continuation execution.
 
+## Verified context and structured Session state
+
+State is declared in `agent/state/*.ts` with a stable qualified name, positive
+version, TypeBox schema, and finite JSON initial value:
+
+```ts
+import { defineState } from "@llm-space/runtime/state";
+import { Type } from "typebox";
+
+export default defineState({
+  name: "weather.requested-cities",
+  version: 1,
+  schema: Type.Object({ cities: Type.Array(Type.String()) }),
+  initial: { cities: [] },
+});
+```
+
+Tools import the handle and use `get()`/`update()` only during managed Runtime
+execution. `get()` returns a deeply frozen JSON snapshot. `update()` validates
+the replacement immediately and makes it visible to every concurrently
+executing tool in the same Pi model step. Parallel writes to the same handle
+are last-actual-write-wins; there is no model-order guarantee.
+
+One automatic tool step uses one temporary shared Map. Only after every tool,
+output, and state value validates does the Runtime replace the full state
+snapshot through one Session Store CAS before Pi may start the next provider
+call. A tool throw, error result, validation failure, or deferred result
+discards every temporary update from that step; Pi retains its normal tool-error
+recovery behavior. The Runtime does not automatically replay the tool. A
+persistence failure never reruns tools: the Run terminates as
+`outcomeUnknown` when effects may already have happened, and tool authors own
+external-effect idempotency.
+
+The Host must supply immutable `AgentSessionContext`: Session ID, initiator,
+current principal, optional tenant, channel, and Turn ID/sequence. The Runtime
+does not derive it from messages, tool arguments, or model output, and neither
+context nor state is inserted into Pi events or model history. State is limited
+to 64 slots, 64 KiB per slot, and 256 KiB total. Unknown/removed definitions,
+version mismatches, and schema drift block execution; V1 never drops, resets,
+migrates, or retries them automatically.
+
+Turn context, Session state, transcript history, and external long-term memory
+remain separate domains. Desktop Project Threads and Server repositories adapt
+their existing Runtime Session record to the same Session Store authority;
+standalone Threads without authored state remain unchanged.
+
 The session core deliberately uses Pi `Agent`, not `AgentHarness`. Pi `Agent`
 owns the official provider stream, ReAct/tool lifecycle, abort settlement, and
 prompt-free `continue()` loop. LLM Space `AgentSession` owns only product
@@ -210,9 +263,13 @@ does not replace an editable Thread transcript. Harness compaction and Session
 tree capabilities may be adopted later only through a separately approved
 integration that preserves settled manual continuation.
 
-Execution modes are `manual`, `autoOnce`, and `react`. Manual deferred tool
-results remain internal control messages and are exposed as pending calls until
-the host supplies real results and calls `continue()`.
+Execution modes are `manual`, `autoOnce`, and `react`. `manual` is a development
+debugging mode: authored tools are not executed and the step does not enter a
+state scope, so Session State is neither read, updated, nor committed. Deferred
+tool results remain internal control messages and are exposed as pending calls
+until the Host supplies real results and calls `continue()`. Automatic modes use
+the same state scope and rollback behavior for every Agent; execution semantics
+do not branch based on whether the Agent happens to declare state slots.
 
 ## Local Server client
 
@@ -293,8 +350,9 @@ new immutable Run Configuration Snapshot, and appends ordered Run Journal
 entries. Expected versions provide compare-and-swap protection: stale or
 simultaneous writers cannot silently overwrite each other. Runtime Run state
 persists across model, tool, and durable-wait boundaries; terminal states never
-transition again. Desktop Threads persist this record as their Session Store;
-future Server repositories implement the same boundary.
+transition again. Desktop Threads and Server repositories persist this record
+as their sole Session Store authority. The optional `snapshot.state` envelope
+remains absent for legacy/stateless Sessions.
 
 Fresh processes recover only from durable control-plane boundaries:
 

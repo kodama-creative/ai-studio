@@ -7,6 +7,7 @@ import {
 import { Compile } from "typebox/compile";
 
 import { compileAgentDefinition } from "./compile-agent-definition";
+import { compileAgentStateDefinition } from "./compile-agent-state-definition";
 import {
   type AgentProjectArtifactDependencyInput,
   type AgentProjectArtifactSourceInput,
@@ -15,10 +16,13 @@ import {
 import { loadAuthoredModule } from "./load-authored-module";
 import { assertNoDuplicateObjectLiteralKeys } from "./validate-authored-source";
 import { normalizeAgentDefinition } from "../../internal/authored-definition/normalize-agent-definition";
+import { getActiveAgentSessionContextRuntime } from "../../internal/authored-state-definitions";
 import { qualifyProjectMcpToolName } from "../../internal/project-mcp-tool-name";
 import { isMcpClientConnectionDefinition } from "../../public/definitions/connections/mcp";
+import { isStateDefinition } from "../../public/definitions/state";
 import { isToolDefinition } from "../../public/definitions/tool";
 import { createImmutableAgentProjectSnapshot } from "../../runtime/agent/create-immutable-agent-project-snapshot";
+import { assertRuntimeSessionStateValues } from "../../runtime/harness/in-memory-session-store";
 import {
   type AgentProjectSourceRef,
   discoverAgentProject,
@@ -27,11 +31,13 @@ import {
 
 import type {
   CompiledAgentProjectSnapshot,
+  CompiledAgentStateDefinition,
   CompiledMcpConnection,
   CompiledProjectTool
 } from "../../runtime/agent/agent-project-snapshot";
 import type { CompiledAgentDefinition } from "../../shared/agent-definition";
 import type { AgentProjectDiagnostic } from "../../shared/agent-project";
+import type { AgentSessionContext } from "../../shared/agent-session-context";
 
 export async function loadAgentProject(
   agentRoot: string
@@ -55,6 +61,13 @@ async function _compileAgentProject(
   const instructions = await _compileInstructions(
     discovered.instructions,
     diagnostics,
+    sources
+  );
+  const stateDefinitions = await _compileStateDefinitions(
+    discovered.states,
+    diagnostics,
+    dependencies,
+    discovered.root,
     sources
   );
   const tools = await _compileTools(
@@ -84,6 +97,7 @@ async function _compileAgentProject(
     dependencies,
     instructions,
     skills,
+    stateDefinitions,
     sources,
     tools
   });
@@ -95,9 +109,89 @@ async function _compileAgentProject(
     tools,
     connections,
     resources: { skills },
+    stateDefinitions,
     diagnostics,
     fingerprint: artifact.fingerprint
   });
+}
+
+async function _compileStateDefinitions(
+  sourceRefs: readonly AgentProjectSourceRef[],
+  diagnostics: AgentProjectDiagnostic[],
+  dependencies: AgentProjectArtifactDependencyInput[],
+  projectRoot: string,
+  sources: AgentProjectArtifactSourceInput[]
+): Promise<CompiledAgentStateDefinition[]> {
+  const definitions: CompiledAgentStateDefinition[] = [];
+  const names = new Map<string, string>();
+  for (const sourceRef of sourceRefs) {
+    try {
+      const loaded = await loadAuthoredModule({
+        projectRoot,
+        sourcePath: sourceRef.absolutePath,
+        authoredSdk: true
+      });
+      _recordDependencies(dependencies, sourceRef.logicalPath, loaded.dependencies);
+      sources.push({ id: sourceRef.logicalPath, content: loaded.source });
+      const definition = loaded.default;
+      if (!isStateDefinition(definition)) {
+        diagnostics.push({
+          severity: "error",
+          code: "state_export_invalid",
+          message: `${path.basename(sourceRef.absolutePath)} must default-export defineState({ name, version, schema, initial })`,
+          path: sourceRef.absolutePath
+        });
+        continue;
+      }
+      const previous = names.get(definition.name);
+      if (previous) {
+        diagnostics.push({
+          severity: "error",
+          code: "state_name_duplicate",
+          message: `State name "${definition.name}" is also exported by ${path.basename(previous)}`,
+          path: sourceRef.absolutePath
+        });
+        continue;
+      }
+      names.set(definition.name, sourceRef.absolutePath);
+      definitions.push(compileAgentStateDefinition(
+        definition,
+        sourceRef.logicalPath
+      ));
+    } catch (error) {
+      diagnostics.push({
+        severity: "error",
+        code: "state_import_failed",
+        message: `Unable to import ${path.basename(sourceRef.absolutePath)}: ${_errorMessage(error)}`,
+        path: sourceRef.absolutePath
+      });
+    }
+  }
+  if (definitions.length > 64) {
+    diagnostics.push({
+      severity: "error",
+      code: "state_export_invalid",
+      message: "Agent Projects support at most 64 state definitions",
+      path: projectRoot
+    });
+  }
+  try {
+    assertRuntimeSessionStateValues(Object.fromEntries(
+      definitions.map(definition => [definition.name, {
+        definitionVersion: definition.version,
+        schemaFingerprint: definition.schemaFingerprint,
+        value: definition.initial
+      }])
+    ));
+  } catch (error) {
+    diagnostics.push({
+      severity: "error",
+      code: "state_export_invalid",
+      message: _errorMessage(error),
+      path: projectRoot
+    });
+  }
+  return definitions;
 }
 
 async function _compileDefinition(
@@ -247,7 +341,11 @@ async function _compileTools(
           const output = await definition.execute(input, {
             abortSignal: signal ?? new AbortController().signal,
             callId: toolCallId,
-            toolName: name
+            toolName: name,
+            get session() {
+              return getActiveAgentSessionContextRuntime() as
+                AgentSessionContext;
+            }
           });
           if (outputValidator && !outputValidator.Check(output)) {
             throw new TypeError(`Invalid output from tool "${name}"`);

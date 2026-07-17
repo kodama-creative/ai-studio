@@ -16,7 +16,8 @@ LLM_SPACE_SERVER_LOCAL_DEV_KEY="$(openssl rand -base64 32)" \
 ```
 
 Production uses `LLM_SPACE_SERVER_AUTH_KEYS`, a non-empty JSON array of
-`{ issuer, principalId, principalType, token }` records. Secrets are read and
+`{ issuer, principalId, principalType, token, tenant? }` records, where an
+optional verified tenant is `{ issuer, tenantId }`. Secrets are read and
 removed from the process environment before authored Agent modules load.
 Outside explicit loopback `--local-dev`, startup requires `--tls-cert` plus
 `--tls-key`, or one or more `--trusted-proxy` IP/CIDR entries and allowed
@@ -66,6 +67,18 @@ SSE `pi` data is the sanitized, version-pinned Pi `AgentEvent`. `control` adds
 only `runTerminal` and transient `serverShutdown`, which Pi cannot express.
 Each persisted event is committed before publication and uses its per-Run
 sequence as the SSE `id`.
+
+For authored tools, the Server projects the repository owner as Session
+initiator, the authenticated request identity as current principal, optional
+tenant data from the trusted authenticator, `http` channel context, and the
+durable Server Run ID/order as Turn context. Model text and tool arguments
+cannot override these values. Named/versioned `agent/state/*.ts` values are
+stored inside the same Server Session repository and recover after restart.
+Each Pi tool batch commits its validated full state snapshot once before the
+next provider call. A tool, schema, or deferred-result failure rolls the batch
+back while retaining Pi's normal tool-error handling; the Runtime does not
+automatically replay it. An unconfirmed persistence outcome terminates the Run
+as `outcomeUnknown` and is never retried automatically.
 
 The complete security, storage, retention, recovery, TLS, CORS, limit, and
 non-goal boundary is recorded in ADR 0002.

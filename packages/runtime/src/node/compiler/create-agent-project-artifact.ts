@@ -14,6 +14,7 @@ import {
 
 import type {
   CompiledAgentSkill,
+  CompiledAgentStateDefinition,
   CompiledMcpConnection,
   CompiledProjectTool
 } from "../../runtime/agent/agent-project-snapshot";
@@ -51,6 +52,7 @@ export function createAgentProjectArtifact({
   dependencies,
   instructions,
   skills,
+  stateDefinitions = [],
   sources,
   tools
 }: {
@@ -60,6 +62,7 @@ export function createAgentProjectArtifact({
   instructions: string;
   skills: readonly CompiledAgentSkill[];
   sources: readonly AgentProjectArtifactSourceInput[];
+  stateDefinitions?: readonly CompiledAgentStateDefinition[];
   tools: readonly CompiledProjectTool[];
 }): AgentProjectArtifact {
   const fingerprints = {
@@ -95,10 +98,18 @@ export function createAgentProjectArtifact({
           content: skill.content,
           disableModelInvocation: skill.disableModelInvocation ?? false
         }
+      })),
+      ...stateDefinitions.map(state => ({
+        id: `state:${state.name}`,
+        content: {
+          name: state.name,
+          version: state.version,
+          initial: state.initial
+        }
       }))
     ]),
-    schemas: _section(
-      tools.flatMap(tool => [
+    schemas: _section([
+      ...tools.flatMap(tool => [
         {
           id: `tool:${tool.name}:input`,
           content: tool.parameters
@@ -107,8 +118,16 @@ export function createAgentProjectArtifact({
           id: `tool:${tool.name}:output`,
           content: tool.outputSchema ?? null
         }
-      ])
-    ),
+      ]),
+      ...stateDefinitions.map(state => ({
+        id: `state:${state.name}`,
+        content: {
+          version: state.version,
+          schema: state.schema,
+          schemaFingerprint: state.schemaFingerprint
+        }
+      }))
+    ]),
     runtime: _section(RUNTIME_FINGERPRINT_INPUTS),
     environmentRequirements: _section([
       ...Object.entries(definition?.environment ?? {}).map(

@@ -23,6 +23,7 @@ import type {
   Thread,
   ThreadRuntimeCheckpoint
 } from "@llm-space/core";
+import type { StoredRuntimeSession } from "@llm-space/runtime/harness";
 
 import {
   executeTool,
@@ -133,8 +134,11 @@ export interface ThreadPlaygroundProps {
   readonly transportOwnsRuntimeRun?: boolean;
 
   readonly resolveTransportRuntimeCheckpoint?: (
-    outcome: "cancelled" | "completed" | "failed"
+    outcome: "cancelled" | "completed" | "failed" | "outcomeUnknown"
   ) => ThreadRuntimeCheckpoint | null;
+
+  /** Latest Runtime Session state committed durably by the execution Host. */
+  readonly resolveCommittedRuntimeSession?: () => StoredRuntimeSession | undefined;
 
   /** Hide Desktop execution-mode controls for a Server-owned ReAct loop. */
   readonly runSettingsReadonly?: boolean;
@@ -198,6 +202,7 @@ const _ThreadPlayground = function ThreadPlayground({
   runtimeOwnsToolLoop,
   transportOwnsRuntimeRun,
   resolveTransportRuntimeCheckpoint,
+  resolveCommittedRuntimeSession,
   renderPromptVariables,
   preserveSavedModel,
   prepareRunSnapshot,
@@ -242,6 +247,7 @@ const _ThreadPlayground = function ThreadPlayground({
       runtimeOwnsToolLoop,
       transportOwnsRuntimeRun,
       resolveTransportRuntimeCheckpoint,
+      resolveCommittedRuntimeSession,
       renderPromptVariables,
       persistSettledThread,
       prepareRunSnapshot: thread =>

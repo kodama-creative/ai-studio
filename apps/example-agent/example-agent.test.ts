@@ -22,7 +22,18 @@ describe("example Agent Project", () => {
       }
     });
     expect(snapshot.instructions).toContain("concise weather assistant");
-    expect(snapshot.tools.map(tool => tool.name)).toEqual(["get-weather"]);
+    expect(snapshot.tools.map(tool => tool.name)).toEqual([
+      "get-weather",
+      "remember-city"
+    ]);
+    expect(snapshot.stateDefinitions).toEqual([
+      expect.objectContaining({
+        name: "example.weather-session",
+        version: 1,
+        initial: { requestedCities: [] },
+        sourcePath: "state/weather-session.ts"
+      })
+    ]);
     expect(
       snapshot.connections.map(connection => ({
         name: connection.name,
@@ -33,19 +44,24 @@ describe("example Agent Project", () => {
       "weather-brief"
     ]);
     expect(snapshot.artifact.fingerprint).toBe(snapshot.fingerprint);
-    expect(snapshot.artifact.fingerprints.sources.entries).toHaveLength(5);
+    expect(snapshot.artifact.fingerprints.sources.entries).toHaveLength(7);
     expect(snapshot.artifact.fingerprints.capabilities.entries.map(entry =>
       entry.id)).toEqual([
       "agent",
       "connection:fixture",
       "instructions",
       "skill:weather-brief",
-      "tool:get-weather"
+      "state:example.weather-session",
+      "tool:get-weather",
+      "tool:remember-city"
     ]);
     expect(snapshot.artifact.fingerprints.schemas.entries.map(entry =>
       entry.id)).toEqual([
+      "state:example.weather-session",
       "tool:get-weather:input",
-      "tool:get-weather:output"
+      "tool:get-weather:output",
+      "tool:remember-city:input",
+      "tool:remember-city:output"
     ]);
     expect(snapshot.artifact.fingerprints.runtime.entries.length).toBeGreaterThan(0);
     expect(

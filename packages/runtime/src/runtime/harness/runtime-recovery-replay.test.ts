@@ -3,6 +3,7 @@ import {
   InMemorySessionStore,
   recoverRuntimeSession,
   replayRuntimeRunEvents,
+  RUNTIME_RUN_REPLAY_CURSOR_SCHEMA_VERSION,
   type RuntimeRunConfigurationSnapshot,
   type RuntimeRunReplayCursor,
   type RuntimeRunState,
@@ -224,6 +225,43 @@ describe("Runtime Run replay", () => {
       authorization,
       all.at(-1)?.cursor
     )).toEqual([]);
+  });
+
+  test("keeps Session state journal entries outside Run-scoped replay", async () => {
+    const store = new InMemorySessionStore();
+    const started = await _start(store, "session-state-replay", "run-state");
+    const stateful = await store.commit({
+      sessionId: "session-state-replay",
+      expectedVersion: started.version,
+      mutations: [{
+        type: "replaceState",
+        values: {
+          "demo.counter": {
+            definitionVersion: 1,
+            schemaFingerprint: "schema",
+            value: 1
+          }
+        }
+      }]
+    });
+    const completed = await store.commit({
+      sessionId: "session-state-replay",
+      expectedVersion: stateful.version,
+      mutations: [_transition("run-state", "completed")]
+    });
+    const authorization = {
+      sessionId: "session-state-replay",
+      runId: "run-state"
+    };
+
+    expect(replayRuntimeRunEvents(completed, authorization)
+      .map(event => event.entry.sequence)).toEqual([1, 3]);
+    expect(() => replayRuntimeRunEvents(completed, authorization, {
+      schemaVersion: RUNTIME_RUN_REPLAY_CURSOR_SCHEMA_VERSION,
+      sessionId: authorization.sessionId,
+      runId: authorization.runId,
+      sequence: 2
+    })).toThrow("does not identify a durable entry in scope");
   });
 
   test("rejects cross-scope, non-entry, and unsupported cursors", async () => {

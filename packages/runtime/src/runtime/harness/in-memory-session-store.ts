@@ -7,11 +7,16 @@ import {
   transitionRuntimeRun
 } from "./runtime-run";
 import {
+  MAX_SESSION_STATE_BYTES,
+  MAX_SESSION_STATE_SLOT_BYTES,
+  MAX_SESSION_STATE_SLOTS,
   RUNTIME_SESSION_SCHEMA_VERSION,
+  RUNTIME_SESSION_STATE_SCHEMA_VERSION,
   type RuntimeRunConfigurationSnapshot,
   type RuntimeRunJournalEntry,
   type RuntimeSessionMutation,
   type RuntimeSessionSnapshot,
+  type RuntimeSessionStateEntry,
   type SessionStore,
   type SessionStoreCommit,
   SessionStoreConflictError,
@@ -137,7 +142,38 @@ function _applyMutation({
     _transitionRun({ journal, mutation, sessionVersion, snapshot });
     return;
   }
+  if (mutation.type === "replaceState") {
+    _replaceState({ journal, mutation, sessionVersion, snapshot });
+    return;
+  }
   _recordCheckpoint({ journal, mutation, sessionVersion, snapshot });
+}
+
+function _replaceState({
+  journal,
+  mutation,
+  sessionVersion,
+  snapshot
+}: {
+  journal: RuntimeRunJournalEntry[];
+  mutation: Extract<RuntimeSessionMutation, { type: "replaceState"; }>;
+  sessionVersion: number;
+  snapshot: RuntimeSessionSnapshot;
+}): void {
+  assertRuntimeSessionStateValues(mutation.values);
+  const revision = (snapshot.state?.revision ?? 0) + 1;
+  (snapshot as { state?: RuntimeSessionSnapshot["state"]; }).state = {
+    schemaVersion: RUNTIME_SESSION_STATE_SCHEMA_VERSION,
+    revision,
+    values: structuredClone(mutation.values)
+  };
+  journal.push({
+    type: "sessionStateReplaced",
+    sequence: journal.length + 1,
+    sessionVersion,
+    revision,
+    names: Object.keys(mutation.values).sort()
+  });
 }
 
 function _startRun({
@@ -347,6 +383,19 @@ function _assertStoredSession(session: StoredRuntimeSession): void {
     );
   }
   _assertId("Session", session.snapshot.id);
+  if (session.snapshot.state) {
+    if (
+      session.snapshot.state.schemaVersion
+      !== RUNTIME_SESSION_STATE_SCHEMA_VERSION
+      || !Number.isSafeInteger(session.snapshot.state.revision)
+      || session.snapshot.state.revision < 1
+    ) {
+      throw new SessionStoreInvariantError(
+        `Session ${session.snapshot.id} has invalid structured state metadata`
+      );
+    }
+    assertRuntimeSessionStateValues(session.snapshot.state.values);
+  }
 
   const configurations = new Map<string, RuntimeRunConfigurationSnapshot>();
   for (const configuration of session.configurations) {
@@ -431,6 +480,7 @@ function _assertStoredSession(session: StoredRuntimeSession): void {
   }
 
   let previousSessionVersion = 0;
+  let stateRevision = 0;
   for (const [index, entry] of session.journal.entries()) {
     if (entry.sequence !== index + 1) {
       throw new SessionStoreInvariantError(
@@ -455,6 +505,24 @@ function _assertStoredSession(session: StoredRuntimeSession): void {
       );
     }
     previousSessionVersion = entry.sessionVersion;
+    if (entry.type === "sessionStateReplaced") {
+      stateRevision += 1;
+      if (
+        entry.revision !== stateRevision
+        || entry.names.some((name, nameIndex) => {
+          const previousName = entry.names[nameIndex - 1];
+          return name.trim().length === 0
+            || (nameIndex > 0
+              && previousName !== undefined
+              && previousName >= name);
+        })
+      ) {
+        throw new SessionStoreInvariantError(
+          `Session state journal entry ${entry.sequence} is invalid`
+        );
+      }
+      continue;
+    }
     if (!runIds.has(entry.runId)) {
       throw new SessionStoreInvariantError(
         `Run Journal entry ${entry.sequence} references missing Runtime Run ${entry.runId}`
@@ -474,6 +542,11 @@ function _assertStoredSession(session: StoredRuntimeSession): void {
       `Run Journal ends at Session version ${previousSessionVersion}, expected ${session.version}`
     );
   }
+  if (stateRevision !== (session.snapshot.state?.revision ?? 0)) {
+    throw new SessionStoreInvariantError(
+      `Session state journal revision ${stateRevision} does not match snapshot revision ${String(session.snapshot.state?.revision ?? 0)}`
+    );
+  }
   _assertJournalReconstructsSnapshot(session);
 }
 
@@ -486,6 +559,7 @@ function _assertJournalReconstructsSnapshot(
     state: RuntimeRunState;
   }>();
   for (const entry of session.journal) {
+    if (entry.type === "sessionStateReplaced") { continue; }
     if (entry.type === "runStarted") {
       const startedState = (entry as { readonly state: unknown; }).state;
       if (startedState !== "runningModel") {
@@ -570,6 +644,84 @@ function _assertJournalReconstructsSnapshot(
       );
     }
   }
+}
+
+export function assertRuntimeSessionStateValues(
+  values: Readonly<Record<string, RuntimeSessionStateEntry>>
+): void {
+  const names = Object.keys(values);
+  if (names.length > MAX_SESSION_STATE_SLOTS) {
+    throw new SessionStoreInvariantError(
+      `Session state supports at most ${MAX_SESSION_STATE_SLOTS} slots`
+    );
+  }
+  let totalBytes = 0;
+  for (const name of names) {
+    _assertId("Session state name", name);
+    const entry = values[name];
+    if (
+      !entry
+      || !Number.isSafeInteger(entry.definitionVersion)
+      || entry.definitionVersion < 1
+    ) {
+      throw new SessionStoreInvariantError(
+        `Session state "${name}" has an invalid definition version`
+      );
+    }
+    _assertId("Session state schema fingerprint", entry.schemaFingerprint);
+    _assertJsonStateValue(entry.value, name, new WeakSet());
+    const bytes = new TextEncoder().encode(JSON.stringify(entry.value)).byteLength;
+    if (bytes > MAX_SESSION_STATE_SLOT_BYTES) {
+      throw new SessionStoreInvariantError(
+        `Session state "${name}" exceeds ${MAX_SESSION_STATE_SLOT_BYTES} bytes`
+      );
+    }
+    totalBytes += bytes;
+  }
+  if (totalBytes > MAX_SESSION_STATE_BYTES) {
+    throw new SessionStoreInvariantError(
+      `Session state exceeds ${MAX_SESSION_STATE_BYTES} bytes`
+    );
+  }
+}
+
+function _assertJsonStateValue(
+  value: unknown,
+  name: string,
+  ancestors: WeakSet<object>
+): void {
+  if (
+    value === null
+    || typeof value === "string"
+    || typeof value === "boolean"
+  ) { return; }
+  if (typeof value === "number") {
+    if (Number.isFinite(value)) { return; }
+    throw new SessionStoreInvariantError(
+      `Session state "${name}" contains a non-finite number`
+    );
+  }
+  if (!value || typeof value !== "object") {
+    throw new SessionStoreInvariantError(
+      `Session state "${name}" contains a non-JSON value`
+    );
+  }
+  if (ancestors.has(value)) {
+    throw new SessionStoreInvariantError(
+      `Session state "${name}" contains circular data`
+    );
+  }
+  const prototype = Object.getPrototypeOf(value) as object | null;
+  if (!Array.isArray(value) && prototype !== Object.prototype && prototype !== null) {
+    throw new SessionStoreInvariantError(
+      `Session state "${name}" contains a non-plain object`
+    );
+  }
+  ancestors.add(value);
+  for (const child of Array.isArray(value) ? value : Object.values(value)) {
+    _assertJsonStateValue(child, name, ancestors);
+  }
+  ancestors.delete(value);
 }
 
 function _sameCheckpoint(

@@ -15,6 +15,7 @@ import type {
   AgentProjectPreset,
   RuntimeExecutionMode
 } from "@llm-space/runtime";
+import type { StoredRuntimeSession } from "@llm-space/runtime/harness";
 import type { RPCSchema } from "electrobun";
 
 import type { AnalyticsEvent, AnalyticsStatus } from "./analytics";
@@ -76,6 +77,12 @@ export interface StreamThreadRequestPayload {
 
 /** A bun→webview chunk of a streaming agent run, keyed by `streamId`. */
 export type StreamThreadResponsePayload =
+  | {
+    code?: "outcomeUnknown";
+    message: string;
+    streamId: string;
+    type: "error";
+  }
   | { event: AgentEvent; streamId: string; type: "event"; }
   | {
     lineage: ThreadServerRunLineage;
@@ -83,11 +90,15 @@ export type StreamThreadResponsePayload =
     terminalOutcome?: "cancelled" | "completed" | "failed" | "outcomeUnknown";
     type: "localServerLineage";
   }
-  | { message: string; streamId: string; type: "error"; }
   | {
     runtime: ThreadAgentRuntimeProvenance;
     streamId: string;
     type: "runtime";
+  }
+  | {
+    runtimeSession: StoredRuntimeSession;
+    streamId: string;
+    type: "runtimeSession";
   }
   | {
     status: ExternalAgentProjectRuntimeStatus;

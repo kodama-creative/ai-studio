@@ -21,7 +21,24 @@ describe("defineTool", () => {
         {
           abortSignal: new AbortController().signal,
           callId: "call-1",
-          toolName: "weather"
+          toolName: "weather",
+          session: {
+            id: "session-1",
+            auth: {
+              initiator: {
+                issuer: "test",
+                principalId: "initiator",
+                principalType: "user"
+              },
+              current: {
+                issuer: "test",
+                principalId: "current",
+                principalType: "user"
+              }
+            },
+            channel: { kind: "test" },
+            turn: { id: "turn-1", sequence: 1 }
+          }
         }
       )
     ).toEqual({ city: "Shanghai:weather:call-1" });

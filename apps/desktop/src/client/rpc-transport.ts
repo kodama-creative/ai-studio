@@ -6,6 +6,8 @@ import {
   uuid
 } from "@llm-space/core";
 
+import type { StoredRuntimeSession } from "@llm-space/runtime/harness";
+
 import { electrobun } from "@/lib/electrobun";
 
 import type {
@@ -19,6 +21,13 @@ import type {
 const createAbortError = () =>
   new DOMException("The operation was aborted.", "AbortError");
 
+export class RuntimeOutcomeUnknownError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RuntimeOutcomeUnknownError";
+  }
+}
+
 /**
  * An {@link AgentTransport} backed by Electrobun RPC. It sends the prepared
  * request as a `sendStreamThreadRequest` message and bridges the incoming
@@ -31,6 +40,7 @@ export function createRpcTransport(options?: {
   ) => void;
   onLocalServerStatus?: (status: ExternalAgentProjectRuntimeStatus) => void;
   onRuntimeResolved?: (runtime: ThreadAgentRuntimeProvenance) => void;
+  onRuntimeSessionCommitted?: (session: StoredRuntimeSession) => void;
   runtime?: () => StreamThreadRequestPayload["runtime"];
   settleAbort?: () => boolean;
 }): AgentTransport {
@@ -47,6 +57,7 @@ export function createRpcTransport(options?: {
     let aborted = false;
     let settleAbort = false;
     let errorMessage: string | null = null;
+    let errorCode: "outcomeUnknown" | undefined;
     const notify = () => {
       wake?.();
       wake = null;
@@ -65,6 +76,8 @@ export function createRpcTransport(options?: {
         events.push(message.event);
       } else if (message.type === "runtime") {
         options?.onRuntimeResolved?.(message.runtime);
+      } else if (message.type === "runtimeSession") {
+        options?.onRuntimeSessionCommitted?.(message.runtimeSession);
       } else if (message.type === "localServerStatus") {
         options?.onLocalServerStatus?.(message.status);
       } else if (message.type === "localServerLineage") {
@@ -79,6 +92,7 @@ export function createRpcTransport(options?: {
         finished = true;
       } else {
         errorMessage = message.message;
+        errorCode = message.code;
         finished = true;
       }
       notify();
@@ -119,7 +133,9 @@ export function createRpcTransport(options?: {
           yield events.shift()!;
         }
         if (errorMessage !== null) {
-          throw new Error(errorMessage);
+          throw errorCode === "outcomeUnknown"
+            ? new RuntimeOutcomeUnknownError(errorMessage)
+            : new Error(errorMessage);
         }
         if (finished) {
           return;

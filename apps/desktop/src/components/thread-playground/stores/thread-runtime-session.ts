@@ -161,7 +161,11 @@ export class ThreadRuntimeSession {
 
   async settle(
     input: {
-      readonly outcome: "cancelled" | "completed" | "failed";
+      readonly outcome:
+        | "cancelled"
+        | "completed"
+        | "failed"
+        | "outcomeUnknown";
       readonly runId: string;
       readonly sawEvent: boolean;
     } & ThreadRuntimeExecutionInput
@@ -294,7 +298,11 @@ async function _configuration(
 
 function _settleMutations(
   input: {
-    readonly outcome: "cancelled" | "completed" | "failed";
+    readonly outcome:
+      | "cancelled"
+      | "completed"
+      | "failed"
+      | "outcomeUnknown";
     readonly runId: string;
   } & ThreadRuntimeExecutionInput
 ): Array<

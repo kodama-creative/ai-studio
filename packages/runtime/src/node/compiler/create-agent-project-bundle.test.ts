@@ -6,6 +6,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 
 import { createAgentProjectBundle } from "./create-agent-project-bundle";
 import { loadAgentProject } from "./load-agent-project";
+import { AgentSessionState } from "../../runtime/state/agent-session-state";
 
 const ROOTS: string[] = [];
 
@@ -38,6 +39,7 @@ describe("createAgentProjectBundle", () => {
     expect(project.artifact).toEqual(built.artifact);
     expect(project.definition?.environment).toEqual(built.environment);
     expect(project.tools.map(tool => tool.name)).toEqual(["echo"]);
+    expect(project.stateDefinitions).toEqual(loaded.stateDefinitions);
     expect(project.connections.map(connection => connection.name)).toEqual([
       "fixture"
     ]);
@@ -58,7 +60,9 @@ describe("createAgentProjectBundle", () => {
     expect(project.resources.skills?.map(skill => skill.name)).toEqual([
       "bundle-proof"
     ]);
-    expect((await project.tools[0]!.execute("call", { value: "hello" })).details)
+    expect((await _executeInScope(
+      async () => project.tools[0]!.execute("call", { value: "hello" })
+    )).details)
       .toEqual({ value: "hello" });
     expect(() => module.createAgentProject({
       ...built.artifact,
@@ -160,12 +164,47 @@ async function _fixture(): Promise<string> {
       tools: { allow: ["remote_echo"] }
     });`
   );
+  await mkdir(join(root, "state"));
+  await writeFile(
+    join(root, "state", "counter.ts"),
+    `import { defineState } from "@llm-space/runtime/state";
+    import { Type } from "typebox";
+    export default defineState({
+      name: "bundle.counter",
+      version: 1,
+      schema: Type.Object({ count: Type.Number() }),
+      initial: { count: 0 }
+    });`
+  );
   await mkdir(join(root, "skills", "bundle-proof"), { recursive: true });
   await writeFile(
     join(root, "skills", "bundle-proof", "SKILL.md"),
     `---\nname: bundle-proof\ndescription: Proves skill bytes survive bundling.\n---\n\nProof.\n`
   );
   return root;
+}
+
+async function _executeInScope<T>(run: () => Promise<T>): Promise<T> {
+  return new AgentSessionState({
+    context: {
+      id: "bundle-test-session",
+      auth: {
+        initiator: {
+          issuer: "test",
+          principalId: "test",
+          principalType: "runtime"
+        },
+        current: {
+          issuer: "test",
+          principalId: "test",
+          principalType: "runtime"
+        }
+      },
+      channel: { kind: "test" },
+      turn: { id: "turn-1", sequence: 1 }
+    },
+    definitions: []
+  }).executeTool(run);
 }
 
 async function _rejection(promise: Promise<unknown>): Promise<Error> {

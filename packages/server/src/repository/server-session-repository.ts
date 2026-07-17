@@ -119,9 +119,12 @@ export interface CreatedServerSession {
 
 export interface CreatedServerRun {
   readonly created: boolean;
+  readonly initiator: ServerPrincipal;
+  readonly owner: ServerPrincipal;
   readonly runId: string;
   readonly sessionId: string;
   readonly transcript: readonly AgentMessage[];
+  readonly turnSequence: number;
 }
 
 export interface RotatedServerContinuation {
@@ -293,9 +296,12 @@ export class ServerSessionRepository implements SessionStore {
         }
         return {
           created: false,
+          initiator: _principal(current.owner),
+          owner: _principal(input.owner),
           sessionId: current.sessionId,
           runId: idempotent.id,
-          transcript: _snapshot(current.transcript)
+          transcript: _snapshot(current.transcript),
+          turnSequence: current.runs.findIndex(run => run.id === idempotent.id) + 1
         };
       }
       if (current.runtime?.snapshot.activeRunId) {
@@ -332,9 +338,12 @@ export class ServerSessionRepository implements SessionStore {
       await this._save(next);
       return {
         created: true,
+        initiator: _principal(next.owner),
+        owner: _principal(input.owner),
         sessionId: next.sessionId,
         runId,
-        transcript: _snapshot(transcript)
+        transcript: _snapshot(transcript),
+        turnSequence: next.runs.length
       };
     });
   }
@@ -362,9 +371,12 @@ export class ServerSessionRepository implements SessionStore {
     }
     return {
       created: false,
+      initiator: _principal(current.owner),
+      owner: _principal(input.owner),
       sessionId: current.sessionId,
       runId: run.id,
-      transcript: _snapshot(current.transcript)
+      transcript: _snapshot(current.transcript),
+      turnSequence: current.runs.findIndex(candidate => candidate.id === run.id) + 1
     };
   }
 
@@ -707,7 +719,8 @@ export class ServerSessionRepository implements SessionStore {
   }
 
   async load(sessionId: string): Promise<StoredRuntimeSession | null> {
-    return this._sessions.get(sessionId)?.runtime ?? null;
+    const runtime = this._sessions.get(sessionId)?.runtime ?? null;
+    return runtime ? _snapshot(runtime) : null;
   }
 
   sessionIds(): readonly string[] {
@@ -979,20 +992,40 @@ function _parseEnvelope(source: string, fileName: string): ServerSessionEnvelope
 }
 
 function _validPrincipal(value: unknown): value is ServerPrincipal {
-  return _isRecord(value)
-    && Object.keys(value).length === 3
+  if (!_isRecord(value)) { return false; }
+  const keys = Object.keys(value);
+  return (keys.length === 3 || (keys.length === 4 && value.tenant !== undefined))
+    && keys.every(key => [
+      "issuer",
+      "principalId",
+      "principalType",
+      "tenant"
+    ].includes(key))
     && typeof value.issuer === "string"
     && value.issuer.length > 0
+    && value.issuer.length <= 256
     && typeof value.principalId === "string"
     && value.principalId.length > 0
-    && (value.principalType === "service" || value.principalType === "user");
+    && value.principalId.length <= 256
+    && (value.principalType === "service" || value.principalType === "user")
+    && (value.tenant === undefined || (
+      _isRecord(value.tenant)
+      && Object.keys(value.tenant).length === 2
+      && typeof value.tenant.issuer === "string"
+      && value.tenant.issuer.length > 0
+      && value.tenant.issuer.length <= 256
+      && typeof value.tenant.tenantId === "string"
+      && value.tenant.tenantId.length > 0
+      && value.tenant.tenantId.length <= 256
+    ));
 }
 
 function _principal(value: ServerPrincipal): ServerPrincipal {
   const principal: ServerPrincipal = {
     issuer: value.issuer,
     principalId: value.principalId,
-    principalType: value.principalType
+    principalType: value.principalType,
+    ...(value.tenant ? { tenant: { ...value.tenant } } : {})
   };
   if (!_validPrincipal(principal)) {
     throw new TypeError("Server principal has an invalid identity");
@@ -1242,7 +1275,8 @@ function _samePrincipal(
   left: ServerPrincipal,
   right: ServerPrincipal
 ): boolean {
-  return left.issuer === right.issuer && left.principalId === right.principalId;
+  return left.issuer === right.issuer
+    && left.principalId === right.principalId;
 }
 
 function _sha256(value: string): string {

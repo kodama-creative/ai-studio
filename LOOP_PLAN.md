@@ -103,7 +103,7 @@ Runtime architecture follows [ADR 0001](./docs/adr/0001-runtime-harness-over-pi-
   - Boundary: no silent migration, broad compatibility shims, or automatic dependency major upgrades.
   - Metric: safe migration completion across the maintained fixture corpus.
 
-- [ ] **12 — Trusted Session context and structured state**
+- [x] **12 — Trusted Session context and structured state**
   - Depends on: 06.
   - Run: `$kaizen-loop Add verified Session identity context and durable typed Session state.`
   - Done when: initiator, current principal, optional tenant, and channel context are verified; Turn context, Session state, message history, and external long-term memory remain distinct.

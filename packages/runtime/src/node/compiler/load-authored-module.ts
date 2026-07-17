@@ -10,6 +10,7 @@ import {
   defineMcpClientConnectionRuntime,
   defineToolRuntime
 } from "../../internal/authored-action-definitions";
+import { defineStateRuntime } from "../../internal/authored-state-definitions";
 
 const TYPEBOX_RUNTIME_KEY = Symbol.for("llm-space.typebox-runtime");
 
@@ -168,6 +169,26 @@ function _authoredSdkPlugin(): Bun.BunPlugin {
         () => ({
           path: "connection-definition",
           namespace: "llm-space-runtime"
+        })
+      );
+      build.onResolve(
+        { filter: /^@llm-space\/runtime\/state$/ },
+        () => ({
+          path: "state-definition",
+          namespace: "llm-space-runtime"
+        })
+      );
+      build.onLoad(
+        {
+          filter: /^state-definition$/,
+          namespace: "llm-space-runtime"
+        },
+        () => ({
+          contents: createAuthoredDefinitionVirtualModule(
+            "defineState",
+            defineStateRuntime
+          ),
+          loader: "js"
         })
       );
       build.onLoad(

@@ -1,3 +1,4 @@
+import { InMemorySessionStore } from "@llm-space/runtime/harness";
 import { describe, expect, mock, test } from "bun:test";
 
 import type { AssistantMessage } from "@earendil-works/pi-ai";
@@ -133,6 +134,51 @@ describe("Thread store Runtime Harness integration", () => {
     expect(session.snapshot.runs[0]?.state).toBe("completed");
   });
 
+  test("adopts a Bun-committed state snapshot before renderer settlement", async () => {
+    const { createThreadStore } = await import("./thread-store");
+    let persisted: Thread = _initialThread();
+    let committed: StoredRuntimeSession | undefined;
+    const baseTransport = _finalTransport();
+    const transport: AgentTransport = async function* transport(request, options) {
+      const begun = persisted.runtimeSession as StoredRuntimeSession;
+      const memory = new InMemorySessionStore([begun]);
+      committed = await memory.commit({
+        sessionId: begun.snapshot.id,
+        expectedVersion: begun.version,
+        mutations: [{
+          type: "replaceState",
+          values: {
+            "desktop.counter": {
+              definitionVersion: 1,
+              schemaFingerprint: "desktop-counter-v1",
+              value: { count: 1 }
+            }
+          }
+        }]
+      });
+      for await (const event of baseTransport(request, options)) {
+        yield event;
+      }
+    };
+    const store = createThreadStore(persisted, {
+      transport,
+      resolveModel: saved => saved ?? null,
+      runtimeOwnsToolLoop: true,
+      resolveCommittedRuntimeSession: () => committed,
+      persistSettledThread: async thread => {
+        persisted = structuredClone(thread);
+      }
+    });
+
+    await store.getState().run();
+
+    const final = persisted.runtimeSession as StoredRuntimeSession;
+    expect(final.version).toBe((committed?.version ?? 0) + 1);
+    expect(final.snapshot.state?.values["desktop.counter"]?.value)
+      .toEqual({ count: 1 });
+    expect(final.snapshot.runs[0]?.state).toBe("completed");
+  });
+
   test("persists outcome unknown before refusing to replay interrupted work", async () => {
     const { createThreadStore } = await import("./thread-store");
     let persisted: Thread = _initialThread();
@@ -170,6 +216,34 @@ describe("Thread store Runtime Harness integration", () => {
       }
     });
     expect(persisted.runHistory ?? []).toHaveLength(0);
+  });
+
+  test("settles a state commit transport failure as outcome unknown", async () => {
+    const { createThreadStore } = await import("./thread-store");
+    let persisted: Thread = _initialThread();
+    const transport: AgentTransport = async function* transport() {
+      yield* [] as AgentEvent[];
+      const error = new Error("State commit could not be confirmed");
+      error.name = "RuntimeOutcomeUnknownError";
+      throw error;
+    };
+    const store = createThreadStore(persisted, {
+      transport,
+      resolveModel: saved => saved ?? null,
+      runtimeOwnsToolLoop: true,
+      persistSettledThread: async thread => {
+        persisted = structuredClone(thread);
+      }
+    });
+
+    await store.getState().run();
+
+    expect(persisted.runtimeSession).toMatchObject({
+      snapshot: {
+        activeRunId: null,
+        runs: [{ state: "outcomeUnknown" }]
+      }
+    });
   });
 
   test("does not publish recovered state when durable persistence fails", async () => {

@@ -5,6 +5,30 @@ import type { AgentModelSelector } from "../../shared/agent-definition";
 import type { RuntimeExecutionMode } from "../../shared/runtime-execution-mode";
 
 export const RUNTIME_SESSION_SCHEMA_VERSION = 1 as const;
+export const RUNTIME_SESSION_STATE_SCHEMA_VERSION = 1 as const;
+export const MAX_SESSION_STATE_SLOTS = 64;
+export const MAX_SESSION_STATE_SLOT_BYTES = 64 * 1024;
+export const MAX_SESSION_STATE_BYTES = 256 * 1024;
+
+export type RuntimeSessionStateValue =
+  | { readonly [key: string]: RuntimeSessionStateValue; }
+  | boolean
+  | number
+  | readonly RuntimeSessionStateValue[]
+  | string
+  | null;
+
+export interface RuntimeSessionStateEntry {
+  readonly definitionVersion: number;
+  readonly schemaFingerprint: string;
+  readonly value: RuntimeSessionStateValue;
+}
+
+export interface RuntimeSessionStateSnapshot {
+  readonly schemaVersion: typeof RUNTIME_SESSION_STATE_SCHEMA_VERSION;
+  readonly revision: number;
+  readonly values: Readonly<Record<string, RuntimeSessionStateEntry>>;
+}
 
 export interface RuntimeRunConfigurationSnapshot {
   readonly id: string;
@@ -21,6 +45,7 @@ export interface RuntimeSessionSnapshot {
   readonly id: string;
   readonly activeRunId: string | null;
   readonly runs: readonly RuntimeRunSnapshot[];
+  readonly state?: RuntimeSessionStateSnapshot;
 }
 
 export type RuntimeRunJournalEntry =
@@ -48,6 +73,13 @@ export type RuntimeRunJournalEntry =
     readonly sessionVersion: number;
     readonly to: RuntimeRunState;
     readonly type: "runStateChanged";
+  }
+  | {
+    readonly names: readonly string[];
+    readonly revision: number;
+    readonly sequence: number;
+    readonly sessionVersion: number;
+    readonly type: "sessionStateReplaced";
   };
 
 export interface StoredRuntimeSession {
@@ -72,6 +104,10 @@ export type RuntimeSessionMutation =
     readonly runId: string;
     readonly to: RuntimeRunState;
     readonly type: "transitionRun";
+  }
+  | {
+    readonly type: "replaceState";
+    readonly values: Readonly<Record<string, RuntimeSessionStateEntry>>;
   };
 
 export interface SessionStoreCommit {

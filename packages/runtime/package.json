@@ -10,6 +10,7 @@
     "./harness": "./src/runtime/harness/index.ts",
     "./node": "./src/node/index.ts",
     "./server": "./src/runtime/server.ts",
+    "./state": "./src/public/state/index.ts",
     "./tools": "./src/public/tools/index.ts",
     "./package.json": "./package.json"
   },

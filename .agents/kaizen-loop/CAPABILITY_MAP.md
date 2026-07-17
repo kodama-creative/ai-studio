@@ -147,6 +147,22 @@
 - Explicit non-goals: provider/tool retry, effect idempotency or exactly-once, distributed leases/heartbeats, Server or reconnect transport, identity/permission policy, arbitrary event payload storage, canonical observability Trace, compaction, branch UI, or background execution.
 - Visible gaps: the Local Server now persists and authorizes its own Pi/control event cursor, but no item-18 idempotency/pre-call/completion protocol can recover external effects beyond terminal `outcomeUnknown`; harness replay still exposes control-plane journal entries rather than token/tool payload traces.
 
+## Trusted Session Context And Structured State
+
+- Status: shipped V1
+- Freshness: confirmed
+- Last checked: 2026-07-17
+- Evidence:
+  - `agent/state/*.ts`, `defineState`, and the shared source/bundle compiler provide named/versioned TypeBox state with deterministic schema/artifact identity, JSON initial values, and 64-slot/64-KiB-per-slot/256-KiB-total limits.
+  - `AgentSessionState` gives automatic Pi tool steps one shared temporary Map, deeply frozen reads, schema-valid updates, last-actual-write-wins concurrency, whole-step rollback, and one full-snapshot Session Store CAS before the next provider call. Commit uncertainty becomes terminal `outcomeUnknown` without replaying tools.
+  - Manual execution is explicitly a development debugging boundary: tools are deferred and the step skips state validation/scope/commit. Automatic tool errors and deferred results discard temporary updates while retaining Pi's normal error handling, with no lifecycle branch based on whether an Agent declares state.
+  - Raw `AgentRuntime` requires Host-supplied immutable context. Server projects exact authenticated principal/initiator, optional tenant context, HTTP channel, and durable Turn lineage; tenant remains context rather than changing ADR 0002 ownership. Desktop supplies its fixed local principal and Project Thread/Run lineage.
+  - Server repository integration preserves isolated state for two principals across restart and blocks removed/version/schema-drifted definitions. Desktop commits through the existing Thread-owned Runtime Session record, hands the newest version to the renderer before settlement, and reopens the committed value without a second authority.
+  - Focused item-12 acceptance passed 80 tests; full repository verification passed 256/257 tests and 1014 assertions, with the sole Server observation-disconnect timeout reproduced at the clean fixed point. Six TypeScript projects, root lint, Runtime browser/Bun bundles, Server Bun bundle, renderer-only Vite, and diff check passed.
+- Boundary: authored tools can read Host-verified Session/Turn identity and maintain typed Session-local working state across automatic tool steps, Turns, Desktop Project Thread reopen, and Server restart. State/context remain outside Pi events and model history; transcript and external memory remain separate authorities.
+- Explicit non-goals: no generic memory object sent to the model, bundled vector database, automatic memory extraction, cross-Session queries, state-backed secret store, hosted tenant database, organization-policy UI, hidden principal metadata, or replacement of the existing Session Store.
+- Visible gaps: no migration/reset/drop path for changed definitions, state inspector/editor/history, cross-Session sharing, external long-term memory, or durable staged state for mixed deferred tool steps; automatic mixed-deferred steps deliberately discard temporary state instead of persisting an incomplete step.
+
 ## Headless Thread Execution And Evaluation
 
 - Status: shipped V1
@@ -317,7 +333,7 @@
 - Evidence:
   - A current isolated Electrobun CEF run at 1280×800 created a real blank standalone Thread. The Thread surface exposes model, tools, variables, system prompt, editable messages, run history, and evaluations, but Welcome, Thread toolbar, menus, Command Palette metadata, typed RPC, and Bun managers contain no promotion command, preview, or materializer.
   - Core `Thread` stores optional model/reasoning parameters, system-prompt and message templates, built-in/custom variable state, four distinct tool kinds, Runtime snapshots, run history, reusable rubrics, and manual evaluations. These are Desktop development/session records rather than portable Agent source.
-  - Runtime Agent Project discovery compiles only `agent.ts`, `instructions.md`, `tools/*`, `connections/*`, and `skills/*`. It has no variable, example, promotion-intent, or Eval source slot; adding one would change the authored source and artifact contract.
+  - Runtime Agent Project discovery compiles `agent.ts`, `instructions.md`, `state/*`, `tools/*`, `connections/*`, and `skills/*`. It has no variable, example, promotion-intent, or Eval source slot; adding one would change the authored source and artifact contract.
   - Thread `function` tools carry schema/description but no executable implementation. `builtin` tools execute through the trusted Desktop registry, `mcp` tools reference Settings-owned server identity/transport/auth, and `project` tools reference another trusted project snapshot. Copying any of them as a local authored tool would be a silent substitution or authority expansion.
   - Thread custom variables are literal Desktop values that may contain private data; built-in values such as current date and available skills are Host/runtime-derived. The current project Runtime does not resolve Thread variable definitions in portable instructions.
   - Manual evaluation rubrics, run scores, verdicts, and notes are explicitly Thread-owned evidence. ADR 0005 says generated projects carry no test/Eval protocol before roadmap item 29, so item 10 cannot invent one or silently reinterpret comparison history as portable assertions.
@@ -325,7 +341,7 @@
   - ADR 0006 and the Eve state research fix the future contract: promotion is preview-first and atomic; Agent Variables, Turn context, Session State, transcript, and external memory remain distinct; local tool and stdio MCP authority is Sandbox-only; exact literals require visible confirmation; evaluation intent is non-executable; and conversation examples defer to item 29.
 - Boundary: today a standalone Thread and an Agent Project remain independent product objects. The accepted implementation will classify every field, resolve all blockers in a temporary preview tab, publish only into an absent user-owned target, and create a fresh independent Project Thread with no transcript, Run, evaluation, state, or Session identity inheritance.
 - Explicit non-goals: no hidden promotion metadata, live Thread/source synchronization, secret-store or Session-state copying, implicit Desktop built-in authority, generated fake tool implementations, Host fallback for Sandbox requirements, source overwrite/merge, transcript migration, Eve compatibility promise, conversation-example format before item 29, or premature executable Eval protocol.
-- Visible gaps: item 10 is dependency-blocked until trusted Session context/state (12), dynamic instructions (13), ExecutionEnv-backed built-ins (16), and Sandbox delivery (17) ship. Product code still lacks the planner, source slots, preview interaction, atomic coordinator, acceptance matrix, and real CEF audit evidence defined by ADR 0006.
+- Visible gaps: trusted Session context/state (12) is now shipped; item 10 remains dependency-blocked on dynamic instructions (13), ExecutionEnv-backed built-ins (16), and Sandbox delivery (17). Product code still lacks the planner, variable/evaluation-intent source slots, preview interaction, atomic coordinator, acceptance matrix, and real CEF audit evidence defined by ADR 0006.
 
 ## Agent And Thread Workbench Navigation
 

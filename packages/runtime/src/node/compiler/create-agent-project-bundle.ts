@@ -76,6 +76,11 @@ export async function createAgentProjectBundle(
       createAgentProject(artifact: AgentProjectArtifact): {
         artifact: AgentProjectArtifact;
         definition?: CompiledAgentDefinition;
+        stateDefinitions?: ReadonlyArray<{
+          name: string;
+          schemaFingerprint: string;
+          version: number;
+        }>;
         tools: ReadonlyArray<{ name: string; }>;
       };
     };
@@ -83,6 +88,8 @@ export async function createAgentProjectBundle(
     if (
       JSON.stringify(bundledProject.artifact) !== JSON.stringify(project.artifact)
       || JSON.stringify(bundledProject.definition) !== JSON.stringify(project.definition)
+      || JSON.stringify(bundledProject.stateDefinitions)
+      !== JSON.stringify(project.stateDefinitions)
       || JSON.stringify(bundledProject.tools.map(tool => tool.name))
       !== JSON.stringify(project.tools.map(tool => tool.name))
     ) {
@@ -134,7 +141,7 @@ async function _buildInFreshBunProcess(
       builtinModules.map(name => name.replace(/^node:/, ""))
     );
     const BUN_COMPATIBILITY_BUILTINS = new Set(["node-fetch", "ws"]);
-    const RUNTIME_SPECIFIER = /^(?:@llm-space\\/runtime(?:\\/tools|\\/connections)?|typebox)$/;
+    const RUNTIME_SPECIFIER = /^(?:@llm-space\\/runtime(?:\\/tools|\\/connections|\\/state)?|typebox)$/;
     const PLUGIN = {
       name: "llm-space-deployment-dependencies",
       setup(build) {
@@ -236,7 +243,9 @@ function _entrySource(
     ...discovered.tools.map((source, index) =>
       `import tool${index} from ${JSON.stringify(source.absolutePath)};`),
     ...discovered.connections.map((source, index) =>
-      `import connection${index} from ${JSON.stringify(source.absolutePath)};`)
+      `import connection${index} from ${JSON.stringify(source.absolutePath)};`),
+    ...discovered.states.map((source, index) =>
+      `import state${index} from ${JSON.stringify(source.absolutePath)};`)
   ];
   const tools = discovered.tools.map((source, index) => ({
     name: path.basename(source.absolutePath, path.extname(source.absolutePath)),
@@ -248,6 +257,10 @@ function _entrySource(
     logicalPath: source.logicalPath,
     definition: `connection${index}`
   }));
+  const states = discovered.states.map((source, index) => ({
+    sourcePath: source.logicalPath,
+    definition: `state${index}`
+  }));
   const skills = (project.resources.skills ?? []).map(skill => ({
     ...skill,
     filePath: path.posix.join("skills", skill.name, "SKILL.md")
@@ -258,6 +271,7 @@ const INPUT = {
   instructions: ${JSON.stringify(project.instructions)},
   tools: [${tools.map(tool => `{ name: ${JSON.stringify(tool.name)}, sourcePath: ${JSON.stringify(tool.sourcePath)}, definition: ${tool.definition} }`).join(",")}],
   connections: [${connections.map(connection => `{ name: ${JSON.stringify(connection.name)}, logicalPath: ${JSON.stringify(connection.logicalPath)}, definition: ${connection.definition} }`).join(",")}],
+  states: [${states.map(state => `{ sourcePath: ${JSON.stringify(state.sourcePath)}, definition: ${state.definition} }`).join(",")}],
   skills: ${JSON.stringify(skills)}
 };
 const EXPECTED_ARTIFACT = Object.freeze(${JSON.stringify(project.artifact)});

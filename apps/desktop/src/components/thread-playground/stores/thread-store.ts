@@ -210,8 +210,11 @@ export function createThreadStore(
 
     /** Resolve the transport-owned authoritative checkpoint after streaming. */
     resolveTransportRuntimeCheckpoint?: (
-      outcome: "cancelled" | "completed" | "failed"
+      outcome: "cancelled" | "completed" | "failed" | "outcomeUnknown"
     ) => ThreadRuntimeCheckpoint | null;
+
+    /** Latest Session snapshot durably committed by the Bun project Runtime. */
+    resolveCommittedRuntimeSession?: () => Thread["runtimeSession"];
     transport: AgentTransport;
   }
 ): ThreadStore {
@@ -975,7 +978,7 @@ export function createThreadStore(
           };
 
           const streamRuntimeRun = async (): Promise<
-            "cancelled" | "completed" | "failed"
+            "cancelled" | "completed" | "failed" | "outcomeUnknown"
           > => {
             try {
               promptSnapshot = preparedContext.snapshot;
@@ -1037,12 +1040,16 @@ export function createThreadStore(
               if (error instanceof Error) {
                 toast.error("Error", { description: error.message });
               }
-              return "failed";
+              return error instanceof Error
+                && error.name === "RuntimeOutcomeUnknownError"
+                ? "outcomeUnknown"
+                : "failed";
             }
           };
 
           const finalizeRuntimeRun = async (
             outcome: "cancelled" | "completed" | "failed"
+              | "outcomeUnknown"
           ) => {
             if (!isActiveRun()) {
               return;
@@ -1113,6 +1120,14 @@ export function createThreadStore(
                   activeRunId: null
                 });
                 return;
+              }
+              const committedRuntimeSession =
+                options.resolveCommittedRuntimeSession?.();
+              if (committedRuntimeSession !== undefined) {
+                runtimeSession = new ThreadRuntimeSession(
+                  committedRuntimeSession
+                );
+                applyRuntimeSession(committedRuntimeSession);
               }
               const settled = await runtimeSession.settle({
                 thread: threadWithSnapshot,

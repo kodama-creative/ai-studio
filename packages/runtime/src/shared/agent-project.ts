@@ -11,6 +11,9 @@ export type AgentProjectDiagnosticCode =
   | "instructions_missing"
   | "instructions_read_failed"
   | "skill_invalid"
+  | "state_export_invalid"
+  | "state_import_failed"
+  | "state_name_duplicate"
   | "tool_export_invalid"
   | "tool_import_failed"
   | "tool_name_duplicate";
