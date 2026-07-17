@@ -44,6 +44,77 @@ afterEach(async () => {
 });
 
 describe("StreamThreadController Agent Project runtime", () => {
+  test("persists dynamic Turn instructions before Desktop Project execution and reopens them", async () => {
+    const { home, models, manager, opened, project, threadId, workspace } =
+      await _fixture({
+        dynamicInstructions: true,
+        instructions: "Root instructions.\n",
+        projectTool: true
+      });
+    const begun = await _beginProjectRun(manager, opened.id, threadId);
+    const activeRunId = begun.snapshot.activeRunId;
+    if (!activeRunId) { throw new Error("Expected an active Runtime Run"); }
+    const controller = new StreamThreadController(
+      _modelManager(models),
+      { capture: () => undefined } as never,
+      manager
+    );
+
+    await controller.run(
+      {
+        streamId: "stream-dynamic-instructions",
+        runtime: {
+          type: "agentProject",
+          projectId: opened.id,
+          threadId,
+          executionMode: "react",
+          modelSource: "agent"
+        },
+        request: {
+          model: { provider: "fake", id: "fake-model" },
+          context: {
+            systemPrompt: "Edited Thread instructions.",
+            messages: [{
+              role: "user",
+              content: [{ type: "text", text: "hello" }],
+              timestamp: Date.now()
+            }],
+            tools: opened.tools,
+            sourceTools: opened.tools
+          }
+        }
+      },
+      () => undefined
+    );
+
+    const persisted = await manager.readThread(opened.id, threadId);
+    const snapshot = (persisted.thread.runtimeSession as StoredRuntimeSession)
+      .snapshot.instructionSnapshots?.[activeRunId];
+    expect(snapshot).toMatchObject({
+      turnId: activeRunId,
+      markdown: `Edited Thread instructions.\n\ndesktop:${threadId}:local-user`
+    });
+    expect(snapshot?.entries.map(entry => entry.sourcePath)).toEqual([
+      "host:system-prompt",
+      "instructions/turn.ts"
+    ]);
+
+    await manager.shutdown();
+    const reopened = new ExternalAgentProjectManager({
+      homePath: home,
+      workspaceRoot: workspace,
+      getModels: async () => Promise.resolve(models)
+    });
+    managers.push(reopened);
+    await reopened.trustAndOpen(project);
+    const runtimeState = await reopened.createRuntimeSessionStore(
+      opened.id,
+      threadId
+    );
+    expect(runtimeState.session.snapshot.instructionSnapshots?.[activeRunId])
+      .toEqual(snapshot);
+  });
+
   test("commits Project state to the Thread before the next model turn and reopens it", async () => {
     const { home, models, manager, opened, project, threadId, workspace } =
       await _fixture({
@@ -91,7 +162,7 @@ describe("StreamThreadController Agent Project runtime", () => {
     );
 
     const persisted = await manager.readThread(opened.id, threadId);
-    expect(committed?.version).toBe(begun.version + 1);
+    expect(committed?.version).toBe(begun.version + 2);
     expect((persisted.thread.runtimeSession as StoredRuntimeSession)
       .snapshot.state?.values["desktop.counter"]?.value).toEqual({
       count: 1,
@@ -119,10 +190,18 @@ describe("StreamThreadController Agent Project runtime", () => {
   });
 
   test("runs the same compiled Agent through a restart-safe Local Server authority", async () => {
-    const { home, models, manager, opened, threadId, workspace } = await _fixture({
+    const {
+      home,
+      models,
+      manager,
+      opened,
+      threadId: directThreadId,
+      workspace
+    } = await _fixture({
       instructions: "Use echo.\n",
       projectTool: true
     });
+    await _beginProjectRun(manager, opened.id, directThreadId);
     let directResult = "";
     const directController = new StreamThreadController(
       _modelManager(models),
@@ -135,7 +214,7 @@ describe("StreamThreadController Agent Project runtime", () => {
         runtime: {
           type: "agentProject",
           projectId: opened.id,
-          threadId,
+          threadId: directThreadId,
           executionMode: "react",
           modelSource: "agent"
         },
@@ -159,18 +238,12 @@ describe("StreamThreadController Agent Project runtime", () => {
         }
       }
     );
-    const record = await manager.readThread(opened.id, threadId);
-    await manager.writeThread(opened.id, threadId, {
-      ...record,
-      thread: {
-        ...record.thread,
-        runtimeProfile: {
-          version: 1,
-          type: "localServer",
-          artifactFingerprint: opened.artifactFingerprint
-        }
-      }
-    });
+    const serverThread = await manager.createThread(
+      opened.id,
+      "Local Server parity",
+      "localServer"
+    );
+    const threadId = serverThread.id;
     const localServers = new EmbeddedLocalServerManager({
       externalAgentProjects: manager,
       homePath: home,
@@ -360,6 +433,7 @@ describe("StreamThreadController Agent Project runtime", () => {
       instructions: "Use echo.\n",
       projectTool: true
     });
+    await _beginProjectRun(manager, opened.id, threadId);
     const events: string[] = [];
     let runtimeProvenance: ThreadAgentRuntimeProvenance | undefined;
     const controller = new StreamThreadController(
@@ -425,6 +499,7 @@ describe("StreamThreadController Agent Project runtime", () => {
         arguments: { command: "rm -rf /tmp/should-not-run" }
       }
     });
+    await _beginProjectRun(manager, opened.id, threadId);
     let executions = 0;
     const controller = new StreamThreadController(
       _modelManager(models),
@@ -495,6 +570,7 @@ describe("StreamThreadController Agent Project runtime", () => {
       instructions: "Use MCP.\n",
       toolCall: { name: toolName, arguments: {} }
     });
+    await _beginProjectRun(manager, opened.id, threadId);
     let toolResultIsError: boolean | undefined;
     const controller = new StreamThreadController(
       _modelManager(models),
@@ -628,11 +704,13 @@ describe("StreamThreadController standalone Runtime Harness", () => {
 });
 
 async function _fixture({
+  dynamicInstructions = false,
   instructions,
   toolCall,
   projectTool = false,
   stateful = false
 }: {
+  dynamicInstructions?: boolean;
   instructions: string;
   projectTool?: boolean;
   stateful?: boolean;
@@ -657,6 +735,19 @@ async function _fixture({
     `export default { model: "fake/fake-model", reasoning: "high" };`
   );
   await writeFile(path.join(agent, "instructions.md"), instructions);
+  if (dynamicInstructions) {
+    await mkdir(path.join(agent, "instructions"));
+    await writeFile(
+      path.join(agent, "instructions", "turn.ts"),
+      `import { defineDynamic, defineInstructions } from "@llm-space/runtime/instructions";
+      export default defineDynamic({ events: {
+        "turn.started": (_event, { session }) => defineInstructions({
+          markdown: session.channel.kind + ":" + session.channel.id + ":"
+            + session.auth.current.principalId
+        })
+      }});`
+    );
+  }
   if (projectTool) {
     await writeFile(
       path.join(agent, "tools", "echo.ts"),

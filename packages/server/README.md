@@ -80,6 +80,12 @@ back while retaining Pi's normal tool-error handling; the Runtime does not
 automatically replay it. An unconfirmed persistence outcome terminates the Run
 as `outcomeUnknown` and is never retried automatically.
 
+Ordered static and `turn.started` dynamic Agent instructions use that same
+verified context and read-only state. The Server records one immutable
+instruction snapshot under the durable Server Turn/Run ID before provider
+execution, reuses it after restart, and keeps it out of the transcript and
+public Pi event stream.
+
 The complete security, storage, retention, recovery, TLS, CORS, limit, and
 non-goal boundary is recorded in ADR 0002.
 

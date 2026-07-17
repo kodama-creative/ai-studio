@@ -5,11 +5,13 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import * as TypeBox from "typebox";
 
+import { assertInstructionSourceImports } from "./validate-authored-source";
 import {
   createAuthoredDefinitionVirtualModule,
   defineMcpClientConnectionRuntime,
   defineToolRuntime
 } from "../../internal/authored-action-definitions";
+import { createAuthoredInstructionsVirtualModule } from "../../internal/authored-instruction-definitions";
 import { defineStateRuntime } from "../../internal/authored-state-definitions";
 
 const TYPEBOX_RUNTIME_KEY = Symbol.for("llm-space.typebox-runtime");
@@ -25,10 +27,12 @@ export async function loadAuthoredModule({
   projectRoot,
   sourcePath,
   authoredSdk = false,
+  restrictInstructionImports = false,
   validateEntrySource
 }: {
   authoredSdk?: boolean;
   projectRoot: string;
+  restrictInstructionImports?: boolean;
   sourcePath: string;
   validateEntrySource?: (source: string, filePath: string) => void;
 }): Promise<{
@@ -41,10 +45,22 @@ export async function loadAuthoredModule({
   const canonicalSource = await realpath(sourcePath);
   const entrySource = await readFile(canonicalSource);
   validateEntrySource?.(entrySource.toString("utf8"), canonicalSource);
+  const validateCapturedSource = restrictInstructionImports
+    ? (source: string, filePath: string) => {
+      assertInstructionSourceImports(source, filePath, {
+        entryPaths: [canonicalSource],
+        stateRoot: path.join(canonicalRoot, "state")
+      });
+    }
+    : undefined;
+  validateCapturedSource?.(entrySource.toString("utf8"), canonicalSource);
   const capturedInputs = new Map<string, Buffer>([
     [canonicalSource, entrySource]
   ]);
-  const plugins = [_sourceSnapshotPlugin(capturedInputs)];
+  const plugins = [_sourceSnapshotPlugin(
+    capturedInputs,
+    validateCapturedSource
+  )];
   if (authoredSdk) { plugins.push(_authoredSdkPlugin()); }
   const result = await Bun.build({
     entrypoints: [sourcePath],
@@ -105,7 +121,8 @@ export async function loadAuthoredModule({
 }
 
 function _sourceSnapshotPlugin(
-  capturedInputs: Map<string, Buffer>
+  capturedInputs: Map<string, Buffer>,
+  validateSource?: (source: string, filePath: string) => void
 ): Bun.BunPlugin {
   return {
     name: "llm-space-source-snapshot",
@@ -119,6 +136,7 @@ function _sourceSnapshotPlugin(
             contents = await readFile(absolutePath);
             capturedInputs.set(absolutePath, contents);
           }
+          validateSource?.(contents.toString("utf8"), absolutePath);
           return { contents, loader: args.loader };
         }
       );
@@ -141,6 +159,23 @@ function _authoredSdkPlugin(): Bun.BunPlugin {
         },
         () => ({
           contents: "export const defineAgent = (definition) => definition;",
+          loader: "js"
+        })
+      );
+      build.onResolve(
+        { filter: /^@llm-space\/runtime\/instructions$/ },
+        () => ({
+          path: "instructions-definition",
+          namespace: "llm-space-runtime"
+        })
+      );
+      build.onLoad(
+        {
+          filter: /^instructions-definition$/,
+          namespace: "llm-space-runtime"
+        },
+        () => ({
+          contents: createAuthoredInstructionsVirtualModule(),
           loader: "js"
         })
       );

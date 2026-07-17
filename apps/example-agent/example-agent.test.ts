@@ -49,6 +49,7 @@ describe("example Agent Project", () => {
       entry.id)).toEqual([
       "agent",
       "connection:fixture",
+      "instruction:instructions.md",
       "instructions",
       "skill:weather-brief",
       "state:example.weather-session",

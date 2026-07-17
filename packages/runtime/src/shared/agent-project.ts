@@ -8,6 +8,8 @@ export type AgentProjectDiagnosticCode =
   | "definition_export_invalid"
   | "definition_import_failed"
   | "definition_missing"
+  | "instruction_entry_import_failed"
+  | "instruction_entry_invalid"
   | "instructions_missing"
   | "instructions_read_failed"
   | "skill_invalid"

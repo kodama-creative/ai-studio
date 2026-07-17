@@ -39,7 +39,7 @@ export interface CreateAgentSessionOptions {
   executionMode?: RuntimeExecutionMode;
   persistence?: AgentSessionPersistence;
   sessionStore?: SessionStore;
-  onStateCommitted?: (session: StoredRuntimeSession) => Promise<void> | void;
+  onSessionCommitted?: (session: StoredRuntimeSession) => Promise<void> | void;
   streamFn?: StreamFn;
 }
 
@@ -114,7 +114,7 @@ export class AgentRuntime {
       executionMode: options.executionMode ?? "react",
       context: options.context,
       sessionStore: options.sessionStore,
-      onStateCommitted: options.onStateCommitted,
+      onSessionCommitted: options.onSessionCommitted,
       persistence: options.persistence,
       streamFn: options.streamFn
     });

@@ -13,6 +13,7 @@ import {
 } from "../../runtime/agent/agent-project-artifact";
 
 import type {
+  CompiledAgentInstructionEntry,
   CompiledAgentSkill,
   CompiledAgentStateDefinition,
   CompiledMcpConnection,
@@ -51,6 +52,7 @@ export function createAgentProjectArtifact({
   definition,
   dependencies,
   instructions,
+  instructionEntries = [],
   skills,
   stateDefinitions = [],
   sources,
@@ -59,6 +61,7 @@ export function createAgentProjectArtifact({
   connections: readonly CompiledMcpConnection[];
   definition: CompiledAgentDefinition | undefined;
   dependencies: readonly AgentProjectArtifactDependencyInput[];
+  instructionEntries?: readonly CompiledAgentInstructionEntry[];
   instructions: string;
   skills: readonly CompiledAgentSkill[];
   sources: readonly AgentProjectArtifactSourceInput[];
@@ -76,6 +79,12 @@ export function createAgentProjectArtifact({
     capabilities: _section([
       ...(definition ? [{ id: "agent", content: definition }] : []),
       { id: "instructions", content: instructions },
+      ...instructionEntries.map(entry => ({
+        id: `instruction:${entry.sourcePath}`,
+        content: entry.kind === "static"
+          ? { kind: entry.kind, markdown: entry.markdown }
+          : { kind: entry.kind, events: ["turn.started"] }
+      })),
       ...tools.map(tool => ({
         id: `tool:${tool.name}`,
         content: { name: tool.name, description: tool.description }

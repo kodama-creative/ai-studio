@@ -1,6 +1,7 @@
 export type { AgentProjectArtifact } from "./agent/agent-project-artifact";
 export type {
   AgentProjectSnapshot,
+  CompiledAgentInstructionEntry,
   CompiledAgentProjectSnapshot,
   CompiledAgentStateDefinition,
   CompiledMcpConnection,

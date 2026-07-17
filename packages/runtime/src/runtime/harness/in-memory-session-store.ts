@@ -1,3 +1,4 @@
+import { deriveInstructionSnapshotContent } from "./derive-instruction-snapshot-content";
 import { immutableSnapshot } from "./immutable-snapshot";
 import {
   isTerminalRuntimeRunState,
@@ -53,6 +54,9 @@ export class InMemorySessionStore implements SessionStore {
   async load(sessionId: string): Promise<StoredRuntimeSession | null> {
     _assertId("Session", sessionId);
     const stored = this._sessions.get(sessionId);
+    if (stored) {
+      await _assertInstructionSnapshotIntegrity(stored.snapshot);
+    }
     return Promise.resolve(stored ? immutableSnapshot(stored) : null);
   }
 
@@ -64,8 +68,19 @@ export class InMemorySessionStore implements SessionStore {
         "A Session Store commit requires at least one mutation"
       );
     }
+    for (const mutation of input.mutations) {
+      if (mutation.type === "recordTurnInstructions") {
+        await _assertInstructionSnapshotIntegrity({
+          instructionSnapshots: { [mutation.snapshot.turnId]: mutation.snapshot }
+        });
+      }
+    }
 
-    const current = this._sessions.get(input.sessionId);
+    let current = this._sessions.get(input.sessionId);
+    if (current) {
+      await _assertInstructionSnapshotIntegrity(current.snapshot);
+      current = this._sessions.get(input.sessionId);
+    }
     const actualVersion = current?.version ?? null;
     if (input.expectedVersion !== actualVersion) {
       throw new SessionStoreConflictError(
@@ -146,7 +161,44 @@ function _applyMutation({
     _replaceState({ journal, mutation, sessionVersion, snapshot });
     return;
   }
+  if (mutation.type === "recordTurnInstructions") {
+    _recordTurnInstructions({ journal, mutation, sessionVersion, snapshot });
+    return;
+  }
   _recordCheckpoint({ journal, mutation, sessionVersion, snapshot });
+}
+
+function _recordTurnInstructions({
+  journal,
+  mutation,
+  sessionVersion,
+  snapshot
+}: {
+  journal: RuntimeRunJournalEntry[];
+  mutation: Extract<RuntimeSessionMutation, { type: "recordTurnInstructions"; }>;
+  sessionVersion: number;
+  snapshot: RuntimeSessionSnapshot;
+}): void {
+  _assertInstructionSnapshot(mutation.snapshot);
+  const existing = snapshot.instructionSnapshots?.[mutation.snapshot.turnId];
+  if (existing) {
+    throw new SessionStoreInvariantError(
+      `Turn instruction snapshot ${mutation.snapshot.turnId} is immutable`
+    );
+  }
+  (snapshot as {
+    instructionSnapshots?: RuntimeSessionSnapshot["instructionSnapshots"];
+  }).instructionSnapshots = {
+    ...snapshot.instructionSnapshots,
+    [mutation.snapshot.turnId]: structuredClone(mutation.snapshot)
+  };
+  journal.push({
+    type: "turnInstructionsRecorded",
+    sequence: journal.length + 1,
+    sessionVersion,
+    turnId: mutation.snapshot.turnId,
+    fingerprint: mutation.snapshot.fingerprint
+  });
 }
 
 function _replaceState({
@@ -355,6 +407,57 @@ function _assertId(label: string, value: string): void {
   }
 }
 
+function _assertInstructionSnapshot(
+  snapshot: NonNullable<RuntimeSessionSnapshot["instructionSnapshots"]>[string]
+): void {
+  _assertId("Instruction Turn", snapshot.turnId);
+  _assertId("Agent snapshot fingerprint", snapshot.agentSnapshotFingerprint);
+  if (!/^[0-9a-f]{64}$/.test(snapshot.fingerprint)) {
+    throw new SessionStoreInvariantError(
+      `Turn ${snapshot.turnId} has an invalid instruction fingerprint`
+    );
+  }
+  if (typeof snapshot.markdown !== "string") {
+    throw new SessionStoreInvariantError(
+      `Turn ${snapshot.turnId} has invalid instruction Markdown`
+    );
+  }
+  for (const entry of snapshot.entries) {
+    if (
+      (entry.kind !== "static" && entry.kind !== "dynamic")
+      || entry.sourcePath.trim().length === 0
+      || typeof entry.markdown !== "string"
+    ) {
+      throw new SessionStoreInvariantError(
+        `Turn ${snapshot.turnId} has an invalid instruction entry`
+      );
+    }
+  }
+}
+
+async function _assertInstructionSnapshotIntegrity(
+  snapshot: Pick<RuntimeSessionSnapshot, "instructionSnapshots">
+): Promise<void> {
+  for (const instructionSnapshot of Object.values(
+    snapshot.instructionSnapshots ?? {}
+  )) {
+    _assertInstructionSnapshot(instructionSnapshot);
+    const { fingerprint, markdown } = await deriveInstructionSnapshotContent(
+      instructionSnapshot.entries
+    );
+    if (instructionSnapshot.markdown !== markdown) {
+      throw new SessionStoreInvariantError(
+        `Turn ${instructionSnapshot.turnId} instruction Markdown does not match its entries`
+      );
+    }
+    if (instructionSnapshot.fingerprint !== fingerprint) {
+      throw new SessionStoreInvariantError(
+        `Turn ${instructionSnapshot.turnId} instruction fingerprint does not match its entries`
+      );
+    }
+  }
+}
+
 function _sameConfiguration(
   left: RuntimeRunConfigurationSnapshot,
   right: RuntimeRunConfigurationSnapshot
@@ -395,6 +498,16 @@ function _assertStoredSession(session: StoredRuntimeSession): void {
       );
     }
     assertRuntimeSessionStateValues(session.snapshot.state.values);
+  }
+  for (const [turnId, snapshot] of Object.entries(
+    session.snapshot.instructionSnapshots ?? {}
+  )) {
+    _assertInstructionSnapshot(snapshot);
+    if (snapshot.turnId !== turnId) {
+      throw new SessionStoreInvariantError(
+        `Turn instruction snapshot key ${turnId} does not match ${snapshot.turnId}`
+      );
+    }
   }
 
   const configurations = new Map<string, RuntimeRunConfigurationSnapshot>();
@@ -481,6 +594,7 @@ function _assertStoredSession(session: StoredRuntimeSession): void {
 
   let previousSessionVersion = 0;
   let stateRevision = 0;
+  const instructionTurns = new Set<string>();
   for (const [index, entry] of session.journal.entries()) {
     if (entry.sequence !== index + 1) {
       throw new SessionStoreInvariantError(
@@ -523,6 +637,19 @@ function _assertStoredSession(session: StoredRuntimeSession): void {
       }
       continue;
     }
+    if (entry.type === "turnInstructionsRecorded") {
+      if (
+        instructionTurns.has(entry.turnId)
+        || session.snapshot.instructionSnapshots?.[entry.turnId]?.fingerprint
+        !== entry.fingerprint
+      ) {
+        throw new SessionStoreInvariantError(
+          `Turn instruction journal entry ${entry.sequence} is invalid`
+        );
+      }
+      instructionTurns.add(entry.turnId);
+      continue;
+    }
     if (!runIds.has(entry.runId)) {
       throw new SessionStoreInvariantError(
         `Run Journal entry ${entry.sequence} references missing Runtime Run ${entry.runId}`
@@ -547,6 +674,14 @@ function _assertStoredSession(session: StoredRuntimeSession): void {
       `Session state journal revision ${stateRevision} does not match snapshot revision ${String(session.snapshot.state?.revision ?? 0)}`
     );
   }
+  if (
+    instructionTurns.size
+    !== Object.keys(session.snapshot.instructionSnapshots ?? {}).length
+  ) {
+    throw new SessionStoreInvariantError(
+      "Turn instruction journal does not match the Session snapshot"
+    );
+  }
   _assertJournalReconstructsSnapshot(session);
 }
 
@@ -559,7 +694,10 @@ function _assertJournalReconstructsSnapshot(
     state: RuntimeRunState;
   }>();
   for (const entry of session.journal) {
-    if (entry.type === "sessionStateReplaced") { continue; }
+    if (
+      entry.type === "sessionStateReplaced"
+      || entry.type === "turnInstructionsRecorded"
+    ) { continue; }
     if (entry.type === "runStarted") {
       const startedState = (entry as { readonly state: unknown; }).state;
       if (startedState !== "runningModel") {

@@ -287,7 +287,7 @@ export class StreamThreadController {
         }))
     );
     const runtimeState = await this._externalAgentProjects
-      .requiresStructuredSessionState(
+      .requiresRuntimeSessionStore(
         payload.runtime.projectId,
         payload.runtime.threadId
       )
@@ -310,6 +310,13 @@ export class StreamThreadController {
     };
     const sessionId = runtimeState?.session.snapshot.id
       ?? payload.runtime.threadId;
+    const publishRuntimeSession = (runtimeSession: StoredRuntimeSession) => {
+      send({
+        streamId: payload.streamId,
+        type: "runtimeSession",
+        runtimeSession
+      });
+    };
     const session = await this._externalAgentProjects.createRuntimeSession(
       payload.runtime.projectId,
       {
@@ -329,13 +336,7 @@ export class StreamThreadController {
         ...(runtimeState && activeRunId
           ? {
             sessionStore: runtimeState.store,
-            onStateCommitted: (runtimeSession: StoredRuntimeSession) => {
-              send({
-                streamId: payload.streamId,
-                type: "runtimeSession",
-                runtimeSession
-              });
-            }
+            onSessionCommitted: publishRuntimeSession
           }
           : {}),
         model: payload.request.model,

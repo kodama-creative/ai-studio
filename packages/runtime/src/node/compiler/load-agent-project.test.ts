@@ -74,6 +74,162 @@ describe("loadAgentProject", () => {
     ]);
   });
 
+  test("composes root, static, and dynamic instruction entries deterministically", async () => {
+    const root = await _fixture();
+    await writeFile(join(root, "instructions.md"), "Root.\n");
+    await mkdir(join(root, "instructions"));
+    await mkdir(join(root, "state"));
+    await writeFile(
+      join(root, "state", "locale.ts"),
+      `import { defineState } from "@llm-space/runtime/state";
+      import { Type } from "typebox";
+      export default defineState({
+        name: "test.locale",
+        version: 1,
+        schema: Type.Object({ value: Type.String() }),
+        initial: { value: "en" }
+      });`
+    );
+    await writeFile(join(root, "instructions", "20-policy.md"), "Policy.\n");
+    await writeFile(
+      join(root, "instructions", "10-static.ts"),
+      `import { defineInstructions } from "@llm-space/runtime/instructions";
+      export default defineInstructions({ markdown: "Static." });`
+    );
+    await writeFile(
+      join(root, "instructions", "30-dynamic.ts"),
+      `import { defineDynamic, defineInstructions } from "@llm-space/runtime/instructions";
+      import locale from "../state/locale";
+      export default defineDynamic({ events: {
+        "turn.started": (_event, context) => defineInstructions({
+          markdown: "Current: " + context.session.auth.current.principalId
+            + ":" + locale.get().value
+        })
+      }});`
+    );
+
+    const snapshot = await loadAgentProject(root);
+
+    expect(snapshot.diagnostics).toEqual([]);
+    expect(snapshot.instructions).toBe("Root.\n\nStatic.\n\nPolicy.");
+    expect(snapshot.instructionEntries?.map(entry => [
+      entry.kind,
+      entry.sourcePath
+    ])).toEqual([
+      ["static", "instructions.md"],
+      ["static", "instructions/10-static.ts"],
+      ["static", "instructions/20-policy.md"],
+      ["dynamic", "instructions/30-dynamic.ts"]
+    ]);
+    expect(snapshot.artifact.fingerprints.capabilities.entries.map(
+      entry => entry.id
+    )).toContain("instruction:instructions/30-dynamic.ts");
+  });
+
+  test("uses code-point ordering for instruction entry filenames", async () => {
+    const root = await _fixture();
+    await writeFile(join(root, "instructions.md"), "Root.\n");
+    await mkdir(join(root, "instructions"));
+    await writeFile(join(root, "instructions", "Z.md"), "Upper.\n");
+    await writeFile(join(root, "instructions", "a.md"), "Lower.\n");
+
+    const snapshot = await loadAgentProject(root);
+
+    expect(snapshot.diagnostics).toEqual([]);
+    expect(snapshot.instructionEntries?.map(entry => entry.sourcePath)).toEqual([
+      "instructions.md",
+      "instructions/Z.md",
+      "instructions/a.md"
+    ]);
+  });
+
+  test("rejects nested, unsupported, symbolic, and invalid instruction entries", async () => {
+    const root = await _fixture();
+    await writeFile(join(root, "instructions.md"), "Root.\n");
+    await mkdir(join(root, "instructions"));
+    await mkdir(join(root, "instructions", "nested"));
+    await writeFile(join(root, "instructions", "unsupported.txt"), "No.");
+    await writeFile(join(root, "outside.md"), "Outside.\n");
+    await symlink(join(root, "outside.md"), join(root, "instructions", "linked.md"));
+    await writeFile(
+      join(root, "instructions", "invalid.ts"),
+      `export default { markdown: "Not branded." };`
+    );
+
+    const snapshot = await loadAgentProject(root);
+
+    expect(snapshot.instructionEntries?.map(entry => entry.sourcePath)).toEqual([
+      "instructions.md"
+    ]);
+    expect(snapshot.diagnostics.map(item => item.code)).toEqual([
+      "instruction_entry_invalid",
+      "instruction_entry_invalid",
+      "instruction_entry_invalid",
+      "instruction_entry_import_failed"
+    ]);
+    expect(snapshot.diagnostics.at(-1)?.message).toContain(
+      "must default-export defineInstructions(...) or defineDynamic(...)"
+    );
+  });
+
+  test("confines instruction imports to the authored instructions and state surface", async () => {
+    const root = await _fixture();
+    await writeFile(join(root, "instructions.md"), "Root.\n");
+    await mkdir(join(root, "instructions"));
+    await mkdir(join(root, "tools"));
+    await writeFile(
+      join(root, "tools", "unsafe.ts"),
+      `import { defineTool } from "@llm-space/runtime/tools";
+      import { Type } from "typebox";
+      export default defineTool({
+        description: "Must not be callable from instructions.",
+        inputSchema: Type.Object({}),
+        execute() { return "bypassed"; }
+      });`
+    );
+    await writeFile(
+      join(root, "instructions", "10-tool.ts"),
+      `import { defineDynamic, defineInstructions } from "@llm-space/runtime/instructions";
+      import unsafe from "../tools/unsafe";
+      export default defineDynamic({ events: {
+        "turn.started": () => defineInstructions({ markdown: unsafe.execute() })
+      }});`
+    );
+    await writeFile(
+      join(root, "instructions", "20-node.ts"),
+      `import { readFileSync } from "node:fs";
+      import { defineInstructions } from "@llm-space/runtime/instructions";
+      export default defineInstructions({ markdown: readFileSync("/tmp/value", "utf8") });`
+    );
+    await writeFile(
+      join(root, "instructions", "30-global.ts"),
+      `import { defineDynamic, defineInstructions } from "@llm-space/runtime/instructions";
+      export default defineDynamic({ events: {
+        "turn.started": async () => {
+          await fetch("https://authority.invalid");
+          return defineInstructions({ markdown: "unsafe" });
+        }
+      }});`
+    );
+
+    const snapshot = await loadAgentProject(root);
+
+    expect(snapshot.instructionEntries?.map(entry => entry.sourcePath)).toEqual([
+      "instructions.md"
+    ]);
+    expect(snapshot.diagnostics.map(item => item.code)).toEqual([
+      "instruction_entry_import_failed",
+      "instruction_entry_import_failed",
+      "instruction_entry_import_failed"
+    ]);
+    expect(snapshot.diagnostics.map(item => item.message).join("\n")).toContain(
+      "Instruction entries may import only"
+    );
+    expect(snapshot.diagnostics.map(item => item.message).join("\n")).toContain(
+      "cannot access Host authority through fetch"
+    );
+  });
+
   test("compiles named versioned state into artifact capability and schema identity", async () => {
     const root = await _fixture();
     await writeFile(join(root, "instructions.md"), "Track a counter.\n");

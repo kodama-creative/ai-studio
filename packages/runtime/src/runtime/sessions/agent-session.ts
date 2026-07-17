@@ -4,6 +4,7 @@ import type { Api, Model, Models, ToolResultMessage } from "@earendil-works/pi-a
 
 import { AgentEventProjector, type AgentSessionEvent, type AgentSessionPersistence } from "../../execution/agent-event-projector";
 import { ToolExecutionPolicy } from "../../execution/tool-execution-policy";
+import { AgentSessionInstructions } from "../instructions/agent-session-instructions";
 import { AgentSessionState } from "../state/agent-session-state";
 
 import type { AgentModelSelector } from "../../shared/agent-definition";
@@ -11,7 +12,11 @@ import type { AgentSessionContext } from "../../shared/agent-session-context";
 import type { RuntimeExecutionMode } from "../../shared/runtime-execution-mode";
 import type { AgentProjectSnapshot } from "../agent/agent-project-snapshot";
 import type { PreparedAgentTool } from "../agent/prepared-agent-tool";
-import type { SessionStore, StoredRuntimeSession } from "../harness/session-store";
+import type {
+  RuntimeTurnInstructionSnapshot,
+  SessionStore,
+  StoredRuntimeSession
+} from "../harness/session-store";
 
 export type { AgentSessionEvent, AgentSessionPersistence };
 
@@ -30,7 +35,7 @@ export interface AgentSessionOptions {
   executionMode: RuntimeExecutionMode;
   context: AgentSessionContext;
   sessionStore?: SessionStore;
-  onStateCommitted?: (session: StoredRuntimeSession) => Promise<void> | void;
+  onSessionCommitted?: (session: StoredRuntimeSession) => Promise<void> | void;
   persistence?: AgentSessionPersistence;
   streamFn?: StreamFn;
 }
@@ -43,6 +48,8 @@ export class AgentSession {
   private readonly _toolPolicy: ToolExecutionPolicy;
   private readonly _eventProjector: AgentEventProjector;
   private readonly _sessionState: AgentSessionState;
+  private readonly _instructions: AgentSessionInstructions;
+  private _instructionSnapshot: RuntimeTurnInstructionSnapshot | null = null;
   private _terminalError: Error | null = null;
   private _executionMode: RuntimeExecutionMode;
 
@@ -55,7 +62,16 @@ export class AgentSession {
       context: options.context,
       definitions: options.project.stateDefinitions ?? [],
       sessionStore: options.sessionStore,
-      onCommitted: options.onStateCommitted
+      onCommitted: options.onSessionCommitted
+    });
+    this._instructions = new AgentSessionInstructions({
+      context: this._sessionState.context,
+      instructionsPrefix: options.instructionsPrefix,
+      onCommitted: options.onSessionCommitted,
+      project: options.project,
+      sessionState: this._sessionState,
+      sessionStore: options.sessionStore,
+      systemPrompt: options.systemPrompt
     });
     this._toolPolicy = new ToolExecutionPolicy({
       tools: options.tools.map(tool => (tool.kind === "executable"
@@ -71,9 +87,7 @@ export class AgentSession {
     this._agent = new Agent({
       sessionId: options.id,
       initialState: {
-        systemPrompt:
-          options.systemPrompt
-          ?? _systemPrompt(options.project, options.instructionsPrefix),
+        systemPrompt: "",
         model: options.model,
         thinkingLevel: options.reasoning ?? "off",
         messages: this._toolPolicy.restoreDeferredPlaceholders(
@@ -129,6 +143,10 @@ export class AgentSession {
     return this._toolPolicy.publicMessages(this._agent.state.messages);
   }
 
+  get instructionSnapshot(): RuntimeTurnInstructionSnapshot | null {
+    return this._instructionSnapshot;
+  }
+
   async validateState(): Promise<void> {
     if (this._executionMode === "manual") { return; }
     await this._sessionState.validateSession();
@@ -147,6 +165,7 @@ export class AgentSession {
   async prompt(message: AgentMessage | AgentMessage[] | string): Promise<void> {
     this._terminalError = null;
     await this.validateState();
+    await this._resolveInstructions();
     await this._agent.prompt(message as AgentMessage | AgentMessage[]);
     this._throwTerminalError();
   }
@@ -167,6 +186,7 @@ export class AgentSession {
   async continue(): Promise<void> {
     this._terminalError = null;
     await this.validateState();
+    await this._resolveInstructions();
     await this._agent.continue();
     this._throwTerminalError();
   }
@@ -191,13 +211,11 @@ export class AgentSession {
     this._terminalError = null;
     if (error) { throw error; }
   }
-}
 
-function _systemPrompt(
-  project: AgentProjectSnapshot,
-  instructionsPrefix: string
-): string {
-  return [instructionsPrefix.trim(), project.instructions.trim()]
-    .filter(Boolean)
-    .join("\n\n");
+  private async _resolveInstructions(): Promise<void> {
+    this._instructionSnapshot = await this._instructions.resolve(
+      this._executionMode !== "manual"
+    );
+    this._agent.state.systemPrompt = this._instructionSnapshot.markdown;
+  }
 }

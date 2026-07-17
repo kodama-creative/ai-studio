@@ -15,6 +15,7 @@ export interface DiscoveredAgentProject {
   readonly root: string;
   readonly definition?: AgentProjectSourceRef;
   readonly instructions?: AgentProjectSourceRef;
+  readonly instructionEntries: readonly AgentProjectSourceRef[];
   readonly states: readonly AgentProjectSourceRef[];
   readonly tools: readonly AgentProjectSourceRef[];
   readonly connections: readonly AgentProjectSourceRef[];
@@ -41,6 +42,10 @@ export async function discoverAgentProject(
     invalidCode: "instructions_read_failed",
     diagnostics
   });
+  const instructionEntries = await _discoverInstructionEntries(
+    root,
+    diagnostics
+  );
   const tools = await _discoverTools(root, diagnostics);
   const states = await _discoverStates(root, diagnostics);
   const connections = await _discoverConnections(root, diagnostics);
@@ -79,12 +84,65 @@ export async function discoverAgentProject(
     root,
     definition,
     instructions,
+    instructionEntries,
     states,
     tools,
     connections,
     skillsRoot,
     diagnostics
   };
+}
+
+async function _discoverInstructionEntries(
+  root: string,
+  diagnostics: AgentProjectDiagnostic[]
+): Promise<AgentProjectSourceRef[]> {
+  const instructionsRoot = path.join(root, "instructions");
+  let entries;
+  try {
+    if (await _isSymlink(instructionsRoot)) {
+      diagnostics.push({
+        severity: "error",
+        code: "instruction_entry_invalid",
+        message: "The instructions source directory cannot be a symbolic link",
+        path: instructionsRoot
+      });
+      return [];
+    }
+    entries = await readdir(instructionsRoot, { withFileTypes: true });
+  } catch (error) {
+    if (_hasCode(error, "ENOENT")) { return []; }
+    diagnostics.push({
+      severity: "error",
+      code: "instruction_entry_invalid",
+      message: `Unable to list instruction entries: ${_errorMessage(error)}`,
+      path: instructionsRoot
+    });
+    return [];
+  }
+  const sources: AgentProjectSourceRef[] = [];
+  for (const entry of entries.sort((left, right) =>
+    (left.name < right.name ? -1 : left.name > right.name ? 1 : 0))) {
+    const absolutePath = path.join(instructionsRoot, entry.name);
+    if (
+      !entry.isFile()
+      || entry.isSymbolicLink()
+      || !/\.(?:md|ts|js)$/.test(entry.name)
+    ) {
+      diagnostics.push({
+        severity: "error",
+        code: "instruction_entry_invalid",
+        message: `Instruction entry must be a regular .md, .ts, or .js file: ${entry.name}`,
+        path: absolutePath
+      });
+      continue;
+    }
+    sources.push({
+      absolutePath,
+      logicalPath: path.posix.join("instructions", entry.name)
+    });
+  }
+  return sources;
 }
 
 async function _discoverStates(

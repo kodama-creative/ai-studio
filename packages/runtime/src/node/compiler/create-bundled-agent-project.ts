@@ -3,6 +3,7 @@ import { Compile } from "typebox/compile";
 import { compileAgentDefinition } from "./compile-agent-definition";
 import { compileAgentStateDefinition } from "./compile-agent-state-definition";
 import { normalizeAgentDefinition } from "../../internal/authored-definition/normalize-agent-definition";
+import { isDynamicInstructionsDefinition } from "../../internal/authored-instruction-definitions";
 import { getActiveAgentSessionContextRuntime } from "../../internal/authored-state-definitions";
 import { qualifyProjectMcpToolName } from "../../internal/project-mcp-tool-name";
 import { isMcpClientConnectionDefinition } from "../../public/definitions/connections/mcp";
@@ -13,6 +14,7 @@ import { assertRuntimeSessionStateValues } from "../../runtime/harness/in-memory
 
 import type { AgentProjectArtifact } from "../../runtime/agent/agent-project-artifact";
 import type {
+  CompiledAgentInstructionEntry,
   CompiledAgentProjectSnapshot,
   CompiledAgentSkill,
   CompiledAgentStateDefinition,
@@ -29,6 +31,18 @@ export interface BundledAgentProjectInput {
   }>;
   readonly definition: unknown;
   readonly instructions: string;
+  readonly instructionEntries: ReadonlyArray<
+    | {
+      readonly definition: unknown;
+      readonly kind: "dynamic";
+      readonly sourcePath: string;
+    }
+    | {
+      readonly kind: "static";
+      readonly markdown: string;
+      readonly sourcePath: string;
+    }
+  >;
   readonly skills: readonly CompiledAgentSkill[];
   readonly states: ReadonlyArray<{
     readonly definition: unknown;
@@ -49,6 +63,26 @@ export function createBundledAgentProject(
     input.definition,
     "Bundled Agent definition is invalid"
   ));
+  const instructionEntries: CompiledAgentInstructionEntry[] = input.instructionEntries.map(entry => {
+    if (entry.kind === "static") {
+      if (typeof entry.markdown !== "string") {
+        throw new TypeError(
+          `Bundled static instructions are invalid: ${entry.sourcePath}`
+        );
+      }
+      return entry;
+    }
+    if (!isDynamicInstructionsDefinition(entry.definition)) {
+      throw new TypeError(
+        `Bundled dynamic instructions are invalid: ${entry.sourcePath}`
+      );
+    }
+    return {
+      kind: "dynamic" as const,
+      definition: entry.definition,
+      sourcePath: entry.sourcePath
+    };
+  });
   const tools = _compileTools(input.tools);
   const stateDefinitions = _compileStates(input.states);
   const connections = _compileConnections(input.connections, tools);
@@ -57,6 +91,7 @@ export function createBundledAgentProject(
     root: "/opt/llm-space",
     definition,
     instructions: input.instructions,
+    instructionEntries,
     tools,
     connections,
     resources: { skills: input.skills },

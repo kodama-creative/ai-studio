@@ -20,6 +20,7 @@ import type {
   AgentEnvironmentRequirements,
   CompiledAgentDefinition
 } from "../../shared/agent-definition";
+import type { AgentProjectSourceRef } from "../discover/discover-agent-project";
 
 const BUN_COMPATIBILITY_BUILTINS = new Set(["node-fetch", "ws"]);
 const NODE_BUILTINS = new Set(
@@ -50,13 +51,17 @@ export async function createAgentProjectBundle(
     if (!discovered.definition) {
       throw new Error("Agent project definition is unavailable");
     }
+    const dynamicInstructionSources = _dynamicInstructionSources(
+      discovered,
+      project
+    );
     const helperPath = fileURLToPath(
       new URL("./create-bundled-agent-project.ts", import.meta.url)
     );
     const entryPath = path.join(temporaryRoot, "entry.mjs");
     await writeFile(
       entryPath,
-      _entrySource(discovered, project, helperPath),
+      _entrySource(discovered, project, helperPath, dynamicInstructionSources),
       "utf8"
     );
     const bundlePath = path.join(temporaryRoot, "agent.bundle.mjs");
@@ -64,7 +69,8 @@ export async function createAgentProjectBundle(
       entryPath,
       bundlePath,
       bundleRoot,
-      helperPath
+      helperPath,
+      dynamicInstructionSources.map(source => source.absolutePath)
     );
     const bundle = await readFile(bundlePath, "utf8");
     _assertClosedBundle(bundle);
@@ -76,6 +82,11 @@ export async function createAgentProjectBundle(
       createAgentProject(artifact: AgentProjectArtifact): {
         artifact: AgentProjectArtifact;
         definition?: CompiledAgentDefinition;
+        instructionEntries?: ReadonlyArray<{
+          kind: "dynamic" | "static";
+          markdown?: string;
+          sourcePath: string;
+        }>;
         stateDefinitions?: ReadonlyArray<{
           name: string;
           schemaFingerprint: string;
@@ -88,6 +99,15 @@ export async function createAgentProjectBundle(
     if (
       JSON.stringify(bundledProject.artifact) !== JSON.stringify(project.artifact)
       || JSON.stringify(bundledProject.definition) !== JSON.stringify(project.definition)
+      || JSON.stringify(bundledProject.instructionEntries?.map(entry => ({
+        kind: entry.kind,
+        ...(entry.kind === "static" ? { markdown: entry.markdown } : {}),
+        sourcePath: entry.sourcePath
+      }))) !== JSON.stringify(project.instructionEntries?.map(entry => ({
+        kind: entry.kind,
+        ...(entry.kind === "static" ? { markdown: entry.markdown } : {}),
+        sourcePath: entry.sourcePath
+      })))
       || JSON.stringify(bundledProject.stateDefinitions)
       !== JSON.stringify(project.stateDefinitions)
       || JSON.stringify(bundledProject.tools.map(tool => tool.name))
@@ -123,7 +143,8 @@ async function _buildInFreshBunProcess(
   entryPath: string,
   bundlePath: string,
   authoredRoot: string,
-  helperPath: string
+  helperPath: string,
+  instructionEntryPaths: readonly string[]
 ): Promise<void> {
   const scriptPath = `${bundlePath}.build.mjs`;
   const validatorPath = fileURLToPath(
@@ -132,16 +153,31 @@ async function _buildInFreshBunProcess(
   await writeFile(scriptPath, `
     import path from "node:path";
     import { builtinModules } from "node:module";
-    import { assertNoNonLiteralRuntimeImports } from ${JSON.stringify(validatorPath)};
-    const [ENTRY_PATH, BUNDLE_PATH, RESOLVE_ROOT, AUTHORED_ROOT, HELPER_PATH]
+    import {
+      assertInstructionSourceImports,
+      assertNoNonLiteralRuntimeImports
+    } from ${JSON.stringify(validatorPath)};
+    const [
+      ENTRY_PATH,
+      BUNDLE_PATH,
+      RESOLVE_ROOT,
+      AUTHORED_ROOT,
+      HELPER_PATH,
+      INSTRUCTION_ENTRY_PATHS
+    ]
       = process.argv.slice(2);
     const AUTHORED_FILES = new Set();
+    const INSTRUCTION_ENTRY_FILES = new Set(
+      JSON.parse(INSTRUCTION_ENTRY_PATHS)
+    );
+    const INSTRUCTION_FILES = new Set(INSTRUCTION_ENTRY_FILES);
     const RUNTIME_FILES = new Set([ENTRY_PATH, HELPER_PATH]);
+    const STATE_ROOT = path.join(AUTHORED_ROOT, "state");
     const NODE_BUILTINS = new Set(
       builtinModules.map(name => name.replace(/^node:/, ""))
     );
     const BUN_COMPATIBILITY_BUILTINS = new Set(["node-fetch", "ws"]);
-    const RUNTIME_SPECIFIER = /^(?:@llm-space\\/runtime(?:\\/tools|\\/connections|\\/state)?|typebox)$/;
+    const RUNTIME_SPECIFIER = /^(?:@llm-space\\/runtime(?:\\/tools|\\/connections|\\/state|\\/instructions)?|typebox)$/;
     const PLUGIN = {
       name: "llm-space-deployment-dependencies",
       setup(build) {
@@ -156,6 +192,19 @@ async function _buildInFreshBunProcess(
             ? RESOLVE_ROOT
             : args.importer ? path.dirname(args.importer) : RESOLVE_ROOT;
           const resolved = Bun.resolveSync(args.path, resolveFrom);
+          if (
+            INSTRUCTION_FILES.has(args.importer)
+            && args.path.startsWith(".")
+            && !resolved.startsWith(STATE_ROOT + path.sep)
+          ) {
+            throw new Error("Instruction dependency escapes agent/state");
+          }
+          if (
+            INSTRUCTION_FILES.has(args.importer)
+            && resolved.startsWith(STATE_ROOT + path.sep)
+          ) {
+            INSTRUCTION_FILES.add(resolved);
+          }
           if (args.importer === ENTRY_PATH) {
             if (resolved.startsWith(AUTHORED_ROOT + path.sep)) {
               AUTHORED_FILES.add(resolved);
@@ -179,6 +228,12 @@ async function _buildInFreshBunProcess(
           if (!AUTHORED_FILES.has(args.path)) { return; }
           const source = await Bun.file(args.path).text();
           assertNoNonLiteralRuntimeImports(source, args.path);
+          if (INSTRUCTION_FILES.has(args.path)) {
+            assertInstructionSourceImports(source, args.path, {
+              entryPaths: [...INSTRUCTION_ENTRY_FILES],
+              stateRoot: STATE_ROOT
+            });
+          }
           const extension = path.extname(args.path);
           const loader = extension === ".tsx"
             ? "tsx"
@@ -214,7 +269,8 @@ async function _buildInFreshBunProcess(
     bundlePath,
     import.meta.dir,
     authoredRoot,
-    helperPath
+    helperPath,
+    JSON.stringify(instructionEntryPaths)
   ], {
     stdout: "pipe",
     stderr: "pipe"
@@ -233,7 +289,8 @@ async function _buildInFreshBunProcess(
 function _entrySource(
   discovered: Awaited<ReturnType<typeof discoverAgentProject>>,
   project: Awaited<ReturnType<typeof loadAgentProject>>,
-  helperPath: string
+  helperPath: string,
+  dynamicInstructionSources: readonly AgentProjectSourceRef[]
 ): string {
   const definitionPath = discovered.definition?.absolutePath;
   if (!definitionPath) { throw new Error("Agent definition is unavailable"); }
@@ -245,7 +302,9 @@ function _entrySource(
     ...discovered.connections.map((source, index) =>
       `import connection${index} from ${JSON.stringify(source.absolutePath)};`),
     ...discovered.states.map((source, index) =>
-      `import state${index} from ${JSON.stringify(source.absolutePath)};`)
+      `import state${index} from ${JSON.stringify(source.absolutePath)};`),
+    ...dynamicInstructionSources.map((source, index) =>
+      `import dynamicInstruction${index} from ${JSON.stringify(source.absolutePath)};`)
   ];
   const tools = discovered.tools.map((source, index) => ({
     name: path.basename(source.absolutePath, path.extname(source.absolutePath)),
@@ -265,10 +324,16 @@ function _entrySource(
     ...skill,
     filePath: path.posix.join("skills", skill.name, "SKILL.md")
   }));
+  let dynamicIndex = 0;
+  const instructionEntries = (project.instructionEntries ?? []).map(entry =>
+    (entry.kind === "static"
+      ? `{ kind: "static", sourcePath: ${JSON.stringify(entry.sourcePath)}, markdown: ${JSON.stringify(entry.markdown)} }`
+      : `{ kind: "dynamic", sourcePath: ${JSON.stringify(entry.sourcePath)}, definition: dynamicInstruction${dynamicIndex++} }`));
   return `${imports.join("\n")}
 const INPUT = {
   definition,
   instructions: ${JSON.stringify(project.instructions)},
+  instructionEntries: [${instructionEntries.join(",")}],
   tools: [${tools.map(tool => `{ name: ${JSON.stringify(tool.name)}, sourcePath: ${JSON.stringify(tool.sourcePath)}, definition: ${tool.definition} }`).join(",")}],
   connections: [${connections.map(connection => `{ name: ${JSON.stringify(connection.name)}, logicalPath: ${JSON.stringify(connection.logicalPath)}, definition: ${connection.definition} }`).join(",")}],
   states: [${states.map(state => `{ sourcePath: ${JSON.stringify(state.sourcePath)}, definition: ${state.definition} }`).join(",")}],
@@ -282,4 +347,22 @@ export const createAgentProject = artifact => {
   return createBundledAgentProject(INPUT, artifact);
 };
 `;
+}
+
+function _dynamicInstructionSources(
+  discovered: Awaited<ReturnType<typeof discoverAgentProject>>,
+  project: Awaited<ReturnType<typeof loadAgentProject>>
+): readonly AgentProjectSourceRef[] {
+  return (project.instructionEntries ?? [])
+    .filter(entry => entry.kind === "dynamic")
+    .map(entry => {
+      const source = discovered.instructionEntries.find(candidate =>
+        candidate.logicalPath === entry.sourcePath);
+      if (!source) {
+        throw new Error(
+          `Dynamic instruction source is unavailable: ${entry.sourcePath}`
+        );
+      }
+      return source;
+    });
 }

@@ -51,6 +51,7 @@ export function replayRuntimeRunEvents(
   const events = session.journal
     .filter(entry =>
       entry.type !== "sessionStateReplaced"
+      && entry.type !== "turnInstructionsRecorded"
       && entry.runId === authorization.runId
       && entry.sequence > afterSequence)
     .map(entry => ({
@@ -92,6 +93,7 @@ function _validatedCursorSequence(
   if (
     entry?.sequence !== cursor.sequence
     || entry.type === "sessionStateReplaced"
+    || entry.type === "turnInstructionsRecorded"
     || entry.runId !== cursor.runId
   ) {
     throw new SessionStoreInvariantError(

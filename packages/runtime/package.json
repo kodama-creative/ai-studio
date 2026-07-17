@@ -8,6 +8,7 @@
     "./client": "./src/client/index.ts",
     "./connections": "./src/public/connections/index.ts",
     "./harness": "./src/runtime/harness/index.ts",
+    "./instructions": "./src/public/instructions/index.ts",
     "./node": "./src/node/index.ts",
     "./server": "./src/runtime/server.ts",
     "./state": "./src/public/state/index.ts",

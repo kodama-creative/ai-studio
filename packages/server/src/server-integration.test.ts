@@ -17,6 +17,7 @@ import {
   type AgentServerStreamEvent,
   createAgentServerClient
 } from "@llm-space/runtime/client";
+import { defineDynamic, defineInstructions } from "@llm-space/runtime/instructions";
 import { getActiveAgentSessionContext } from "@llm-space/runtime/server";
 import { defineState } from "@llm-space/runtime/state";
 import { afterEach, describe, expect, test } from "bun:test";
@@ -482,6 +483,7 @@ describe("Agent Server HTTP protocol", () => {
         token: "principal-two-token-with-thirty-two-bytes"
       }
     ]);
+    const instructionResolutions: string[] = [];
     const options = {
       artifactFingerprint: fingerprint,
       authenticator,
@@ -489,7 +491,11 @@ describe("Agent Server HTTP protocol", () => {
       localDev: true,
       models: _models(),
       port: 0,
-      project: _statefulProject(fingerprint, "server-state-v1"),
+      project: _statefulProject(
+        fingerprint,
+        "server-state-v1",
+        markdown => { instructionResolutions.push(markdown); }
+      ),
       repositoryRoot: root
     };
     const first = await startAgentServer(options);
@@ -534,9 +540,21 @@ describe("Agent Server HTTP protocol", () => {
       channel: "http",
       turnSequence: 1
     });
+    const firstInstructionSnapshots = await _storedInstructionSnapshots(
+      root,
+      firstSession.sessionId
+    );
+    expect(firstInstructionSnapshots).toHaveLength(1);
+    expect(firstInstructionSnapshots[0]).toMatchObject({
+      markdown: expect.stringContaining(
+        "principal-one:tenant-one:http:1:0:read-only"
+      )
+    });
 
     await first.stop();
     const restarted = await startAgentServer(options);
+    expect(await _storedInstructionSnapshots(root, firstSession.sessionId))
+      .toEqual(firstInstructionSnapshots);
     const recoveredClient = createAgentServerClient({
       baseUrl: restarted.url,
       authorization: "principal-one-token-with-thirty-two-bytes"
@@ -550,6 +568,25 @@ describe("Agent Server HTTP protocol", () => {
       channel: "http",
       turnSequence: 2
     });
+    const recoveredInstructionSnapshots = await _storedInstructionSnapshots(
+      root,
+      firstSession.sessionId
+    );
+    expect(recoveredInstructionSnapshots).toHaveLength(2);
+    expect(recoveredInstructionSnapshots[0]).toEqual(
+      firstInstructionSnapshots[0]
+    );
+    expect(recoveredInstructionSnapshots[1]).toMatchObject({
+      markdown: expect.stringContaining(
+        "principal-one:tenant-one:http:2:1:read-only"
+      )
+    });
+    expect(instructionResolutions).toContain(
+      "principal-one:tenant-one:http:1:0:read-only"
+    );
+    expect(instructionResolutions).toContain(
+      "principal-one:tenant-one:http:2:1:read-only"
+    );
     await restarted.stop();
 
     const drifted = await startAgentServer({
@@ -1452,11 +1489,47 @@ const SERVER_STATE = defineState({
 
 function _statefulProject(
   fingerprint: string,
-  schemaFingerprint: string
+  schemaFingerprint: string,
+  onInstructions?: (markdown: string) => void
 ): CompiledAgentProjectSnapshot {
   const project = _project(fingerprint);
+  const dynamicInstructions = defineDynamic({
+    events: {
+      "turn.started": (_event, { session }) => {
+        const state = SERVER_STATE.get();
+        let readOnly = "mutable";
+        try {
+          SERVER_STATE.update(current => current);
+        } catch {
+          readOnly = "read-only";
+        }
+        const markdown = [
+          session.auth.current.principalId,
+          session.tenant?.tenantId ?? "",
+          session.channel.kind,
+          session.turn.sequence,
+          state.count,
+          readOnly
+        ].join(":");
+        onInstructions?.(markdown);
+        return defineInstructions({ markdown });
+      }
+    }
+  });
   return {
     ...project,
+    instructionEntries: [
+      {
+        kind: "static",
+        markdown: project.instructions,
+        sourcePath: "instructions.md"
+      },
+      {
+        kind: "dynamic",
+        definition: dynamicInstructions,
+        sourcePath: "instructions/session.ts"
+      }
+    ],
     stateDefinitions: [{
       name: SERVER_STATE.name,
       version: SERVER_STATE.version,
@@ -1536,6 +1609,22 @@ async function _storedServerState(
   };
   return envelope.runtime.snapshot.state.values[SERVER_STATE.name]!.value as
     Awaited<ReturnType<typeof _storedServerState>>;
+}
+
+async function _storedInstructionSnapshots(
+  root: string,
+  sessionId: string
+): Promise<unknown[]> {
+  const envelope = JSON.parse(
+    await readFile(join(root, `${sessionId}.json`), "utf8")
+  ) as {
+    runtime: {
+      snapshot: {
+        instructionSnapshots?: Record<string, unknown>;
+      };
+    };
+  };
+  return Object.values(envelope.runtime.snapshot.instructionSnapshots ?? {});
 }
 
 function _models(configured = true): Models {

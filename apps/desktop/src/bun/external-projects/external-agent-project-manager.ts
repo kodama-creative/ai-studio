@@ -894,12 +894,16 @@ export class ExternalAgentProjectManager {
     return { session: validated, store };
   }
 
-  async requiresStructuredSessionState(
+  async requiresRuntimeSessionStore(
     projectId: string,
     threadId: string
   ): Promise<boolean> {
     await this._ensureProject(projectId);
-    if ((this._state(projectId).snapshot?.stateDefinitions?.length ?? 0) > 0) {
+    const snapshot = this._state(projectId).snapshot;
+    if (
+      (snapshot?.stateDefinitions?.length ?? 0) > 0
+      || (snapshot?.instructionEntries?.length ?? 0) > 0
+    ) {
       return true;
     }
     const record = await this._readThreadFile(projectId, threadId);

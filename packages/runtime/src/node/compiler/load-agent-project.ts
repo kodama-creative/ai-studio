@@ -16,6 +16,10 @@ import {
 import { loadAuthoredModule } from "./load-authored-module";
 import { assertNoDuplicateObjectLiteralKeys } from "./validate-authored-source";
 import { normalizeAgentDefinition } from "../../internal/authored-definition/normalize-agent-definition";
+import {
+  isDynamicInstructionsDefinition,
+  isInstructionsDefinition
+} from "../../internal/authored-instruction-definitions";
 import { getActiveAgentSessionContextRuntime } from "../../internal/authored-state-definitions";
 import { qualifyProjectMcpToolName } from "../../internal/project-mcp-tool-name";
 import { isMcpClientConnectionDefinition } from "../../public/definitions/connections/mcp";
@@ -30,6 +34,7 @@ import {
 } from "../discover/discover-agent-project";
 
 import type {
+  CompiledAgentInstructionEntry,
   CompiledAgentProjectSnapshot,
   CompiledAgentStateDefinition,
   CompiledMcpConnection,
@@ -58,11 +63,26 @@ async function _compileAgentProject(
     discovered.root,
     sources
   );
-  const instructions = await _compileInstructions(
+  const instructionEntries = await _compileInstructions(
     discovered.instructions,
+    discovered.instructionEntries,
     diagnostics,
+    dependencies,
+    discovered.root,
     sources
   );
+  const staticInstructionEntries = instructionEntries.filter(
+    (entry): entry is Extract<CompiledAgentInstructionEntry, {
+      kind: "static";
+    }> => entry.kind === "static"
+  );
+  const instructions = instructionEntries.length === 1
+    && staticInstructionEntries[0]?.sourcePath === "instructions.md"
+    ? staticInstructionEntries[0].markdown
+    : staticInstructionEntries
+      .map(entry => entry.markdown.trim())
+      .filter(Boolean)
+      .join("\n\n");
   const stateDefinitions = await _compileStateDefinitions(
     discovered.states,
     diagnostics,
@@ -96,6 +116,7 @@ async function _compileAgentProject(
     definition,
     dependencies,
     instructions,
+    instructionEntries,
     skills,
     stateDefinitions,
     sources,
@@ -109,6 +130,7 @@ async function _compileAgentProject(
     tools,
     connections,
     resources: { skills },
+    instructionEntries,
     stateDefinitions,
     diagnostics,
     fingerprint: artifact.fingerprint
@@ -241,24 +263,75 @@ async function _compileDefinition(
 }
 
 async function _compileInstructions(
-  sourceRef: AgentProjectSourceRef | undefined,
+  rootSource: AgentProjectSourceRef | undefined,
+  entrySources: readonly AgentProjectSourceRef[],
   diagnostics: AgentProjectDiagnostic[],
+  dependencies: AgentProjectArtifactDependencyInput[],
+  projectRoot: string,
   sources: AgentProjectArtifactSourceInput[]
-): Promise<string> {
-  if (!sourceRef) { return ""; }
-  try {
-    const instructions = await readFile(sourceRef.absolutePath, "utf8");
-    sources.push({ id: sourceRef.logicalPath, content: instructions });
-    return instructions;
-  } catch (error) {
-    diagnostics.push({
-      severity: "error",
-      code: "instructions_read_failed",
-      message: `Unable to read instructions.md: ${_errorMessage(error)}`,
-      path: sourceRef.absolutePath
-    });
-    return "";
+): Promise<CompiledAgentInstructionEntry[]> {
+  const compiled: CompiledAgentInstructionEntry[] = [];
+  if (rootSource) {
+    try {
+      const markdown = await readFile(rootSource.absolutePath, "utf8");
+      sources.push({ id: rootSource.logicalPath, content: markdown });
+      compiled.push({
+        kind: "static",
+        markdown,
+        sourcePath: rootSource.logicalPath
+      });
+    } catch (error) {
+      diagnostics.push({
+        severity: "error",
+        code: "instructions_read_failed",
+        message: `Unable to read instructions.md: ${_errorMessage(error)}`,
+        path: rootSource.absolutePath
+      });
+    }
   }
+  for (const source of entrySources) {
+    try {
+      if (source.logicalPath.endsWith(".md")) {
+        const markdown = await readFile(source.absolutePath, "utf8");
+        sources.push({ id: source.logicalPath, content: markdown });
+        compiled.push({ kind: "static", markdown, sourcePath: source.logicalPath });
+        continue;
+      }
+      const loaded = await loadAuthoredModule({
+        projectRoot,
+        sourcePath: source.absolutePath,
+        authoredSdk: true,
+        restrictInstructionImports: true
+      });
+      _recordDependencies(dependencies, source.logicalPath, loaded.dependencies);
+      sources.push({ id: source.logicalPath, content: loaded.source });
+      if (isInstructionsDefinition(loaded.default)) {
+        compiled.push({
+          kind: "static",
+          markdown: loaded.default.markdown,
+          sourcePath: source.logicalPath
+        });
+      } else if (isDynamicInstructionsDefinition(loaded.default)) {
+        compiled.push({
+          kind: "dynamic",
+          definition: loaded.default,
+          sourcePath: source.logicalPath
+        });
+      } else {
+        throw new TypeError(
+          "TypeScript instruction entries must default-export defineInstructions(...) or defineDynamic(...)"
+        );
+      }
+    } catch (error) {
+      diagnostics.push({
+        severity: "error",
+        code: "instruction_entry_import_failed",
+        message: `Unable to compile ${path.basename(source.absolutePath)}: ${_errorMessage(error)}`,
+        path: source.absolutePath
+      });
+    }
+  }
+  return compiled;
 }
 
 async function _compileTools(

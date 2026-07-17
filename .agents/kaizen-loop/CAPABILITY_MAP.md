@@ -163,6 +163,23 @@
 - Explicit non-goals: no generic memory object sent to the model, bundled vector database, automatic memory extraction, cross-Session queries, state-backed secret store, hosted tenant database, organization-policy UI, hidden principal metadata, or replacement of the existing Session Store.
 - Visible gaps: no migration/reset/drop path for changed definitions, state inspector/editor/history, cross-Session sharing, external long-term memory, or durable staged state for mixed deferred tool steps; automatic mixed-deferred steps deliberately discard temporary state instead of persisting an incomplete step.
 
+## Composable Static And Dynamic Instructions
+
+- Status: shipped V1
+- Freshness: confirmed
+- Last checked: 2026-07-18
+- Evidence:
+  - Required `instructions.md` remains first; an optional flat `instructions/` directory accepts regular `.md`, `.ts`, and `.js` entries in stable code-point filename order. Static code exports `defineInstructions({ markdown })`; dynamic code uses the Eve-shaped `defineDynamic({ events: { "turn.started": ... } })` contract.
+  - Source discovery rejects nested, symbolic, non-regular, unsupported, and invalid-export entries. Instruction code cannot import tool/connection/Node/package source or dynamically load modules; its only runtime dependency graph is the authored instructions SDK plus confined `state/` definitions using the state SDK and TypeBox.
+  - Artifact and closed-bundle fixtures preserve identical entry kind, logical source path, static Markdown, dependency identity, and executable dynamic callbacks across equivalent roots. Dynamic source changes remain covered by the Agent artifact fingerprint.
+  - `AgentSessionInstructions` resolves once before Pi provider execution from the Host-verified deeply frozen Session/Turn context. Automatic execution exposes authored state read-only; manual debugging deliberately has no state scope. Resolver failure, missing Session Store, artifact drift, persistence conflict, or snapshot-integrity mismatch blocks provider execution.
+  - The existing Session Store records one immutable per-Turn snapshot containing ordered entry provenance, exact combined Markdown, Agent fingerprint, Turn ID, and a recomputed SHA-256. Every Pi provider call in that Turn receives those bytes; reload/continuation reuses them, while transcript messages, Pi events, and Run replay exclude instruction content/journal entries.
+  - Server integration proves authenticated principal/tenant/HTTP/Turn context plus read-only state across restart. Desktop Project Threads publish the committed Runtime Session before execution settlement and reopen the same snapshot; an edited Thread system prompt is recorded explicitly as Host-owned input while unchanged project prompts retain source-entry provenance.
+  - Item-13 focused acceptance covers source, bundle, Runtime, Session Store, Server, Desktop, and example artifact behavior. Six TypeScript projects, root lint, browser/Bun bundles, renderer-only Vite, and final Standards/Spec review passed; the full suite retains only the independently reproduced fixed-point Server shutdown timeout.
+- Boundary: authors can compose deterministic standing instructions and trusted per-Turn context/state-derived instructions into one explainable prompt snapshot used through Pi without adding a message protocol or a second execution loop.
+- Explicit non-goals: no Session- or step-scoped prompt mutation, dynamic model/tool/connection/stream options, arbitrary runtime module loading, tool execution from instructions, variable-provider system, hooks, UI editor/preview, prompt registry, template language, or instruction migration.
+- Visible gaps: item 14 still owns broader dynamic capability snapshots; item 10 still owns Agent Variable authoring/promotion; hostile-code isolation remains part of the later Sandbox/ExecutionEnv boundary rather than an instruction-specific sandbox.
+
 ## Headless Thread Execution And Evaluation
 
 - Status: shipped V1

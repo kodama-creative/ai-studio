@@ -1,17 +1,21 @@
 import {
   InMemorySessionStore,
+  replayRuntimeRunEvents,
   RUNTIME_RUN_STATES,
   RUNTIME_SESSION_SCHEMA_VERSION,
   type RuntimeRunConfigurationSnapshot,
   type RuntimeRunSnapshot,
   type RuntimeRunState,
   RuntimeRunTransitionError,
+  type RuntimeTurnInstructionSnapshot,
   type SessionStore,
   SessionStoreConflictError,
   SessionStoreInvariantError,
   transitionRuntimeRun
 } from "@llm-space/runtime/harness";
 import { describe, expect, test } from "bun:test";
+
+import { sha256 } from "./sha256";
 
 const LEGAL_TRANSITIONS: Readonly<
   Record<RuntimeRunState, readonly RuntimeRunState[]>
@@ -65,6 +69,137 @@ describe("Runtime Run state machine", () => {
 });
 
 describe("InMemorySessionStore", () => {
+  test("records one immutable instruction snapshot for each Turn", async () => {
+    const store = new InMemorySessionStore();
+    const snapshot = await _instructionSnapshot();
+    const recorded = await store.commit({
+      sessionId: "session-instructions",
+      expectedVersion: null,
+      mutations: [{ type: "recordTurnInstructions", snapshot }]
+    });
+
+    expect(recorded.snapshot.instructionSnapshots?.[snapshot.turnId])
+      .toEqual(snapshot);
+    expect(recorded.journal).toEqual([{
+      type: "turnInstructionsRecorded",
+      sequence: 1,
+      sessionVersion: 1,
+      turnId: snapshot.turnId,
+      fingerprint: snapshot.fingerprint
+    }]);
+    expect(Object.isFrozen(
+      recorded.snapshot.instructionSnapshots?.[snapshot.turnId]?.entries
+    )).toBe(true);
+
+    const replacementEntries: RuntimeTurnInstructionSnapshot["entries"] = [{
+      kind: "static",
+      markdown: "Replacement.",
+      sourcePath: "instructions.md"
+    }];
+    const rejection = await _rejection(store.commit({
+      sessionId: "session-instructions",
+      expectedVersion: recorded.version,
+      mutations: [{
+        type: "recordTurnInstructions",
+        snapshot: {
+          ...snapshot,
+          entries: replacementEntries,
+          fingerprint: await sha256(JSON.stringify(replacementEntries)),
+          markdown: "Replacement."
+        }
+      }]
+    }));
+    expect(rejection).toMatchObject({
+      message: expect.stringContaining("is immutable")
+    });
+    expect(await store.load("session-instructions")).toEqual(recorded);
+  });
+
+  test("validates instruction snapshot and journal consistency on hydration", async () => {
+    const source = new InMemorySessionStore();
+    const recorded = await source.commit({
+      sessionId: "session-instruction-hydration",
+      expectedVersion: null,
+      mutations: [{
+        type: "recordTurnInstructions",
+        snapshot: await _instructionSnapshot()
+      }]
+    });
+
+    expect(await new InMemorySessionStore([recorded]).load(
+      "session-instruction-hydration"
+    )).toEqual(recorded);
+    expect(() => new InMemorySessionStore([{
+      ...recorded,
+      journal: recorded.journal.map(entry => (entry.type === "turnInstructionsRecorded"
+        ? { ...entry, fingerprint: "b".repeat(64) }
+        : entry))
+    }])).toThrow("Turn instruction journal entry");
+    expect(() => new InMemorySessionStore([{
+      ...recorded,
+      snapshot: { ...recorded.snapshot, instructionSnapshots: undefined }
+    }])).toThrow("Turn instruction journal entry");
+    const original = recorded.snapshot.instructionSnapshots?.["turn-one"];
+    if (!original) { throw new Error("Expected recorded Turn instructions"); }
+    const mismatchedMarkdown = new InMemorySessionStore([{
+      ...recorded,
+      snapshot: {
+        ...recorded.snapshot,
+        instructionSnapshots: {
+          "turn-one": { ...original, markdown: "Tampered Markdown" }
+        }
+      }
+    }]);
+    expect(await _rejection(mismatchedMarkdown.load(
+      "session-instruction-hydration"
+    ))).toMatchObject({
+      message: expect.stringContaining("Markdown does not match")
+    });
+    const tamperedEntries = [{
+      kind: "static" as const,
+      markdown: "Tampered entry.",
+      sourcePath: "instructions.md"
+    }];
+    const mismatchedFingerprint = new InMemorySessionStore([{
+      ...recorded,
+      snapshot: {
+        ...recorded.snapshot,
+        instructionSnapshots: {
+          "turn-one": {
+            ...original,
+            entries: tamperedEntries,
+            markdown: "Tampered entry."
+          }
+        }
+      }
+    }]);
+    expect(await _rejection(mismatchedFingerprint.load(
+      "session-instruction-hydration"
+    ))).toMatchObject({
+      message: expect.stringContaining("fingerprint does not match")
+    });
+  });
+
+  test("keeps instruction journal entries out of Runtime Run replay", async () => {
+    const store = new InMemorySessionStore();
+    const recorded = await store.commit({
+      sessionId: "session-instruction-replay",
+      expectedVersion: null,
+      mutations: [
+        {
+          type: "recordTurnInstructions",
+          snapshot: await _instructionSnapshot()
+        },
+        _start("run-instruction-replay", _configuration())
+      ]
+    });
+
+    expect(replayRuntimeRunEvents(recorded, {
+      sessionId: "session-instruction-replay",
+      runId: "run-instruction-replay"
+    }).map(event => event.entry.type)).toEqual(["runStarted"]);
+  });
+
   test("hydrates a persisted safe-boundary Session without replaying mutations", async () => {
     const original = new InMemorySessionStore();
     const started = await original.commit({
@@ -518,6 +653,28 @@ function _run(state: RuntimeRunState): RuntimeRunSnapshot {
     sessionId: "session-one",
     configurationId: "config-one",
     state
+  };
+}
+
+async function _instructionSnapshot(): Promise<RuntimeTurnInstructionSnapshot> {
+  const entries: RuntimeTurnInstructionSnapshot["entries"] = [
+    {
+      kind: "static",
+      markdown: "Root instructions.",
+      sourcePath: "instructions.md"
+    },
+    {
+      kind: "dynamic",
+      markdown: "Turn instructions.",
+      sourcePath: "instructions/turn.ts"
+    }
+  ];
+  return {
+    agentSnapshotFingerprint: "agent-snapshot",
+    entries,
+    fingerprint: await sha256(JSON.stringify(entries)),
+    markdown: "Root instructions.\n\nTurn instructions.",
+    turnId: "turn-one"
   };
 }
 

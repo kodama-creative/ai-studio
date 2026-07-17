@@ -30,6 +30,18 @@ export interface RuntimeSessionStateSnapshot {
   readonly values: Readonly<Record<string, RuntimeSessionStateEntry>>;
 }
 
+export interface RuntimeTurnInstructionSnapshot {
+  readonly agentSnapshotFingerprint: string;
+  readonly entries: ReadonlyArray<{
+    readonly kind: "dynamic" | "static";
+    readonly markdown: string;
+    readonly sourcePath: string;
+  }>;
+  readonly fingerprint: string;
+  readonly markdown: string;
+  readonly turnId: string;
+}
+
 export interface RuntimeRunConfigurationSnapshot {
   readonly id: string;
   readonly agentSnapshotFingerprint: string;
@@ -45,6 +57,9 @@ export interface RuntimeSessionSnapshot {
   readonly id: string;
   readonly activeRunId: string | null;
   readonly runs: readonly RuntimeRunSnapshot[];
+  readonly instructionSnapshots?: Readonly<
+    Record<string, RuntimeTurnInstructionSnapshot>
+  >;
   readonly state?: RuntimeSessionStateSnapshot;
 }
 
@@ -65,6 +80,13 @@ export type RuntimeRunJournalEntry =
     readonly sessionVersion: number;
     readonly state: Exclude<RuntimeRunState, "runningModel" | "runningTools">;
     readonly type: "runCheckpointRecorded";
+  }
+  | {
+    readonly fingerprint: string;
+    readonly sequence: number;
+    readonly sessionVersion: number;
+    readonly turnId: string;
+    readonly type: "turnInstructionsRecorded";
   }
   | {
     readonly from: RuntimeRunState;
@@ -104,6 +126,10 @@ export type RuntimeSessionMutation =
     readonly runId: string;
     readonly to: RuntimeRunState;
     readonly type: "transitionRun";
+  }
+  | {
+    readonly snapshot: RuntimeTurnInstructionSnapshot;
+    readonly type: "recordTurnInstructions";
   }
   | {
     readonly type: "replaceState";

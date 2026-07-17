@@ -110,7 +110,7 @@ Runtime architecture follows [ADR 0001](./docs/adr/0001-runtime-harness-over-pi-
   - Boundary: no bundled vector database, automatic memory extraction, hosted tenant database, or organization-policy UI.
   - Metric: isolated structured-state recovery after Server restart.
 
-- [ ] **13 — Composable static and dynamic instructions**
+- [x] **13 — Composable static and dynamic instructions**
   - Depends on: 12.
   - Run: `$kaizen-loop Support composable build-time and trusted per-Turn Agent instructions.`
   - Done when: root instructions and ordered directory entries compile deterministically; dynamic instructions resolve from trusted Session context and are snapshotted per Turn through Pi.

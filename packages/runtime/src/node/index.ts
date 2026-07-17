@@ -7,6 +7,7 @@ export {
 } from "../runtime/agent/agent-project-artifact";
 export {
   type AgentProjectSnapshot,
+  type CompiledAgentInstructionEntry,
   type CompiledAgentProjectSnapshot,
   type CompiledAgentStateDefinition,
   type CompiledMcpConnection,

@@ -36,6 +36,7 @@ export {
   type RuntimeSessionStateEntry,
   type RuntimeSessionStateSnapshot,
   type RuntimeSessionStateValue,
+  type RuntimeTurnInstructionSnapshot,
   type SessionStore,
   type SessionStoreCommit,
   SessionStoreConflictError,

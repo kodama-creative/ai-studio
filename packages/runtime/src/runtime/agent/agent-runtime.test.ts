@@ -15,6 +15,7 @@ import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
 
 import { AgentRuntime } from "./agent-runtime";
 import { defineState } from "../../public/definitions/state";
+import { defineDynamic, defineInstructions } from "../../public/instructions";
 import { InMemorySessionStore } from "../harness/in-memory-session-store";
 
 import type { AgentProjectSnapshot } from "./agent-project-snapshot";
@@ -162,6 +163,129 @@ describe("AgentRuntime", () => {
     expect(JSON.stringify(events)).not.toContain("stateful-runtime-session");
   });
 
+  test("resolves one read-only instruction snapshot per Turn and sends it through Pi", async () => {
+    const store = new InMemorySessionStore();
+    let resolutions = 0;
+    const prompts: string[] = [];
+    const events: unknown[] = [];
+    const dynamic = defineDynamic({
+      events: {
+        "turn.started": (_event, context) => {
+          resolutions += 1;
+          expect(Object.isFrozen(context.session)).toBe(true);
+          expect(Object.isFrozen(context.session.auth.current)).toBe(true);
+          expect(context.session.auth.current.principalId).toBe("runtime-test");
+          expect(() => {
+            (context.session.auth.current as { principalId: string; })
+              .principalId = "resolver-spoof";
+          }).toThrow();
+          const value = RUNTIME_COUNTER.get();
+          expect(() => { RUNTIME_COUNTER.update(() => ({ count: 99 })); })
+            .toThrow("read-only");
+          return defineInstructions({
+            markdown: `${context.session.turn.id}:${value.count}`
+          });
+        }
+      }
+    });
+    const runtime = new AgentRuntime({
+      models: _reactModels(),
+      project: {
+        ..._project(),
+        instructions: "Root.",
+        instructionEntries: [
+          { kind: "static", markdown: "Root.", sourcePath: "instructions.md" },
+          {
+            kind: "dynamic",
+            definition: dynamic,
+            sourcePath: "instructions/turn.ts"
+          }
+        ],
+        stateDefinitions: [{
+          name: RUNTIME_COUNTER.name,
+          version: RUNTIME_COUNTER.version,
+          schema: RUNTIME_COUNTER.schema,
+          schemaFingerprint: "runtime-counter-v1",
+          initial: RUNTIME_COUNTER.initial,
+          sourcePath: "state/runtime-counter.ts"
+        }]
+      }
+    });
+    const context = _context("instruction-session");
+    const first = await runtime.createSession({
+      context,
+      sessionStore: store,
+      streamFn: async (_model, piContext) => {
+        prompts.push(piContext.systemPrompt ?? "");
+        return _stream(piContext);
+      }
+    });
+    first.subscribe(event => { events.push(event); });
+    context.auth.current.principalId = "host-mutated-after-validation";
+
+    await first.prompt("hello");
+    const recorded = first.instructionSnapshot;
+    expect(prompts).toEqual(["Root.\n\nturn-instruction-session:0", "Root.\n\nturn-instruction-session:0"]);
+    expect(recorded).toMatchObject({
+      markdown: "Root.\n\nturn-instruction-session:0",
+      turnId: "turn-instruction-session"
+    });
+    expect(recorded?.fingerprint).toMatch(/^[0-9a-f]{64}$/);
+    expect(JSON.stringify(first.messages)).not.toContain(
+      "turn-instruction-session:0"
+    );
+    expect(JSON.stringify(events)).not.toContain("turn-instruction-session:0");
+
+    const reloaded = await runtime.createSession({
+      context,
+      sessionStore: store,
+      streamFn: async (_model, piContext) => _stream(piContext)
+    });
+    await reloaded.prompt("again");
+    expect(resolutions).toBe(1);
+    expect(reloaded.instructionSnapshot).toEqual(recorded);
+  });
+
+  test("blocks provider execution when dynamic instructions fail", async () => {
+    const store = new InMemorySessionStore();
+    let providerCalls = 0;
+    const runtime = new AgentRuntime({
+      models: _reactModels(),
+      project: {
+        ..._project(),
+        instructionEntries: [{
+          kind: "dynamic",
+          sourcePath: "instructions/failing.ts",
+          definition: defineDynamic({
+            events: {
+              "turn.started": () => { throw new Error("resolution failed"); }
+            }
+          })
+        }]
+      }
+    });
+    expect(await _rejection(runtime.createSession({
+      context: _context("missing-instruction-store")
+    }))).toMatchObject({
+      message: "Agent Projects with dynamic instructions require a Session Store"
+    });
+    const session = await runtime.createSession({
+      context: _context("failing-instructions"),
+      sessionStore: store,
+      streamFn: async (_model, piContext) => {
+        providerCalls += 1;
+        return _stream(piContext);
+      }
+    });
+
+    expect(await _rejection(session.prompt("hello"))).toMatchObject({
+      message: "resolution failed"
+    });
+    expect(providerCalls).toBe(0);
+    expect(session.messages).toEqual([]);
+    expect(await store.load("failing-instructions")).toBeNull();
+  });
+
   test("rolls back automatic state updates while preserving Pi tool-error recovery", async () => {
     const store = new InMemorySessionStore();
     const runtime = new AgentRuntime({
@@ -199,7 +323,8 @@ describe("AgentRuntime", () => {
       "assistant"
     ]);
     expect(session.messages[2]).toMatchObject({ isError: true });
-    expect(await store.load("recoverable-tool-error")).toBeNull();
+    expect((await store.load("recoverable-tool-error"))?.snapshot.state)
+      .toBeUndefined();
   });
 
   test("keeps manual placeholders internal and continues from resolved results", async () => {
@@ -440,7 +565,8 @@ describe("AgentRuntime", () => {
 
     await session.prompt("hello");
 
-    expect(await store.load("mixed-deferred-session")).toBeNull();
+    expect((await store.load("mixed-deferred-session"))?.snapshot.state)
+      .toBeUndefined();
   });
 
   test("blocks an unavailable definition default but accepts an explicit override", async () => {

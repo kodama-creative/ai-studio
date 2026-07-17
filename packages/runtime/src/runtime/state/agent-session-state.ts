@@ -86,6 +86,10 @@ export class AgentSessionState {
     }
   }
 
+  get context(): AgentSessionContext {
+    return this._context;
+  }
+
   async executeTool<TResult>(run: () => Promise<TResult>): Promise<TResult> {
     const transaction = await this._ensureTransaction();
     const scope: ActiveAgentStateScope = {
@@ -99,6 +103,18 @@ export class AgentSessionState {
       transaction.failed = true;
       throw error;
     }
+  }
+
+  async executeReadOnly<TResult>(run: () => Promise<TResult>): Promise<TResult> {
+    const transaction = await this._loadTransaction();
+    const scope: ActiveAgentStateScope = {
+      session: this._context,
+      get: name => this._get(transaction, name),
+      update() {
+        throw new Error("Session state is read-only while resolving instructions");
+      }
+    };
+    return ACTIVE_SCOPE.run(scope, run);
   }
 
   async validateSession(): Promise<void> {

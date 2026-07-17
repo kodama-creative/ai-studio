@@ -38,6 +38,46 @@ describe("createAgentProjectBundle", () => {
     const project = module.createAgentProject(built.artifact);
     expect(project.artifact).toEqual(built.artifact);
     expect(project.definition?.environment).toEqual(built.environment);
+    expect(project.instructions).toBe(
+      "Echo the input.\n\nKeep answers deterministic.\n\nUse typed static guidance."
+    );
+    expect(project.instructionEntries?.map(entry => ({
+      kind: entry.kind,
+      sourcePath: entry.sourcePath,
+      ...(entry.kind === "static" ? { markdown: entry.markdown } : {})
+    }))).toEqual(loaded.instructionEntries?.map(entry => ({
+      kind: entry.kind,
+      sourcePath: entry.sourcePath,
+      ...(entry.kind === "static" ? { markdown: entry.markdown } : {})
+    })));
+    const dynamicInstructions = project.instructionEntries?.find(
+      entry => entry.kind === "dynamic"
+    );
+    if (dynamicInstructions?.kind !== "dynamic") {
+      throw new Error("Expected bundled dynamic instructions");
+    }
+    expect(await dynamicInstructions.definition.events["turn.started"](
+      { type: "turn.started" },
+      {
+        session: {
+          id: "bundle-session",
+          auth: {
+            initiator: {
+              issuer: "test",
+              principalId: "initiator",
+              principalType: "user"
+            },
+            current: {
+              issuer: "test",
+              principalId: "current",
+              principalType: "user"
+            }
+          },
+          channel: { kind: "bundle" },
+          turn: { id: "turn-bundle", sequence: 1 }
+        }
+      }
+    )).toMatchObject({ markdown: "turn-bundle:current" });
     expect(project.tools.map(tool => tool.name)).toEqual(["echo"]);
     expect(project.stateDefinitions).toEqual(loaded.stateDefinitions);
     expect(project.connections.map(connection => connection.name)).toEqual([
@@ -140,6 +180,27 @@ async function _fixture(): Promise<string> {
     });`
   );
   await writeFile(join(root, "instructions.md"), "Echo the input.\n");
+  await mkdir(join(root, "instructions"));
+  await writeFile(
+    join(root, "instructions", "01-deterministic.md"),
+    "Keep answers deterministic.\n"
+  );
+  await writeFile(
+    join(root, "instructions", "02-typed.ts"),
+    `import { defineInstructions } from "@llm-space/runtime/instructions";
+    export default defineInstructions({ markdown: "Use typed static guidance." });`
+  );
+  await writeFile(
+    join(root, "instructions", "03-turn.ts"),
+    `import { defineDynamic, defineInstructions } from "@llm-space/runtime/instructions";
+    export default defineDynamic({
+      events: {
+        "turn.started": (_event, { session }) => defineInstructions({
+          markdown: session.turn.id + ":" + session.auth.current.principalId
+        })
+      }
+    });`
+  );
   await mkdir(join(root, "tools"));
   await writeFile(
     join(root, "tools", "echo.ts"),

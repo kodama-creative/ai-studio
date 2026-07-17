@@ -30,6 +30,8 @@ The runtime owns three boundaries:
 - `@llm-space/runtime/state` is the authored structured-state contract. It
   exports `defineState()` handles whose live values exist only inside a
   Host-verified Runtime Session scope.
+- `@llm-space/runtime/instructions` exports `defineInstructions()` and
+  `defineDynamic()` for ordered static and trusted per-Turn instructions.
 - `@llm-space/runtime/connections` is the authored remote-action contract. It
   exports `defineMcpClientConnection()` for Streamable HTTP MCP connections.
 - `@llm-space/runtime/server` is a minimal Bun-only type surface used by a
@@ -96,6 +98,9 @@ V1 requires:
 agent/
 ├── agent.ts
 ├── instructions.md
+├── instructions/
+│   ├── *.md
+│   └── *.{ts,js}
 ├── tools/
 │   └── *.ts
 ├── state/
@@ -123,6 +128,59 @@ export default defineAgent({
 The model string splits on its first `/`. Reasoning accepts
 `provider-default`, `none`, `minimal`, `low`, `medium`, `high`, and `xhigh`;
 `none` maps to Pi's internal `off` value.
+
+## Composable Turn instructions
+
+The required `instructions.md` is always first. An optional flat
+`agent/instructions/` directory adds `.md`, `.ts`, and `.js` entries in stable
+code-point filename order; nested directories, symbolic links, and other file
+types are rejected. Markdown is static. A static code entry default-exports
+`defineInstructions({ markdown })`:
+
+```ts
+import { defineInstructions } from "@llm-space/runtime/instructions";
+
+export default defineInstructions({ markdown: "Keep answers concise." });
+```
+
+A dynamic entry uses Eve's `turn.started` authoring shape and may return
+branded instructions or `null`:
+
+```ts
+import {
+  defineDynamic,
+  defineInstructions,
+} from "@llm-space/runtime/instructions";
+import preferences from "../state/preferences";
+
+export default defineDynamic({
+  events: {
+    "turn.started": (_event, { session }) => defineInstructions({
+      markdown: `Principal: ${session.auth.current.principalId}; locale: ${preferences.get().locale}`,
+    }),
+  },
+});
+```
+
+Instruction code may import only the instructions SDK and static files under
+the Agent's `state/` directory. That state graph is itself limited to relative
+state files, `@llm-space/runtime/state`, and `typebox`; dynamic imports,
+`require`, tools, Node built-ins, packages, and other project source are
+rejected before the module executes. Direct Host/runtime escape hatches such
+as `Bun`, `process`, `fetch`, `globalThis`, `eval`, `Function`, workers, and
+`import.meta` are rejected in the instruction/state source graph as well; the
+same validation runs independently against closed-bundle source.
+
+The Runtime resolves dynamic entries once from the Host-verified, deeply
+immutable Session/Turn context and read-only Session state before Pi's first
+provider call. It records the ordered entries, combined Markdown, Agent
+fingerprint, Turn ID, and SHA-256 instruction fingerprint atomically in the
+Session Store. Every provider call in that Turn receives those exact bytes;
+reload or continuation reuses the stored snapshot instead of rerunning code.
+Resolution or persistence failure blocks provider execution. Instructions do
+not become transcript messages or Pi events, and they cannot invoke tools or
+expand Runtime authority. Manual debugging still resolves context-dependent
+instructions but intentionally provides no Session State scope.
 
 The optional `environment` map declares required or optional runtime input
 names as `config` or `secret`. It may include a non-sensitive description but

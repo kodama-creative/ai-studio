@@ -2,6 +2,7 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { TSchema } from "typebox";
 
 import type { AgentProjectArtifact } from "./agent-project-artifact";
+import type { RuntimeDynamicInstructionsDefinition } from "../../internal/authored-instruction-definitions";
 import type { McpClientConnectionDefinition } from "../../public/definitions/connections/mcp";
 import type { JsonValue } from "../../public/definitions/tool";
 import type { CompiledAgentDefinition } from "../../shared/agent-definition";
@@ -27,6 +28,18 @@ export interface CompiledAgentStateDefinition {
   readonly version: number;
 }
 
+export type CompiledAgentInstructionEntry =
+  | {
+    readonly definition: RuntimeDynamicInstructionsDefinition;
+    readonly kind: "dynamic";
+    readonly sourcePath: string;
+  }
+  | {
+    readonly kind: "static";
+    readonly markdown: string;
+    readonly sourcePath: string;
+  };
+
 export interface CompiledAgentSkill {
   readonly name: string;
   readonly description: string;
@@ -44,6 +57,7 @@ export interface AgentProjectSnapshot {
   readonly root: string;
   readonly definition?: CompiledAgentDefinition;
   readonly instructions: string;
+  readonly instructionEntries?: readonly CompiledAgentInstructionEntry[];
   readonly tools: readonly CompiledProjectTool[];
   readonly connections: readonly CompiledMcpConnection[];
   readonly resources: Readonly<AgentProjectResources>;
