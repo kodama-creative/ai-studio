@@ -165,10 +165,20 @@ const _ExternalAgentProjectsPanel = function ExternalAgentProjectsPanel({
         <h2 className="text-muted-foreground text-[11px] font-medium tracking-wide uppercase">
           Agents
         </h2>
+        <Tooltip content="Create agent project…">
+          <Button
+            aria-label="Create agent project"
+            className="ml-auto"
+            onClick={() => { executeCommand({ type: "createAgentProject", args: {} }); }}
+            size="icon-sm"
+            variant="ghost"
+          >
+            <PlusIcon />
+          </Button>
+        </Tooltip>
         <Tooltip content="Open agent folder…">
           <Button
             aria-label="Open agent folder"
-            className="ml-auto"
             onClick={() => { executeCommand({ type: "openExternalAgentProject", args: {} }); }}
             size="icon-sm"
             variant="ghost"

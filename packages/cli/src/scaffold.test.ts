@@ -1,13 +1,18 @@
-import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
+  AGENT_PROJECT_PRESETS,
+  type AgentProjectPreset
+} from "@llm-space/runtime";
+import {
   loadAgentProject,
-  loadAgentProjectManifest
+  loadAgentProjectManifest,
+  scaffoldAgentProject
 } from "@llm-space/runtime/node";
 import { afterEach, describe, expect, test } from "bun:test";
 
-import { scaffoldAgentProject } from "./scaffold";
+import { createOciBuildContext } from "./oci-build-context";
 
 const roots: string[] = [];
 
@@ -24,54 +29,76 @@ function _root() {
 }
 
 describe("scaffoldAgentProject", () => {
-  test("creates a runnable starter inside an existing directory", async () => {
-    const root = _root();
-    await mkdir(root);
-    await writeFile(path.join(root, "README.md"), "keep\n", "utf8");
-    await scaffoldAgentProject({ directory: root, template: "starter" });
-
-    const resolved = await loadAgentProjectManifest(root);
-    const snapshot = await loadAgentProject(resolved.agentRoot);
-    expect(snapshot.diagnostics).toEqual([]);
-    expect(snapshot.definition).toEqual({
-      model: { provider: "openai", id: "gpt-5.3-codex" },
-      reasoning: "high",
-      environment: {
-        OPENAI_API_KEY: { kind: "secret", required: true }
-      }
-    });
-    expect(snapshot.tools.map(tool => tool.name)).toEqual(["get-weather"]);
-    expect(snapshot.resources.skills?.map(skill => skill.name)).toEqual([
-      "weather-brief"
-    ]);
-    expect(await readFile(path.join(root, "README.md"), "utf8")).toBe("keep\n");
-  });
-
-  test("creates a valid blank project", async () => {
-    const root = _root();
-    await scaffoldAgentProject({ directory: root, template: "blank" });
-    const resolved = await loadAgentProjectManifest(root);
-    const snapshot = await loadAgentProject(resolved.agentRoot);
-    expect(snapshot.diagnostics).toEqual([]);
-    expect(snapshot.definition).toEqual({
-      model: { provider: "openai", id: "gpt-5.3-codex" },
-      reasoning: "high",
-      environment: {
-        OPENAI_API_KEY: { kind: "secret", required: true }
-      }
-    });
-    expect(snapshot.tools).toEqual([]);
-  });
-
-  test("refuses conflicts without leaving staging data", async () => {
-    const root = _root();
-    await mkdir(path.join(root, "agent"), { recursive: true });
-    try {
-      await scaffoldAgentProject({ directory: root, template: "starter" });
-      throw new Error("Expected scaffold to reject the conflict.");
-    } catch (error) {
-      expect(String(error)).toContain("Refusing to overwrite");
-    }
-    expect((await readdir(root)).sort()).toEqual(["agent"]);
-  });
+  for (let mask = 0; mask < (1 << AGENT_PROJECT_PRESETS.length); mask += 1) {
+    const presets = AGENT_PROJECT_PRESETS.filter(
+      (_preset, index) => Boolean(mask & (1 << index))
+    );
+    test(
+      `generates and builds ${_label(presets)}`,
+      async () => {
+        const parent = _root();
+        await mkdir(parent);
+        const root = path.join(parent, `agent-${mask}`);
+        await scaffoldAgentProject({
+          directory: root,
+          presets,
+          ...(presets.includes("mcp-connection")
+            ? {
+              mcpConnection: {
+                url: "https://mcp.example.test/tools",
+                tools: ["remote_echo"]
+              }
+            }
+            : {})
+        });
+        const resolved = await loadAgentProjectManifest(root);
+        const snapshot = await loadAgentProject(resolved.agentRoot);
+        expect(snapshot.diagnostics).toEqual([]);
+        expect(snapshot.definition).toEqual({
+          model: { provider: "openai", id: "gpt-5.3-codex" },
+          reasoning: "high",
+          environment: {
+            OPENAI_API_KEY: { kind: "secret", required: true }
+          }
+        });
+        expect(snapshot.tools.map(tool => tool.name)).toEqual(
+          presets.includes("local-tool") ? ["echo"] : []
+        );
+        expect(snapshot.resources.skills?.map(skill => skill.name) ?? []).toEqual(
+          presets.includes("skill") ? ["concise-response"] : []
+        );
+        expect(snapshot.connections.map(connection => ({
+          name: connection.name,
+          url: connection.definition.url,
+          allow: connection.definition.tools.allow
+        }))).toEqual(
+          presets.includes("mcp-connection")
+            ? [{
+              name: "remote",
+              url: "https://mcp.example.test/tools",
+              allow: ["remote_echo"]
+            }]
+            : []
+        );
+        if (presets.includes("local-tool")) {
+          const result = await snapshot.tools[0]!.execute("scaffold-test", {
+            text: "hello"
+          });
+          expect(result.details).toEqual({ text: "hello" });
+        }
+        const output = path.join(parent, `oci-${mask}`);
+        const built = await createOciBuildContext({
+          agentRoot: resolved.agentRoot,
+          output
+        });
+        expect(built.artifactFingerprint).toBe(snapshot.artifact.fingerprint);
+        expect(await readdir(output)).toContain("Containerfile");
+      },
+      60_000
+    );
+  }
 });
+
+function _label(presets: readonly AgentProjectPreset[]): string {
+  return presets.length > 0 ? presets.join(" + ") : "canonical base";
+}

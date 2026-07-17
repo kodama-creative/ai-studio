@@ -8,4 +8,5 @@ export type {
 export * from "./shared/agent-model-matches-definition";
 export * from "./shared/agent-project";
 export * from "./shared/agent-project-manifest";
+export * from "./shared/agent-project-scaffold";
 export * from "./shared/runtime-execution-mode";

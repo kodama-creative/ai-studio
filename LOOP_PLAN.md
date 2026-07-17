@@ -80,13 +80,13 @@ Runtime architecture follows [ADR 0001](./docs/adr/0001-runtime-harness-over-pi-
 
 ## Studio Authoring And Project Lifecycle
 
-- [ ] **09 — Canonical template and capability presets**
+- [x] **09 — Canonical template and capability presets**
   - Depends on: 05.
   - Run: `$kaizen-loop Create one canonical Agent template with composable presets for shipped capabilities.`
-  - Done when: Studio and CLI share one atomic scaffolder; every supported preset combination builds without manual edits and includes a focused test or eval case.
+  - Done when: Studio and CLI share one atomic scaffolder; every supported preset combination builds without manual edits and is covered by a focused repository-owned conformance case.
   - Boundary: no marketplace, duplicated full templates, or templates for unshipped capabilities.
   - Metric: generated-project build success rate.
-  - Blocker (2026-07-17): current contracts do not decide Studio-created source location/ownership, whole-project collision semantics, the supported capability-preset set and defaults, or the generated project's self-test/build dependency boundary. These choices require human approval before replacing the CLI's separate `blank`/`starter` templates or adding a Desktop creation flow.
+  - Decision (2026-07-17): ADR 0005 keeps portable source user-owned, requires an absent target with validated sibling staging and whole-root publication, composes the canonical base from `local-tool`, `skill`, and `mcp-connection`, defaults to local tool plus skill, and keeps exhaustive conformance repository-owned until a portable Eval protocol ships.
 
 - [ ] **10 — Build Thread as Agent Project**
   - Depends on: 09.

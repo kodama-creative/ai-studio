@@ -62,10 +62,62 @@ export default defineTool({
     projectMcpConnector: options.connector
   });
   managers.push(manager);
-  return { home, manager, marker, project, workspace };
+  return { home, manager, marker, project, root, workspace };
 }
 
 describe("ExternalAgentProjectManager", () => {
+  test("creates user-owned source before desktop-owned trust and Thread data", async () => {
+    const { home, manager, root } = await _fixture();
+    const parentDirectory = path.join(root, "user-projects");
+    await mkdir(parentDirectory);
+    const created = await manager.create({
+      parentDirectory,
+      name: "created-agent",
+      presets: ["local-tool", "skill"]
+    });
+
+    expect(created.path).toBe(
+      await realpath(path.join(parentDirectory, "created-agent"))
+    );
+    expect(created.removable).toBe(true);
+    expect(created.tools.map(tool => tool.name)).toEqual(["echo"]);
+    expect(created.skills.map(skill => skill.name)).toEqual([
+      "concise-response"
+    ]);
+    expect(created.threads).toHaveLength(1);
+    expect(
+      await Bun.file(path.join(created.path, "llm-space.json")).exists()
+    ).toBe(true);
+    expect(
+      await Bun.file(
+        path.join(
+          home,
+          "projects",
+          created.id,
+          "threads",
+          `${created.threads[0]!.id}.json`
+        )
+      ).exists()
+    ).toBe(true);
+  });
+
+  test("removes generated source when Desktop activation cannot commit", async () => {
+    const { home, manager, root } = await _fixture();
+    const parentDirectory = path.join(root, "user-projects");
+    const target = path.join(parentDirectory, "rollback-agent");
+    await mkdir(parentDirectory);
+    await writeFile(path.join(home, "settings"), "not a directory", "utf8");
+
+    await expect(manager.create({
+      parentDirectory,
+      name: "rollback-agent",
+      presets: ["local-tool", "skill"]
+    })).rejects.toThrow("cleanup was incomplete");
+
+    expect(await Bun.file(target).exists()).toBe(false);
+    expect(await Bun.file(path.join(home, "projects")).exists()).toBe(false);
+  });
+
   test("keeps Local Server authority immutable and duplicates it as a fresh Thread", async () => {
     const { manager, project } = await _fixture();
     const opened = await manager.trustAndOpen(project);

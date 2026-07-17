@@ -45,7 +45,8 @@ import { useFullScreen } from "@/lib/use-full-screen";
 import type { SettingsTab } from "@/shared/commands";
 import type {
   ExternalAgentProjectPreview,
-  ExternalAgentProjectSummary
+  ExternalAgentProjectSummary,
+  ExternalAgentProjectView
 } from "@/shared/external-agent-project";
 import type { TraceRecord } from "@/shared/traces";
 
@@ -68,6 +69,10 @@ const OnboardDialog = lazy(async () =>
 const StartFromExampleDialog = lazy(async () =>
   import("@/components/start-from-example-dialog").then(m => ({
     default: m.StartFromExampleDialog
+  })));
+const NewAgentProjectDialog = lazy(async () =>
+  import("@/components/new-agent-project-dialog").then(m => ({
+    default: m.NewAgentProjectDialog
   })));
 
 /**
@@ -239,6 +244,7 @@ function PageInner() {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [onboardOpen, setOnboardOpen] = useState(() => models.length === 0);
   const [examplesOpen, setExamplesOpen] = useState(false);
+  const [newAgentProjectOpen, setNewAgentProjectOpen] = useState(false);
   const [externalProjectsRefresh, setExternalProjectsRefresh] = useState(0);
   const [pendingTrust, setPendingTrust] =
     useState<ExternalAgentProjectPreview | null>(null);
@@ -330,6 +336,18 @@ function PageInner() {
       });
     }
   }, [executeCommand]);
+  const handleAgentProjectCreated = useCallback(
+    (project: ExternalAgentProjectView) => {
+      setExternalProjectsRefresh(value => value + 1);
+      setSidebarMode("agents");
+      tabs.openExternalProject({
+        projectId: project.id,
+        path: project.path,
+        projectName: project.name
+      });
+    },
+    [tabs]
+  );
 
   // File import: a hidden picker (opened by the `importFiles` command), the
   // parent directory it should import into, and page-wide drag-and-drop state.
@@ -410,6 +428,7 @@ function PageInner() {
       examplesParentRef.current = parent;
       setExamplesOpen(true);
     },
+    createAgentProject: () => { setNewAgentProjectOpen(true); },
     openExternalAgentProject: () => void browseExternalProject(),
     trustExternalAgentProject: ({ path }) =>
       void finishOpenExternalProject(path).catch(error =>
@@ -696,6 +715,13 @@ function PageInner() {
             });
           }}
           open={examplesOpen}
+        />
+      </LazyOverlay>
+      <LazyOverlay open={newAgentProjectOpen}>
+        <NewAgentProjectDialog
+          onCreated={handleAgentProjectCreated}
+          onOpenChange={setNewAgentProjectOpen}
+          open={newAgentProjectOpen}
         />
       </LazyOverlay>
       <ExternalAgentProjectTrustDialog

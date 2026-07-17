@@ -24,7 +24,10 @@ import {
 } from "@llm-space/core/thread";
 import {
   agentModelMatchesDefinition,
-  type CompiledAgentDefinition
+  type AgentProjectMcpConnectionPreset,
+  type AgentProjectPreset,
+  type CompiledAgentDefinition,
+  isAgentProjectName
 } from "@llm-space/runtime";
 import {
   type AgentProjectSnapshot,
@@ -38,7 +41,8 @@ import {
   type ProjectMcpConnector,
   ProjectMcpSession,
   ProjectMcpToolCallRejectedError,
-  type ResolvedAgentProjectManifest
+  type ResolvedAgentProjectManifest,
+  scaffoldAgentProject
 } from "@llm-space/runtime/node";
 
 import type { Models } from "@earendil-works/pi-ai";
@@ -139,6 +143,72 @@ export class ExternalAgentProjectManager {
 
   setOnChange(listener: (projectId: string) => void): void {
     this._onChange = listener;
+  }
+
+  async create(options: {
+    mcpConnection?: AgentProjectMcpConnectionPreset;
+    name: string;
+    parentDirectory: string;
+    presets: readonly AgentProjectPreset[];
+  }): Promise<ExternalAgentProjectView> {
+    await this._ensureRegistry();
+    if (!isAgentProjectName(options.name)) {
+      throw new Error(
+        "Agent Project name must use lowercase kebab-case letters and numbers."
+      );
+    }
+    const parentDirectory = await realpath(options.parentDirectory);
+    const directory = path.join(parentDirectory, options.name);
+    const projectId = _projectId(directory);
+    if (
+      this._registry.has(projectId)
+      || await _exists(path.join(this._dataRoot, projectId))
+    ) {
+      throw new Error(
+        "Desktop already has registry or Thread data for this Agent Project path. Remove the old Agent Project or choose another name."
+      );
+    }
+    const created = await scaffoldAgentProject({
+      directory,
+      presets: options.presets,
+      ...(options.mcpConnection
+        ? { mcpConnection: options.mcpConnection }
+        : {})
+    });
+    try {
+      const project = await this.trustAndOpen(created.directory);
+      if (project.status !== "ready" || project.threads.length === 0) {
+        throw new Error(
+          project.error ?? "Created Agent Project did not open with a default Thread."
+        );
+      }
+      return project;
+    } catch (error) {
+      this._registry.delete(projectId);
+      await this._closeLoaded(projectId);
+      const cleanup = await Promise.allSettled([
+        this._saveRegistry(),
+        rm(path.join(this._dataRoot, projectId), {
+          recursive: true,
+          force: true
+        }),
+        rm(created.directory, { recursive: true, force: true })
+      ]);
+      this._notify(projectId);
+      const cleanupErrors: unknown[] = [];
+      for (const result of cleanup) {
+        if (result.status === "rejected") {
+          cleanupErrors.push(result.reason);
+        }
+      }
+      if (cleanupErrors.length > 0) {
+        throw new AggregateError(
+          [error, ...cleanupErrors],
+          "Agent Project creation failed and cleanup was incomplete."
+        );
+      }
+      throw error;
+    }
   }
 
   async preview(
@@ -1469,6 +1539,16 @@ function _assertRuntimeProfileWrite(current: Thread, next: Thread): void {
 
 function _hasCode(error: unknown, code: string): boolean {
   return error instanceof Error && "code" in error && error.code === code;
+}
+
+async function _exists(target: string): Promise<boolean> {
+  try {
+    await lstat(target);
+    return true;
+  } catch (error) {
+    if (_hasCode(error, "ENOENT")) { return false; }
+    throw error;
+  }
 }
 
 function _message(error: unknown): string {

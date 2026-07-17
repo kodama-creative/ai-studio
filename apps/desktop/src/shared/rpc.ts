@@ -10,7 +10,11 @@ import type {
   ThreadAgentRuntimeProvenance,
   ThreadServerRunLineage
 } from "@llm-space/core";
-import type { RuntimeExecutionMode } from "@llm-space/runtime";
+import type {
+  AgentProjectMcpConnectionPreset,
+  AgentProjectPreset,
+  RuntimeExecutionMode
+} from "@llm-space/runtime";
 import type { RPCSchema } from "electrobun";
 
 import type { AnalyticsEvent, AnalyticsStatus } from "./analytics";
@@ -166,6 +170,10 @@ export interface DesktopRPCType {
         params: Record<string, never>;
         response: ExternalAgentProjectPreview | null;
       };
+      externalAgentProjectBrowseCreateParent: {
+        params: Record<string, never>;
+        response: { path: string; } | null;
+      };
       externalAgentProjectCallTool: {
         params: {
           arguments: Record<string, unknown>;
@@ -177,6 +185,15 @@ export interface DesktopRPCType {
           threadId?: string;
         };
         response: ExternalAgentProjectToolCallResponse;
+      };
+      externalAgentProjectCreate: {
+        params: {
+          mcpConnection?: AgentProjectMcpConnectionPreset;
+          name: string;
+          parentDirectory: string;
+          presets: AgentProjectPreset[];
+        };
+        response: ExternalAgentProjectView;
       };
       externalAgentProjectCreateThread: {
         params: {

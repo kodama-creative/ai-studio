@@ -1,3 +1,8 @@
+import type {
+  AgentProjectMcpConnectionPreset,
+  AgentProjectPreset
+} from "@llm-space/runtime";
+
 import { electrobun } from "@/lib/electrobun";
 
 import type {
@@ -17,11 +22,22 @@ function _rpc() {
 }
 
 export const externalAgentProjects = {
+  async browseCreateParent(): Promise<{ path: string; } | null> {
+    return _rpc().request.externalAgentProjectBrowseCreateParent({});
+  },
   async browse(): Promise<ExternalAgentProjectPreview | null> {
     return _rpc().request.externalAgentProjectBrowse({});
   },
   async trustAndOpen(path: string): Promise<ExternalAgentProjectView> {
     return _rpc().request.externalAgentProjectTrustAndOpen({ path });
+  },
+  async create(input: {
+    mcpConnection?: AgentProjectMcpConnectionPreset;
+    name: string;
+    parentDirectory: string;
+    presets: AgentProjectPreset[];
+  }): Promise<ExternalAgentProjectView> {
+    return _rpc().request.externalAgentProjectCreate(input);
   },
   async list(): Promise<ExternalAgentProjectSummary[]> {
     return _rpc().request.externalAgentProjectList({});

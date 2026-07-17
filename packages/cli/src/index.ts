@@ -1,20 +1,31 @@
 #!/usr/bin/env bun
 
-import { loadAgentProjectManifest } from "@llm-space/runtime/node";
+import {
+  type AgentProjectPreset,
+  DEFAULT_AGENT_PROJECT_PRESETS,
+  isAgentProjectPreset
+} from "@llm-space/runtime";
+import {
+  loadAgentProjectManifest,
+  scaffoldAgentProject
+} from "@llm-space/runtime/node";
 
 import { createOciBuildContext } from "./oci-build-context";
-import { scaffoldAgentProject } from "./scaffold";
 import { serveAgentProject } from "./serve";
 
 const HELP = `LLM Space Agent Project CLI
 
 Usage:
-  llm-space init [directory] [--blank]
+  llm-space init <directory> [--preset <name>...] [--blank]
   llm-space build [directory] --target oci --output <directory>
   llm-space serve [directory] [options]
 
 Options:
-  --blank    Create a minimal Agent instead of the starter project
+  --preset <name>              Select exactly one or more presets
+                               (local-tool, skill, mcp-connection)
+  --blank                      Create the canonical base with no presets
+  --mcp-url <url>              Streamable HTTP(S) URL for mcp-connection
+  --mcp-tool <name>            Exact remote tool allowlist; repeat as needed
   --target <target>             Build target (supported: oci)
   --output <directory>          Build output directory
   --host <host>                 Bind host (default: 127.0.0.1)
@@ -91,20 +102,26 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     process.stderr.write(command ? `Unknown command: ${command}\n\n` : HELP);
     return command ? 1 : 0;
   }
-  const positional = argv.slice(1).filter(arg => !arg.startsWith("-"));
-  const unknown = argv
-    .slice(1)
-    .filter(arg => arg.startsWith("-") && arg !== "--blank");
-  if (positional.length > 1 || unknown.length > 0) {
-    process.stderr.write(`Invalid arguments.\n\n${HELP}`);
+  let options: ReturnType<typeof _initOptions>;
+  try {
+    options = _initOptions(argv.slice(1));
+  } catch (error) {
+    process.stderr.write(
+      `Invalid Agent Project options: ${error instanceof Error ? error.message : String(error)}\n\n${HELP}`
+    );
     return 1;
   }
   try {
     const root = await scaffoldAgentProject({
-      directory: positional[0] ?? process.cwd(),
-      template: argv.includes("--blank") ? "blank" : "starter"
+      directory: options.directory,
+      presets: options.presets,
+      ...(options.mcpConnection
+        ? { mcpConnection: options.mcpConnection }
+        : {})
     });
-    process.stdout.write(`Created LLM Space Agent Project at ${root}\n`);
+    process.stdout.write(
+      `Created LLM Space Agent Project at ${root.directory}\n`
+    );
     return 0;
   } catch (error) {
     process.stderr.write(
@@ -112,6 +129,81 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     );
     return 1;
   }
+}
+
+function _initOptions(argv: string[]) {
+  const positional: string[] = [];
+  const presets: AgentProjectPreset[] = [];
+  const mcpTools: string[] = [];
+  let mcpUrl: string | undefined;
+  let blank = false;
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
+    if (!argument) { break; }
+    if (!argument.startsWith("-")) {
+      positional.push(argument);
+      continue;
+    }
+    if (argument === "--blank") {
+      blank = true;
+      continue;
+    }
+    if (
+      argument !== "--preset"
+      && argument !== "--mcp-url"
+      && argument !== "--mcp-tool"
+    ) {
+      throw new Error(`Unknown option: ${argument}`);
+    }
+    const value = argv[index + 1];
+    if (!value || value.startsWith("-")) {
+      throw new Error(`Missing value for ${argument}`);
+    }
+    if (argument === "--preset") {
+      if (!isAgentProjectPreset(value)) {
+        throw new Error(`Unsupported preset: ${value}`);
+      }
+      presets.push(value);
+    } else if (argument === "--mcp-url") {
+      if (mcpUrl) { throw new Error("--mcp-url may be provided only once"); }
+      mcpUrl = value;
+    } else {
+      mcpTools.push(value);
+    }
+    index += 1;
+  }
+  const directory = positional[0];
+  if (positional.length !== 1 || !directory) {
+    throw new Error("Exactly one new Agent Project directory is required");
+  }
+  if (blank && presets.length > 0) {
+    throw new Error("--blank and --preset cannot be combined");
+  }
+  const selected = blank
+    ? []
+    : presets.length > 0
+      ? presets
+      : [...DEFAULT_AGENT_PROJECT_PRESETS];
+  const hasMcp = selected.includes("mcp-connection");
+  if (!hasMcp && (mcpUrl || mcpTools.length > 0)) {
+    throw new Error("MCP options require --preset mcp-connection");
+  }
+  if (hasMcp) {
+    if (!mcpUrl || mcpTools.length === 0) {
+      throw new Error(
+        "mcp-connection requires --mcp-url and at least one --mcp-tool"
+      );
+    }
+    return {
+      directory,
+      presets: selected,
+      mcpConnection: { url: mcpUrl, tools: mcpTools }
+    };
+  }
+  return {
+    directory,
+    presets: selected
+  };
 }
 
 function _buildOptions(argv: string[]) {

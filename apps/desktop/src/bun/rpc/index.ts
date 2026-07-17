@@ -261,6 +261,18 @@ export function createMainWindowRPC({
             ? externalAgentProjects.preview(directory)
             : Promise.resolve(null);
         },
+        externalAgentProjectBrowseCreateParent: async () => {
+          const selected = await Utils.openFileDialog({
+            startingFolder: "~/",
+            canChooseFiles: false,
+            canChooseDirectory: true,
+            allowsMultipleSelection: false
+          });
+          const directory = selected.map(item => item.trim()).find(Boolean);
+          return directory ? { path: directory } : null;
+        },
+        externalAgentProjectCreate: async input =>
+          externalAgentProjects.create(input),
         externalAgentProjectTrustAndOpen: async ({ path }) =>
           externalAgentProjects.trustAndOpen(path),
         externalAgentProjectList: async () => externalAgentProjects.list(),

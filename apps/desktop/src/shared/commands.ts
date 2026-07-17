@@ -51,6 +51,9 @@ export interface OpenStartFromExampleCommand extends GenericCommand<
 /** Choose, validate, trust, and open an external Agent Project directory. */
 export interface OpenExternalAgentProjectCommand extends GenericCommand<"openExternalAgentProject"> {}
 
+/** Open the canonical Agent Project creation flow. */
+export interface CreateAgentProjectCommand extends GenericCommand<"createAgentProject"> {}
+
 /** Trust a previously previewed Agent Project path and open it in Desktop. */
 export interface TrustExternalAgentProjectCommand extends GenericCommand<
   "trustExternalAgentProject",
@@ -366,6 +369,7 @@ export type Command =
   | CloseOtherTabsCommand
   | CloseTabCommand
   | CopyFileCommand
+  | CreateAgentProjectCommand
   | CreateConnectedTraceProjectCommand
   | CreateExternalAgentProjectThreadCommand
   | CreateTraceProjectCommand
@@ -441,6 +445,10 @@ export const COMMAND_META = {
   },
   openExternalAgentProject: {
     label: "Open Agent Project...",
+    target: "webview"
+  },
+  createAgentProject: {
+    label: "New Agent Project...",
     target: "webview"
   },
   trustExternalAgentProject: {

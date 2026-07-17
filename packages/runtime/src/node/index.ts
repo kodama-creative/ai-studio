@@ -56,3 +56,8 @@ export {
   LocalAgentRuntime,
   type LocalAgentRuntimeOptions
 } from "./local-agent-runtime";
+export {
+  scaffoldAgentProject,
+  type ScaffoldAgentProjectOptions,
+  type ScaffoldedAgentProject
+} from "./scaffold/scaffold-agent-project";

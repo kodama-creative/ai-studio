@@ -2,6 +2,7 @@
 
 import {
   ArrowUpRightIcon,
+  BotIcon,
   FolderOpenIcon,
   PlusIcon,
   SettingsIcon,
@@ -67,11 +68,11 @@ export function Welcome({
           </EmptyMedia>
           <EmptyTitle>Welcome to LLM Space 4</EmptyTitle>
           <EmptyDescription>
-            Start with a ready agent thread, create a blank one, or open an
-            existing file from the left side panel.
+            Create an Agent Project, start from a ready example, or open a blank
+            thread.
           </EmptyDescription>
         </EmptyHeader>
-        <EmptyContent className="flex-row justify-center gap-2">
+        <EmptyContent className="flex-row flex-wrap justify-center gap-2">
           <Button onClick={onNewStarter}>
             <SparklesIcon />
             Start from examples
@@ -79,6 +80,13 @@ export function Welcome({
           <Button onClick={onNewFile} variant="outline">
             <PlusIcon />
             Blank thread
+          </Button>
+          <Button
+            onClick={() => { executeCommand({ type: "createAgentProject", args: {} }); }}
+            variant="outline"
+          >
+            <BotIcon />
+            Create agent project
           </Button>
           <Button onClick={onModels} variant="outline">
             <SettingsIcon />

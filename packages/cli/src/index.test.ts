@@ -36,6 +36,76 @@ describe("llm-space build", () => {
   });
 });
 
+describe("llm-space init", () => {
+  test("creates the default canonical preset combination", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "llm-space-cli-init-"));
+    ROOTS.push(parent);
+    const project = join(parent, "my-agent");
+    const result = await _cli(["init", project]);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain(project);
+    expect((await readdir(join(project, "agent"))).sort()).toEqual([
+      "agent.ts",
+      "instructions.md",
+      "skills",
+      "tools"
+    ]);
+  });
+
+  test("supports blank and explicit MCP presets without interactive input", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "llm-space-cli-init-"));
+    ROOTS.push(parent);
+    const blank = join(parent, "blank-agent");
+    const remote = join(parent, "remote-agent");
+    expect((await _cli(["init", blank, "--blank"])).exitCode).toBe(0);
+    expect((await readdir(join(blank, "agent"))).sort()).toEqual([
+      "agent.ts",
+      "instructions.md"
+    ]);
+
+    const result = await _cli([
+      "init",
+      remote,
+      "--preset",
+      "mcp-connection",
+      "--mcp-url",
+      "https://mcp.example.test/tools",
+      "--mcp-tool",
+      "remote_echo"
+    ]);
+    expect(result.exitCode).toBe(0);
+    expect(await readdir(join(remote, "agent", "connections"))).toEqual([
+      "remote.ts"
+    ]);
+  });
+
+  test("requires a new directory and complete non-conflicting options", async () => {
+    const noDirectory = await _cli(["init"]);
+    expect(noDirectory.exitCode).toBe(1);
+    expect(noDirectory.stderr).toContain("Exactly one");
+
+    const conflict = await _cli([
+      "init",
+      "agent",
+      "--blank",
+      "--preset",
+      "skill"
+    ]);
+    expect(conflict.exitCode).toBe(1);
+    expect(conflict.stderr).toContain("cannot be combined");
+
+    const incompleteMcp = await _cli([
+      "init",
+      "agent",
+      "--preset",
+      "mcp-connection"
+    ]);
+    expect(incompleteMcp.exitCode).toBe(1);
+    expect(incompleteMcp.stderr).toContain("requires --mcp-url");
+  });
+});
+
 async function _cli(args: readonly string[]): Promise<{
   exitCode: number;
   stderr: string;

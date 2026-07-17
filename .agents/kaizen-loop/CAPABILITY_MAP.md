@@ -265,11 +265,13 @@
 
 ## Agent Project Activation
 
-- Status: shipped One Agent Project Model V1
+- Status: shipped One Agent Project Model and Creation V1
 - Freshness: confirmed
-- Last checked: 2026-07-14
+- Last checked: 2026-07-17
 - Evidence:
-  - `packages/cli` exposes `bunx @llm-space/cli init [directory]` / `llm-space init [directory]`, with Starter and `--blank` templates, full collision preflight, staging rollback, and no overwrite or merge.
+  - `packages/cli` exposes mandatory-destination `llm-space init <directory>` over the shared Runtime Node scaffolder, with repeatable `--preset`, empty-preset `--blank` compatibility, and explicit MCP URL/tool inputs.
+  - Desktop exposes New Agent Project through Welcome, the Agents sidebar, and Command Palette. It asks for a parent folder, creates only an absent kebab-case child, then auto-trusts it, creates the existing default Project Thread under `LLM_SPACE_HOME`, switches to Agents, and opens Build.
+  - Current CEF audit `audits/2026-07-17-175010-canonical-agent-project/` proves default and conditional MCP dialog states, keyboard/focus behavior, 1280×800 and 900×700 reflow, real Bun RPC creation, source inspection in Build, separated source/registry/Thread ownership, and no application console errors.
   - `packages/runtime/src/manifest.ts` and `src/node/project-manifest.ts` define and safely resolve the V1 `llm-space.json` contract while rejecting traversal, absolute Agent paths, and source-root symlinks.
   - Desktop `ExternalAgentProjectManager` keeps registry/trust and project Threads under `LLM_SPACE_HOME`, validates before trust without importing tools, recursively watches trusted source, retains frozen snapshots, and executes project tools in Bun through typed RPC.
   - Current CEF screenshots `audits/2026-07-13-182809-external-agent-project-v1/02-project-restored.png`, `03-project-build.png`, and `04-project-thread.png` show the separate Agent Projects sidebar, external Build/source surface, project tool, project skill variable, and reused Thread Playground.
@@ -286,25 +288,26 @@
   - Current CEF audit `audits/2026-07-14-005810-agent-navigation-editor/` shows a manifestless workspace Agent auto-discovered into the same inventory and Build/Threads flow as explicitly opened projects, with no provenance badge or separate Builder/Target path.
   - `packages/runtime/src/node/project-manifest.ts` defaults a missing manifest to schema version 1 and `agent: "agent"`; focused tests preserve explicit-manifest confinement and symlink rejection.
   - Desktop now has one Agent Project manager/typed path. It recursively discovers canonical workspace paths, merges and deduplicates registered paths, auto-trusts only the canonical workspace boundary, and keeps every project Thread under desktop-owned `LLM_SPACE_HOME/projects` data.
-- Boundary: users can use one portable Agent Project contract in the default workspace or any explicitly opened directory; a manifest is optional when the Agent lives under `agent/`. Every Agent uses one Build + nested project Threads workflow, while source, trust, Thread, tool execution, and persistence boundaries remain path-safe and desktop-owned where appropriate.
-- Explicit non-goals: no desktop project-creation wizard, external source copy, Git/cloud/deployment workflow, Builder Agent or AI source mutation for external projects, sandbox or per-call approval system, public plugin SDK, multiple Agents per manifest, graphs/subagents/schedules, breakpoint debugger, directory-move migration, or destructive deletion of desktop-owned project data.
-- Visible gaps: native-picker import coverage is still manual/pre-seeded in CEF because the execution environment lacks macOS Accessibility/Screen Recording control. A live configured-provider message run was not exercised in the isolated audit, so remote provider connectivity remains supplementary rather than proven; trusted project tools are not sandboxed; moving a project creates a new path identity; project removal keeps its desktop-owned data intentionally; richer missing-skill diagnostics and automated CEF regression coverage remain future work.
+- Boundary: users can create or open one portable Agent Project contract in the default workspace or an explicit user-owned directory; a manifest is optional when the Agent lives under `agent/`. Every Agent uses one Build + nested Project Threads workflow, while source remains user-owned and trust, Threads, tool execution, and persistence remain path-safe and Desktop-owned where appropriate.
+- Explicit non-goals: no external source copy, Git/cloud/deployment workflow, Builder Agent or AI source mutation, sandbox or per-call approval system, public plugin SDK, multiple Agents per manifest, graphs/subagents/schedules, breakpoint debugger, directory merge/overwrite, directory-move migration, or destructive deletion of desktop-owned project data.
+- Visible gaps: native-picker completion remains a manual supplementary check because available CEF/macOS automation could open but not choose the folder. Thread-to-project promotion remains item 10; live provider connectivity, sandboxing, richer missing-skill diagnostics, source moves, and automated CEF regression coverage remain future work.
 
 ## Canonical Agent Project Scaffolding
 
-- Status: blocked before V1
+- Status: shipped V1
 - Freshness: confirmed
 - Last checked: 2026-07-17
 - Evidence:
-  - `packages/cli/src/scaffold.ts` is one rollback-safe writer but branches between two hard-coded full templates, `blank` and `starter`; it has no capability-preset model and stages inside the destination before moving only `agent/` and `llm-space.json`.
-  - `packages/cli/src/scaffold.test.ts` proves both current shapes load through the trusted Runtime compiler and preserves an unrelated file, but generated projects contain no focused test/eval source and the matrix does not cover composable capabilities.
-  - `apps/example-agent` is the checked-in reference for shipped model/reasoning/environment, local tool, skill, and MCP connection capabilities, but it is a private monorepo workspace rather than the source of the CLI templates.
-  - Desktop RPC, commands, welcome screen, and Agents panel expose only native-picker import, trust/open, inspect, source editing, and desktop-owned Thread operations. There is no create-project request, command, interaction, or shared scaffolder call.
-  - `ExternalAgentProjectManager` auto-trusts source only inside the canonical workspace, registers explicitly trusted external paths, and stores project Threads separately under `LLM_SPACE_HOME/projects`; current evidence does not authorize Studio to create portable source in either location.
-  - Runtime authored SDK imports are supplied by the trusted compiler's virtual modules, while `@llm-space/runtime` remains a private workspace package. A generated focused test cannot be assumed to run as an independently installed package without choosing a new dependency/test ownership contract.
-- Boundary: today users can create either the CLI's minimal or weather starter source and can open an existing Agent Project in Studio. There is no canonical shared base, composable preset set, Studio creation flow, or generated focused test/eval contract.
-- Explicit non-goals: no marketplace, remote/community templates, duplicated full templates, presets for unshipped capabilities, secret values, source mutation after creation, or silent overwrite/merge.
-- Visible gaps: human approval is required for (1) Studio-created source destination and ownership, (2) absent/empty/existing target and rollback semantics, (3) supported capability presets, defaults, and `blank`/`starter` compatibility, and (4) how every generated combination builds and owns a runnable focused test before item 09 product code can begin.
+  - ADR 0005 fixes user-owned portable source, Desktop-owned registry/trust/Threads, absent-target collision semantics, canonical base content, the three shipped presets and defaults, CLI compatibility, MCP constraints, and repository-owned conformance.
+  - `@llm-space/runtime/node` exports the sole `scaffoldAgentProject()` implementation; browser-safe Runtime exports share preset/config validation with the renderer without importing Node execution code.
+  - The scaffolder canonicalizes an existing parent, validates a strict kebab-case child and preset input, renders in a sibling private stage, loads the complete project through Runtime, atomically reserves the absent destination, and publishes the whole root with one rename. Failures remove staging and never merge with or recursively delete a raced target.
+  - The canonical base always emits manifest, instructions, Agent model/reasoning, and an environment requirement. Independent `echo`, `concise-response`, and explicit HTTP(S) MCP contributions compose in canonical order without secrets or network validation.
+  - Repository-owned tests exhaust all eight preset combinations and prove Runtime load, local-tool execution, MCP/skill shape, and deterministic OCI context creation without source repair. Focused final acceptance passes 32 tests with 187 assertions.
+  - CLI parsing tests prove mandatory destination, default local-tool + skill, `--blank`, repeated explicit presets, MCP inputs, and invalid combinations. Desktop manager tests prove successful source/trust/default-Thread ownership and source cleanup when Desktop activation cannot commit.
+  - Real Electrobun evidence under `audits/2026-07-17-175010-canonical-agent-project/` verifies the three creation entry points, dialog states and accessibility, conditional MCP fields, real RPC generation, and Build landing at both target sizes.
+- Boundary: CLI and Studio create the same canonical portable source into a wholly absent user-owned directory. V1 composes only `local-tool`, `skill`, and `mcp-connection`; defaults are local tool plus skill, and MCP requires an HTTP(S) URL plus one or more exact allowlisted names. Generated projects intentionally carry no repository-specific test/Eval protocol.
+- Explicit non-goals: no marketplace, remote/community templates, duplicated full templates, unshipped capability presets, dependency installer, Git setup, auth/OAuth/stdio MCP, secret values, network validation, source mutation after creation, or silent overwrite/merge.
+- Visible gaps: portable generated Eval suites remain item 29, Thread promotion remains item 10, and native folder selection is not automated in the CEF audit. Remote templates, dependency management, and source merge/adoption require separate future product decisions.
 
 ## Agent And Thread Workbench Navigation
 
