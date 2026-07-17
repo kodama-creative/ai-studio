@@ -16,6 +16,7 @@ export function compileAgentDefinition(
       provider: definition.model.slice(0, separator),
       id: definition.model.slice(separator + 1)
     },
-    ...(reasoning ? { reasoning } : {})
+    ...(reasoning ? { reasoning } : {}),
+    ...(definition.environment ? { environment: definition.environment } : {})
   };
 }

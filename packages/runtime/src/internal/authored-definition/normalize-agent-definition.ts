@@ -1,9 +1,17 @@
 import type {
   AgentDefinition,
+  AgentEnvironmentRequirement,
+  AgentEnvironmentRequirements,
   AgentReasoningDefinition
 } from "../../public/definitions/agent";
 
-const AGENT_DEFINITION_KEYS = new Set(["model", "reasoning"]);
+const AGENT_DEFINITION_KEYS = new Set(["environment", "model", "reasoning"]);
+const ENVIRONMENT_REQUIREMENT_KEYS = new Set([
+  "description",
+  "kind",
+  "required"
+]);
+const ENVIRONMENT_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const AGENT_REASONING_VALUES = new Set<AgentReasoningDefinition>([
   "provider-default",
   "none",
@@ -38,5 +46,61 @@ export function normalizeAgentDefinition(
   ) {
     throw new TypeError(errorMessage);
   }
-  return candidate as unknown as AgentDefinition;
+  const environment = _normalizeEnvironment(candidate.environment, errorMessage);
+  return {
+    model: candidate.model,
+    ...(candidate.reasoning ? { reasoning: candidate.reasoning } : {}),
+    ...(environment ? { environment } : {})
+  };
+}
+
+function _normalizeEnvironment(
+  value: unknown,
+  errorMessage: string
+): AgentEnvironmentRequirements | undefined {
+  if (value === undefined) { return undefined; }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError(errorMessage);
+  }
+  const environment: Record<string, AgentEnvironmentRequirement> = {};
+  for (const name of Object.keys(value).sort(_compareCodePoint)) {
+    if (!ENVIRONMENT_NAME_PATTERN.test(name)) {
+      throw new TypeError(errorMessage);
+    }
+    const requirement = (value as Record<string, unknown>)[name];
+    if (
+      !requirement
+      || typeof requirement !== "object"
+      || Array.isArray(requirement)
+    ) {
+      throw new TypeError(errorMessage);
+    }
+    const candidate = requirement as Record<string, unknown>;
+    if (
+      Object.keys(candidate).some(key => !ENVIRONMENT_REQUIREMENT_KEYS.has(key))
+      || (candidate.kind !== "config" && candidate.kind !== "secret")
+      || typeof candidate.required !== "boolean"
+      || (
+        candidate.description !== undefined
+        && (
+          typeof candidate.description !== "string"
+          || candidate.description.trim().length === 0
+        )
+      )
+    ) {
+      throw new TypeError(errorMessage);
+    }
+    environment[name] = {
+      kind: candidate.kind,
+      required: candidate.required,
+      ...(typeof candidate.description === "string"
+        ? { description: candidate.description }
+        : {})
+    };
+  }
+  return environment;
+}
+
+function _compareCodePoint(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }

@@ -13,6 +13,7 @@ This is the English user manual for LLM Space. Start with the quick start guide,
 | [UI Layout](./ui-layout.md) | Explains the major areas of the main interface. |
 | [Settings](./settings.md) | Introduces the Settings entry point and the General, Models, MCP, Search, and Skills pages. |
 | [Shortcut Keys](./shortcut-keys.md) | Introduces menu shortcuts, the command palette, and Thread run shortcuts. |
+| [OCI Deployment](./oci-deployment.md) | Builds and operates one project-specific Agent deployment image. |
 
 # External Links
 

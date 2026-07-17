@@ -110,6 +110,12 @@ export function createAgentProjectArtifact({
     ),
     runtime: _section(RUNTIME_FINGERPRINT_INPUTS),
     environmentRequirements: _section([
+      ...Object.entries(definition?.environment ?? {}).map(
+        ([name, requirement]) => ({
+          id: `agent-env:${name}`,
+          content: requirement
+        })
+      ),
       {
         id: `bun@${rootPackage.engines.bun}`,
         content: { runtime: "bun", requirement: rootPackage.engines.bun }

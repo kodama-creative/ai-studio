@@ -29,6 +29,9 @@ The runtime owns three boundaries:
   `defineTool()` and the bounded `ToolContext`.
 - `@llm-space/runtime/connections` is the authored remote-action contract. It
   exports `defineMcpClientConnection()` for Streamable HTTP MCP connections.
+- `@llm-space/runtime/server` is a minimal Bun-only type surface used by a
+  closed deployment Server bundle. It avoids importing compiler discovery or
+  source-loading side effects.
 
 ## Architecture
 
@@ -105,12 +108,27 @@ import { defineAgent } from "@llm-space/runtime";
 export default defineAgent({
   model: "openai/gpt-5.3-codex",
   reasoning: "high",
+  environment: {
+    OPENAI_API_KEY: { kind: "secret", required: true },
+  },
 });
 ```
 
 The model string splits on its first `/`. Reasoning accepts
 `provider-default`, `none`, `minimal`, `low`, `medium`, `high`, and `xhigh`;
 `none` maps to Pi's internal `off` value.
+
+The optional `environment` map declares required or optional runtime input
+names as `config` or `secret`. It may include a non-sensitive description but
+never a default or value. Names and classifications participate in the Agent
+Artifact fingerprint. Hosts remain responsible for supplying values without
+copying them into source, artifacts, Sessions, Threads, Traces, or logs.
+
+`createAgentProjectBundle()` captures two identical project copies and emits a
+self-contained executable Agent bundle plus the unchanged artifact descriptor.
+The split capture prevents self-mutating authored imports from changing the
+compiled bytes. The bundle embeds and verifies the full descriptor and closes
+authored local/npm dependencies without retaining absolute project paths.
 
 ## Actions
 

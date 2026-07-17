@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import {
   AgentRuntime,
   type CompiledAgentProjectSnapshot
-} from "@llm-space/runtime/node";
+} from "@llm-space/runtime/server";
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Models, UserMessage } from "@earendil-works/pi-ai";

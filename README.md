@@ -93,6 +93,7 @@ The user guide lives in this repository:
 - [Quick start](./docs/get-started.md)
 - [User manual](./docs/index.md)
 - [Core concepts](./docs/core-concepts.md)
+- [OCI deployment](./docs/oci-deployment.md)
 
 ## Contributing
 

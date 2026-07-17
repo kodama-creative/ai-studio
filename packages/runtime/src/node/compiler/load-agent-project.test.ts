@@ -28,7 +28,15 @@ describe("loadAgentProject", () => {
       join(root, "agent.ts"),
       `export default {
         model: "fake/models/codex",
-        reasoning: "none"
+        reasoning: "none",
+        environment: {
+          LOG_LEVEL: {
+            kind: "config",
+            required: false,
+            description: "Optional runtime logging level"
+          },
+          PROVIDER_API_KEY: { kind: "secret", required: true }
+        }
       };`
     );
 
@@ -36,13 +44,52 @@ describe("loadAgentProject", () => {
 
     expect(snapshot.definition).toEqual({
       model: { provider: "fake", id: "models/codex" },
-      reasoning: "off"
+      reasoning: "off",
+      environment: {
+        LOG_LEVEL: {
+          kind: "config",
+          required: false,
+          description: "Optional runtime logging level"
+        },
+        PROVIDER_API_KEY: { kind: "secret", required: true }
+      }
     });
     expect(snapshot.diagnostics).toEqual([]);
     expect(Object.isFrozen(snapshot)).toBe(true);
     expect(Object.isFrozen(snapshot.definition?.model)).toBe(true);
     expect(Object.isFrozen(snapshot.artifact.fingerprints)).toBe(true);
     expect(snapshot.fingerprint).toBe(snapshot.artifact.fingerprint);
+    expect(
+      snapshot.artifact.fingerprints.environmentRequirements.entries.map(
+        entry => entry.id
+      )
+    ).toEqual([
+      "agent-env:LOG_LEVEL",
+      "agent-env:PROVIDER_API_KEY",
+      "bun@>=1.3.14"
+    ]);
+  });
+
+  test("rejects invalid Agent environment requirement declarations", async () => {
+    const root = await _fixture();
+    await writeFile(join(root, "instructions.md"), "Test.\n");
+    await writeFile(
+      join(root, "agent.ts"),
+      `export default {
+        model: "fake/model",
+        environment: {
+          "invalid-name": { kind: "secret", required: true },
+          API_KEY: { kind: "secret", required: true, default: "value" }
+        }
+      };`
+    );
+
+    const snapshot = await loadAgentProject(root);
+
+    expect(snapshot.definition).toBeUndefined();
+    expect(snapshot.diagnostics).toEqual([
+      expect.objectContaining({ code: "definition_export_invalid" })
+    ]);
   });
 
   test("discovers instructions, executable tools, and skills", async () => {

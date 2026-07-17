@@ -24,6 +24,10 @@ export {
   type AgentSessionOptions,
   type AgentSessionPersistence
 } from "../runtime/sessions/agent-session";
+export {
+  type AgentProjectBundle,
+  createAgentProjectBundle
+} from "./compiler/create-agent-project-bundle";
 export { loadAgentProject } from "./compiler/load-agent-project";
 export {
   type ProjectMcpConnectionStatus,

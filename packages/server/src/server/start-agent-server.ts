@@ -1,7 +1,7 @@
 import { recoverRuntimeSession } from "@llm-space/runtime/harness";
 
 import type { Models } from "@earendil-works/pi-ai";
-import type { CompiledAgentProjectSnapshot } from "@llm-space/runtime/node";
+import type { CompiledAgentProjectSnapshot } from "@llm-space/runtime/server";
 
 import {
   assertValidTrustedProxyRanges,
@@ -231,6 +231,15 @@ async function _handleRequest(
   ) {
     return _error(413, "request_too_large");
   }
+  const url = new URL(request.url);
+  const origin = request.headers.get("origin");
+  if (_isLoopbackProbe(request, url, peerAddress)) {
+    if (origin && !context.allowedOrigins.has(origin)) {
+      return _error(403, "origin_forbidden");
+    }
+    const response = await _routeRequest(request, context, url);
+    return origin ? _corsResponse(response, origin) : response;
+  }
   if (context.trustedProxyCidrs.length > 0) {
     if (
       !peerAddress
@@ -242,11 +251,9 @@ async function _handleRequest(
       return _error(400, "https_required");
     }
   }
-  const url = new URL(request.url);
   if (!context.allowedHosts.has(url.host)) {
     return _error(400, "invalid_host");
   }
-  const origin = request.headers.get("origin");
   if (origin && !context.allowedOrigins.has(origin)) {
     return _error(403, "origin_forbidden");
   }
@@ -258,6 +265,24 @@ async function _handleRequest(
   }
   const response = await _routeRequest(request, context, url);
   return origin ? _corsResponse(response, origin) : response;
+}
+
+function _isLoopbackProbe(
+  request: Request,
+  url: URL,
+  peerAddress?: string
+): boolean {
+  return request.method === "GET"
+    && (url.pathname === "/v1/health" || url.pathname === "/v1/ready")
+    && _isLoopbackHost(url.hostname)
+    && Boolean(peerAddress && _isLoopbackPeer(peerAddress));
+}
+
+function _isLoopbackPeer(value: string): boolean {
+  const normalized = value.toLowerCase();
+  return normalized === "::1"
+    || normalized.startsWith("127.")
+    || normalized.startsWith("::ffff:127.");
 }
 
 function _forwardedHttps(request: Request): boolean {

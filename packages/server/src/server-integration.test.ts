@@ -975,6 +975,15 @@ describe("Agent Server HTTP protocol", () => {
     servers.push(server);
     const url = server.url.replace("0.0.0.0", "127.0.0.1");
     expect(await _directHttpStatus(`${url}/v1/health`, {
+      host: "127.0.0.1"
+    })).toBe(200);
+    expect(await _directHttpStatus(`${url}/v1/ready`, {
+      host: "127.0.0.1"
+    })).toBe(200);
+    expect(await _directHttpStatus(`${url}/v1/sessions`, {
+      host: "127.0.0.1"
+    }, "POST")).toBe(400);
+    expect(await _directHttpStatus(`${url}/v1/health`, {
       host: "agent.example"
     })).toBe(400);
     expect(await _directHttpStatus(`${url}/v1/health`, {
@@ -988,7 +997,7 @@ describe("Agent Server HTTP protocol", () => {
     expect(await _directHttpStatus(`${url}/v1/health`, {
       host: "127.0.0.1",
       "x-forwarded-proto": "https"
-    })).toBe(400);
+    })).toBe(200);
     const proxied = await _directHttpStatus(`${url}/v1/health`, {
       host: "agent.example",
       "x-forwarded-proto": "https"
@@ -1480,7 +1489,8 @@ function _disconnectFirstEventOnce(): typeof globalThis.fetch {
 
 async function _directHttpStatus(
   value: string,
-  headers: Readonly<Record<string, string>>
+  headers: Readonly<Record<string, string>>,
+  method = "GET"
 ): Promise<number> {
   const url = new URL(value);
   return new Promise<number>((resolveStatus, rejectStatus) => {
@@ -1492,7 +1502,7 @@ async function _directHttpStatus(
         .map(([name, value]) => `${name}: ${value}`)
         .join("\r\n");
       socket.write(
-        `GET ${url.pathname}${url.search} HTTP/1.1\r\n${requestHeaders}`
+        `${method} ${url.pathname}${url.search} HTTP/1.1\r\n${requestHeaders}`
         + "\r\nConnection: close\r\n\r\n"
       );
     });

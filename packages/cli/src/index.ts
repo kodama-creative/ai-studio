@@ -1,5 +1,8 @@
 #!/usr/bin/env bun
 
+import { loadAgentProjectManifest } from "@llm-space/runtime/node";
+
+import { createOciBuildContext } from "./oci-build-context";
 import { scaffoldAgentProject } from "./scaffold";
 import { serveAgentProject } from "./serve";
 
@@ -7,10 +10,13 @@ const HELP = `LLM Space Agent Project CLI
 
 Usage:
   llm-space init [directory] [--blank]
+  llm-space build [directory] --target oci --output <directory>
   llm-space serve [directory] [options]
 
 Options:
   --blank    Create a minimal Agent instead of the starter project
+  --target <target>             Build target (supported: oci)
+  --output <directory>          Build output directory
   --host <host>                 Bind host (default: 127.0.0.1)
   --port <port>                 Bind port (default: 7331)
   --local-dev                   Enable authenticated loopback HTTP
@@ -54,6 +60,33 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       return 1;
     }
   }
+  if (command === "build") {
+    let options: ReturnType<typeof _buildOptions>;
+    try {
+      options = _buildOptions(argv.slice(1));
+    } catch (error) {
+      process.stderr.write(
+        `Invalid Agent build options: ${error instanceof Error ? error.message : "unknown error"}\n`
+      );
+      return 1;
+    }
+    try {
+      const project = await loadAgentProjectManifest(options.projectRoot);
+      const result = await createOciBuildContext({
+        agentRoot: project.agentRoot,
+        output: options.output
+      });
+      process.stdout.write(
+        `Created OCI build context for ${result.artifactFingerprint} at ${result.output}\n`
+      );
+      return 0;
+    } catch {
+      process.stderr.write(
+        "Unable to build OCI Agent context; verify the project and output path.\n"
+      );
+      return 1;
+    }
+  }
   if (command !== "init") {
     process.stderr.write(command ? `Unknown command: ${command}\n\n` : HELP);
     return command ? 1 : 0;
@@ -79,6 +112,42 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     );
     return 1;
   }
+}
+
+function _buildOptions(argv: string[]) {
+  const positional: string[] = [];
+  const values = new Map<string, string>();
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
+    if (!argument) { break; }
+    if (!argument.startsWith("-")) {
+      positional.push(argument);
+      continue;
+    }
+    if (argument !== "--target" && argument !== "--output") {
+      throw new Error(`Unknown option: ${argument}`);
+    }
+    const value = argv[index + 1];
+    if (!value || value.startsWith("-")) {
+      throw new Error(`Missing value for ${argument}`);
+    }
+    values.set(argument, value);
+    index += 1;
+  }
+  if (positional.length > 1) {
+    throw new Error("Too many Agent Project directories");
+  }
+  if (values.get("--target") !== "oci") {
+    throw new Error("--target oci is required");
+  }
+  const output = values.get("--output");
+  if (!output) {
+    throw new Error("--output is required");
+  }
+  return {
+    projectRoot: positional[0] ?? process.cwd(),
+    output
+  };
 }
 
 function _serveOptions(argv: string[]) {

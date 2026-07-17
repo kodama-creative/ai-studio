@@ -69,3 +69,7 @@ sequence as the SSE `id`.
 
 The complete security, storage, retention, recovery, TLS, CORS, limit, and
 non-goal boundary is recorded in ADR 0002.
+
+For the fixed non-root OCI profile, declared Agent environment, trusted proxy,
+volume ownership, multi-platform build, and stop-grace contract, see
+[OCI Deployment](../../docs/oci-deployment.md).

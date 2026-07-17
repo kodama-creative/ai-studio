@@ -16,7 +16,10 @@ describe("example Agent Project", () => {
     expect(snapshot.diagnostics).toEqual([]);
     expect(snapshot.definition).toEqual({
       model: { provider: "openai", id: "gpt-5.3-codex" },
-      reasoning: "high"
+      reasoning: "high",
+      environment: {
+        OPENAI_API_KEY: { kind: "secret", required: true }
+      }
     });
     expect(snapshot.instructions).toContain("concise weather assistant");
     expect(snapshot.tools.map(tool => tool.name)).toEqual(["get-weather"]);
@@ -45,8 +48,11 @@ describe("example Agent Project", () => {
       "tool:get-weather:output"
     ]);
     expect(snapshot.artifact.fingerprints.runtime.entries.length).toBeGreaterThan(0);
-    expect(snapshot.artifact.fingerprints.environmentRequirements.entries)
-      .toEqual([expect.objectContaining({ id: "bun@>=1.3.14" })]);
+    expect(
+      snapshot.artifact.fingerprints.environmentRequirements.entries.map(
+        entry => entry.id
+      )
+    ).toEqual(["agent-env:OPENAI_API_KEY", "bun@>=1.3.14"]);
 
     const result = await snapshot.tools[0]!.execute("example-test", {
       city: "Shanghai"

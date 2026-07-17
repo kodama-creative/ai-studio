@@ -1,5 +1,7 @@
 export * from "./public/definitions/agent";
 export type {
+  AgentEnvironmentRequirement,
+  AgentEnvironmentRequirements,
   AgentModelSelector,
   CompiledAgentDefinition
 } from "./shared/agent-definition";

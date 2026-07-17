@@ -130,7 +130,7 @@ async function _compileDefinition(
     return compileAgentDefinition(
       normalizeAgentDefinition(
         authored,
-        "agent.ts must default-export defineAgent({ model, reasoning? })"
+        "agent.ts must default-export defineAgent({ model, reasoning?, environment? })"
       )
     );
   } catch (error) {

@@ -35,7 +35,10 @@ describe("scaffoldAgentProject", () => {
     expect(snapshot.diagnostics).toEqual([]);
     expect(snapshot.definition).toEqual({
       model: { provider: "openai", id: "gpt-5.3-codex" },
-      reasoning: "high"
+      reasoning: "high",
+      environment: {
+        OPENAI_API_KEY: { kind: "secret", required: true }
+      }
     });
     expect(snapshot.tools.map(tool => tool.name)).toEqual(["get-weather"]);
     expect(snapshot.resources.skills?.map(skill => skill.name)).toEqual([
@@ -52,7 +55,10 @@ describe("scaffoldAgentProject", () => {
     expect(snapshot.diagnostics).toEqual([]);
     expect(snapshot.definition).toEqual({
       model: { provider: "openai", id: "gpt-5.3-codex" },
-      reasoning: "high"
+      reasoning: "high",
+      environment: {
+        OPENAI_API_KEY: { kind: "secret", required: true }
+      }
     });
     expect(snapshot.tools).toEqual([]);
   });

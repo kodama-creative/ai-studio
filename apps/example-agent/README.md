@@ -40,3 +40,20 @@ weather data.
 
 This project is example code for local development. It does not provide live
 weather data, sandbox tool execution, or production deployment guarantees.
+
+## Build An OCI Context
+
+The example declares `OPENAI_API_KEY` as a required secret name without a
+value. Generate its project-specific, self-contained OCI context from the
+repository root:
+
+```sh
+bun packages/cli/src/index.ts build ./apps/example-agent \
+  --target oci \
+  --output ./oci-context
+```
+
+The command does not invoke Docker or publish an image. See
+[OCI Deployment](../../docs/oci-deployment.md) for the locked base image,
+trusted-proxy environment, non-root volume ownership, multi-platform build,
+and graceful-stop contract.
