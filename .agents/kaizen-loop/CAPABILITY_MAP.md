@@ -1,7 +1,7 @@
 # LLM Space Capability Map
 
 - Last updated: 2026-07-17
-- Map status: refreshed after the roadmap item 08 decision gate. ADR 0004 now fixes the OCI artifact, environment/secrets, non-root volume, lifecycle, and two-platform acceptance boundary; implementation has not started.
+- Map status: refreshed after roadmap item 08 shipped. ADR 0004's OCI artifact, environment/secrets, non-root volume, lifecycle, and two-platform acceptance boundary is implemented and verified; item 09 remains the next unchecked roadmap capability.
 - Evidence rule: entries marked `confirmed` cite current rendered-product or current-code evidence. Entries marked `stale` rely on previous logs or code paths not fully re-inspected in this loop. Entries marked `unknown` need a future product-surface check before they can drive a recommendation.
 
 ## First-Run Model Setup
