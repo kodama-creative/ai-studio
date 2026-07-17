@@ -57,6 +57,9 @@ describe("loadAgentProject", () => {
     expect(snapshot.diagnostics).toEqual([]);
     expect(Object.isFrozen(snapshot)).toBe(true);
     expect(Object.isFrozen(snapshot.definition?.model)).toBe(true);
+    expect(Object.isFrozen(snapshot.definition?.environment)).toBe(true);
+    expect(Object.isFrozen(snapshot.definition?.environment?.PROVIDER_API_KEY))
+      .toBe(true);
     expect(Object.isFrozen(snapshot.artifact.fingerprints)).toBe(true);
     expect(snapshot.fingerprint).toBe(snapshot.artifact.fingerprint);
     expect(

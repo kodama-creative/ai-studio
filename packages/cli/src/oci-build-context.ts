@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import {
   lstat,
   mkdir,
+  readdir,
+  readFile,
   rename,
   rm,
   writeFile
@@ -61,6 +63,7 @@ export async function createOciBuildContext(
         "utf8"
       )
     ]);
+    await _assertNoRuntimeSecretValues(stage, environment.agent);
     await rename(stage, output);
     return Object.freeze({
       artifactFingerprint: bundled.artifact.fingerprint,
@@ -69,6 +72,30 @@ export async function createOciBuildContext(
   } catch (error) {
     await rm(stage, { recursive: true, force: true });
     throw error;
+  }
+}
+
+async function _assertNoRuntimeSecretValues(
+  stage: string,
+  agent: ReturnType<typeof createOciEnvironmentManifest>["agent"]
+): Promise<void> {
+  const names = [
+    "LLM_SPACE_SERVER_AUTH_KEYS",
+    ...Object.entries(agent)
+      .filter(([, requirement]) => requirement.kind === "secret")
+      .map(([name]) => name)
+  ];
+  const files = await readdir(stage);
+  const context = (await Promise.all(
+    files.map(async file => readFile(path.join(stage, file), "utf8"))
+  )).join("\n");
+  for (const name of names) {
+    const value = process.env[name];
+    if (value && context.includes(value)) {
+      throw new Error(
+        `Generated OCI context contains runtime secret value for ${name}`
+      );
+    }
   }
 }
 
@@ -85,18 +112,18 @@ async function _bundleEntriesInFreshBunProcess(stage: string): Promise<void> {
   const bootstrapEntry = path.join(import.meta.dir, "oci/bootstrap.ts");
   const healthcheckEntry = path.join(import.meta.dir, "oci/healthcheck.ts");
   await writeFile(scriptPath, `
-    const [resolveRoot, ...entries] = process.argv.slice(2);
-    const plugin = {
+    const [RESOLVE_ROOT, ...ENTRIES] = process.argv.slice(2);
+    const PLUGIN = {
       name: "llm-space-oci-workspaces",
       setup(build) {
         build.onResolve({ filter: /^@llm-space\\// }, args => ({
-          path: Bun.resolveSync(args.path, resolveRoot)
+          path: Bun.resolveSync(args.path, RESOLVE_ROOT)
         }));
       }
     };
-    for (let index = 0; index < entries.length; index += 2) {
-      const entryPath = entries[index];
-      const outputPath = entries[index + 1];
+    for (let index = 0; index < ENTRIES.length; index += 2) {
+      const entryPath = ENTRIES[index];
+      const outputPath = ENTRIES[index + 1];
       const result = await Bun.build({
         entrypoints: [entryPath],
         format: "esm",
@@ -108,7 +135,7 @@ async function _bundleEntriesInFreshBunProcess(stage: string): Promise<void> {
         sourcemap: "none",
         target: "bun",
         write: false,
-        plugins: [plugin]
+        plugins: [PLUGIN]
       });
       if (!result.success || !result.outputs[0]) {
         throw new Error(

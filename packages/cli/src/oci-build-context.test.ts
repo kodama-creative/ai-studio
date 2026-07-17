@@ -26,7 +26,18 @@ describe("createOciBuildContext", () => {
     const output = join(root, "context");
     const agentRoot = join(import.meta.dir, "../../../apps/example-agent/agent");
 
-    const result = await createOciBuildContext({ agentRoot, output });
+    const originalProviderKey = process.env.OPENAI_API_KEY;
+    process.env.OPENAI_API_KEY = "artifact-secret";
+    let result: Awaited<ReturnType<typeof createOciBuildContext>>;
+    try {
+      result = await createOciBuildContext({ agentRoot, output });
+    } finally {
+      if (originalProviderKey === undefined) {
+        delete process.env.OPENAI_API_KEY;
+      } else {
+        process.env.OPENAI_API_KEY = originalProviderKey;
+      }
+    }
 
     expect(result.output).toBe(output);
     expect(result.artifactFingerprint).toHaveLength(64);
@@ -229,6 +240,40 @@ describe("createOciBuildContext", () => {
     expect((await _rejection(creation)).message).toContain(
       "cannot redefine Server Host input"
     );
+    expect(await Bun.file(output).exists()).toBe(false);
+    expect((await readdir(root)).sort()).toEqual(["agent"]);
+  });
+
+  test("rejects a declared runtime secret value embedded in authored code", async () => {
+    const root = await _root();
+    const agentRoot = join(root, "agent");
+    const output = join(root, "context");
+    const secret = "fixture-secret-that-must-not-enter-the-image";
+    await mkdir(agentRoot);
+    await writeFile(
+      join(agentRoot, "agent.ts"),
+      `import { defineAgent } from "@llm-space/runtime";
+      export default defineAgent({
+        model: "openai/gpt-5.3-codex",
+        environment: {
+          EMBEDDED_SECRET: {
+            kind: "secret",
+            required: true,
+            description: ${JSON.stringify(secret)}
+          }
+        }
+      });`
+    );
+    await writeFile(join(agentRoot, "instructions.md"), "Test.\n");
+    process.env.EMBEDDED_SECRET = secret;
+    try {
+      const creation = createOciBuildContext({ agentRoot, output });
+      expect((await _rejection(creation)).message).toContain(
+        "contains runtime secret value for EMBEDDED_SECRET"
+      );
+    } finally {
+      delete process.env.EMBEDDED_SECRET;
+    }
     expect(await Bun.file(output).exists()).toBe(false);
   });
 });

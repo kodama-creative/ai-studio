@@ -38,6 +38,26 @@ describe("createAgentProjectBundle", () => {
     expect(project.artifact).toEqual(built.artifact);
     expect(project.definition?.environment).toEqual(built.environment);
     expect(project.tools.map(tool => tool.name)).toEqual(["echo"]);
+    expect(project.connections.map(connection => connection.name)).toEqual([
+      "fixture"
+    ]);
+    const connection = project.connections[0]!.definition;
+    const connectionContext = {
+      abortSignal: new AbortController().signal,
+      connectionName: "fixture",
+      url: connection.url
+    };
+    expect(await connection.auth?.(connectionContext)).toEqual({
+      token: "fixture-secret"
+    });
+    expect(
+      typeof connection.headers === "function"
+        ? await connection.headers(connectionContext)
+        : connection.headers
+    ).toEqual({ "X-Connection": "fixture" });
+    expect(project.resources.skills?.map(skill => skill.name)).toEqual([
+      "bundle-proof"
+    ]);
     expect((await project.tools[0]!.execute("call", { value: "hello" })).details)
       .toEqual({ value: "hello" });
     expect(() => module.createAgentProject({
@@ -105,6 +125,23 @@ async function _fixture(): Promise<string> {
       outputSchema: Type.Object({ value: Type.String() }),
       execute({ value }) { return { value }; }
     });`
+  );
+  await mkdir(join(root, "connections"));
+  await writeFile(
+    join(root, "connections", "fixture.ts"),
+    `import { defineMcpClientConnection } from "@llm-space/runtime/connections";
+    export default defineMcpClientConnection({
+      url: "https://example.com/mcp",
+      description: "Bundle callback proof.",
+      auth: ({ connectionName }) => ({ token: connectionName + "-secret" }),
+      headers: ({ connectionName }) => ({ "X-Connection": connectionName }),
+      tools: { allow: ["remote_echo"] }
+    });`
+  );
+  await mkdir(join(root, "skills", "bundle-proof"), { recursive: true });
+  await writeFile(
+    join(root, "skills", "bundle-proof", "SKILL.md"),
+    `---\nname: bundle-proof\ndescription: Proves skill bytes survive bundling.\n---\n\nProof.\n`
   );
   return root;
 }

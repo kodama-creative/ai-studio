@@ -41,7 +41,7 @@ weather data.
 This project is example code for local development. It does not provide live
 weather data, sandbox tool execution, or production deployment guarantees.
 
-## Build An OCI Context
+## Build an OCI context
 
 The example declares `OPENAI_API_KEY` as a required secret name without a
 value. Generate its project-specific, self-contained OCI context from the

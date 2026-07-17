@@ -23,8 +23,8 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     return 1;
   }
   try {
-    const artifact = _artifact(await _jsonFile("artifact.json"));
-    const manifest = _manifest(
+    const artifact = _parseArtifact(await _jsonFile("artifact.json"));
+    const manifest = _parseEnvironmentManifest(
       await _jsonFile("environment.json"),
       artifact
     );
@@ -77,7 +77,7 @@ async function _jsonFile(name: string): Promise<unknown> {
   return JSON.parse(await Bun.file(join(DIRECTORY, name)).text()) as unknown;
 }
 
-function _artifact(value: unknown): AgentProjectArtifact {
+function _parseArtifact(value: unknown): AgentProjectArtifact {
   const artifact = _record(value, "Agent artifact");
   if (
     !_exactKeys(artifact, ["fingerprint", "fingerprints", "schemaVersion"])
@@ -115,7 +115,7 @@ function _artifact(value: unknown): AgentProjectArtifact {
   return artifact as unknown as AgentProjectArtifact;
 }
 
-function _manifest(
+function _parseEnvironmentManifest(
   value: unknown,
   artifact: AgentProjectArtifact
 ): OciEnvironmentManifest {

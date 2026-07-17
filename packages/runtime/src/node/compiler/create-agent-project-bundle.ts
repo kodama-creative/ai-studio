@@ -6,6 +6,7 @@ import {
   rm,
   writeFile
 } from "node:fs/promises";
+import { builtinModules } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -20,6 +21,11 @@ import type {
   CompiledAgentDefinition
 } from "../../shared/agent-definition";
 
+const BUN_COMPATIBILITY_BUILTINS = new Set(["node-fetch", "ws"]);
+const NODE_BUILTINS = new Set(
+  builtinModules.map(name => name.replace(/^node:/, ""))
+);
+
 export interface AgentProjectBundle {
   readonly artifact: AgentProjectArtifact;
   readonly bundle: string;
@@ -29,13 +35,13 @@ export interface AgentProjectBundle {
 export async function createAgentProjectBundle(
   agentRoot: string
 ): Promise<AgentProjectBundle> {
-  const temporaryRoot = await mkdtemp(join(
+  const temporaryRoot = await mkdtemp(path.join(
     await realpath(tmpdir()),
     "llm-space-agent-bundle-"
   ));
   try {
-    const compileRoot = join(temporaryRoot, "compile-source");
-    const bundleRoot = join(temporaryRoot, "bundle-source");
+    const compileRoot = path.join(temporaryRoot, "compile-source");
+    const bundleRoot = path.join(temporaryRoot, "bundle-source");
     await cp(agentRoot, compileRoot, { recursive: true, errorOnExist: true });
     await cp(agentRoot, bundleRoot, { recursive: true, errorOnExist: true });
     const project = await loadAgentProject(compileRoot);
@@ -44,12 +50,13 @@ export async function createAgentProjectBundle(
     if (!discovered.definition) {
       throw new Error("Agent project definition is unavailable");
     }
-    const entryPath = join(temporaryRoot, "entry.mjs");
+    const entryPath = path.join(temporaryRoot, "entry.mjs");
     await writeFile(entryPath, _entrySource(discovered, project), "utf8");
-    const bundlePath = join(temporaryRoot, "agent.bundle.mjs");
+    const bundlePath = path.join(temporaryRoot, "agent.bundle.mjs");
     await _buildInFreshBunProcess(entryPath, bundlePath);
     const bundle = await readFile(bundlePath, "utf8");
-    const verificationPath = join(temporaryRoot, "verify.mjs");
+    _assertClosedBundle(bundle);
+    const verificationPath = path.join(temporaryRoot, "verify.mjs");
     await writeFile(verificationPath, bundle, "utf8");
     const loaded = await import(
       pathToFileURL(verificationPath).href
@@ -79,24 +86,38 @@ export async function createAgentProjectBundle(
   }
 }
 
+function _assertClosedBundle(bundle: string): void {
+  const external = new Bun.Transpiler({ loader: "js" })
+    .scanImports(bundle)
+    .map(imported => imported.path)
+    .find(specifier =>
+      !specifier.startsWith("node:")
+      && !specifier.startsWith("bun:")
+      && !NODE_BUILTINS.has(specifier)
+      && !BUN_COMPATIBILITY_BUILTINS.has(specifier));
+  if (external) {
+    throw new Error(`Agent deployment bundle contains external import: ${external}`);
+  }
+}
+
 async function _buildInFreshBunProcess(
   entryPath: string,
   bundlePath: string
 ): Promise<void> {
   const scriptPath = `${bundlePath}.build.mjs`;
   await writeFile(scriptPath, `
-    const [entryPath, bundlePath, resolveRoot] = process.argv.slice(2);
-    const plugin = {
+    const [ENTRY_PATH, BUNDLE_PATH, RESOLVE_ROOT] = process.argv.slice(2);
+    const PLUGIN = {
       name: "llm-space-deployment-dependencies",
       setup(build) {
         build.onResolve(
           { filter: /^(?:@llm-space\\/runtime(?:\\/tools|\\/connections)?|typebox)$/ },
-          args => ({ path: Bun.resolveSync(args.path, resolveRoot) })
+          args => ({ path: Bun.resolveSync(args.path, RESOLVE_ROOT) })
         );
       }
     };
     const result = await Bun.build({
-      entrypoints: [entryPath],
+      entrypoints: [ENTRY_PATH],
       format: "esm",
       minify: {
         identifiers: false,
@@ -106,12 +127,12 @@ async function _buildInFreshBunProcess(
       sourcemap: "none",
       target: "bun",
       write: false,
-      plugins: [plugin]
+      plugins: [PLUGIN]
     });
     if (!result.success || !result.outputs[0]) {
       throw new Error(result.logs.map(log => log.message).join("\\n") || "Unable to build Agent deployment bundle");
     }
-    await Bun.write(bundlePath, result.outputs[0]);
+    await Bun.write(BUNDLE_PATH, result.outputs[0]);
   `, "utf8");
   const child = Bun.spawn([
     process.execPath,
@@ -166,23 +187,19 @@ function _entrySource(
     filePath: path.posix.join("skills", skill.name, "SKILL.md")
   }));
   return `${imports.join("\n")}
-const input = {
+const INPUT = {
   definition,
   instructions: ${JSON.stringify(project.instructions)},
   tools: [${tools.map(tool => `{ name: ${JSON.stringify(tool.name)}, sourcePath: ${JSON.stringify(tool.sourcePath)}, definition: ${tool.definition} }`).join(",")}],
   connections: [${connections.map(connection => `{ name: ${JSON.stringify(connection.name)}, logicalPath: ${JSON.stringify(connection.logicalPath)}, definition: ${connection.definition} }`).join(",")}],
   skills: ${JSON.stringify(skills)}
 };
-const expectedArtifact = Object.freeze(${JSON.stringify(project.artifact)});
+const EXPECTED_ARTIFACT = Object.freeze(${JSON.stringify(project.artifact)});
 export const createAgentProject = artifact => {
-  if (JSON.stringify(artifact) !== JSON.stringify(expectedArtifact)) {
+  if (JSON.stringify(artifact) !== JSON.stringify(EXPECTED_ARTIFACT)) {
     throw new Error("Bundled Agent artifact descriptor mismatch");
   }
-  return createBundledAgentProject(input, artifact);
+  return createBundledAgentProject(INPUT, artifact);
 };
 `;
-}
-
-function join(...parts: string[]): string {
-  return path.join(...parts);
 }

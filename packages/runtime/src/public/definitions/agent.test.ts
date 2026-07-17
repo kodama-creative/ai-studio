@@ -58,6 +58,14 @@ describe("defineAgent", () => {
           API_KEY: { kind: "secret", required: true, default: "secret" }
         }
       });
+      defineAgent({
+        model: "openai/model",
+        environment: {
+          API_KEY: { kind: "secret", required: true },
+          // @ts-expect-error duplicate environment names are rejected
+          API_KEY: { kind: "config", required: false }
+        }
+      });
     };
     expect(typecheck).toBeFunction();
   });
