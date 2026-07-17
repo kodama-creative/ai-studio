@@ -8,6 +8,26 @@ LLM Space is a workbench for developing, inspecting, and evaluating agents throu
 An editable, durable conversation used as the fast interactive surface for developing and debugging agent behavior in the desktop app.
 _Avoid_: Harness session, agent run
 
+**Thread Promotion**:
+A one-way, previewed conversion of a standalone Desktop Thread's portable authoring intent into a new user-owned Agent Project and independent Project Thread.
+_Avoid_: Thread export, project sync, source serialization
+
+**Agent Variable**:
+A source-owned named input or provider used when resolving Agent instructions; it is distinct from an environment value and mutable Session state.
+_Avoid_: Thread value, secret, memory
+
+**Turn Context**:
+Verified, immutable identity and channel data for one inbound Turn that may be used to resolve instructions and capabilities.
+_Avoid_: Session state, message metadata, transport payload
+
+**Session State**:
+Source-declared, schema-validated mutable working data whose live value is owned durably by one Runtime Session through the Session Store.
+_Avoid_: Thread variable, transcript, long-term memory
+
+**Evaluation Intent**:
+A portable human-readable statement of what good Agent behavior means, without executable cases, graders, results, or reports.
+_Avoid_: Eval suite, evaluation result, score history
+
 **Settled step debugging**:
 A Desktop Thread debugging mode in which a model turn ends durably at tool calls so their results may be supplied or edited later, after which inference continues without an additional user message.
 _Avoid_: suspended run, pending approval, single-step execution

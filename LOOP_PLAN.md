@@ -89,12 +89,12 @@ Runtime architecture follows [ADR 0001](./docs/adr/0001-runtime-harness-over-pi-
   - Decision (2026-07-17): ADR 0005 keeps portable source user-owned, requires an absent target with validated sibling staging and whole-root publication, composes the canonical base from `local-tool`, `skill`, and `mcp-connection`, defaults to local tool plus skill, and keeps exhaustive conformance repository-owned until a portable Eval protocol ships.
 
 - [ ] **10 — Build Thread as Agent Project**
-  - Depends on: 09.
+  - Depends on: 09, 12, 13, 16, and 17.
   - Run: `$kaizen-loop Turn a runnable standalone Thread into a buildable Agent Project.`
-  - Done when: promotion previews and atomically materializes portable model, reasoning, prompt, variables, tools, examples, and evaluation intent into source plus an initial Project Thread.
-  - Boundary: one-way conversion; original Thread remains independent; no hidden metadata, live sync, secret copy, or silent tool substitution.
+  - Done when: promotion previews and atomically materializes portable model, reasoning, prompt, variable declarations/providers, tools, and human-readable evaluation intent into source plus a fresh initial Project Thread.
+  - Boundary: one-way conversion; original Thread remains independent; no conversation-example format before item 29, hidden metadata, live sync, inherited Session state, secret-store copy, Host fallback, or silent tool substitution.
   - Metric: Thread-to-buildable-Agent completion without manual source repair.
-  - Blocker (2026-07-17): current source contracts do not define portable representations for Thread variables, conversation examples, or evaluation intent, and current Thread tool kinds do not share one lossless authoring path: manual function tools have schemas but no implementation, Desktop built-ins carry Host authority, MCP settings may contain unsupported transports and private Host configuration, and project tools belong to another source tree. Human approval is required for the eligible-Thread/tool matrix, source representation and future item-29 boundary, sensitive-value preview/copy policy, and initial Project Thread semantics before promotion can be implemented without silent substitution or data leakage.
+  - Decision (2026-07-17): ADR 0006 defines preview-first atomic promotion, separate Agent Variable and Session State source domains, exact or explicitly reviewed tool materialization, Sandbox-only local authority, environment aggregation, non-executable evaluation intent, no conversation examples before item 29, and a fresh independent Project Thread. Item 10 is dependency-blocked until 12, 13, 16, and 17 ship.
 
 - [ ] **11 — Explicit source and artifact migrations**
   - Depends on: 05 and a real schema evolution.
@@ -293,7 +293,7 @@ Runtime architecture follows [ADR 0001](./docs/adr/0001-runtime-harness-over-pi-
 - [ ] Do not require all vendor Channel adapters for core Agent Studio completion.
 - [ ] Do not add runtime plugins, dynamic Desktop UI plugins, or arbitrary third-party code loading.
 - [ ] Do not add hidden Agent configuration state or live Thread/Agent bidirectional synchronization.
-- [ ] Do not copy secrets into source, artifacts, Threads, Traces, or Eval reports.
+- [ ] Do not automatically copy secret-store or environment values into source, artifacts, Threads, Traces, or Eval reports. A Thread-owned literal may enter source only through ADR 0006's exact preview and explicit sensitive-value confirmation.
 - [ ] Do not silently downgrade a required sandbox.
 - [ ] Do not claim exactly-once external effects.
 - [ ] Do not load multiple Agent Projects into one Server deployment artifact.

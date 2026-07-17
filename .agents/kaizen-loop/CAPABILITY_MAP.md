@@ -311,7 +311,7 @@
 
 ## Thread-To-Agent Project Promotion
 
-- Status: blocked before V1
+- Status: contract accepted; blocked on prerequisite capabilities before V1
 - Freshness: confirmed
 - Last checked: 2026-07-17
 - Evidence:
@@ -322,9 +322,10 @@
   - Thread custom variables are literal Desktop values that may contain private data; built-in values such as current date and available skills are Host/runtime-derived. The current project Runtime does not resolve Thread variable definitions in portable instructions.
   - Manual evaluation rubrics, run scores, verdicts, and notes are explicitly Thread-owned evidence. ADR 0005 says generated projects carry no test/Eval protocol before roadmap item 29, so item 10 cannot invent one or silently reinterpret comparison history as portable assertions.
   - Dify and Langflow primary docs make export contents, credentials/variable references, version compatibility, and non-exported logs/conversations explicit. Promptfoo requires authored test cases and assertions rather than inferring evaluation contracts from past runs.
-- Boundary: today a standalone Thread and an Agent Project remain independent product objects. A user can create a new canonical project or manually author equivalent source, but cannot preview and atomically promote a Thread while preserving an explainable mapping.
-- Explicit non-goals: no hidden promotion metadata, live Thread/source synchronization, secret or credential copying, implicit Desktop built-in authority, generated fake tool implementations, source overwrite/merge, transcript migration, or premature portable Eval protocol.
-- Visible gaps: owner decisions are required for (1) strict eligibility versus pulling later tool capabilities forward, (2) variable/example/evaluation-intent source representation and item-29 compatibility, (3) sensitive-value inclusion/redaction, and (4) the new Project Thread's transcript/runtime/evaluation state. Any approved UI must later define preview diffs, unsupported diagnoses, destination selection, cancellation/failure states, keyboard behavior, and CEF audit evidence.
+  - ADR 0006 and the Eve state research fix the future contract: promotion is preview-first and atomic; Agent Variables, Turn context, Session State, transcript, and external memory remain distinct; local tool and stdio MCP authority is Sandbox-only; exact literals require visible confirmation; evaluation intent is non-executable; and conversation examples defer to item 29.
+- Boundary: today a standalone Thread and an Agent Project remain independent product objects. The accepted implementation will classify every field, resolve all blockers in a temporary preview tab, publish only into an absent user-owned target, and create a fresh independent Project Thread with no transcript, Run, evaluation, state, or Session identity inheritance.
+- Explicit non-goals: no hidden promotion metadata, live Thread/source synchronization, secret-store or Session-state copying, implicit Desktop built-in authority, generated fake tool implementations, Host fallback for Sandbox requirements, source overwrite/merge, transcript migration, Eve compatibility promise, conversation-example format before item 29, or premature executable Eval protocol.
+- Visible gaps: item 10 is dependency-blocked until trusted Session context/state (12), dynamic instructions (13), ExecutionEnv-backed built-ins (16), and Sandbox delivery (17) ship. Product code still lacks the planner, source slots, preview interaction, atomic coordinator, acceptance matrix, and real CEF audit evidence defined by ADR 0006.
 
 ## Agent And Thread Workbench Navigation
 
