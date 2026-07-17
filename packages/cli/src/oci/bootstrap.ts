@@ -22,15 +22,18 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     process.stderr.write("OCI Agent Server does not accept runtime arguments.\n");
     return 1;
   }
+  let startupStage = "deployment descriptor";
   try {
     const artifact = _parseArtifact(await _jsonFile("artifact.json"));
     const manifest = _parseEnvironmentManifest(
       await _jsonFile("environment.json"),
       artifact
     );
+    startupStage = "Host configuration";
     const host = _hostConfiguration();
     const authenticator = _serverAuthenticator();
     _validateAgentEnvironment(manifest);
+    startupStage = "Agent bundle";
     const bundleUrl = new URL("./agent.bundle.mjs", import.meta.url).href;
     const module = await import(bundleUrl) as {
       createAgentProject(artifact: AgentProjectArtifact): {
@@ -46,6 +49,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     ) {
       throw new Error("Agent bundle descriptor mismatch");
     }
+    startupStage = "Server startup";
     const server = await startAgentServer({
       artifactFingerprint: artifact.fingerprint,
       project: project as Parameters<typeof startAgentServer>[0]["project"],
@@ -67,7 +71,8 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     return 0;
   } catch {
     process.stderr.write(
-      "Unable to start OCI Agent Server; verify declared environment and mounted storage.\n"
+      "Unable to start OCI Agent Server; verify declared environment and mounted storage. "
+      + `Failed during ${startupStage}.\n`
     );
     return 1;
   }

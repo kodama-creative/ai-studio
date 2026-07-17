@@ -197,9 +197,10 @@ describe("createOciBuildContext", () => {
 
     expect(result.exitCode).toBe(1);
     expect(await Bun.file(marker).exists()).toBe(false);
-    expect(result.stderr).toBe(
-      "Unable to start OCI Agent Server; verify declared environment and mounted storage.\n"
+    expect(result.stderr).toContain(
+      "Unable to start OCI Agent Server; verify declared environment and mounted storage."
     );
+    expect(result.stderr).toContain("Failed during deployment descriptor.");
   });
 
   test("validates Host configuration before authored code is imported", async () => {
