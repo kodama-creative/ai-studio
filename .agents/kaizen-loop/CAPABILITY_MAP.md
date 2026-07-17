@@ -290,6 +290,22 @@
 - Explicit non-goals: no desktop project-creation wizard, external source copy, Git/cloud/deployment workflow, Builder Agent or AI source mutation for external projects, sandbox or per-call approval system, public plugin SDK, multiple Agents per manifest, graphs/subagents/schedules, breakpoint debugger, directory-move migration, or destructive deletion of desktop-owned project data.
 - Visible gaps: native-picker import coverage is still manual/pre-seeded in CEF because the execution environment lacks macOS Accessibility/Screen Recording control. A live configured-provider message run was not exercised in the isolated audit, so remote provider connectivity remains supplementary rather than proven; trusted project tools are not sandboxed; moving a project creates a new path identity; project removal keeps its desktop-owned data intentionally; richer missing-skill diagnostics and automated CEF regression coverage remain future work.
 
+## Canonical Agent Project Scaffolding
+
+- Status: blocked before V1
+- Freshness: confirmed
+- Last checked: 2026-07-17
+- Evidence:
+  - `packages/cli/src/scaffold.ts` is one rollback-safe writer but branches between two hard-coded full templates, `blank` and `starter`; it has no capability-preset model and stages inside the destination before moving only `agent/` and `llm-space.json`.
+  - `packages/cli/src/scaffold.test.ts` proves both current shapes load through the trusted Runtime compiler and preserves an unrelated file, but generated projects contain no focused test/eval source and the matrix does not cover composable capabilities.
+  - `apps/example-agent` is the checked-in reference for shipped model/reasoning/environment, local tool, skill, and MCP connection capabilities, but it is a private monorepo workspace rather than the source of the CLI templates.
+  - Desktop RPC, commands, welcome screen, and Agents panel expose only native-picker import, trust/open, inspect, source editing, and desktop-owned Thread operations. There is no create-project request, command, interaction, or shared scaffolder call.
+  - `ExternalAgentProjectManager` auto-trusts source only inside the canonical workspace, registers explicitly trusted external paths, and stores project Threads separately under `LLM_SPACE_HOME/projects`; current evidence does not authorize Studio to create portable source in either location.
+  - Runtime authored SDK imports are supplied by the trusted compiler's virtual modules, while `@llm-space/runtime` remains a private workspace package. A generated focused test cannot be assumed to run as an independently installed package without choosing a new dependency/test ownership contract.
+- Boundary: today users can create either the CLI's minimal or weather starter source and can open an existing Agent Project in Studio. There is no canonical shared base, composable preset set, Studio creation flow, or generated focused test/eval contract.
+- Explicit non-goals: no marketplace, remote/community templates, duplicated full templates, presets for unshipped capabilities, secret values, source mutation after creation, or silent overwrite/merge.
+- Visible gaps: human approval is required for (1) Studio-created source destination and ownership, (2) absent/empty/existing target and rollback semantics, (3) supported capability presets, defaults, and `blank`/`starter` compatibility, and (4) how every generated combination builds and owns a runnable focused test before item 09 product code can begin.
+
 ## Agent And Thread Workbench Navigation
 
 - Status: shipped One Agent Model And Source Workspace V1

@@ -86,6 +86,7 @@ Runtime architecture follows [ADR 0001](./docs/adr/0001-runtime-harness-over-pi-
   - Done when: Studio and CLI share one atomic scaffolder; every supported preset combination builds without manual edits and includes a focused test or eval case.
   - Boundary: no marketplace, duplicated full templates, or templates for unshipped capabilities.
   - Metric: generated-project build success rate.
+  - Blocker (2026-07-17): current contracts do not decide Studio-created source location/ownership, whole-project collision semantics, the supported capability-preset set and defaults, or the generated project's self-test/build dependency boundary. These choices require human approval before replacing the CLI's separate `blank`/`starter` templates or adding a Desktop creation flow.
 
 - [ ] **10 — Build Thread as Agent Project**
   - Depends on: 09.
