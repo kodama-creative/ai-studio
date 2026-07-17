@@ -29,9 +29,11 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       await _jsonFile("environment.json"),
       artifact
     );
-    startupStage = "Host configuration";
+    startupStage = "Host settings";
     const host = _hostConfiguration();
+    startupStage = "Server credentials";
     const authenticator = _serverAuthenticator();
+    startupStage = "Agent environment";
     _validateAgentEnvironment(manifest);
     startupStage = "Agent bundle";
     const bundleUrl = new URL("./agent.bundle.mjs", import.meta.url).href;
