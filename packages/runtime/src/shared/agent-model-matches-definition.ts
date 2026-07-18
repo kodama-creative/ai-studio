@@ -14,8 +14,13 @@ export function agentModelMatchesDefinition({
 }): boolean {
   return Boolean(
     definition
-    && model?.provider === definition.model.provider
-    && model.id === definition.model.id
-    && reasoning === definition.reasoning
+    && (
+      definition.dynamicModel
+      || (
+        model?.provider === definition.model.provider
+        && model.id === definition.model.id
+        && reasoning === definition.reasoning
+      )
+    )
   );
 }

@@ -1,10 +1,15 @@
+import { isDynamicModelDefinition } from "../../internal/authored-dynamic-model-definition";
+
 import type { AgentDefinition } from "../../public/definitions/agent";
 import type { CompiledAgentDefinition } from "../../shared/agent-definition";
 
 export function compileAgentDefinition(
   definition: AgentDefinition
 ): CompiledAgentDefinition {
-  const separator = definition.model.indexOf("/");
+  const model = isDynamicModelDefinition(definition.model)
+    ? definition.model.fallback
+    : definition.model;
+  const separator = model.indexOf("/");
   let reasoning: "off" | AgentDefinition["reasoning"] | undefined =
     definition.reasoning;
   if (reasoning === "none") {
@@ -14,9 +19,13 @@ export function compileAgentDefinition(
   }
   return {
     model: {
-      provider: definition.model.slice(0, separator),
-      id: definition.model.slice(separator + 1)
+      provider: model.slice(0, separator),
+      id: model.slice(separator + 1)
     },
+    ...(isDynamicModelDefinition(definition.model)
+      ? { dynamicModel: definition.model }
+      : {}),
+    ...(definition.modelOptions ? { modelOptions: definition.modelOptions } : {}),
     ...(reasoning ? { reasoning } : {}),
     ...(definition.environment ? { environment: definition.environment } : {})
   };

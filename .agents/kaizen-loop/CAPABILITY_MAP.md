@@ -182,18 +182,20 @@
 
 ## Dynamic Capability Snapshots
 
-- Status: blocked before V1
+- Status: shipped V1
 - Freshness: confirmed
 - Last checked: 2026-07-18
 - Evidence:
-  - `AgentDefinition` declares one static model/reasoning pair. `AgentRuntime.createSession()` accepts Host model/reasoning, extra-tool, active-tool, and `streamFn` overrides, but neither layer declares a versioned capability policy or maximum.
-  - `AgentSession` constructs one tool policy and Pi `Agent` at Session creation. Pi captures context/tools per provider call and can update model/thinking/context between internal turns, but its public turn update cannot replace tools.
-  - Item 13's Session Store has an immutable integrity-checked per-Turn instruction snapshot, while `RuntimeRunConfigurationSnapshot` records only model/reasoning and a tool-configuration fingerprint; neither records connections or normalized safe stream options.
-  - Desktop resolves credentials, base URL, headers, temperature, and max tokens inside a Host-owned `streamFn`; MCP manager connection lifecycle and exposed tools are also Host-owned. Secret-bearing headers/environment and callbacks/runtime objects cannot enter a durable capability snapshot.
-  - Eve's current dynamic-capability contract supports session/turn/step resolution and permits dynamic tools to override authored tools. That is useful event-shape evidence but conflicts with item 14's immutable-per-Turn authored maximum and no-escalation boundary.
-- Boundary after approval: one automatic Turn may select only from compiled source-owned maxima further constrained by a Host-owned policy, record one immutable secret-free effective snapshot, and use it unchanged across every Pi provider/tool step and restart continuation.
-- Explicit non-goals: resolver-created code or schemas, session/step-scoped mutation, dynamic discovery/plugin install, arbitrary path/module loading, credential persistence, connection lifecycle redesign, policy UI, automatic external-operation retry, or permission escalation.
-- Visible gaps: an ADR must decide authored source shape, Host policy/request ownership, model fallback, tool/connection selection granularity, safe stream-option keys/bounds, resolver/policy/MCP-drift failure behavior, and manual-debug snapshot semantics before product implementation can begin.
+  - ADR 0007 fixes Eve-shaped `defineDynamic({ events: { "turn.started": ... } })` for model and tool authoring only. Dynamic models require a fallback; resolver failure/null uses it. Dynamic tool resolvers may generate schemas and override static names, skip only their own failure, and fail the Turn on dynamic/dynamic name collision.
+  - The compiler assigns inline dynamic tool callbacks stable artifact-owned step IDs and captures JSON closure values. Artifact and closed-bundle tests preserve resolver/step identity; Session reload reconstructs the callback from the persisted snapshot and compiled registry without re-running the resolver or prior tool call. Dynamic capability Projects require a Session Store.
+  - Every Host supplies a cloned serializable `AgentCapabilityPolicy` over model/reasoning choices, safe option bounds, and compiled tool/connection contribution IDs. Desktop Thread values are Turn requests within that policy; unavailable or denied selections fail before Pi.
+  - `AgentSession` resolves instructions and capabilities from one frozen Turn view and commits both in one Session Store CAS. The integrity-checked capability snapshot records Agent/policy/request fingerprints, effective model/reasoning and safe Turn-level model options, tool definitions/provenance, dynamic step closures, and static connection tool fingerprints; its journal entry stays outside transcript, Pi events, and Run replay.
+  - Manual mode still records capabilities but exposes no state scope and keeps tools deferred. Continuation reuses the persisted snapshot; changed requests are rejected, artifact drift fails closed, and changed Host policy produces explicit Desktop/Server `hostPolicyChanged` termination without mutation or re-resolution.
+  - Static MCP connections remain compiled and Host-owned. Snapshots include only the remote tool surface exposed to the model—logical connection/contribution names plus schema fingerprints—never URL, auth, headers, environment, callbacks, or connection runtime objects.
+  - Focused acceptance passes 59 tests across compiler/Runtime/Session Store/Desktop/Server. Full verification passes 283/284 tests and 1116 assertions with only the independently reproduced fixed-point Server shutdown timeout; six package TypeScript projects plus root TypeScript, root lint, five non-packaging bundles, renderer-only Vite, and diff checks pass.
+- Boundary: each external Turn resolves one authored capability set from verified context and automatic read-only state, intersects it with explicit Host policy and safe Host requests, records it immutably beside instructions, and uses that same selection throughout Pi iteration and restart continuation. Pi remains the provider/tool loop and performs its own context-dependent `maxTokens` reduction per provider call.
+- Explicit non-goals: no dynamic connections, session/step capability mutation, runtime code/plugin discovery, arbitrary path loading, approval, Sandbox, advanced MCP lifecycle, policy UI, Trace UI, provider-specific secret options, automatic resolver/tool retry, or permission escalation.
+- Visible gaps: item 23 owns remote tool-list refresh and schema drift; item 19 owns approval; item 17 owns hostile-code isolation and Sandbox authority; item 26 owns lifecycle hooks. V1 exposes no dedicated capability snapshot UI and does not attempt semantic secret-taint detection inside trusted authored JSON closure values.
 
 ## Headless Thread Execution And Evaluation
 

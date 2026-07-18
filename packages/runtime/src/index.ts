@@ -1,4 +1,6 @@
 export * from "./public/definitions/agent";
+export * from "./public/models/define-dynamic";
+export * from "./shared/agent-capability-policy";
 export type {
   AgentEnvironmentRequirement,
   AgentEnvironmentRequirements,

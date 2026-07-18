@@ -550,11 +550,22 @@ describe("Agent Server HTTP protocol", () => {
         "principal-one:tenant-one:http:1:0:read-only"
       )
     });
+    const firstCapabilitySnapshots = await _storedCapabilitySnapshots(
+      root,
+      firstSession.sessionId
+    );
+    expect(firstCapabilitySnapshots).toHaveLength(1);
+    expect(firstCapabilitySnapshots[0]).toMatchObject({
+      model: { provider: "fake", id: "fake-model" },
+      tools: [{ name: "increment" }]
+    });
 
     await first.stop();
     const restarted = await startAgentServer(options);
     expect(await _storedInstructionSnapshots(root, firstSession.sessionId))
       .toEqual(firstInstructionSnapshots);
+    expect(await _storedCapabilitySnapshots(root, firstSession.sessionId))
+      .toEqual(firstCapabilitySnapshots);
     const recoveredClient = createAgentServerClient({
       baseUrl: restarted.url,
       authorization: "principal-one-token-with-thirty-two-bytes"
@@ -573,6 +584,8 @@ describe("Agent Server HTTP protocol", () => {
       firstSession.sessionId
     );
     expect(recoveredInstructionSnapshots).toHaveLength(2);
+    expect(await _storedCapabilitySnapshots(root, firstSession.sessionId))
+      .toHaveLength(2);
     expect(recoveredInstructionSnapshots[0]).toEqual(
       firstInstructionSnapshots[0]
     );
@@ -1625,6 +1638,22 @@ async function _storedInstructionSnapshots(
     };
   };
   return Object.values(envelope.runtime.snapshot.instructionSnapshots ?? {});
+}
+
+async function _storedCapabilitySnapshots(
+  root: string,
+  sessionId: string
+): Promise<unknown[]> {
+  const envelope = JSON.parse(
+    await readFile(join(root, `${sessionId}.json`), "utf8")
+  ) as {
+    runtime: {
+      snapshot: {
+        capabilitySnapshots?: Record<string, unknown>;
+      };
+    };
+  };
+  return Object.values(envelope.runtime.snapshot.capabilitySnapshots ?? {});
 }
 
 function _models(configured = true): Models {

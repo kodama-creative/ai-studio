@@ -13,6 +13,7 @@ import {
 import { afterEach, describe, expect, test } from "bun:test";
 
 import { LocalAgentRuntime } from "./local-agent-runtime";
+import { InMemorySessionStore } from "../runtime/harness/in-memory-session-store";
 
 const ROOTS: string[] = [];
 
@@ -60,6 +61,322 @@ describe("LocalAgentRuntime", () => {
       "assistant"
     ]);
     expect(executions).toBe(2);
+  });
+
+  test("resolves Eve-shaped model and tools into one durable Turn snapshot", async () => {
+    const agentRoot = await _fixture();
+    await writeFile(
+      join(agentRoot, "agent.ts"),
+      `import { defineAgent, defineDynamic } from "@llm-space/runtime";
+      export default defineAgent({
+        model: defineDynamic({
+          fallback: "fake/fake-model",
+          events: {
+            "turn.started": (_event, ctx) => ({
+              model: "fake/fake-model",
+              modelOptions: { temperature: ctx.session.channel.kind === "test" ? 0.4 : 0.2 }
+            })
+          }
+        }),
+        reasoning: "high"
+      });`
+    );
+    await writeFile(
+      join(agentRoot, "tools", "tenant.ts"),
+      `import { defineDynamic, defineTool } from "@llm-space/runtime/tools";
+      import { Type } from "typebox";
+      let resolutions = 0;
+      export default defineDynamic({
+        events: {
+          "turn.started": (_event, ctx) => {
+            if (++resolutions > 1) throw new Error("resolver reran");
+            const prefix = ctx.session.channel.kind;
+            return {
+              echo: defineTool({
+                description: "Echo with channel.",
+                inputSchema: Type.Object({ text: Type.String() }),
+                outputSchema: Type.Object({ text: Type.String() }),
+                execute(input) { return { text: prefix + ":" + input.text }; }
+              })
+            };
+          }
+        }
+      });`
+    );
+    const runtime = await LocalAgentRuntime.create({
+      agentRoot,
+      models: _fakeModels(() => {})
+    });
+    const store = new InMemorySessionStore();
+    const principal = {
+      issuer: "test",
+      principalId: "dynamic-user",
+      principalType: "runtime" as const
+    };
+    const session = await runtime.createSession({
+      context: {
+        id: "dynamic-session",
+        auth: { initiator: principal, current: principal },
+        channel: { kind: "test" },
+        turn: { id: "dynamic-turn", sequence: 1 }
+      },
+      sessionStore: store
+    });
+
+    expect(session.capabilitySnapshot).toMatchObject({
+      model: { provider: "fake", id: "fake-model" },
+      modelOptions: { temperature: 0.4 },
+      turnId: "dynamic-turn",
+      tools: [{
+        name: "echo",
+        contributionId: "tool-resolver:tools/tenant.ts",
+        outputSchema: expect.any(Object)
+      }]
+    });
+    const recorded = await store.load("dynamic-session");
+    expect(recorded?.snapshot.instructionSnapshots?.["dynamic-turn"])
+      .toBeDefined();
+    expect(recorded?.snapshot.capabilitySnapshots?.["dynamic-turn"])
+      .toEqual(session.capabilitySnapshot ?? undefined);
+    expect(recorded?.journal.slice(-2).map(entry => entry.type)).toEqual([
+      "turnInstructionsRecorded",
+      "turnCapabilitiesRecorded"
+    ]);
+    expect(new Set(recorded?.journal.slice(-2).map(
+      entry => entry.sessionVersion
+    ))).toEqual(new Set([1]));
+
+    await session.prompt("hello");
+    expect(session.messages.map(message => message.role)).toEqual([
+      "user",
+      "assistant",
+      "toolResult",
+      "assistant"
+    ]);
+    const reloaded = await runtime.createSession({
+      context: {
+        id: "dynamic-session",
+        auth: { initiator: principal, current: principal },
+        channel: { kind: "changed" },
+        turn: { id: "dynamic-turn", sequence: 1 }
+      },
+      initialMessages: session.messages,
+      sessionStore: store
+    });
+    expect(reloaded.capabilitySnapshot).toEqual(session.capabilitySnapshot);
+    await reloaded.prompt("again");
+    expect(reloaded.messages.at(-1)?.role).toBe("assistant");
+    expect(await _rejection(runtime.createSession({
+      context: {
+        id: "dynamic-session",
+        auth: { initiator: principal, current: principal },
+        channel: { kind: "test" },
+        turn: { id: "dynamic-turn", sequence: 1 }
+      },
+      modelOptions: { temperature: 0.8 },
+      sessionStore: store
+    }))).toMatchObject({
+      message: "The Turn capability request changed after its snapshot was recorded"
+    });
+    try {
+      await runtime.createSession({
+        capabilityPolicy: {
+          connectionContributions: [],
+          modelOptions: {},
+          models: [{ provider: "fake", id: "fake-model" }],
+          reasoning: ["high"],
+          toolContributions: []
+        },
+        context: {
+          id: "dynamic-session",
+          auth: { initiator: principal, current: principal },
+          channel: { kind: "test" },
+          turn: { id: "dynamic-turn", sequence: 1 }
+        },
+        sessionStore: store
+      });
+      throw new Error("Expected changed Host policy to reject.");
+    } catch (error) {
+      expect(error).toMatchObject({ name: "AgentHostPolicyChangedError" });
+    }
+  });
+
+  test("rejects a dynamic tool whose execute callback is not inline", async () => {
+    const agentRoot = await _fixture();
+    await writeFile(
+      join(agentRoot, "tools", "invalid.ts"),
+      `import { defineDynamic, defineTool } from "@llm-space/runtime/tools";
+      import { Type } from "typebox";
+      const execute = () => ({ ok: true });
+      export default defineDynamic({
+        events: {
+          "turn.started": () => defineTool({
+            description: "Invalid replay callback.",
+            inputSchema: Type.Object({}),
+            execute
+          })
+        }
+      });`
+    );
+
+    try {
+      await LocalAgentRuntime.create({
+        agentRoot,
+        models: _fakeModels(() => {})
+      });
+      throw new Error("Expected invalid dynamic tool source to reject.");
+    } catch (error) {
+      expect(error).toMatchObject({
+        message: expect.stringContaining(
+          "dynamic tool execute must be an inline function"
+        )
+      });
+    }
+  });
+
+  test("skips only a failing dynamic tool resolver", async () => {
+    const agentRoot = await _fixture();
+    await writeFile(
+      join(agentRoot, "tools", "failing.ts"),
+      `import { defineDynamic, defineTool } from "@llm-space/runtime/tools";
+      import { Type } from "typebox";
+      export default defineDynamic({
+        events: {
+          "turn.started": () => {
+            defineTool({
+              description: "Unavailable tool.",
+              inputSchema: Type.Object({}),
+              execute: () => ({ ok: false })
+            });
+            throw new Error("unavailable");
+          }
+        }
+      });`
+    );
+    await writeFile(
+      join(agentRoot, "tools", "working.ts"),
+      `import { defineDynamic, defineTool } from "@llm-space/runtime/tools";
+      import { Type } from "typebox";
+      export default defineDynamic({
+        events: {
+          "turn.started": () => ({
+            working: defineTool({
+              description: "Working tool.",
+              inputSchema: Type.Object({}),
+              execute: () => ({ ok: true })
+            })
+          })
+        }
+      });`
+    );
+    const runtime = await LocalAgentRuntime.create({
+      agentRoot,
+      models: _fakeModels(() => {})
+    });
+    const session = await runtime.createSession({
+      id: "resolver-skip",
+      sessionStore: new InMemorySessionStore()
+    });
+
+    expect(session.capabilitySnapshot?.tools.map(tool => tool.name))
+      .toEqual(["working"]);
+  });
+
+  test("fails a Turn when dynamic tool resolvers claim the same name", async () => {
+    const agentRoot = await _fixture();
+    for (const source of ["first", "second"]) {
+      await writeFile(
+        join(agentRoot, "tools", `${source}.ts`),
+        `import { defineDynamic, defineTool } from "@llm-space/runtime/tools";
+        import { Type } from "typebox";
+        export default defineDynamic({
+          events: {
+            "turn.started": () => ({
+              duplicate: defineTool({
+                description: "${source} tool.",
+                inputSchema: Type.Object({}),
+                execute: () => ({ source: "${source}" })
+              })
+            })
+          }
+        });`
+      );
+    }
+    const runtime = await LocalAgentRuntime.create({
+      agentRoot,
+      models: _fakeModels(() => {})
+    });
+
+    expect(await _rejection(runtime.createSession({
+      id: "resolver-collision",
+      sessionStore: new InMemorySessionStore()
+    })))
+      .toMatchObject({
+        message: expect.stringContaining("Dynamic tool duplicate collides")
+      });
+  });
+
+  test("fails before Pi when a dynamic tool closure is not serializable", async () => {
+    const agentRoot = await _fixture();
+    await writeFile(
+      join(agentRoot, "tools", "closure.ts"),
+      `import { defineDynamic, defineTool } from "@llm-space/runtime/tools";
+      import { Type } from "typebox";
+      export default defineDynamic({
+        events: {
+          "turn.started": () => {
+            function format(value) { return "value:" + value; }
+            return defineTool({
+              description: "Invalid closure.",
+              inputSchema: Type.Object({ value: Type.String() }),
+              execute: ({ value }) => ({ value: format(value) })
+            });
+          }
+        }
+      });`
+    );
+    let providerCalls = 0;
+    const runtime = await LocalAgentRuntime.create({
+      agentRoot,
+      models: _fakeModels(() => { providerCalls += 1; })
+    });
+
+    expect(await _rejection(runtime.createSession({
+      id: "invalid-closure",
+      sessionStore: new InMemorySessionStore()
+    }))).toBeInstanceOf(Error);
+    expect(providerCalls).toBe(0);
+  });
+
+  test("rejects an invalid dynamic tool name before Pi", async () => {
+    const agentRoot = await _fixture();
+    await writeFile(
+      join(agentRoot, "tools", "names.ts"),
+      `import { defineDynamic, defineTool } from "@llm-space/runtime/tools";
+      import { Type } from "typebox";
+      export default defineDynamic({
+        events: {
+          "turn.started": () => ({
+            "invalid name": defineTool({
+              description: "Invalid name.",
+              inputSchema: Type.Object({}),
+              execute: () => ({ ok: true })
+            })
+          })
+        }
+      });`
+    );
+    let providerCalls = 0;
+    const runtime = await LocalAgentRuntime.create({
+      agentRoot,
+      models: _fakeModels(() => { providerCalls += 1; })
+    });
+
+    expect(await _rejection(runtime.createSession({
+      id: "invalid-name",
+      sessionStore: new InMemorySessionStore()
+    }))).toMatchObject({ message: "Invalid dynamic tool name: invalid name" });
+    expect(providerCalls).toBe(0);
   });
 });
 
@@ -152,4 +469,13 @@ function _fakeStream(context: Context) {
     });
   });
   return stream;
+}
+
+async function _rejection(promise: Promise<unknown>): Promise<unknown> {
+  try {
+    await promise;
+  } catch (error) {
+    return error;
+  }
+  throw new Error("Expected promise to reject");
 }

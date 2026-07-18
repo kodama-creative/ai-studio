@@ -5,14 +5,26 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import * as TypeBox from "typebox";
 
+import {
+  DYNAMIC_TOOL_STEPS_EXPORT,
+  transformDynamicToolSource
+} from "./transform-dynamic-tool-source";
 import { assertInstructionSourceImports } from "./validate-authored-source";
 import {
   createAuthoredDefinitionVirtualModule,
   defineMcpClientConnectionRuntime,
   defineToolRuntime
 } from "../../internal/authored-action-definitions";
+import {
+  createAuthoredAgentVirtualModule
+} from "../../internal/authored-dynamic-model-definition";
+import {
+  createAuthoredToolsVirtualModule
+} from "../../internal/authored-dynamic-tools-definition";
 import { createAuthoredInstructionsVirtualModule } from "../../internal/authored-instruction-definitions";
 import { defineStateRuntime } from "../../internal/authored-state-definitions";
+
+import type { DynamicToolSteps } from "../../internal/dynamic-tool-step";
 
 const TYPEBOX_RUNTIME_KEY = Symbol.for("llm-space.typebox-runtime");
 
@@ -28,16 +40,19 @@ export async function loadAuthoredModule({
   sourcePath,
   authoredSdk = false,
   restrictInstructionImports = false,
+  transformDynamicTools = false,
   validateEntrySource
 }: {
   authoredSdk?: boolean;
   projectRoot: string;
   restrictInstructionImports?: boolean;
   sourcePath: string;
+  transformDynamicTools?: boolean;
   validateEntrySource?: (source: string, filePath: string) => void;
 }): Promise<{
   default?: unknown;
   dependencies: readonly AuthoredModuleDependencyFingerprint[];
+  dynamicToolSteps?: DynamicToolSteps;
   fingerprint: string;
   source: string;
 }> {
@@ -59,7 +74,11 @@ export async function loadAuthoredModule({
   ]);
   const plugins = [_sourceSnapshotPlugin(
     capturedInputs,
-    validateCapturedSource
+    validateCapturedSource,
+    transformDynamicTools ? canonicalSource : undefined,
+    path.relative(canonicalRoot, canonicalSource)
+      .split(path.sep)
+      .join(path.posix.sep)
   )];
   if (authoredSdk) { plugins.push(_authoredSdkPlugin()); }
   const result = await Bun.build({
@@ -114,6 +133,13 @@ export async function loadAuthoredModule({
     ? {
       default: module.default,
       dependencies,
+      ...(DYNAMIC_TOOL_STEPS_EXPORT in module
+        ? {
+          dynamicToolSteps: (module as Record<string, unknown>)[
+            DYNAMIC_TOOL_STEPS_EXPORT
+          ] as DynamicToolSteps
+        }
+        : {}),
       fingerprint,
       source: sourceInput.toString("utf8")
     }
@@ -122,7 +148,9 @@ export async function loadAuthoredModule({
 
 function _sourceSnapshotPlugin(
   capturedInputs: Map<string, Buffer>,
-  validateSource?: (source: string, filePath: string) => void
+  validateSource?: (source: string, filePath: string) => void,
+  dynamicToolEntry?: string,
+  dynamicToolSourceId?: string
 ): Bun.BunPlugin {
   return {
     name: "llm-space-source-snapshot",
@@ -137,7 +165,16 @@ function _sourceSnapshotPlugin(
             capturedInputs.set(absolutePath, contents);
           }
           validateSource?.(contents.toString("utf8"), absolutePath);
-          return { contents, loader: args.loader };
+          const source = contents.toString("utf8");
+          return {
+            contents: absolutePath === dynamicToolEntry
+              ? transformDynamicToolSource(
+                source,
+                dynamicToolSourceId ?? path.basename(absolutePath)
+              )
+              : contents,
+            loader: args.loader
+          };
         }
       );
     }
@@ -158,7 +195,7 @@ function _authoredSdkPlugin(): Bun.BunPlugin {
           namespace: "llm-space-runtime"
         },
         () => ({
-          contents: "export const defineAgent = (definition) => definition;",
+          contents: createAuthoredAgentVirtualModule(),
           loader: "js"
         })
       );
@@ -191,13 +228,16 @@ function _authoredSdkPlugin(): Bun.BunPlugin {
           filter: /^tool-definition$/,
           namespace: "llm-space-runtime"
         },
-        () => ({
-          contents: createAuthoredDefinitionVirtualModule(
+        () => {
+          const defineToolSource = createAuthoredDefinitionVirtualModule(
             "defineTool",
             defineToolRuntime
-          ),
-          loader: "js"
-        })
+          );
+          return {
+            contents: createAuthoredToolsVirtualModule(defineToolSource),
+            loader: "js"
+          };
+        }
       );
       build.onResolve(
         { filter: /^@llm-space\/runtime\/connections$/ },

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Type } from "typebox";
 
 import { defineTool, isToolDefinition } from "./tool";
+import { defineDynamic } from "../tools/define-dynamic";
 
 describe("defineTool", () => {
   test("preserves a typed, framework-owned tool definition", async () => {
@@ -42,6 +43,45 @@ describe("defineTool", () => {
         }
       )
     ).toEqual({ city: "Shanghai:weather:call-1" });
+  });
+
+  test("preserves an Eve-shaped dynamic tool resolver", async () => {
+    const definition = defineDynamic({
+      events: {
+        "turn.started": (_event, { session }) => ({
+          echo: defineTool({
+            description: "Echo the current Turn.",
+            inputSchema: Type.Object({}),
+            execute: () => ({ turnId: session.turn.id })
+          })
+        })
+      }
+    });
+
+    const result = await definition.events["turn.started"](
+      { type: "turn.started" },
+      {
+        session: {
+          id: "session",
+          auth: {
+            initiator: {
+              issuer: "test",
+              principalId: "one",
+              principalType: "user"
+            },
+            current: {
+              issuer: "test",
+              principalId: "one",
+              principalType: "user"
+            }
+          },
+          channel: { kind: "test" },
+          turn: { id: "turn", sequence: 1 }
+        }
+      }
+    );
+
+    expect(result).toMatchObject({ echo: expect.any(Object) });
   });
 
   test("rejects author-owned identity at typecheck", () => {

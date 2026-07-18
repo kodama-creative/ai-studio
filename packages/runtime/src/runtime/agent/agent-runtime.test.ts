@@ -15,7 +15,12 @@ import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
 
 import { AgentRuntime } from "./agent-runtime";
 import { defineState } from "../../public/definitions/state";
-import { defineDynamic, defineInstructions } from "../../public/instructions";
+import {
+  defineDynamic as defineDynamicInstructions,
+  defineInstructions
+} from "../../public/instructions";
+import { defineDynamic as defineDynamicModel } from "../../public/models/define-dynamic";
+import { defineDynamic as defineDynamicTools } from "../../public/tools/define-dynamic";
 import { InMemorySessionStore } from "../harness/in-memory-session-store";
 
 import type { AgentProjectSnapshot } from "./agent-project-snapshot";
@@ -87,6 +92,7 @@ describe("AgentRuntime", () => {
     });
 
     const session = await runtime.createSession({
+      capabilityPolicy: _policy(),
       id: "thread-one",
       context: _context("thread-one"),
       executionMode: "react",
@@ -96,9 +102,11 @@ describe("AgentRuntime", () => {
         }
       }
     });
+    const capabilitySnapshot = session.capabilitySnapshot;
     await session.prompt("hello");
 
     expect(executions).toBe(1);
+    expect(session.capabilitySnapshot).toBe(capabilitySnapshot);
     expect(persisted.at(-1)?.map(message => message.role)).toEqual([
       "user",
       "assistant",
@@ -136,6 +144,7 @@ describe("AgentRuntime", () => {
       }
     });
     const session = await runtime.createSession({
+      capabilityPolicy: _policy(),
       id: "stateful-runtime-session",
       context: _context("stateful-runtime-session"),
       sessionStore: store,
@@ -168,7 +177,7 @@ describe("AgentRuntime", () => {
     let resolutions = 0;
     const prompts: string[] = [];
     const events: unknown[] = [];
-    const dynamic = defineDynamic({
+    const dynamic = defineDynamicInstructions({
       events: {
         "turn.started": (_event, context) => {
           resolutions += 1;
@@ -213,6 +222,7 @@ describe("AgentRuntime", () => {
     });
     const context = _context("instruction-session");
     const first = await runtime.createSession({
+      capabilityPolicy: _policy(),
       context,
       sessionStore: store,
       streamFn: async (_model, piContext) => {
@@ -237,6 +247,7 @@ describe("AgentRuntime", () => {
     expect(JSON.stringify(events)).not.toContain("turn-instruction-session:0");
 
     const reloaded = await runtime.createSession({
+      capabilityPolicy: _policy(),
       context,
       sessionStore: store,
       streamFn: async (_model, piContext) => _stream(piContext)
@@ -256,7 +267,7 @@ describe("AgentRuntime", () => {
         instructionEntries: [{
           kind: "dynamic",
           sourcePath: "instructions/failing.ts",
-          definition: defineDynamic({
+          definition: defineDynamicInstructions({
             events: {
               "turn.started": () => { throw new Error("resolution failed"); }
             }
@@ -265,24 +276,23 @@ describe("AgentRuntime", () => {
       }
     });
     expect(await _rejection(runtime.createSession({
+      capabilityPolicy: _policy(),
       context: _context("missing-instruction-store")
     }))).toMatchObject({
       message: "Agent Projects with dynamic instructions require a Session Store"
     });
-    const session = await runtime.createSession({
+    expect(await _rejection(runtime.createSession({
+      capabilityPolicy: _policy(),
       context: _context("failing-instructions"),
       sessionStore: store,
       streamFn: async (_model, piContext) => {
         providerCalls += 1;
         return _stream(piContext);
       }
-    });
-
-    expect(await _rejection(session.prompt("hello"))).toMatchObject({
+    }))).toMatchObject({
       message: "resolution failed"
     });
     expect(providerCalls).toBe(0);
-    expect(session.messages).toEqual([]);
     expect(await store.load("failing-instructions")).toBeNull();
   });
 
@@ -310,6 +320,7 @@ describe("AgentRuntime", () => {
       }
     });
     const session = await runtime.createSession({
+      capabilityPolicy: _policy(),
       context: _context("recoverable-tool-error"),
       sessionStore: store
     });
@@ -380,6 +391,7 @@ describe("AgentRuntime", () => {
     });
     const persisted: AgentMessage[][] = [];
     const session = await runtime.createSession({
+      capabilityPolicy: _policy(),
       context: _context("manual-session"),
       executionMode: "manual",
       sessionStore: store,
@@ -467,6 +479,7 @@ describe("AgentRuntime", () => {
       project: { ..._project(), tools: [tool] }
     });
     const session = await runtime.createSession({
+      capabilityPolicy: _policy(),
       context: _context("auto-once-session"),
       executionMode: "autoOnce"
     });
@@ -487,6 +500,7 @@ describe("AgentRuntime", () => {
       project: _project()
     });
     const session = await runtime.createSession({
+      capabilityPolicy: _policy(),
       context: _context("deferred-session"),
       executionMode: "react",
       extraTools: [
@@ -549,6 +563,7 @@ describe("AgentRuntime", () => {
       }
     });
     const session = await runtime.createSession({
+      capabilityPolicy: _policy(),
       context: _context("mixed-deferred-session"),
       extraTools: [{
         kind: "deferred",
@@ -569,7 +584,7 @@ describe("AgentRuntime", () => {
       .toBeUndefined();
   });
 
-  test("blocks an unavailable definition default but accepts an explicit override", async () => {
+  test("blocks unavailable defaults and model requests outside Agent source", async () => {
     const project = {
       ..._project(),
       definition: {
@@ -584,7 +599,10 @@ describe("AgentRuntime", () => {
       available: false
     });
     try {
-      await runtime.createSession({ context: _context("missing-session") });
+      await runtime.createSession({
+        capabilityPolicy: _policy(),
+        context: _context("missing-session")
+      });
       throw new Error("Expected the unavailable default to reject.");
     } catch (error) {
       expect(error).toMatchObject({
@@ -592,29 +610,228 @@ describe("AgentRuntime", () => {
         selector: { provider: "missing", id: "missing-model" }
       });
     }
-    const session = await runtime.createSession({
+    expect(await _rejection(runtime.createSession({
+      capabilityPolicy: _policy(),
       context: _context("override-session"),
       model: { provider: "fake", id: "fake-model" }
+    }))).toMatchObject({
+      message: "Agent source denies model request: fake/fake-model"
     });
-    expect(session.model).toEqual({ provider: "fake", id: "fake-model" });
   });
 
-  test("distinguishes an omitted reasoning override from provider default", async () => {
+  test("uses Eve fallback on dynamic model failure and denies policy escape", async () => {
+    const fallback = defineDynamicModel({
+      fallback: "fake/fake-model",
+      events: {
+        "turn.started": () => { throw new Error("resolver failed"); }
+      }
+    });
+    const fallbackRuntime = new AgentRuntime({
+      models: _reactModels(),
+      project: {
+        ..._project(),
+        definition: {
+          model: { provider: "fake", id: "fake-model" },
+          dynamicModel: fallback,
+          reasoning: "high"
+        }
+      }
+    });
+    const fallbackSession = await fallbackRuntime.createSession({
+      capabilityPolicy: _policy(),
+      context: _context("dynamic-fallback"),
+      sessionStore: new InMemorySessionStore()
+    });
+    expect(fallbackSession.capabilitySnapshot).toMatchObject({
+      model: { provider: "fake", id: "fake-model" }
+    });
+
+    const escaping = defineDynamicModel({
+      fallback: "fake/fake-model",
+      events: { "turn.started": () => "missing/missing-model" }
+    });
+    const escapingRuntime = new AgentRuntime({
+      models: _reactModels(),
+      project: {
+        ..._project(),
+        definition: {
+          model: { provider: "fake", id: "fake-model" },
+          dynamicModel: escaping,
+          reasoning: "high"
+        }
+      }
+    });
+    expect(await _rejection(escapingRuntime.createSession({
+      capabilityPolicy: {
+        ..._policy(),
+        models: [{ provider: "fake", id: "fake-model" }]
+      },
+      context: _context("dynamic-policy-denial"),
+      sessionStore: new InMemorySessionStore()
+    }))).toMatchObject({ message: "Host policy denies model: missing/missing-model" });
+  });
+
+  test("requires a Session Store for dynamic capability resolution", async () => {
+    const runtime = new AgentRuntime({
+      models: _reactModels(),
+      project: {
+        ..._project(),
+        definition: {
+          model: { provider: "fake", id: "fake-model" },
+          dynamicModel: defineDynamicModel({
+            fallback: "fake/fake-model",
+            events: { "turn.started": () => "fake/fake-model" }
+          })
+        }
+      }
+    });
+
+    expect(await _rejection(runtime.createSession({
+      capabilityPolicy: _policy(),
+      context: _context("dynamic-without-store")
+    }))).toMatchObject({
+      message: "Agent Projects with dynamic capabilities require a Session Store"
+    });
+  });
+
+  test("rejects model options outside source authority or intrinsic bounds", async () => {
+    const runtime = new AgentRuntime({
+      models: _reactModels(),
+      project: {
+        ..._project(),
+        definition: {
+          model: { provider: "fake", id: "fake-model" },
+          modelOptions: { maxRetries: 1 }
+        }
+      }
+    });
+    const policy = {
+      ..._policy(),
+      modelOptions: {
+        maxRetries: { min: -10, max: 10 },
+        temperature: { min: -10, max: 10 }
+      }
+    };
+
+    expect(await _rejection(runtime.createSession({
+      capabilityPolicy: policy,
+      context: _context("unauthorized-option"),
+      modelOptions: { temperature: 0.4 }
+    }))).toMatchObject({
+      message: "Agent source denies model option request: temperature"
+    });
+    expect(await _rejection(runtime.createSession({
+      capabilityPolicy: policy,
+      context: _context("invalid-option"),
+      modelOptions: { maxRetries: -1 }
+    }))).toMatchObject({
+      message: "Invalid model option value: maxRetries"
+    });
+  });
+
+  test("resolves manual capabilities without exposing Session state", async () => {
+    let modelSawState = false;
+    let toolsSawState = false;
+    const store = new InMemorySessionStore();
+    await store.commit({
+      sessionId: "manual-capabilities",
+      expectedVersion: null,
+      mutations: [{
+        type: "replaceState",
+        values: {
+          [RUNTIME_COUNTER.name]: {
+            definitionVersion: RUNTIME_COUNTER.version,
+            schemaFingerprint: "runtime-counter-v1",
+            value: { count: 2 }
+          }
+        }
+      }]
+    });
+    const runtime = new AgentRuntime({
+      models: _reactModels(),
+      project: {
+        ..._project(),
+        definition: {
+          model: { provider: "fake", id: "fake-model" },
+          dynamicModel: defineDynamicModel({
+            fallback: "fake/fake-model",
+            events: {
+              "turn.started": () => {
+                RUNTIME_COUNTER.get();
+                modelSawState = true;
+                return {
+                  model: "fake/fake-model",
+                  modelOptions: { temperature: 0.3 }
+                };
+              }
+            }
+          })
+        },
+        dynamicToolResolvers: [{
+          contributionId: "tool-resolver:tools/state.ts",
+          definition: defineDynamicTools({
+            events: {
+              "turn.started": () => {
+                RUNTIME_COUNTER.get();
+                toolsSawState = true;
+                return null;
+              }
+            }
+          }),
+          sourcePath: "tools/state.ts",
+          steps: {}
+        }],
+        stateDefinitions: [{
+          name: RUNTIME_COUNTER.name,
+          version: RUNTIME_COUNTER.version,
+          schema: RUNTIME_COUNTER.schema,
+          schemaFingerprint: "runtime-counter-v1",
+          initial: RUNTIME_COUNTER.initial,
+          sourcePath: "state/runtime-counter.ts"
+        }]
+      }
+    });
+    const session = await runtime.createSession({
+      capabilityPolicy: {
+        ..._policy(),
+        toolContributions: [
+          ..._policy().toolContributions,
+          "tool-resolver:tools/state.ts"
+        ]
+      },
+      context: _context("manual-capabilities"),
+      executionMode: "manual",
+      sessionStore: store
+    });
+
+    expect(modelSawState).toBe(false);
+    expect(toolsSawState).toBe(false);
+    expect(session.capabilitySnapshot).toMatchObject({
+      modelOptions: {},
+      tools: []
+    });
+  });
+
+  test("inherits authored reasoning and rejects an unauthorized default", async () => {
     const runtime = new AgentRuntime({
       models: _reactModels(),
       project: _project()
     });
 
     const inherited = await runtime.createSession({
+      capabilityPolicy: _policy(),
       context: _context("inherited-session")
     });
-    const providerDefault = await runtime.createSession({
+    const providerDefault = _rejection(runtime.createSession({
+      capabilityPolicy: _policy(),
       context: _context("provider-default-session"),
       reasoning: undefined
-    });
+    }));
 
     expect(inherited.reasoning).toBe("high");
-    expect(providerDefault.reasoning).toBeUndefined();
+    expect(await providerDefault).toMatchObject({
+      message: "Agent source denies reasoning request: undefined"
+    });
   });
 
   test("rejects non-plain project tool definitions instead of sharing them", () => {
@@ -660,6 +877,25 @@ function _context(id: string) {
     auth: { initiator: principal, current: principal },
     channel: { kind: "test" },
     turn: { id: `turn-${id}`, sequence: 1 }
+  };
+}
+
+function _policy() {
+  return {
+    connectionContributions: [],
+    modelOptions: {},
+    models: [
+      { provider: "fake", id: "fake-model" },
+      { provider: "missing", id: "missing-model" }
+    ],
+    reasoning: ["off", "minimal", "low", "medium", "high", "xhigh"] as const,
+    toolContributions: [
+      "host-tool:echo",
+      "host-tool:host_action",
+      "host-tool:remember",
+      "tool:echo",
+      "tool:remember"
+    ]
   };
 }
 

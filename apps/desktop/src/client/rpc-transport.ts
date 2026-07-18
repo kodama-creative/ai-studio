@@ -28,6 +28,13 @@ export class RuntimeOutcomeUnknownError extends Error {
   }
 }
 
+export class RuntimeHostPolicyChangedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RuntimeHostPolicyChangedError";
+  }
+}
+
 /**
  * An {@link AgentTransport} backed by Electrobun RPC. It sends the prepared
  * request as a `sendStreamThreadRequest` message and bridges the incoming
@@ -57,7 +64,7 @@ export function createRpcTransport(options?: {
     let aborted = false;
     let settleAbort = false;
     let errorMessage: string | null = null;
-    let errorCode: "outcomeUnknown" | undefined;
+    let errorCode: "hostPolicyChanged" | "outcomeUnknown" | undefined;
     const notify = () => {
       wake?.();
       wake = null;
@@ -133,9 +140,13 @@ export function createRpcTransport(options?: {
           yield events.shift()!;
         }
         if (errorMessage !== null) {
-          throw errorCode === "outcomeUnknown"
-            ? new RuntimeOutcomeUnknownError(errorMessage)
-            : new Error(errorMessage);
+          if (errorCode === "outcomeUnknown") {
+            throw new RuntimeOutcomeUnknownError(errorMessage);
+          }
+          if (errorCode === "hostPolicyChanged") {
+            throw new RuntimeHostPolicyChangedError(errorMessage);
+          }
+          throw new Error(errorMessage);
         }
         if (finished) {
           return;

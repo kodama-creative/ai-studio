@@ -52,6 +52,7 @@ export function replayRuntimeRunEvents(
     .filter(entry =>
       entry.type !== "sessionStateReplaced"
       && entry.type !== "turnInstructionsRecorded"
+      && entry.type !== "turnCapabilitiesRecorded"
       && entry.runId === authorization.runId
       && entry.sequence > afterSequence)
     .map(entry => ({
@@ -94,6 +95,7 @@ function _validatedCursorSequence(
     entry?.sequence !== cursor.sequence
     || entry.type === "sessionStateReplaced"
     || entry.type === "turnInstructionsRecorded"
+    || entry.type === "turnCapabilitiesRecorded"
     || entry.runId !== cursor.runId
   ) {
     throw new SessionStoreInvariantError(

@@ -2,7 +2,9 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { TSchema } from "typebox";
 
 import type { AgentProjectArtifact } from "./agent-project-artifact";
+import type { RuntimeDynamicToolsDefinition } from "../../internal/authored-dynamic-tools-definition";
 import type { RuntimeDynamicInstructionsDefinition } from "../../internal/authored-instruction-definitions";
+import type { DynamicToolSteps } from "../../internal/dynamic-tool-step";
 import type { McpClientConnectionDefinition } from "../../public/definitions/connections/mcp";
 import type { JsonValue } from "../../public/definitions/tool";
 import type { CompiledAgentDefinition } from "../../shared/agent-definition";
@@ -17,6 +19,13 @@ export interface CompiledMcpConnection {
 export interface CompiledProjectTool extends AgentTool {
   readonly outputSchema?: AgentTool["parameters"];
   readonly sourcePath?: string;
+}
+
+export interface CompiledDynamicToolResolver {
+  readonly contributionId: string;
+  readonly definition: RuntimeDynamicToolsDefinition;
+  readonly sourcePath: string;
+  readonly steps: DynamicToolSteps;
 }
 
 export interface CompiledAgentStateDefinition {
@@ -63,6 +72,7 @@ export interface AgentProjectSnapshot {
   readonly resources: Readonly<AgentProjectResources>;
   readonly stateDefinitions?: readonly CompiledAgentStateDefinition[];
   readonly diagnostics: readonly AgentProjectDiagnostic[];
+  readonly dynamicToolResolvers?: readonly CompiledDynamicToolResolver[];
   readonly fingerprint: string;
 }
 

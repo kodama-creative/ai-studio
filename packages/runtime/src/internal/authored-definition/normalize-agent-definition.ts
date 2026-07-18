@@ -1,3 +1,5 @@
+import { isDynamicModelDefinition } from "../authored-dynamic-model-definition";
+
 import type {
   AgentDefinition,
   AgentEnvironmentRequirement,
@@ -5,7 +7,24 @@ import type {
   AgentReasoningDefinition
 } from "../../public/definitions/agent";
 
-const AGENT_DEFINITION_KEYS = new Set(["environment", "model", "reasoning"]);
+const AGENT_DEFINITION_KEYS = new Set([
+  "environment",
+  "model",
+  "modelOptions",
+  "reasoning"
+]);
+const MODEL_OPTION_KEYS = new Set([
+  "cacheRetention",
+  "maxRetryDelayMs",
+  "maxRetries",
+  "maxTokens",
+  "reasoning",
+  "temperature",
+  "thinkingBudgets",
+  "timeoutMs",
+  "transport",
+  "websocketConnectTimeoutMs"
+]);
 const ENVIRONMENT_REQUIREMENT_KEYS = new Set([
   "description",
   "kind",
@@ -33,11 +52,17 @@ export function normalizeAgentDefinition(
   if (Object.keys(candidate).some(key => !AGENT_DEFINITION_KEYS.has(key))) {
     throw new TypeError(errorMessage);
   }
-  if (typeof candidate.model !== "string") {
+  if (
+    typeof candidate.model !== "string"
+    && !isDynamicModelDefinition(candidate.model)
+  ) {
     throw new TypeError(errorMessage);
   }
-  const separator = candidate.model.indexOf("/");
-  if (separator <= 0 || separator === candidate.model.length - 1) {
+  const fallback = typeof candidate.model === "string"
+    ? candidate.model
+    : candidate.model.fallback;
+  const separator = fallback.indexOf("/");
+  if (separator <= 0 || separator === fallback.length - 1) {
     throw new TypeError(errorMessage);
   }
   if (
@@ -47,11 +72,31 @@ export function normalizeAgentDefinition(
     throw new TypeError(errorMessage);
   }
   const environment = _normalizeEnvironment(candidate.environment, errorMessage);
+  const modelOptions = _normalizeModelOptions(
+    candidate.modelOptions,
+    errorMessage
+  );
   return {
     model: candidate.model,
+    ...(modelOptions ? { modelOptions } : {}),
     ...(candidate.reasoning ? { reasoning: candidate.reasoning } : {}),
     ...(environment ? { environment } : {})
   };
+}
+
+function _normalizeModelOptions(
+  value: unknown,
+  errorMessage: string
+): AgentDefinition["modelOptions"] {
+  if (value === undefined) { return undefined; }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError(errorMessage);
+  }
+  const candidate = value as Record<string, unknown>;
+  if (Object.keys(candidate).some(key => !MODEL_OPTION_KEYS.has(key))) {
+    throw new TypeError(errorMessage);
+  }
+  return { ...candidate };
 }
 
 function _normalizeEnvironment(

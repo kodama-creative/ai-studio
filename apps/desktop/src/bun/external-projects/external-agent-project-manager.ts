@@ -40,6 +40,7 @@ import {
   type AgentSession,
   type CompiledAgentProjectSnapshot,
   type CreateAgentSessionOptions,
+  createHostCapabilityPolicy,
   loadAgentProject,
   loadAgentProjectManifest,
   type ProjectMcpConnectionStatus,
@@ -825,7 +826,9 @@ export class ExternalAgentProjectManager {
 
   async createRuntimeSession(
     projectId: string,
-    options: CreateAgentSessionOptions
+    options: {
+      capabilityPolicy?: CreateAgentSessionOptions["capabilityPolicy"];
+    } & Omit<CreateAgentSessionOptions, "capabilityPolicy">
   ): Promise<AgentSession> {
     await this._ensureProject(projectId);
     const loaded = this._state(projectId);
@@ -837,7 +840,15 @@ export class ExternalAgentProjectManager {
       loaded.runtime = new AgentRuntime({ models, project: loaded.snapshot });
       loaded.models = models;
     }
-    return loaded.runtime.createSession(options);
+    return loaded.runtime.createSession({
+      ...options,
+      capabilityPolicy: options.capabilityPolicy
+        ?? createHostCapabilityPolicy({
+          extraTools: options.extraTools,
+          models,
+          project: loaded.snapshot!
+        })
+    });
   }
 
   async createRuntimeSessionStore(

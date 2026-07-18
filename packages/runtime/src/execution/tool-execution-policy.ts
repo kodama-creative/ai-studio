@@ -13,9 +13,9 @@ export interface DeferredToolCall {
 }
 
 export class ToolExecutionPolicy {
-  private readonly _tools: PreparedAgentTool[];
-  private readonly _toolNames: Set<string>;
-  private readonly _staticallyDeferredToolNames: Set<string>;
+  private _tools: PreparedAgentTool[] = [];
+  private _toolNames = new Set<string>();
+  private _staticallyDeferredToolNames = new Set<string>();
   private readonly _deferredCalls = new Map<string, DeferredToolCall>();
 
   constructor({
@@ -25,6 +25,16 @@ export class ToolExecutionPolicy {
     activeToolNames?: string[];
     tools: PreparedAgentTool[];
   }) {
+    this.configure({ tools, activeToolNames });
+  }
+
+  configure({
+    tools,
+    activeToolNames
+  }: {
+    activeToolNames?: readonly string[];
+    tools: PreparedAgentTool[];
+  }): void {
     _assertUniqueToolNames(tools);
     const activeNames = activeToolNames ? new Set(activeToolNames) : null;
     this._tools = activeNames

@@ -7,6 +7,7 @@ import {
   type RuntimeRunSnapshot,
   type RuntimeRunState,
   RuntimeRunTransitionError,
+  type RuntimeTurnCapabilitySnapshot,
   type RuntimeTurnInstructionSnapshot,
   type SessionStore,
   SessionStoreConflictError,
@@ -69,6 +70,81 @@ describe("Runtime Run state machine", () => {
 });
 
 describe("InMemorySessionStore", () => {
+  test("records immutable capability snapshots and rejects tampering", async () => {
+    const store = new InMemorySessionStore();
+    const snapshot = await _capabilitySnapshot();
+    const recorded = await store.commit({
+      sessionId: "session-capabilities",
+      expectedVersion: null,
+      mutations: [{ type: "recordTurnCapabilities", snapshot }]
+    });
+
+    expect(recorded.snapshot.capabilitySnapshots?.[snapshot.turnId])
+      .toEqual(snapshot);
+    expect(recorded.journal).toEqual([{
+      type: "turnCapabilitiesRecorded",
+      sequence: 1,
+      sessionVersion: 1,
+      turnId: snapshot.turnId,
+      fingerprint: snapshot.fingerprint
+    }]);
+    expect(Object.isFrozen(
+      recorded.snapshot.capabilitySnapshots?.[snapshot.turnId]?.tools
+    )).toBe(true);
+
+    const replacement = await _capabilitySnapshot({ temperature: 0.8 });
+    expect(await _rejection(store.commit({
+      sessionId: "session-capabilities",
+      expectedVersion: recorded.version,
+      mutations: [{ type: "recordTurnCapabilities", snapshot: replacement }]
+    }))).toMatchObject({
+      message: expect.stringContaining("is immutable")
+    });
+
+    const original = recorded.snapshot.capabilitySnapshots?.[snapshot.turnId];
+    if (!original) { throw new Error("Expected recorded Turn capabilities"); }
+    const tampered = new InMemorySessionStore([{
+      ...recorded,
+      snapshot: {
+        ...recorded.snapshot,
+        capabilitySnapshots: {
+          [snapshot.turnId]: {
+            ...original,
+            modelOptions: { temperature: 0.9 }
+          }
+        }
+      }
+    }]);
+    expect(await _rejection(tampered.load("session-capabilities")))
+      .toMatchObject({
+        message: expect.stringContaining(
+          "capability fingerprint does not match its content"
+        )
+      });
+
+    const unsafeContent = {
+      ...original,
+      modelOptions: {
+        ...original.modelOptions,
+        headers: { authorization: "must-not-rehydrate" }
+      }
+    };
+    const { fingerprint: _fingerprint, ...content } = unsafeContent;
+    const unsafeFingerprint = await sha256(JSON.stringify(content));
+    expect(() => new InMemorySessionStore([{
+      ...recorded,
+      snapshot: {
+        ...recorded.snapshot,
+        capabilitySnapshots: {
+          [snapshot.turnId]: {
+            ...unsafeContent,
+            fingerprint: unsafeFingerprint
+          }
+        }
+      }
+    }])).toThrow("forbidden capability model option headers");
+  });
+
   test("records one immutable instruction snapshot for each Turn", async () => {
     const store = new InMemorySessionStore();
     const snapshot = await _instructionSnapshot();
@@ -675,6 +751,25 @@ async function _instructionSnapshot(): Promise<RuntimeTurnInstructionSnapshot> {
     fingerprint: await sha256(JSON.stringify(entries)),
     markdown: "Root instructions.\n\nTurn instructions.",
     turnId: "turn-one"
+  };
+}
+
+async function _capabilitySnapshot(
+  modelOptions: RuntimeTurnCapabilitySnapshot["modelOptions"] = {}
+): Promise<RuntimeTurnCapabilitySnapshot> {
+  const content = {
+    agentSnapshotFingerprint: "agent-snapshot",
+    connectionTools: [],
+    hostPolicyFingerprint: "host-policy",
+    model: { provider: "fake", id: "fake-model" },
+    modelOptions,
+    requestFingerprint: "turn-request",
+    tools: [],
+    turnId: "turn-one"
+  };
+  return {
+    ...content,
+    fingerprint: await sha256(JSON.stringify(content))
   };
 }
 

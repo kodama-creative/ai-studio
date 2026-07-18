@@ -9,6 +9,13 @@ type PreparedAgentToolOutcome =
   }
   | { readonly type: "deferred"; };
 
+export interface PreparedAgentToolProvenance {
+  readonly connectionName?: string;
+  readonly contributionId: string;
+  readonly schemaFingerprint?: string;
+  readonly sourcePath?: string;
+}
+
 export type PreparedAgentTool =
   | {
     readonly definition: PreparedAgentToolDefinition;
@@ -16,8 +23,10 @@ export type PreparedAgentTool =
       ...args: Parameters<AgentTool["execute"]>
     ) => Promise<PreparedAgentToolOutcome>;
     readonly kind: "executable";
+    readonly provenance?: PreparedAgentToolProvenance;
   }
   | {
     readonly definition: PreparedAgentToolDefinition;
     readonly kind: "deferred";
+    readonly provenance?: PreparedAgentToolProvenance;
   };

@@ -79,6 +79,40 @@ describe("createAgentProjectBundle", () => {
       }
     )).toMatchObject({ markdown: "turn-bundle:current" });
     expect(project.tools.map(tool => tool.name)).toEqual(["echo"]);
+    const dynamicTools = project.dynamicToolResolvers?.[0];
+    expect(dynamicTools?.sourcePath).toBe("tools/tenant.ts");
+    const resolvedDynamicTools = await dynamicTools?.definition.events[
+      "turn.started"
+    ](
+      { type: "turn.started" },
+      {
+        session: {
+          id: "bundle-session",
+          auth: {
+            initiator: {
+              issuer: "test",
+              principalId: "initiator",
+              principalType: "user"
+            },
+            current: {
+              issuer: "test",
+              principalId: "current",
+              principalType: "user"
+            }
+          },
+          channel: { kind: "bundle" },
+          turn: { id: "turn-bundle", sequence: 1 }
+        }
+      }
+    );
+    expect(resolvedDynamicTools).toMatchObject({
+      tenant_echo: {
+        __llmSpaceDynamicTool: {
+          stepId: "dynamic-tool:tools/tenant.ts:0",
+          closureVariables: { prefix: "bundle" }
+        }
+      }
+    });
     expect(project.stateDefinitions).toEqual(loaded.stateDefinitions);
     expect(project.connections.map(connection => connection.name)).toEqual([
       "fixture"
@@ -202,6 +236,25 @@ async function _fixture(): Promise<string> {
     });`
   );
   await mkdir(join(root, "tools"));
+  await writeFile(
+    join(root, "tools", "tenant.ts"),
+    `import { defineDynamic, defineTool } from "@llm-space/runtime/tools";
+    import { Type } from "typebox";
+    export default defineDynamic({
+      events: {
+        "turn.started": (_event, { session }) => {
+          const prefix = session.channel.kind;
+          return {
+            tenant_echo: defineTool({
+              description: "Echo with a captured tenant prefix.",
+              inputSchema: Type.Object({ value: Type.String() }),
+              execute({ value }) { return { value: prefix + ":" + value }; }
+            })
+          };
+        }
+      }
+    });`
+  );
   await writeFile(
     join(root, "tools", "echo.ts"),
     `import { defineTool } from "@llm-space/runtime/tools";

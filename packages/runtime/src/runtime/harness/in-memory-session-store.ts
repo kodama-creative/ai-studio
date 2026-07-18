@@ -1,3 +1,4 @@
+import { deriveCapabilitySnapshotFingerprint } from "./derive-capability-snapshot-fingerprint";
 import { deriveInstructionSnapshotContent } from "./derive-instruction-snapshot-content";
 import { immutableSnapshot } from "./immutable-snapshot";
 import {
@@ -56,6 +57,7 @@ export class InMemorySessionStore implements SessionStore {
     const stored = this._sessions.get(sessionId);
     if (stored) {
       await _assertInstructionSnapshotIntegrity(stored.snapshot);
+      await _assertCapabilitySnapshotIntegrity(stored.snapshot);
     }
     return Promise.resolve(stored ? immutableSnapshot(stored) : null);
   }
@@ -74,11 +76,19 @@ export class InMemorySessionStore implements SessionStore {
           instructionSnapshots: { [mutation.snapshot.turnId]: mutation.snapshot }
         });
       }
+      if (mutation.type === "recordTurnCapabilities") {
+        await _assertCapabilitySnapshotIntegrity({
+          capabilitySnapshots: {
+            [mutation.snapshot.turnId]: mutation.snapshot
+          }
+        });
+      }
     }
 
     let current = this._sessions.get(input.sessionId);
     if (current) {
       await _assertInstructionSnapshotIntegrity(current.snapshot);
+      await _assertCapabilitySnapshotIntegrity(current.snapshot);
       current = this._sessions.get(input.sessionId);
     }
     const actualVersion = current?.version ?? null;
@@ -165,7 +175,44 @@ function _applyMutation({
     _recordTurnInstructions({ journal, mutation, sessionVersion, snapshot });
     return;
   }
+  if (mutation.type === "recordTurnCapabilities") {
+    _recordTurnCapabilities({ journal, mutation, sessionVersion, snapshot });
+    return;
+  }
   _recordCheckpoint({ journal, mutation, sessionVersion, snapshot });
+}
+
+function _recordTurnCapabilities({
+  journal,
+  mutation,
+  sessionVersion,
+  snapshot
+}: {
+  journal: RuntimeRunJournalEntry[];
+  mutation: Extract<RuntimeSessionMutation, { type: "recordTurnCapabilities"; }>;
+  sessionVersion: number;
+  snapshot: RuntimeSessionSnapshot;
+}): void {
+  _assertCapabilitySnapshot(mutation.snapshot);
+  const existing = snapshot.capabilitySnapshots?.[mutation.snapshot.turnId];
+  if (existing) {
+    throw new SessionStoreInvariantError(
+      `Turn capability snapshot ${mutation.snapshot.turnId} is immutable`
+    );
+  }
+  (snapshot as {
+    capabilitySnapshots?: RuntimeSessionSnapshot["capabilitySnapshots"];
+  }).capabilitySnapshots = {
+    ...snapshot.capabilitySnapshots,
+    [mutation.snapshot.turnId]: structuredClone(mutation.snapshot)
+  };
+  journal.push({
+    type: "turnCapabilitiesRecorded",
+    sequence: journal.length + 1,
+    sessionVersion,
+    turnId: mutation.snapshot.turnId,
+    fingerprint: mutation.snapshot.fingerprint
+  });
 }
 
 function _recordTurnInstructions({
@@ -458,6 +505,174 @@ async function _assertInstructionSnapshotIntegrity(
   }
 }
 
+function _assertCapabilitySnapshot(
+  snapshot: NonNullable<RuntimeSessionSnapshot["capabilitySnapshots"]>[string]
+): void {
+  _assertId("Capability Turn", snapshot.turnId);
+  _assertId("Agent snapshot fingerprint", snapshot.agentSnapshotFingerprint);
+  _assertId("Host policy fingerprint", snapshot.hostPolicyFingerprint);
+  _assertId("Capability request fingerprint", snapshot.requestFingerprint);
+  _assertId("Capability model provider", snapshot.model.provider);
+  _assertId("Capability model id", snapshot.model.id);
+  _assertCapabilityModelOptions(snapshot);
+  if (
+    snapshot.reasoning !== undefined
+    && !["off", "minimal", "low", "medium", "high", "xhigh"].includes(
+      snapshot.reasoning
+    )
+  ) {
+    throw new SessionStoreInvariantError(
+      `Turn ${snapshot.turnId} has invalid capability reasoning`
+    );
+  }
+  if (!/^[0-9a-f]{64}$/.test(snapshot.fingerprint)) {
+    throw new SessionStoreInvariantError(
+      `Turn ${snapshot.turnId} has an invalid capability fingerprint`
+    );
+  }
+  for (const tool of snapshot.connectionTools) {
+    if (
+      typeof tool.connectionName !== "string"
+      || typeof tool.contributionId !== "string"
+      || typeof tool.schemaFingerprint !== "string"
+      || typeof tool.toolName !== "string"
+    ) {
+      throw new SessionStoreInvariantError(
+        `Turn ${snapshot.turnId} has invalid connection-tool provenance`
+      );
+    }
+    _assertId("Capability connection", tool.connectionName);
+    _assertId("Capability connection contribution", tool.contributionId);
+    _assertId("Capability connection schema", tool.schemaFingerprint);
+    _assertId("Capability connection tool", tool.toolName);
+  }
+  for (const tool of snapshot.tools) {
+    if (
+      typeof tool.name !== "string"
+      || typeof tool.contributionId !== "string"
+      || typeof tool.description !== "string"
+      || typeof tool.schemaFingerprint !== "string"
+    ) {
+      throw new SessionStoreInvariantError(
+        `Turn ${snapshot.turnId} has an invalid capability tool`
+      );
+    }
+    _assertId("Capability tool name", tool.name);
+    _assertId("Capability contribution", tool.contributionId);
+    _assertId("Capability schema fingerprint", tool.schemaFingerprint);
+    _assertJsonStateValue(tool.inputSchema, tool.name, new WeakSet());
+    if (tool.outputSchema !== undefined) {
+      _assertJsonStateValue(tool.outputSchema, tool.name, new WeakSet());
+    }
+    if (tool.stepId !== undefined || tool.closureVariables !== undefined) {
+      _assertId("Dynamic tool step", tool.stepId ?? "");
+      if (tool.closureVariables === undefined) {
+        throw new SessionStoreInvariantError(
+          `Dynamic tool ${tool.name} is missing closure variables`
+        );
+      }
+      _assertJsonStateValue(
+        tool.closureVariables,
+        `${tool.name} closure`,
+        new WeakSet()
+      );
+    }
+  }
+}
+
+function _assertCapabilityModelOptions(
+  snapshot: NonNullable<RuntimeSessionSnapshot["capabilitySnapshots"]>[string]
+): void {
+  const options = snapshot.modelOptions;
+  if (!options || typeof options !== "object" || Array.isArray(options)) {
+    throw new SessionStoreInvariantError(
+      `Turn ${snapshot.turnId} has invalid capability model options`
+    );
+  }
+  const numberKeys = new Set([
+    "maxRetries",
+    "maxRetryDelayMs",
+    "maxTokens",
+    "temperature",
+    "timeoutMs",
+    "websocketConnectTimeoutMs"
+  ]);
+  const allowedKeys = new Set([
+    ...numberKeys,
+    "cacheRetention",
+    "thinkingBudgets",
+    "transport"
+  ]);
+  for (const [key, value] of Object.entries(options)) {
+    if (!allowedKeys.has(key)) {
+      throw new SessionStoreInvariantError(
+        `Turn ${snapshot.turnId} has forbidden capability model option ${key}`
+      );
+    }
+    if (numberKeys.has(key) && (typeof value !== "number" || !Number.isFinite(value))) {
+      throw new SessionStoreInvariantError(
+        `Turn ${snapshot.turnId} has invalid capability model option ${key}`
+      );
+    }
+  }
+  if (
+    options.cacheRetention !== undefined
+    && !["none", "short", "long"].includes(options.cacheRetention)
+  ) {
+    throw new SessionStoreInvariantError(
+      `Turn ${snapshot.turnId} has invalid capability cache retention`
+    );
+  }
+  if (
+    options.transport !== undefined
+    && !["auto", "sse", "websocket", "websocket-cached"].includes(
+      options.transport
+    )
+  ) {
+    throw new SessionStoreInvariantError(
+      `Turn ${snapshot.turnId} has invalid capability transport`
+    );
+  }
+  if (options.thinkingBudgets !== undefined) {
+    const budgets = options.thinkingBudgets;
+    if (!budgets || typeof budgets !== "object" || Array.isArray(budgets)) {
+      throw new SessionStoreInvariantError(
+        `Turn ${snapshot.turnId} has invalid capability thinking budgets`
+      );
+    }
+    for (const [key, value] of Object.entries(budgets)) {
+      if (
+        !["minimal", "low", "medium", "high"].includes(key)
+        || typeof value !== "number"
+        || !Number.isFinite(value)
+      ) {
+        throw new SessionStoreInvariantError(
+          `Turn ${snapshot.turnId} has invalid capability thinking budget ${key}`
+        );
+      }
+    }
+  }
+}
+
+async function _assertCapabilitySnapshotIntegrity(
+  snapshot: Pick<RuntimeSessionSnapshot, "capabilitySnapshots">
+): Promise<void> {
+  for (const capabilitySnapshot of Object.values(
+    snapshot.capabilitySnapshots ?? {}
+  )) {
+    _assertCapabilitySnapshot(capabilitySnapshot);
+    const { fingerprint: _fingerprint, ...content } = capabilitySnapshot;
+    if (
+      capabilitySnapshot.fingerprint
+      !== await deriveCapabilitySnapshotFingerprint(content)
+    ) {
+      throw new SessionStoreInvariantError(
+        `Turn ${capabilitySnapshot.turnId} capability fingerprint does not match its content`
+      );
+    }
+  }
+}
+
 function _sameConfiguration(
   left: RuntimeRunConfigurationSnapshot,
   right: RuntimeRunConfigurationSnapshot
@@ -506,6 +721,16 @@ function _assertStoredSession(session: StoredRuntimeSession): void {
     if (snapshot.turnId !== turnId) {
       throw new SessionStoreInvariantError(
         `Turn instruction snapshot key ${turnId} does not match ${snapshot.turnId}`
+      );
+    }
+  }
+  for (const [turnId, snapshot] of Object.entries(
+    session.snapshot.capabilitySnapshots ?? {}
+  )) {
+    _assertCapabilitySnapshot(snapshot);
+    if (snapshot.turnId !== turnId) {
+      throw new SessionStoreInvariantError(
+        `Turn capability snapshot key ${turnId} does not match ${snapshot.turnId}`
       );
     }
   }
@@ -595,6 +820,7 @@ function _assertStoredSession(session: StoredRuntimeSession): void {
   let previousSessionVersion = 0;
   let stateRevision = 0;
   const instructionTurns = new Set<string>();
+  const capabilityTurns = new Set<string>();
   for (const [index, entry] of session.journal.entries()) {
     if (entry.sequence !== index + 1) {
       throw new SessionStoreInvariantError(
@@ -650,6 +876,19 @@ function _assertStoredSession(session: StoredRuntimeSession): void {
       instructionTurns.add(entry.turnId);
       continue;
     }
+    if (entry.type === "turnCapabilitiesRecorded") {
+      if (
+        capabilityTurns.has(entry.turnId)
+        || session.snapshot.capabilitySnapshots?.[entry.turnId]?.fingerprint
+        !== entry.fingerprint
+      ) {
+        throw new SessionStoreInvariantError(
+          `Turn capability journal entry ${entry.sequence} is invalid`
+        );
+      }
+      capabilityTurns.add(entry.turnId);
+      continue;
+    }
     if (!runIds.has(entry.runId)) {
       throw new SessionStoreInvariantError(
         `Run Journal entry ${entry.sequence} references missing Runtime Run ${entry.runId}`
@@ -682,6 +921,14 @@ function _assertStoredSession(session: StoredRuntimeSession): void {
       "Turn instruction journal does not match the Session snapshot"
     );
   }
+  if (
+    capabilityTurns.size
+    !== Object.keys(session.snapshot.capabilitySnapshots ?? {}).length
+  ) {
+    throw new SessionStoreInvariantError(
+      "Turn capability journal does not match the Session snapshot"
+    );
+  }
   _assertJournalReconstructsSnapshot(session);
 }
 
@@ -697,6 +944,7 @@ function _assertJournalReconstructsSnapshot(
     if (
       entry.type === "sessionStateReplaced"
       || entry.type === "turnInstructionsRecorded"
+      || entry.type === "turnCapabilitiesRecorded"
     ) { continue; }
     if (entry.type === "runStarted") {
       const startedState = (entry as { readonly state: unknown; }).state;

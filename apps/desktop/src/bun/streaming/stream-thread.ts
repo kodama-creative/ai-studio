@@ -9,10 +9,12 @@ import {
 import { streamAgent } from "@llm-space/core/server";
 import { agentModelMatchesDefinition } from "@llm-space/runtime";
 import {
+  AgentHostPolicyChangedError,
   type AgentProjectSnapshot,
   AgentRuntime,
   type AgentSession,
   AgentStateCommitUnknownError,
+  createHostCapabilityPolicy,
   type PreparedAgentTool
 } from "@llm-space/runtime/node";
 
@@ -104,7 +106,9 @@ export class StreamThreadController {
         message: error instanceof Error ? error.message : "Internal error",
         ...(error instanceof AgentStateCommitUnknownError
           ? { code: "outcomeUnknown" as const }
-          : {})
+          : error instanceof AgentHostPolicyChangedError
+            ? { code: "hostPolicyChanged" as const }
+            : {})
       });
     } finally {
       this._activeStreams.delete(streamId);
@@ -179,7 +183,10 @@ export class StreamThreadController {
     const sourceTools = payload.request.context.sourceTools ?? [];
     const extraTools = sourceTools
       .filter(tool => tool.type !== "project")
-      .map(tool => this._runtimeTool(tool));
+      .map(tool => ({
+        ...this._runtimeTool(tool),
+        provenance: { contributionId: `host-tool:${tool.name}` }
+      }));
     extraTools.push(
       ...sourceTools
         .filter((tool): tool is ProjectTool => tool.type === "project")
@@ -190,6 +197,10 @@ export class StreamThreadController {
             label: tool.name,
             description: tool.description,
             parameters: tool.parameters
+          },
+          provenance: {
+            contributionId: `host-tool:${tool.name}`,
+            ...(tool.sourcePath ? { sourcePath: tool.sourcePath } : {})
           }
         }))
     );
@@ -197,6 +208,14 @@ export class StreamThreadController {
       root: "desktop-thread://runtime",
       definition: {
         model: payload.request.model,
+        modelOptions: {
+          ...(payload.request.config?.model?.maxTokens === undefined
+            ? {}
+            : { maxTokens: payload.request.config.model.maxTokens }),
+          ...(payload.request.config?.model?.temperature === undefined
+            ? {}
+            : { temperature: payload.request.config.model.temperature })
+        },
         reasoning: payload.request.config?.model?.reasoning
       },
       instructions: "",
@@ -206,8 +225,9 @@ export class StreamThreadController {
       diagnostics: [],
       fingerprint: "desktop-thread-runtime-v1"
     };
+    const models = await this._modelManager.getAvailableModels();
     const runtime = new AgentRuntime({
-      models: await this._modelManager.getAvailableModels(),
+      models,
       project
     });
     const desktopPrincipal = {
@@ -216,6 +236,11 @@ export class StreamThreadController {
       principalType: "user" as const
     };
     const session = await runtime.createSession({
+      capabilityPolicy: createHostCapabilityPolicy({
+        extraTools,
+        models,
+        project
+      }),
       id: payload.streamId,
       context: {
         id: payload.streamId,
@@ -227,6 +252,14 @@ export class StreamThreadController {
         turn: { id: payload.streamId, sequence: 1 }
       },
       model: payload.request.model,
+      modelOptions: {
+        ...(payload.request.config?.model?.maxTokens === undefined
+          ? {}
+          : { maxTokens: payload.request.config.model.maxTokens }),
+        ...(payload.request.config?.model?.temperature === undefined
+          ? {}
+          : { temperature: payload.request.config.model.temperature })
+      },
       reasoning: payload.request.config?.model?.reasoning,
       initialMessages: payload.request.context.messages as AgentMessage[],
       extraTools,
@@ -261,15 +294,24 @@ export class StreamThreadController {
           payload.runtime.threadId,
           projectSnapshot
         );
-    const activeSourceTools = sourceTools.filter(
-      tool =>
-        tool.type !== "project"
-        || !tool.connectionName
-        || activeRemoteToolNames.has(tool.name)
+    const unavailableRemoteTool = sourceTools.find(
+      (tool): tool is ProjectTool =>
+        tool.type === "project"
+        && Boolean(tool.connectionName)
+        && !activeRemoteToolNames.has(tool.name)
     );
+    if (unavailableRemoteTool) {
+      throw new Error(
+        `Selected connection tool is unavailable: ${unavailableRemoteTool.name}`
+      );
+    }
+    const activeSourceTools = sourceTools;
     const extraTools = activeSourceTools
       .filter(tool => tool.type !== "project")
-      .map(tool => this._runtimeTool(tool));
+      .map(tool => ({
+        ...this._runtimeTool(tool),
+        provenance: { contributionId: `host-tool:${tool.name}` }
+      }));
     extraTools.push(
       ...activeSourceTools
         .filter(
@@ -283,6 +325,14 @@ export class StreamThreadController {
             label: tool.name,
             description: tool.description,
             parameters: tool.parameters
+          },
+          provenance: {
+            connectionName: tool.connectionName,
+            contributionId: `connection:${tool.sourcePath ?? tool.connectionName}`,
+            ...(tool.schemaFingerprint
+              ? { schemaFingerprint: tool.schemaFingerprint }
+              : {}),
+            ...(tool.sourcePath ? { sourcePath: tool.sourcePath } : {})
           }
         }))
     );
@@ -339,8 +389,24 @@ export class StreamThreadController {
             onSessionCommitted: publishRuntimeSession
           }
           : {}),
-        model: payload.request.model,
-        reasoning: payload.request.config?.model?.reasoning,
+        ...(payload.runtime.modelSource === "threadOverride"
+          ? { model: payload.request.model }
+          : {}),
+        ...(payload.runtime.modelSource === "threadOverride"
+          ? {
+            modelOptions: {
+              ...(payload.request.config?.model?.maxTokens === undefined
+                ? {}
+                : { maxTokens: payload.request.config.model.maxTokens }),
+              ...(payload.request.config?.model?.temperature === undefined
+                ? {}
+                : { temperature: payload.request.config.model.temperature })
+            },
+            ...(payload.request.config?.model?.reasoning === undefined
+              ? {}
+              : { reasoning: payload.request.config.model.reasoning })
+          }
+          : {}),
         initialMessages: payload.request.context.messages as AgentMessage[],
         extraTools,
         activeToolNames: activeSourceTools.map(tool => tool.name),

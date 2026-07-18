@@ -7,13 +7,15 @@ import {
   AgentRuntime,
   type CreateAgentSessionOptions
 } from "../runtime/agent/agent-runtime";
+import { createHostCapabilityPolicy } from "../runtime/capabilities/create-host-capability-policy";
 
 import type { AgentSession } from "../runtime/sessions/agent-session";
 import type { AgentSessionContext } from "../shared/agent-session-context";
 
 export type CreateLocalAgentSessionOptions = {
+  capabilityPolicy?: CreateAgentSessionOptions["capabilityPolicy"];
   context?: AgentSessionContext;
-} & Omit<CreateAgentSessionOptions, "context">;
+} & Omit<CreateAgentSessionOptions, "capabilityPolicy" | "context">;
 
 export interface LocalAgentRuntimeOptions {
   agentRoot: string;
@@ -62,6 +64,12 @@ export class LocalAgentRuntime {
     };
     return this._runtime.createSession({
       ...options,
+      capabilityPolicy: options.capabilityPolicy
+        ?? createHostCapabilityPolicy({
+          extraTools: options.extraTools,
+          models: this._runtime.models,
+          project: this.project
+        }),
       context: options.context ?? {
         id,
         auth: { initiator: principal, current: principal },

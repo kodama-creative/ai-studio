@@ -70,7 +70,8 @@ export async function createAgentProjectBundle(
       bundlePath,
       bundleRoot,
       helperPath,
-      dynamicInstructionSources.map(source => source.absolutePath)
+      dynamicInstructionSources.map(source => source.absolutePath),
+      discovered.tools.map(source => source.absolutePath)
     );
     const bundle = await readFile(bundlePath, "utf8");
     _assertClosedBundle(bundle);
@@ -82,6 +83,7 @@ export async function createAgentProjectBundle(
       createAgentProject(artifact: AgentProjectArtifact): {
         artifact: AgentProjectArtifact;
         definition?: CompiledAgentDefinition;
+        dynamicToolResolvers?: ReadonlyArray<{ sourcePath: string; }>;
         instructionEntries?: ReadonlyArray<{
           kind: "dynamic" | "static";
           markdown?: string;
@@ -112,6 +114,11 @@ export async function createAgentProjectBundle(
       !== JSON.stringify(project.stateDefinitions)
       || JSON.stringify(bundledProject.tools.map(tool => tool.name))
       !== JSON.stringify(project.tools.map(tool => tool.name))
+      || JSON.stringify(bundledProject.dynamicToolResolvers?.map(
+        resolver => resolver.sourcePath
+      )) !== JSON.stringify(project.dynamicToolResolvers?.map(
+        resolver => resolver.sourcePath
+      ))
     ) {
       throw new Error("Bundled Agent does not match its compiled artifact");
     }
@@ -144,11 +151,15 @@ async function _buildInFreshBunProcess(
   bundlePath: string,
   authoredRoot: string,
   helperPath: string,
-  instructionEntryPaths: readonly string[]
+  instructionEntryPaths: readonly string[],
+  toolEntryPaths: readonly string[]
 ): Promise<void> {
   const scriptPath = `${bundlePath}.build.mjs`;
   const validatorPath = fileURLToPath(
     new URL("./validate-authored-source.ts", import.meta.url)
+  );
+  const dynamicToolTransformerPath = fileURLToPath(
+    new URL("./transform-dynamic-tool-source.ts", import.meta.url)
   );
   await writeFile(scriptPath, `
     import path from "node:path";
@@ -157,13 +168,15 @@ async function _buildInFreshBunProcess(
       assertInstructionSourceImports,
       assertNoNonLiteralRuntimeImports
     } from ${JSON.stringify(validatorPath)};
+    import { transformDynamicToolSource } from ${JSON.stringify(dynamicToolTransformerPath)};
     const [
       ENTRY_PATH,
       BUNDLE_PATH,
       RESOLVE_ROOT,
       AUTHORED_ROOT,
       HELPER_PATH,
-      INSTRUCTION_ENTRY_PATHS
+      INSTRUCTION_ENTRY_PATHS,
+      TOOL_ENTRY_PATHS
     ]
       = process.argv.slice(2);
     const AUTHORED_FILES = new Set();
@@ -171,6 +184,7 @@ async function _buildInFreshBunProcess(
       JSON.parse(INSTRUCTION_ENTRY_PATHS)
     );
     const INSTRUCTION_FILES = new Set(INSTRUCTION_ENTRY_FILES);
+    const TOOL_ENTRY_FILES = new Set(JSON.parse(TOOL_ENTRY_PATHS));
     const RUNTIME_FILES = new Set([ENTRY_PATH, HELPER_PATH]);
     const STATE_ROOT = path.join(AUTHORED_ROOT, "state");
     const NODE_BUILTINS = new Set(
@@ -240,7 +254,15 @@ async function _buildInFreshBunProcess(
             : extension === ".ts" || extension === ".mts" || extension === ".cts"
               ? "ts"
               : extension === ".jsx" ? "jsx" : "js";
-          return { contents: source, loader };
+          return {
+            contents: TOOL_ENTRY_FILES.has(args.path)
+              ? transformDynamicToolSource(
+                source,
+                path.relative(AUTHORED_ROOT, args.path).split(path.sep).join(path.posix.sep)
+              )
+              : source,
+            loader
+          };
         });
       }
     };
@@ -270,7 +292,8 @@ async function _buildInFreshBunProcess(
     import.meta.dir,
     authoredRoot,
     helperPath,
-    JSON.stringify(instructionEntryPaths)
+    JSON.stringify(instructionEntryPaths),
+    JSON.stringify(toolEntryPaths)
   ], {
     stdout: "pipe",
     stderr: "pipe"
@@ -297,8 +320,14 @@ function _entrySource(
   const imports = [
     `import { createBundledAgentProject } from ${JSON.stringify(helperPath)};`,
     `import definition from ${JSON.stringify(definitionPath)};`,
-    ...discovered.tools.map((source, index) =>
-      `import tool${index} from ${JSON.stringify(source.absolutePath)};`),
+    ...discovered.tools.map((source, index) => {
+      const dynamic = project.dynamicToolResolvers?.some(
+        resolver => resolver.sourcePath === source.logicalPath
+      );
+      return dynamic
+        ? `import tool${index}, { __llmSpaceDynamicToolSteps as tool${index}Steps } from ${JSON.stringify(source.absolutePath)};`
+        : `import tool${index} from ${JSON.stringify(source.absolutePath)};`;
+    }),
     ...discovered.connections.map((source, index) =>
       `import connection${index} from ${JSON.stringify(source.absolutePath)};`),
     ...discovered.states.map((source, index) =>
@@ -307,9 +336,13 @@ function _entrySource(
       `import dynamicInstruction${index} from ${JSON.stringify(source.absolutePath)};`)
   ];
   const tools = discovered.tools.map((source, index) => ({
+    kind: project.dynamicToolResolvers?.some(
+      resolver => resolver.sourcePath === source.logicalPath
+    ) ? "dynamic" : "static",
     name: path.basename(source.absolutePath, path.extname(source.absolutePath)),
     sourcePath: source.logicalPath,
-    definition: `tool${index}`
+    definition: `tool${index}`,
+    steps: `tool${index}Steps`
   }));
   const connections = discovered.connections.map((source, index) => ({
     name: path.basename(source.absolutePath, path.extname(source.absolutePath)),
@@ -334,7 +367,7 @@ const INPUT = {
   definition,
   instructions: ${JSON.stringify(project.instructions)},
   instructionEntries: [${instructionEntries.join(",")}],
-  tools: [${tools.map(tool => `{ name: ${JSON.stringify(tool.name)}, sourcePath: ${JSON.stringify(tool.sourcePath)}, definition: ${tool.definition} }`).join(",")}],
+  tools: [${tools.map(tool => `{ kind: ${JSON.stringify(tool.kind)}, name: ${JSON.stringify(tool.name)}, sourcePath: ${JSON.stringify(tool.sourcePath)}, definition: ${tool.definition}${tool.kind === "dynamic" ? `, steps: ${tool.steps}` : ""} }`).join(",")}],
   connections: [${connections.map(connection => `{ name: ${JSON.stringify(connection.name)}, logicalPath: ${JSON.stringify(connection.logicalPath)}, definition: ${connection.definition} }`).join(",")}],
   states: [${states.map(state => `{ sourcePath: ${JSON.stringify(state.sourcePath)}, definition: ${state.definition} }`).join(",")}],
   skills: ${JSON.stringify(skills)}

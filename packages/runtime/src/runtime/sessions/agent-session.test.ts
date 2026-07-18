@@ -28,6 +28,7 @@ describe("AgentSession Pi Agent ownership", () => {
       }
     };
     const firstSession = await runtime.createSession({
+      capabilityPolicy: _policy(),
       context: _context("manual-session"),
       executionMode: "manual",
       persistence,
@@ -42,6 +43,7 @@ describe("AgentSession Pi Agent ownership", () => {
     ]);
 
     const reloadedSession = await runtime.createSession({
+      capabilityPolicy: _policy(),
       context: _context("manual-session"),
       executionMode: "manual",
       initialMessages: persisted,
@@ -70,6 +72,7 @@ describe("AgentSession Pi Agent ownership", () => {
   test("persists the public transcript before publishing agent_end", async () => {
     const order: string[] = [];
     const session = await _runtime().createSession({
+      capabilityPolicy: _policy(),
       context: _context("persistence-session"),
       persistence: {
         replaceMessages(messages) {
@@ -124,6 +127,7 @@ describe("AgentSession Pi Agent ownership", () => {
       return stream;
     };
     const session = await _runtime().createSession({
+      capabilityPolicy: _policy(),
       context: _context("abort-session"),
       persistence: {
         replaceMessages(messages) {
@@ -157,6 +161,16 @@ describe("AgentSession Pi Agent ownership", () => {
 
 function _runtime(): AgentRuntime {
   return new AgentRuntime({ models: _models(), project: _project() });
+}
+
+function _policy() {
+  return {
+    connectionContributions: [],
+    modelOptions: {},
+    models: [{ provider: "fake", id: "fake-model" }],
+    reasoning: ["off", "minimal", "low", "medium", "high", "xhigh"] as const,
+    toolContributions: ["tool:echo"]
+  };
 }
 
 function _context(id: string) {

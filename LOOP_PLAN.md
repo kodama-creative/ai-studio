@@ -117,13 +117,13 @@ Runtime architecture follows [ADR 0001](./docs/adr/0001-runtime-harness-over-pi-
   - Boundary: instructions cannot execute tools, load arbitrary runtime code, or expand authority.
   - Metric: deterministic, explainable instruction snapshots.
 
-- [ ] **14 — Dynamic capability snapshots**
+- [x] **14 — Dynamic capability snapshots**
   - Depends on: 12 and 13.
   - Run: `$kaizen-loop Resolve model, tools, connections, and stream options dynamically at each Turn inside static policy bounds.`
   - Done when: every Turn records an immutable effective-capability snapshot constrained by authored maximums and Host policy.
   - Boundary: no dynamic code discovery, runtime plugin install, arbitrary path loading, or permission escalation.
   - Metric: capability-snapshot policy fidelity.
-  - Current blocker (2026-07-18): current source and ADRs do not define the authored-maximum source shape, Host policy/request boundary, model fallback, tool/connection selection, safe stream-option schema, failure behavior, or manual-debug snapshot semantics. These change portable source, security/authority, and Session Store persistence, so item 14 remains unchecked pending an owner-approved ADR.
+  - Completed evidence (2026-07-18): ADR 0007 fixes the Eve-shaped Turn-only contract; compiler, closed-bundle, Runtime, Session Store, Desktop, and Server fixtures prove policy-bounded immutable snapshots, dynamic-tool restart rehydration without resolver replay, manual no-state behavior, static connection provenance, and explicit Host-policy-change termination.
 
 - [ ] **15 — Named structured output contracts**
   - Depends on: 05 and 06.

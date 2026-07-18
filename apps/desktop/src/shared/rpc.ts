@@ -78,7 +78,7 @@ export interface StreamThreadRequestPayload {
 /** A bun→webview chunk of a streaming agent run, keyed by `streamId`. */
 export type StreamThreadResponsePayload =
   | {
-    code?: "outcomeUnknown";
+    code?: "hostPolicyChanged" | "outcomeUnknown";
     message: string;
     streamId: string;
     type: "error";

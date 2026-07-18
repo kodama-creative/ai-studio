@@ -1,7 +1,10 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 
 import type { RuntimeRunSnapshot, RuntimeRunState } from "./runtime-run";
-import type { AgentModelSelector } from "../../shared/agent-definition";
+import type {
+  AgentModelOptionsDefinition,
+  AgentModelSelector
+} from "../../shared/agent-definition";
 import type { RuntimeExecutionMode } from "../../shared/runtime-execution-mode";
 
 export const RUNTIME_SESSION_SCHEMA_VERSION = 1 as const;
@@ -42,6 +45,34 @@ export interface RuntimeTurnInstructionSnapshot {
   readonly turnId: string;
 }
 
+export interface RuntimeTurnCapabilitySnapshot {
+  readonly agentSnapshotFingerprint: string;
+  readonly connectionTools: ReadonlyArray<{
+    readonly connectionName: string;
+    readonly contributionId: string;
+    readonly schemaFingerprint: string;
+    readonly toolName: string;
+  }>;
+  readonly fingerprint: string;
+  readonly hostPolicyFingerprint: string;
+  readonly model: AgentModelSelector;
+  readonly modelOptions: AgentModelOptionsDefinition;
+  readonly reasoning?: ThinkingLevel;
+  readonly requestFingerprint: string;
+  readonly tools: ReadonlyArray<{
+    readonly closureVariables?: RuntimeSessionStateValue;
+    readonly contributionId: string;
+    readonly description: string;
+    readonly inputSchema: RuntimeSessionStateValue;
+    readonly name: string;
+    readonly outputSchema?: RuntimeSessionStateValue;
+    readonly schemaFingerprint: string;
+    readonly sourcePath?: string;
+    readonly stepId?: string;
+  }>;
+  readonly turnId: string;
+}
+
 export interface RuntimeRunConfigurationSnapshot {
   readonly id: string;
   readonly agentSnapshotFingerprint: string;
@@ -59,6 +90,9 @@ export interface RuntimeSessionSnapshot {
   readonly runs: readonly RuntimeRunSnapshot[];
   readonly instructionSnapshots?: Readonly<
     Record<string, RuntimeTurnInstructionSnapshot>
+  >;
+  readonly capabilitySnapshots?: Readonly<
+    Record<string, RuntimeTurnCapabilitySnapshot>
   >;
   readonly state?: RuntimeSessionStateSnapshot;
 }
@@ -80,6 +114,13 @@ export type RuntimeRunJournalEntry =
     readonly sessionVersion: number;
     readonly state: Exclude<RuntimeRunState, "runningModel" | "runningTools">;
     readonly type: "runCheckpointRecorded";
+  }
+  | {
+    readonly fingerprint: string;
+    readonly sequence: number;
+    readonly sessionVersion: number;
+    readonly turnId: string;
+    readonly type: "turnCapabilitiesRecorded";
   }
   | {
     readonly fingerprint: string;
@@ -126,6 +167,10 @@ export type RuntimeSessionMutation =
     readonly runId: string;
     readonly to: RuntimeRunState;
     readonly type: "transitionRun";
+  }
+  | {
+    readonly snapshot: RuntimeTurnCapabilitySnapshot;
+    readonly type: "recordTurnCapabilities";
   }
   | {
     readonly snapshot: RuntimeTurnInstructionSnapshot;

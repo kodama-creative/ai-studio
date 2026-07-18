@@ -20,6 +20,8 @@ export {
 } from "../runtime/agent/agent-runtime";
 export { AgentRuntimeModelUnavailableError } from "../runtime/agent/agent-runtime-model-unavailable-error";
 export type { PreparedAgentTool } from "../runtime/agent/prepared-agent-tool";
+export { AgentHostPolicyChangedError } from "../runtime/capabilities/agent-session-capabilities";
+export { createHostCapabilityPolicy } from "../runtime/capabilities/create-host-capability-policy";
 export {
   AgentSession,
   type AgentSessionEvent,

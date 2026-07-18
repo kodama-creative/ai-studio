@@ -16,6 +16,7 @@ import type {
   CompiledAgentInstructionEntry,
   CompiledAgentSkill,
   CompiledAgentStateDefinition,
+  CompiledDynamicToolResolver,
   CompiledMcpConnection,
   CompiledProjectTool
 } from "../../runtime/agent/agent-project-snapshot";
@@ -51,6 +52,7 @@ export function createAgentProjectArtifact({
   connections,
   definition,
   dependencies,
+  dynamicToolResolvers = [],
   instructions,
   instructionEntries = [],
   skills,
@@ -61,6 +63,7 @@ export function createAgentProjectArtifact({
   connections: readonly CompiledMcpConnection[];
   definition: CompiledAgentDefinition | undefined;
   dependencies: readonly AgentProjectArtifactDependencyInput[];
+  dynamicToolResolvers?: readonly CompiledDynamicToolResolver[];
   instructionEntries?: readonly CompiledAgentInstructionEntry[];
   instructions: string;
   skills: readonly CompiledAgentSkill[];
@@ -77,7 +80,18 @@ export function createAgentProjectArtifact({
       }))
     ),
     capabilities: _section([
-      ...(definition ? [{ id: "agent", content: definition }] : []),
+      ...(definition ? [{
+        id: "agent",
+        content: {
+          model: definition.model,
+          modelOptions: definition.modelOptions ?? null,
+          reasoning: definition.reasoning ?? null,
+          environment: definition.environment ?? null,
+          dynamicModel: definition.dynamicModel
+            ? { fallback: definition.model, events: ["turn.started"] }
+            : null
+        }
+      }] : []),
       { id: "instructions", content: instructions },
       ...instructionEntries.map(entry => ({
         id: `instruction:${entry.sourcePath}`,
@@ -88,6 +102,13 @@ export function createAgentProjectArtifact({
       ...tools.map(tool => ({
         id: `tool:${tool.name}`,
         content: { name: tool.name, description: tool.description }
+      })),
+      ...dynamicToolResolvers.map(resolver => ({
+        id: resolver.contributionId,
+        content: {
+          sourcePath: resolver.sourcePath,
+          events: ["turn.started"]
+        }
       })),
       ...connections.map(connection => ({
         id: `connection:${connection.name}`,

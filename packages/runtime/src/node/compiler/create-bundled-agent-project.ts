@@ -1,23 +1,26 @@
-import { Compile } from "typebox/compile";
-
 import { compileAgentDefinition } from "./compile-agent-definition";
 import { compileAgentStateDefinition } from "./compile-agent-state-definition";
 import { normalizeAgentDefinition } from "../../internal/authored-definition/normalize-agent-definition";
+import { isDynamicToolsDefinition } from "../../internal/authored-dynamic-tools-definition";
 import { isDynamicInstructionsDefinition } from "../../internal/authored-instruction-definitions";
 import { getActiveAgentSessionContextRuntime } from "../../internal/authored-state-definitions";
 import { qualifyProjectMcpToolName } from "../../internal/project-mcp-tool-name";
 import { isMcpClientConnectionDefinition } from "../../public/definitions/connections/mcp";
 import { isStateDefinition } from "../../public/definitions/state";
 import { isToolDefinition } from "../../public/definitions/tool";
+import { createCompiledProjectTool } from "../../runtime/agent/create-compiled-project-tool";
 import { createImmutableAgentProjectSnapshot } from "../../runtime/agent/create-immutable-agent-project-snapshot";
 import { assertRuntimeSessionStateValues } from "../../runtime/harness/in-memory-session-store";
+import { isAgentToolName } from "../../shared/is-agent-tool-name";
 
+import type { DynamicToolSteps } from "../../internal/dynamic-tool-step";
 import type { AgentProjectArtifact } from "../../runtime/agent/agent-project-artifact";
 import type {
   CompiledAgentInstructionEntry,
   CompiledAgentProjectSnapshot,
   CompiledAgentSkill,
   CompiledAgentStateDefinition,
+  CompiledDynamicToolResolver,
   CompiledMcpConnection,
   CompiledProjectTool
 } from "../../runtime/agent/agent-project-snapshot";
@@ -50,8 +53,10 @@ export interface BundledAgentProjectInput {
   }>;
   readonly tools: ReadonlyArray<{
     readonly definition: unknown;
+    readonly kind: "dynamic" | "static";
     readonly name: string;
     readonly sourcePath: string;
+    readonly steps?: DynamicToolSteps;
   }>;
 }
 
@@ -83,7 +88,8 @@ export function createBundledAgentProject(
       sourcePath: entry.sourcePath
     };
   });
-  const tools = _compileTools(input.tools);
+  const compiledTools = _compileTools(input.tools);
+  const { dynamicToolResolvers, tools } = compiledTools;
   const stateDefinitions = _compileStates(input.states);
   const connections = _compileConnections(input.connections, tools);
   return createImmutableAgentProjectSnapshot({
@@ -93,6 +99,7 @@ export function createBundledAgentProject(
     instructions: input.instructions,
     instructionEntries,
     tools,
+    dynamicToolResolvers,
     connections,
     resources: { skills: input.skills },
     stateDefinitions,
@@ -128,51 +135,42 @@ function _compileStates(
 
 function _compileTools(
   inputs: BundledAgentProjectInput["tools"]
-): CompiledProjectTool[] {
+): {
+  dynamicToolResolvers: CompiledDynamicToolResolver[];
+  tools: CompiledProjectTool[];
+} {
   const names = new Set<string>();
-  return inputs.map(input => {
-    if (!_isModelName(input.name) || names.has(input.name)) {
+  const tools: CompiledProjectTool[] = [];
+  const dynamicToolResolvers: CompiledDynamicToolResolver[] = [];
+  for (const input of inputs) {
+    if (input.kind === "dynamic") {
+      if (!isDynamicToolsDefinition(input.definition)) {
+        throw new TypeError(`Bundled dynamic tool is invalid: ${input.sourcePath}`);
+      }
+      dynamicToolResolvers.push({
+        contributionId: `tool-resolver:${input.sourcePath}`,
+        definition: input.definition,
+        sourcePath: input.sourcePath,
+        steps: input.steps ?? {}
+      });
+      continue;
+    }
+    if (!isAgentToolName(input.name) || names.has(input.name)) {
       throw new TypeError(`Invalid or duplicate bundled tool name: ${input.name}`);
     }
     names.add(input.name);
     if (!isToolDefinition(input.definition)) {
       throw new TypeError(`Bundled tool is invalid: ${input.name}`);
     }
-    const definition = input.definition;
-    const inputValidator = Compile(definition.inputSchema);
-    const outputValidator = definition.outputSchema
-      ? Compile(definition.outputSchema)
-      : null;
-    return {
+    tools.push(createCompiledProjectTool({
+      definition: input.definition,
       name: input.name,
-      label: input.name,
-      description: definition.description,
-      parameters: definition.inputSchema,
-      outputSchema: definition.outputSchema,
       sourcePath: input.sourcePath,
-      async execute(toolCallId, value, signal) {
-        if (!inputValidator.Check(value)) {
-          throw new TypeError(`Invalid input for tool "${input.name}"`);
-        }
-        const output = await definition.execute(value, {
-          abortSignal: signal ?? new AbortController().signal,
-          callId: toolCallId,
-          toolName: input.name,
-          get session() {
-            return getActiveAgentSessionContextRuntime() as AgentSessionContext;
-          }
-        });
-        if (outputValidator && !outputValidator.Check(output)) {
-          throw new TypeError(`Invalid output from tool "${input.name}"`);
-        }
-        const text = _serializeToolOutput(output, input.name);
-        return {
-          content: [{ type: "text" as const, text }],
-          details: output
-        };
-      }
-    };
-  });
+      getSession: () => getActiveAgentSessionContextRuntime() as
+        AgentSessionContext
+    }));
+  }
+  return { dynamicToolResolvers, tools };
 }
 
 function _compileConnections(
@@ -182,7 +180,7 @@ function _compileConnections(
   const connectionNames = new Set<string>();
   const toolNames = new Set(tools.map(tool => tool.name));
   return inputs.map(input => {
-    if (!_isModelName(input.name) || connectionNames.has(input.name)) {
+    if (!isAgentToolName(input.name) || connectionNames.has(input.name)) {
       throw new TypeError(
         `Invalid or duplicate bundled connection name: ${input.name}`
       );
@@ -193,7 +191,7 @@ function _compileConnections(
     }
     for (const toolName of input.definition.tools.allow) {
       const qualifiedName = qualifyProjectMcpToolName(input.name, toolName);
-      if (!_isModelName(toolName) || !_isModelName(qualifiedName)) {
+      if (!isAgentToolName(toolName) || !isAgentToolName(qualifiedName)) {
         throw new TypeError(`Invalid bundled MCP tool name: ${toolName}`);
       }
       if (toolNames.has(qualifiedName)) {
@@ -207,49 +205,4 @@ function _compileConnections(
       definition: input.definition
     };
   });
-}
-
-const MODEL_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_-]{0,63}$/;
-
-function _isModelName(value: string): boolean {
-  return MODEL_NAME_PATTERN.test(value);
-}
-
-function _serializeToolOutput(output: unknown, name: string): string {
-  _assertJsonValue(output, name, new WeakSet());
-  if (typeof output === "string") { return output; }
-  const text = JSON.stringify(output);
-  if (text === undefined) {
-    throw new TypeError(`Tool "${name}" returned a non-JSON value`);
-  }
-  return text;
-}
-
-function _assertJsonValue(
-  value: unknown,
-  name: string,
-  ancestors: WeakSet<object>
-): void {
-  if (value === null || typeof value === "string" || typeof value === "boolean") {
-    return;
-  }
-  if (typeof value === "number") {
-    if (Number.isFinite(value)) { return; }
-    throw new TypeError(`Tool "${name}" returned a non-JSON number`);
-  }
-  if (typeof value !== "object") {
-    throw new TypeError(`Tool "${name}" returned a non-JSON value`);
-  }
-  if (ancestors.has(value)) {
-    throw new TypeError(`Tool "${name}" returned circular JSON data`);
-  }
-  const prototype = Object.getPrototypeOf(value) as object | null;
-  if (!Array.isArray(value) && prototype !== Object.prototype && prototype !== null) {
-    throw new TypeError(`Tool "${name}" returned a non-plain JSON object`);
-  }
-  ancestors.add(value);
-  for (const child of Array.isArray(value) ? value : Object.values(value)) {
-    _assertJsonValue(child, name, ancestors);
-  }
-  ancestors.delete(value);
 }

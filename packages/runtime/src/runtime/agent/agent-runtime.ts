@@ -1,6 +1,5 @@
 import type {
   AgentMessage,
-  AgentTool,
   StreamFn,
   ThinkingLevel
 } from "@earendil-works/pi-agent-core";
@@ -8,15 +7,22 @@ import type { Models } from "@earendil-works/pi-ai";
 
 import { assertValidAgentProject } from "./assert-valid-agent-project";
 import { createImmutableAgentProjectSnapshot } from "./create-immutable-agent-project-snapshot";
+import { prepareProjectTool } from "./prepare-project-tool";
 import { resolveAgentRuntimeModel } from "./resolve-model";
 import {
   AgentSession,
   type AgentSessionPersistence
 } from "../sessions/agent-session";
 
-import type { AgentProjectSnapshot } from "./agent-project-snapshot";
+import type {
+  AgentProjectSnapshot
+} from "./agent-project-snapshot";
 import type { PreparedAgentTool } from "./prepared-agent-tool";
-import type { AgentModelSelector } from "../../shared/agent-definition";
+import type { AgentCapabilityPolicy } from "../../shared/agent-capability-policy";
+import type {
+  AgentModelOptionsDefinition,
+  AgentModelSelector
+} from "../../shared/agent-definition";
 import type { AgentSessionContext } from "../../shared/agent-session-context";
 import type { RuntimeExecutionMode } from "../../shared/runtime-execution-mode";
 import type { SessionStore, StoredRuntimeSession } from "../harness/session-store";
@@ -29,7 +35,9 @@ export interface AgentRuntimeOptions {
 export interface CreateAgentSessionOptions {
   id?: string;
   context: AgentSessionContext;
+  capabilityPolicy: AgentCapabilityPolicy;
   model?: AgentModelSelector;
+  modelOptions?: AgentModelOptionsDefinition;
   reasoning?: ThinkingLevel;
   initialMessages?: AgentMessage[];
   extraTools?: PreparedAgentTool[];
@@ -59,6 +67,10 @@ export class AgentRuntime {
 
   get project(): AgentProjectSnapshot {
     return this._project;
+  }
+
+  get models(): Models {
+    return this._models;
   }
 
   get defaultModel(): {
@@ -105,10 +117,21 @@ export class AgentRuntime {
       reasoning,
       initialMessages: options.initialMessages ?? [],
       tools: [
-        ...this._project.tools.map(_prepareProjectTool),
+        ...this._project.tools.map(tool => prepareProjectTool(tool)),
         ...(options.extraTools ?? [])
       ],
       activeToolNames: options.activeToolNames,
+      capabilityPolicy: options.capabilityPolicy,
+      capabilityRequest: {
+        ...(options.model ? { model: options.model } : {}),
+        ...(Object.hasOwn(options, "reasoning")
+          ? { reasoning: options.reasoning }
+          : {}),
+        ...(options.modelOptions ? { modelOptions: options.modelOptions } : {}),
+        ...(options.activeToolNames
+          ? { activeToolNames: options.activeToolNames }
+          : {})
+      },
       instructionsPrefix: options.instructionsPrefix ?? "",
       systemPrompt: options.systemPrompt,
       executionMode: options.executionMode ?? "react",
@@ -119,17 +142,7 @@ export class AgentRuntime {
       streamFn: options.streamFn
     });
     await session.validateState();
+    await session.prepareTurn();
     return session;
   }
-}
-
-function _prepareProjectTool(tool: AgentTool): PreparedAgentTool {
-  const { execute, ...definition } = tool;
-  return {
-    kind: "executable",
-    definition,
-    async execute(...args) {
-      return { type: "completed", result: await execute(...args) };
-    }
-  };
 }

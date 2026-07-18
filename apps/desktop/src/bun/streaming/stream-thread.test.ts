@@ -15,12 +15,14 @@ import {
   type RuntimeRunConfigurationSnapshot,
   type StoredRuntimeSession
 } from "@llm-space/runtime/harness";
+import { AgentHostPolicyChangedError } from "@llm-space/runtime/node";
 import { afterEach, describe, expect, test } from "bun:test";
 
 import type { AgentEvent } from "@earendil-works/pi-agent-core";
 import type {
   BuiltinTool,
   McpTool,
+  ProjectTool,
   ThreadAgentRuntimeProvenance,
   ThreadServerRunLineage
 } from "@llm-space/core";
@@ -44,6 +46,96 @@ afterEach(async () => {
 });
 
 describe("StreamThreadController Agent Project runtime", () => {
+  test("reports a Host policy change with an explicit terminal code", async () => {
+    const manager = {
+      requiresRuntimeSessionStore: async () => Promise.resolve(false),
+      createRuntimeSession: async () => {
+        throw new AgentHostPolicyChangedError();
+      }
+    } as unknown as ExternalAgentProjectManager;
+    const controller = new StreamThreadController(
+      _modelManager(createModels()),
+      { capture: () => undefined } as never,
+      manager
+    );
+    const responses: unknown[] = [];
+
+    await controller.run({
+      streamId: "stream-host-policy-changed",
+      runtime: {
+        type: "agentProject",
+        projectId: "project-one",
+        threadId: "thread-one",
+        executionMode: "react",
+        modelSource: "agent"
+      },
+      request: {
+        model: { provider: "fake", id: "fake-model" },
+        context: { messages: [], tools: [], sourceTools: [] }
+      }
+    }, message => {
+      responses.push(message);
+    });
+
+    expect(responses).toEqual([{
+      streamId: "stream-host-policy-changed",
+      type: "error",
+      code: "hostPolicyChanged",
+      message: "The Host capability policy changed after this Turn was recorded"
+    }]);
+  });
+
+  test("fails before Pi when a selected connection tool is unavailable", async () => {
+    const manager = {
+      getActiveRemoteToolNames: () => new Set<string>()
+    } as unknown as ExternalAgentProjectManager;
+    const controller = new StreamThreadController(
+      _modelManager(createModels()),
+      { capture: () => undefined } as never,
+      manager
+    );
+    const responses: unknown[] = [];
+    const remoteTool: ProjectTool = {
+      type: "project",
+      name: "fixture__echo",
+      description: "Remote echo.",
+      parameters: { type: "object", properties: {} },
+      projectId: "project-one",
+      snapshot: "snapshot-one",
+      sourcePath: "connections/fixture.ts",
+      connectionName: "fixture",
+      remoteToolName: "echo",
+      schemaFingerprint: "schema-one"
+    };
+
+    await controller.run({
+      streamId: "stream-connection-unavailable",
+      runtime: {
+        type: "agentProject",
+        projectId: "project-one",
+        threadId: "thread-one",
+        executionMode: "react",
+        modelSource: "agent"
+      },
+      request: {
+        model: { provider: "fake", id: "fake-model" },
+        context: {
+          messages: [],
+          tools: [remoteTool],
+          sourceTools: [remoteTool]
+        }
+      }
+    }, message => {
+      responses.push(message);
+    });
+
+    expect(responses).toEqual([{
+      streamId: "stream-connection-unavailable",
+      type: "error",
+      message: "Selected connection tool is unavailable: fixture__echo"
+    }]);
+  });
+
   test("persists dynamic Turn instructions before Desktop Project execution and reopens them", async () => {
     const { home, models, manager, opened, project, threadId, workspace } =
       await _fixture({
@@ -88,8 +180,10 @@ describe("StreamThreadController Agent Project runtime", () => {
     );
 
     const persisted = await manager.readThread(opened.id, threadId);
-    const snapshot = (persisted.thread.runtimeSession as StoredRuntimeSession)
-      .snapshot.instructionSnapshots?.[activeRunId];
+    const runtimeSnapshot = (
+      persisted.thread.runtimeSession as StoredRuntimeSession
+    ).snapshot;
+    const snapshot = runtimeSnapshot.instructionSnapshots?.[activeRunId];
     expect(snapshot).toMatchObject({
       turnId: activeRunId,
       markdown: `Edited Thread instructions.\n\ndesktop:${threadId}:local-user`
@@ -98,6 +192,14 @@ describe("StreamThreadController Agent Project runtime", () => {
       "host:system-prompt",
       "instructions/turn.ts"
     ]);
+    const capabilitySnapshot = runtimeSnapshot.capabilitySnapshots?.[
+      activeRunId
+    ];
+    expect(capabilitySnapshot).toMatchObject({
+      turnId: activeRunId,
+      model: { provider: "fake", id: "fake-model" }
+    });
+    expect(capabilitySnapshot?.tools.map(tool => tool.name)).toContain("echo");
 
     await manager.shutdown();
     const reopened = new ExternalAgentProjectManager({
@@ -113,6 +215,8 @@ describe("StreamThreadController Agent Project runtime", () => {
     );
     expect(runtimeState.session.snapshot.instructionSnapshots?.[activeRunId])
       .toEqual(snapshot);
+    expect(runtimeState.session.snapshot.capabilitySnapshots?.[activeRunId])
+      .toEqual(capabilitySnapshot);
   });
 
   test("commits Project state to the Thread before the next model turn and reopens it", async () => {

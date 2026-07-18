@@ -4,8 +4,8 @@ import {
   loadSkills,
   NodeExecutionEnv
 } from "@earendil-works/pi-agent-core/node";
-import { Compile } from "typebox/compile";
 
+import { assertDynamicToolSource } from "./assert-dynamic-tool-source";
 import { compileAgentDefinition } from "./compile-agent-definition";
 import { compileAgentStateDefinition } from "./compile-agent-state-definition";
 import {
@@ -17,6 +17,9 @@ import { loadAuthoredModule } from "./load-authored-module";
 import { assertNoDuplicateObjectLiteralKeys } from "./validate-authored-source";
 import { normalizeAgentDefinition } from "../../internal/authored-definition/normalize-agent-definition";
 import {
+  isDynamicToolsDefinition
+} from "../../internal/authored-dynamic-tools-definition";
+import {
   isDynamicInstructionsDefinition,
   isInstructionsDefinition
 } from "../../internal/authored-instruction-definitions";
@@ -25,8 +28,10 @@ import { qualifyProjectMcpToolName } from "../../internal/project-mcp-tool-name"
 import { isMcpClientConnectionDefinition } from "../../public/definitions/connections/mcp";
 import { isStateDefinition } from "../../public/definitions/state";
 import { isToolDefinition } from "../../public/definitions/tool";
+import { createCompiledProjectTool } from "../../runtime/agent/create-compiled-project-tool";
 import { createImmutableAgentProjectSnapshot } from "../../runtime/agent/create-immutable-agent-project-snapshot";
 import { assertRuntimeSessionStateValues } from "../../runtime/harness/in-memory-session-store";
+import { isAgentToolName } from "../../shared/is-agent-tool-name";
 import {
   type AgentProjectSourceRef,
   discoverAgentProject,
@@ -37,6 +42,7 @@ import type {
   CompiledAgentInstructionEntry,
   CompiledAgentProjectSnapshot,
   CompiledAgentStateDefinition,
+  CompiledDynamicToolResolver,
   CompiledMcpConnection,
   CompiledProjectTool
 } from "../../runtime/agent/agent-project-snapshot";
@@ -90,13 +96,14 @@ async function _compileAgentProject(
     discovered.root,
     sources
   );
-  const tools = await _compileTools(
+  const compiledTools = await _compileTools(
     discovered.tools,
     diagnostics,
     dependencies,
     discovered.root,
     sources
   );
+  const { dynamicToolResolvers, tools } = compiledTools;
   const connections = await _compileConnections(
     discovered.connections,
     diagnostics,
@@ -117,6 +124,7 @@ async function _compileAgentProject(
     dependencies,
     instructions,
     instructionEntries,
+    dynamicToolResolvers,
     skills,
     stateDefinitions,
     sources,
@@ -128,6 +136,7 @@ async function _compileAgentProject(
     definition,
     instructions,
     tools,
+    dynamicToolResolvers,
     connections,
     resources: { skills },
     instructionEntries,
@@ -248,7 +257,7 @@ async function _compileDefinition(
     return compileAgentDefinition(
       normalizeAgentDefinition(
         authored,
-        "agent.ts must default-export defineAgent({ model, reasoning?, environment? })"
+        "agent.ts must default-export defineAgent({ model, modelOptions?, reasoning?, environment? })"
       )
     );
   } catch (error) {
@@ -340,15 +349,20 @@ async function _compileTools(
   dependencies: AgentProjectArtifactDependencyInput[],
   projectRoot: string,
   sources: AgentProjectArtifactSourceInput[]
-): Promise<CompiledProjectTool[]> {
+): Promise<{
+  dynamicToolResolvers: CompiledDynamicToolResolver[];
+  tools: CompiledProjectTool[];
+}> {
   const tools: CompiledProjectTool[] = [];
+  const dynamicToolResolvers: CompiledDynamicToolResolver[] = [];
   const names = new Map<string, string>();
   for (const sourceRef of sourceRefs) {
     try {
       const loaded = await loadAuthoredModule({
         projectRoot,
         sourcePath: sourceRef.absolutePath,
-        authoredSdk: true
+        authoredSdk: true,
+        transformDynamicTools: true
       });
       _recordDependencies(
         dependencies,
@@ -357,11 +371,21 @@ async function _compileTools(
       );
       sources.push({ id: sourceRef.logicalPath, content: loaded.source });
       const definition = loaded.default;
+      if (isDynamicToolsDefinition(definition)) {
+        assertDynamicToolSource(loaded.source, sourceRef.logicalPath);
+        dynamicToolResolvers.push({
+          contributionId: `tool-resolver:${sourceRef.logicalPath}`,
+          definition,
+          sourcePath: sourceRef.logicalPath,
+          steps: loaded.dynamicToolSteps ?? {}
+        });
+        continue;
+      }
       if (!isToolDefinition(definition)) {
         diagnostics.push({
           severity: "error",
           code: "tool_export_invalid",
-          message: `${path.basename(sourceRef.absolutePath)} must default-export defineTool({ description, inputSchema, execute })`,
+          message: `${path.basename(sourceRef.absolutePath)} must default-export defineTool(...) or defineDynamic(...)`,
           path: sourceRef.absolutePath
         });
         continue;
@@ -376,11 +400,11 @@ async function _compileTools(
         continue;
       }
       const name = path.basename(sourceRef.absolutePath, path.extname(sourceRef.absolutePath));
-      if (!_isModelName(name)) {
+      if (!isAgentToolName(name)) {
         diagnostics.push({
           severity: "error",
           code: "tool_export_invalid",
-          message: `Tool filename must match ${MODEL_NAME_PATTERN.source}: ${name}`,
+          message: `Tool filename must be a valid model-visible name: ${name}`,
           path: sourceRef.absolutePath
         });
         continue;
@@ -396,40 +420,13 @@ async function _compileTools(
         continue;
       }
       names.set(name, sourceRef.absolutePath);
-      const inputValidator = Compile(definition.inputSchema);
-      const outputValidator = definition.outputSchema
-        ? Compile(definition.outputSchema)
-        : null;
-      tools.push({
+      tools.push(createCompiledProjectTool({
+        definition,
         name,
-        label: name,
-        description: definition.description,
-        parameters: definition.inputSchema,
-        outputSchema: definition.outputSchema,
         sourcePath: sourceRef.logicalPath,
-        async execute(toolCallId, input, signal) {
-          if (!inputValidator.Check(input)) {
-            throw new TypeError(`Invalid input for tool "${name}"`);
-          }
-          const output = await definition.execute(input, {
-            abortSignal: signal ?? new AbortController().signal,
-            callId: toolCallId,
-            toolName: name,
-            get session() {
-              return getActiveAgentSessionContextRuntime() as
-                AgentSessionContext;
-            }
-          });
-          if (outputValidator && !outputValidator.Check(output)) {
-            throw new TypeError(`Invalid output from tool "${name}"`);
-          }
-          const text = _serializeToolOutput(output, name);
-          return {
-            content: [{ type: "text", text }],
-            details: output
-          };
-        }
-      });
+        getSession: () => getActiveAgentSessionContextRuntime() as
+          AgentSessionContext
+      }));
     } catch (error) {
       diagnostics.push({
         severity: "error",
@@ -439,7 +436,7 @@ async function _compileTools(
       });
     }
   }
-  return tools;
+  return { dynamicToolResolvers, tools };
 }
 
 async function _compileConnections(
@@ -457,11 +454,11 @@ async function _compileConnections(
       sourceRef.absolutePath,
       path.extname(sourceRef.absolutePath)
     );
-    if (!_isModelName(name)) {
+    if (!isAgentToolName(name)) {
       diagnostics.push({
         severity: "error",
         code: "connection_name_invalid",
-        message: `Connection filename must match ${MODEL_NAME_PATTERN.source}: ${name}`,
+        message: `Connection filename must be a valid model-visible name: ${name}`,
         path: sourceRef.absolutePath
       });
       continue;
@@ -502,11 +499,11 @@ async function _compileConnections(
       const qualifiedNames: string[] = [];
       let collision = false;
       for (const toolName of definition.tools.allow) {
-        if (!_isModelName(toolName)) {
+        if (!isAgentToolName(toolName)) {
           throw new TypeError(`Invalid allowlisted MCP tool name: ${toolName}`);
         }
         const qualifiedName = qualifyProjectMcpToolName(name, toolName);
-        if (!_isModelName(qualifiedName)) {
+        if (!isAgentToolName(qualifiedName)) {
           throw new TypeError(
             `Qualified MCP tool name is not provider-safe: ${qualifiedName}`
           );
@@ -606,54 +603,6 @@ function _recordDependencies(
   }
 }
 
-const MODEL_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_-]{0,63}$/;
-
-function _isModelName(value: string): boolean {
-  return MODEL_NAME_PATTERN.test(value);
-}
-
-function _serializeToolOutput(output: unknown, name: string): string {
-  _assertJsonValue(output, name, new WeakSet());
-  if (typeof output === "string") { return output; }
-  const text = JSON.stringify(output);
-  if (text === undefined) {
-    throw new TypeError(`Tool "${name}" returned a non-JSON value`);
-  }
-  return text;
-}
-
-function _assertJsonValue(
-  value: unknown,
-  name: string,
-  ancestors: WeakSet<object>
-): void {
-  if (
-    value === null
-    || typeof value === "string"
-    || typeof value === "boolean"
-  ) {
-    return;
-  }
-  if (typeof value === "number") {
-    if (Number.isFinite(value)) { return; }
-    throw new TypeError(`Tool "${name}" returned a non-JSON number`);
-  }
-  if (typeof value !== "object") {
-    throw new TypeError(`Tool "${name}" returned a non-JSON value`);
-  }
-  if (ancestors.has(value)) {
-    throw new TypeError(`Tool "${name}" returned circular JSON data`);
-  }
-  const prototype = Object.getPrototypeOf(value) as object | null;
-  if (!Array.isArray(value) && prototype !== Object.prototype && prototype !== null) {
-    throw new TypeError(`Tool "${name}" returned a non-plain JSON object`);
-  }
-  ancestors.add(value);
-  for (const child of Array.isArray(value) ? value : Object.values(value)) {
-    _assertJsonValue(child, name, ancestors);
-  }
-  ancestors.delete(value);
-}
 
 function _errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);

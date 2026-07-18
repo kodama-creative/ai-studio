@@ -76,6 +76,33 @@ export class AgentSessionInstructions {
     const stored = this._sessionStore
       ? await this._sessionStore.load(this._context.id)
       : null;
+    const snapshot = await this.prepare(stateScopeEnabled, stored);
+    if (!this._sessionStore || stored?.snapshot.instructionSnapshots?.[
+      this._context.turn.id
+    ]) {
+      return snapshot;
+    }
+    const committed = await this._sessionStore.commit({
+      sessionId: this._context.id,
+      expectedVersion: stored?.version ?? null,
+      mutations: [{ type: "recordTurnInstructions", snapshot }]
+    });
+    await this._onCommitted?.(committed);
+    const recorded = committed.snapshot.instructionSnapshots?.[
+      this._context.turn.id
+    ];
+    if (!recorded) {
+      throw new Error(
+        `Turn ${this._context.turn.id} instruction snapshot was not persisted`
+      );
+    }
+    return recorded;
+  }
+
+  async prepare(
+    stateScopeEnabled: boolean,
+    stored: StoredRuntimeSession | null
+  ): Promise<RuntimeTurnInstructionSnapshot> {
     const existing = stored?.snapshot.instructionSnapshots?.[
       this._context.turn.id
     ];
@@ -129,21 +156,6 @@ export class AgentSessionInstructions {
       markdown,
       turnId: this._context.turn.id
     };
-    if (!this._sessionStore) { return snapshot; }
-    const committed = await this._sessionStore.commit({
-      sessionId: this._context.id,
-      expectedVersion: stored?.version ?? null,
-      mutations: [{ type: "recordTurnInstructions", snapshot }]
-    });
-    await this._onCommitted?.(committed);
-    const recorded = committed.snapshot.instructionSnapshots?.[
-      this._context.turn.id
-    ];
-    if (!recorded) {
-      throw new Error(
-        `Turn ${this._context.turn.id} instruction snapshot was not persisted`
-      );
-    }
-    return recorded;
+    return snapshot;
   }
 }

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { defineAgent } from "./agent";
+import { defineDynamic } from "../models/define-dynamic";
 
 describe("defineAgent", () => {
   test("preserves authored literal definition values", () => {
@@ -36,6 +37,48 @@ describe("defineAgent", () => {
       }
     });
     expect(definition.model).toBe("openai/gpt-5.3-codex");
+  });
+
+  test("preserves an Eve-shaped dynamic model fallback and safe options", async () => {
+    const dynamic = defineDynamic({
+      fallback: "openai/gpt-5.3-codex",
+      events: {
+        "turn.started": (_event, { session }) => ({
+          model: session.channel.kind === "test"
+            ? "openai/gpt-5.3-codex"
+            : "openai/gpt-5.3",
+          modelOptions: { temperature: 0.4, maxRetries: 1 }
+        })
+      }
+    });
+    const definition = defineAgent({
+      model: dynamic,
+      modelOptions: { cacheRetention: "short", maxTokens: 4_096 }
+    });
+
+    expect(definition.model).toBe(dynamic);
+    expect((await dynamic.events["turn.started"](
+      { type: "turn.started" },
+      {
+        session: {
+          id: "session",
+          auth: {
+            initiator: {
+              issuer: "test",
+              principalId: "one",
+              principalType: "user"
+            },
+            current: {
+              issuer: "test",
+              principalId: "one",
+              principalType: "user"
+            }
+          },
+          channel: { kind: "test" },
+          turn: { id: "turn", sequence: 1 }
+        }
+      }
+    ))).toMatchObject({ modelOptions: { temperature: 0.4 } });
   });
 
   test("rejects unsupported authored fields and reasoning at typecheck", () => {

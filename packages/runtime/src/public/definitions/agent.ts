@@ -1,17 +1,21 @@
 import type { ExactDefinition } from "./exact-definition";
 import type {
   AgentDefinition,
+  AgentDynamicModelDefinition,
   AgentEnvironmentRequirement,
   AgentEnvironmentRequirements,
   AgentModelDefinition,
+  AgentModelOptionsDefinition,
   AgentReasoningDefinition
 } from "../../shared/agent-definition";
 
 export type {
   AgentDefinition,
+  AgentDynamicModelDefinition,
   AgentEnvironmentRequirement,
   AgentEnvironmentRequirements,
   AgentModelDefinition,
+  AgentModelOptionsDefinition,
   AgentReasoningDefinition
 };
 

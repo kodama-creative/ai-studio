@@ -1,12 +1,15 @@
 import { createHash } from "node:crypto";
 import {
+  AgentHostPolicyChangedError,
   AgentRuntime,
   AgentStateCommitUnknownError,
-  type CompiledAgentProjectSnapshot
+  type CompiledAgentProjectSnapshot,
+  createHostCapabilityPolicy
 } from "@llm-space/runtime/server";
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Models, UserMessage } from "@earendil-works/pi-ai";
+import type { AgentCapabilityPolicy } from "@llm-space/runtime";
 
 import { ServerCapacityError } from "./server-capacity-error";
 import { serializePiAgentEvent } from "../protocol/pi-event-serializer";
@@ -28,6 +31,7 @@ export interface ServerRunControllerOptions {
 
 export class ServerRunController {
   private readonly _runtime: AgentRuntime;
+  private readonly _capabilityPolicy: AgentCapabilityPolicy;
   private readonly _repository: ServerSessionRepository;
   private readonly _active = new Map<string, { abort(): void; }>();
   private readonly _abortedRuns = new Set<string>();
@@ -40,6 +44,10 @@ export class ServerRunController {
 
   constructor(options: ServerRunControllerOptions) {
     this._runtime = new AgentRuntime({
+      models: options.models,
+      project: options.project
+    });
+    this._capabilityPolicy = createHostCapabilityPolicy({
       models: options.models,
       project: options.project
     });
@@ -178,6 +186,7 @@ export class ServerRunController {
     let code: string | undefined;
     try {
       const session = await this._runtime.createSession({
+        capabilityPolicy: this._capabilityPolicy,
         id: run.sessionId,
         context: {
           id: run.sessionId,
@@ -249,6 +258,9 @@ export class ServerRunController {
       } else if (error instanceof AgentStateCommitUnknownError) {
         outcome = "outcomeUnknown";
         code = "session_state_commit_unknown";
+      } else if (error instanceof AgentHostPolicyChangedError) {
+        outcome = "failed";
+        code = "hostPolicyChanged";
       } else {
         outcome = "failed";
         code = error instanceof ServerEventTooLargeError
