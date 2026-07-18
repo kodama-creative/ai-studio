@@ -1,7 +1,7 @@
 # LLM Space Capability Map
 
-- Last updated: 2026-07-17
-- Map status: refreshed after roadmap item 08 shipped. ADR 0004's OCI artifact, environment/secrets, non-root volume, lifecycle, and two-platform acceptance boundary is implemented and verified; item 09 remains the next unchecked roadmap capability.
+- Last updated: 2026-07-18
+- Map status: refreshed through roadmap item 14 discovery. Items 12 and 13 are shipped; item 14 is confirmed decision-blocked before implementation by missing authored-maximum, Host-policy, and effective-snapshot contracts.
 - Evidence rule: entries marked `confirmed` cite current rendered-product or current-code evidence. Entries marked `stale` rely on previous logs or code paths not fully re-inspected in this loop. Entries marked `unknown` need a future product-surface check before they can drive a recommendation.
 
 ## First-Run Model Setup
@@ -179,6 +179,21 @@
 - Boundary: authors can compose deterministic standing instructions and trusted per-Turn context/state-derived instructions into one explainable prompt snapshot used through Pi without adding a message protocol or a second execution loop.
 - Explicit non-goals: no Session- or step-scoped prompt mutation, dynamic model/tool/connection/stream options, arbitrary runtime module loading, tool execution from instructions, variable-provider system, hooks, UI editor/preview, prompt registry, template language, or instruction migration.
 - Visible gaps: item 14 still owns broader dynamic capability snapshots; item 10 still owns Agent Variable authoring/promotion; hostile-code isolation remains part of the later Sandbox/ExecutionEnv boundary rather than an instruction-specific sandbox.
+
+## Dynamic Capability Snapshots
+
+- Status: blocked before V1
+- Freshness: confirmed
+- Last checked: 2026-07-18
+- Evidence:
+  - `AgentDefinition` declares one static model/reasoning pair. `AgentRuntime.createSession()` accepts Host model/reasoning, extra-tool, active-tool, and `streamFn` overrides, but neither layer declares a versioned capability policy or maximum.
+  - `AgentSession` constructs one tool policy and Pi `Agent` at Session creation. Pi captures context/tools per provider call and can update model/thinking/context between internal turns, but its public turn update cannot replace tools.
+  - Item 13's Session Store has an immutable integrity-checked per-Turn instruction snapshot, while `RuntimeRunConfigurationSnapshot` records only model/reasoning and a tool-configuration fingerprint; neither records connections or normalized safe stream options.
+  - Desktop resolves credentials, base URL, headers, temperature, and max tokens inside a Host-owned `streamFn`; MCP manager connection lifecycle and exposed tools are also Host-owned. Secret-bearing headers/environment and callbacks/runtime objects cannot enter a durable capability snapshot.
+  - Eve's current dynamic-capability contract supports session/turn/step resolution and permits dynamic tools to override authored tools. That is useful event-shape evidence but conflicts with item 14's immutable-per-Turn authored maximum and no-escalation boundary.
+- Boundary after approval: one automatic Turn may select only from compiled source-owned maxima further constrained by a Host-owned policy, record one immutable secret-free effective snapshot, and use it unchanged across every Pi provider/tool step and restart continuation.
+- Explicit non-goals: resolver-created code or schemas, session/step-scoped mutation, dynamic discovery/plugin install, arbitrary path/module loading, credential persistence, connection lifecycle redesign, policy UI, automatic external-operation retry, or permission escalation.
+- Visible gaps: an ADR must decide authored source shape, Host policy/request ownership, model fallback, tool/connection selection granularity, safe stream-option keys/bounds, resolver/policy/MCP-drift failure behavior, and manual-debug snapshot semantics before product implementation can begin.
 
 ## Headless Thread Execution And Evaluation
 

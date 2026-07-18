@@ -123,6 +123,7 @@ Runtime architecture follows [ADR 0001](./docs/adr/0001-runtime-harness-over-pi-
   - Done when: every Turn records an immutable effective-capability snapshot constrained by authored maximums and Host policy.
   - Boundary: no dynamic code discovery, runtime plugin install, arbitrary path loading, or permission escalation.
   - Metric: capability-snapshot policy fidelity.
+  - Current blocker (2026-07-18): current source and ADRs do not define the authored-maximum source shape, Host policy/request boundary, model fallback, tool/connection selection, safe stream-option schema, failure behavior, or manual-debug snapshot semantics. These change portable source, security/authority, and Session Store persistence, so item 14 remains unchecked pending an owner-approved ADR.
 
 - [ ] **15 — Named structured output contracts**
   - Depends on: 05 and 06.
