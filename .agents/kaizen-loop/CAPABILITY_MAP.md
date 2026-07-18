@@ -197,6 +197,24 @@
 - Explicit non-goals: no dynamic connections, session/step capability mutation, runtime code/plugin discovery, arbitrary path loading, approval, Sandbox, advanced MCP lifecycle, policy UI, Trace UI, provider-specific secret options, automatic resolver/tool retry, or permission escalation.
 - Visible gaps: item 23 owns remote tool-list refresh and schema drift; item 19 owns approval; item 17 owns hostile-code isolation and Sandbox authority; item 26 owns lifecycle hooks. V1 exposes no dedicated capability snapshot UI and does not attempt semantic secret-taint detection inside trusted authored JSON closure values.
 
+## Named Structured Output Contracts
+
+- Status: missing; roadmap item 15 decision-blocked
+- Freshness: confirmed
+- Last checked: 2026-07-18
+- Evidence:
+  - `@earendil-works/pi-ai@0.80.3` exposes provider-agnostic `StreamOptions`/`SimpleStreamOptions` without an output schema, response format, or structured-result field. Its OpenAI, Anthropic, Google, Bedrock, and Mistral adapters expose no structured-output option in their Pi-facing types.
+  - Current Pi upstream `main` was rechecked on 2026-07-18 and retains the same absence. Pi `AgentEvent` ends with `agent_end`; it has no structured-result event. Pi tool calls and schema validation are the existing portable structured-data path.
+  - Eve `c1b6ad3e485f2d15a25bdb5636209aa1367a3124` injects a framework `final_output` tool whose input is the requested schema, intercepts that call as terminal, validates it, and publishes a custom `result.completed` event. Eve accepts caller-supplied per-Turn schemas and a single Agent `outputSchema`, which do not satisfy this roadmap's predeclared named-contract ceiling without an LLM Space decision.
+  - ADR 0002 fixes version-pinned Pi `AgentEvent` as the public Server execution vocabulary and permits only the existing Runtime-owned control terminal. Adding Eve's result event directly would reopen that accepted protocol decision.
+  - `packages/runtime/src/shared/agent-definition.ts` has no output definition; the artifact schema fingerprint has no named output contracts; `AgentSession.prompt()` returns no typed result; Runtime Run records carry lifecycle state but no output payload.
+  - `packages/core/src/types/threads/thread.ts` has no selected output contract or typed terminal value. Thread Run snapshots persist reduced text/tool evidence only.
+  - `packages/runtime/src/client/server-protocol.ts` exposes Pi events plus `runTerminal { outcome, code? }`. Server run creation accepts only text and has no declared-contract selector or typed terminal result.
+  - Installed provider SDKs already expose native structured-output primitives—OpenAI JSON Schema response formats, Anthropic `output_config.format`, and Google response schema fields—but Pi's current adapters do not surface a portable mapping.
+- Boundary: the planned capability lets a Thread or Channel choose only a source-declared named contract, constrains generation through an approved Pi/provider path, validates the exact final JSON value, and exposes one typed terminal result consistently across Desktop and Server.
+- Explicit non-goals: arbitrary caller-provided schemas, a second model/tool iteration loop, silent provider fallback, schema-derived UI generation, unlimited repair, hidden transcript metadata, or an unapproved replacement for Pi `AgentEvent`.
+- Visible gaps: source location and naming, Standard Schema versus TypeBox/JSON Schema acceptance, contract selection/default precedence, supported-provider detection, Eve-style `final_output` versus native provider formatting, collision/reservation behavior, finite invalid/missing-result semantics, manual-mode behavior, immutable Turn/Run identity, and Thread/Session Store/Server terminal persistence are not yet approved.
+
 ## Headless Thread Execution And Evaluation
 
 - Status: shipped V1

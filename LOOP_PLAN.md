@@ -131,6 +131,7 @@ Runtime architecture follows [ADR 0001](./docs/adr/0001-runtime-harness-over-pi-
   - Done when: Thread or Channel selects a declared contract, Runtime maps it to supported provider behavior, validates the final result, and emits a typed terminal state.
   - Boundary: no arbitrary caller-supplied schemas or unlimited automatic repair loop.
   - Metric: schema-valid completion rate on supported providers.
+  - Blocker (2026-07-18): pinned and current Pi expose neither a structured-output stream option nor a structured-result event. Eve's current implementation instead injects an intercepted `final_output` tool and publishes a separate `result.completed` event, while ADR 0002 fixes Pi `AgentEvent` as LLM Space's public execution protocol. Before implementation, the owner must approve the source declaration shape, Pi-tool versus provider-native mapping, finite invalid/missing-output behavior, and the typed result's Thread/Runtime/Server persistence and protocol ownership. No caller-supplied schema or second unapproved event vocabulary may be inferred.
 
 ## Pi Execution, Safety, And Durability
 
