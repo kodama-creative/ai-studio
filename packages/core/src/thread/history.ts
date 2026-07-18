@@ -12,7 +12,9 @@ import type {
   ThreadRunSnapshot,
   ThreadRuntimeCheckpoint,
   ThreadRuntimeRunState,
-  ThreadSnapshot
+  ThreadSnapshot,
+  ThreadStructuredOutput,
+  ThreadStructuredOutputFailure
 } from "../types";
 
 /** Maximum number of run snapshots retained in `runHistory`. */
@@ -76,6 +78,9 @@ export function snapshotThread(thread: Thread): ThreadSnapshot {
   if (thread.model !== undefined) {
     snapshot.model = thread.model;
   }
+  if (thread.outputContract !== undefined) {
+    snapshot.outputContract = thread.outputContract;
+  }
   if (thread.agentRuntime !== undefined) {
     snapshot.agentRuntime = thread.agentRuntime;
   }
@@ -114,13 +119,19 @@ export function normalizeRunHistory(
         ? run.usage
         : undefined;
     const runtime = _normalizeRuntimeCheckpoint(run.runtime);
+    const structuredOutput = _normalizeStructuredOutput(run.structuredOutput);
+    const structuredOutputFailure = _normalizeStructuredOutputFailure(
+      run.structuredOutputFailure
+    );
     return [
       {
         id,
         timestamp: run.timestamp,
         thread: snapshotThread(run.thread),
         ...(usage ? { usage } : {}),
-        ...(runtime ? { runtime } : {})
+        ...(runtime ? { runtime } : {}),
+        ...(structuredOutput ? { structuredOutput } : {}),
+        ...(structuredOutputFailure ? { structuredOutputFailure } : {})
       }
     ];
   });
@@ -573,6 +584,8 @@ export function recordRun(
   options: {
     id?: string;
     runtime?: ThreadRuntimeCheckpoint;
+    structuredOutput?: ThreadStructuredOutput;
+    structuredOutputFailure?: ThreadStructuredOutputFailure;
     usage?: ModelUsage | null;
   } = {}
 ): RunSnapshot[] {
@@ -584,7 +597,13 @@ export function recordRun(
       thread: snapshotThread(thread),
       timestamp,
       usage,
-      ...(options.runtime ? { runtime: options.runtime } : {})
+      ...(options.runtime ? { runtime: options.runtime } : {}),
+      ...(options.structuredOutput
+        ? { structuredOutput: options.structuredOutput }
+        : {}),
+      ...(options.structuredOutputFailure
+        ? { structuredOutputFailure: options.structuredOutputFailure }
+        : {})
     }
   ];
   return next.length > MAX_RUN_HISTORY
@@ -616,6 +635,7 @@ function _normalizeRuntimeCheckpoint(
   const state = record.state;
   const checkpointOrder = record.checkpointOrder;
   const server = _normalizeServerRunLineage(record.server, runId);
+  const outputContract = _normalizeOutputContract(record.outputContract);
   if (
     !runId
     || !continuationFingerprint
@@ -632,8 +652,78 @@ function _normalizeRuntimeCheckpoint(
     state: state as ThreadRuntimeRunState,
     checkpointOrder: checkpointOrder as number,
     continuationFingerprint,
-    ...(server ? { server } : {})
+    ...(server ? { server } : {}),
+    ...(outputContract ? { outputContract } : {})
   };
+}
+
+function _normalizeOutputContract(
+  value: unknown
+): ThreadRuntimeCheckpoint["outputContract"] | null {
+  const record = _asRecord(value);
+  const name = _trimmed(record?.name);
+  const schemaFingerprint = _trimmed(record?.schemaFingerprint);
+  return name && schemaFingerprint && /^[0-9a-f]{64}$/.test(schemaFingerprint)
+    ? { name, schemaFingerprint }
+    : null;
+}
+
+function _normalizeStructuredOutput(value: unknown): ThreadStructuredOutput | null {
+  const record = _asRecord(value);
+  const contract = _trimmed(record?.contract);
+  const schemaFingerprint = _trimmed(record?.schemaFingerprint);
+  if (
+    !contract
+    || !schemaFingerprint
+    || !/^[0-9a-f]{64}$/.test(schemaFingerprint)
+    || !_isJsonValue(record?.value, new WeakSet())
+  ) {
+    return null;
+  }
+  return {
+    contract,
+    schemaFingerprint,
+    value: structuredClone(record?.value)
+  };
+}
+
+function _normalizeStructuredOutputFailure(
+  value: unknown
+): ThreadStructuredOutputFailure | null {
+  const record = _asRecord(value);
+  const contract = _trimmed(record?.contract);
+  const schemaFingerprint = _trimmed(record?.schemaFingerprint);
+  const code = record?.code;
+  if (
+    !contract
+    || !schemaFingerprint
+    || !/^[0-9a-f]{64}$/.test(schemaFingerprint)
+    || (code !== "structured_output_invalid"
+      && code !== "structured_output_missing"
+      && code !== "structured_output_too_large")
+  ) {
+    return null;
+  }
+  return { contract, schemaFingerprint, code };
+}
+
+function _isJsonValue(value: unknown, ancestors: WeakSet<object>): boolean {
+  if (value === null || typeof value === "string" || typeof value === "boolean") {
+    return true;
+  }
+  if (typeof value === "number") { return Number.isFinite(value); }
+  if (typeof value !== "object" || ancestors.has(value)) { return false; }
+  const prototype = Object.getPrototypeOf(value) as object | null;
+  if (!Array.isArray(value) && prototype !== Object.prototype && prototype !== null) {
+    return false;
+  }
+  ancestors.add(value);
+  const valid = (Array.isArray(value)
+    ? value
+    : Object.values(value as Record<string, unknown>))
+    .every(child => _isJsonValue(child, ancestors));
+  ancestors.delete(value);
+  return valid;
 }
 
 function _normalizeServerRunLineage(

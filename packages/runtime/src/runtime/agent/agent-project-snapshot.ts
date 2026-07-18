@@ -37,6 +37,14 @@ export interface CompiledAgentStateDefinition {
   readonly version: number;
 }
 
+export interface CompiledAgentOutputDefinition {
+  readonly description: string;
+  readonly name: string;
+  readonly schema: TSchema;
+  readonly schemaFingerprint: string;
+  readonly sourcePath: string;
+}
+
 export type CompiledAgentInstructionEntry =
   | {
     readonly definition: RuntimeDynamicInstructionsDefinition;
@@ -67,6 +75,7 @@ export interface AgentProjectSnapshot {
   readonly definition?: CompiledAgentDefinition;
   readonly instructions: string;
   readonly instructionEntries?: readonly CompiledAgentInstructionEntry[];
+  readonly outputDefinitions?: readonly CompiledAgentOutputDefinition[];
   readonly tools: readonly CompiledProjectTool[];
   readonly connections: readonly CompiledMcpConnection[];
   readonly resources: Readonly<AgentProjectResources>;

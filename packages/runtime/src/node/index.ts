@@ -8,6 +8,7 @@ export {
 export {
   type AgentProjectSnapshot,
   type CompiledAgentInstructionEntry,
+  type CompiledAgentOutputDefinition,
   type CompiledAgentProjectSnapshot,
   type CompiledAgentStateDefinition,
   type CompiledMcpConnection,
@@ -23,6 +24,9 @@ export type { PreparedAgentTool } from "../runtime/agent/prepared-agent-tool";
 export { AgentHostPolicyChangedError } from "../runtime/capabilities/agent-session-capabilities";
 export { createHostCapabilityPolicy } from "../runtime/capabilities/create-host-capability-policy";
 export {
+  StructuredOutputError
+} from "../runtime/outputs/structured-output-error";
+export {
   AgentSession,
   type AgentSessionEvent,
   type AgentSessionOptions,
@@ -32,6 +36,7 @@ export {
   AgentStateCommitUnknownError,
   getActiveAgentSessionContext
 } from "../runtime/state/agent-session-state";
+export type { StructuredOutputFailureCode } from "../shared/structured-output";
 export {
   type AgentProjectBundle,
   createAgentProjectBundle

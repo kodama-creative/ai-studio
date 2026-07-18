@@ -14,6 +14,7 @@ import {
 
 import type {
   CompiledAgentInstructionEntry,
+  CompiledAgentOutputDefinition,
   CompiledAgentSkill,
   CompiledAgentStateDefinition,
   CompiledDynamicToolResolver,
@@ -57,6 +58,7 @@ export function createAgentProjectArtifact({
   instructionEntries = [],
   skills,
   stateDefinitions = [],
+  outputDefinitions = [],
   sources,
   tools
 }: {
@@ -66,6 +68,7 @@ export function createAgentProjectArtifact({
   dynamicToolResolvers?: readonly CompiledDynamicToolResolver[];
   instructionEntries?: readonly CompiledAgentInstructionEntry[];
   instructions: string;
+  outputDefinitions?: readonly CompiledAgentOutputDefinition[];
   skills: readonly CompiledAgentSkill[];
   sources: readonly AgentProjectArtifactSourceInput[];
   stateDefinitions?: readonly CompiledAgentStateDefinition[];
@@ -136,6 +139,13 @@ export function createAgentProjectArtifact({
           version: state.version,
           initial: state.initial
         }
+      })),
+      ...outputDefinitions.map(output => ({
+        id: `output:${output.name}`,
+        content: {
+          name: output.name,
+          description: output.description
+        }
       }))
     ]),
     schemas: _section([
@@ -155,6 +165,13 @@ export function createAgentProjectArtifact({
           version: state.version,
           schema: state.schema,
           schemaFingerprint: state.schemaFingerprint
+        }
+      })),
+      ...outputDefinitions.map(output => ({
+        id: `output:${output.name}`,
+        content: {
+          schema: output.schema,
+          schemaFingerprint: output.schemaFingerprint
         }
       }))
     ]),

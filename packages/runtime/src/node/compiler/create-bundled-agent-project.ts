@@ -1,4 +1,5 @@
 import { compileAgentDefinition } from "./compile-agent-definition";
+import { compileAgentOutputDefinition } from "./compile-agent-output-definition";
 import { compileAgentStateDefinition } from "./compile-agent-state-definition";
 import { normalizeAgentDefinition } from "../../internal/authored-definition/normalize-agent-definition";
 import { isDynamicToolsDefinition } from "../../internal/authored-dynamic-tools-definition";
@@ -6,6 +7,7 @@ import { isDynamicInstructionsDefinition } from "../../internal/authored-instruc
 import { getActiveAgentSessionContextRuntime } from "../../internal/authored-state-definitions";
 import { qualifyProjectMcpToolName } from "../../internal/project-mcp-tool-name";
 import { isMcpClientConnectionDefinition } from "../../public/definitions/connections/mcp";
+import { isOutputDefinition } from "../../public/definitions/output";
 import { isStateDefinition } from "../../public/definitions/state";
 import { isToolDefinition } from "../../public/definitions/tool";
 import { createCompiledProjectTool } from "../../runtime/agent/create-compiled-project-tool";
@@ -34,6 +36,11 @@ export interface BundledAgentProjectInput {
   }>;
   readonly definition: unknown;
   readonly instructions: string;
+  readonly outputs: ReadonlyArray<{
+    readonly definition: unknown;
+    readonly name: string;
+    readonly sourcePath: string;
+  }>;
   readonly instructionEntries: ReadonlyArray<
     | {
       readonly definition: unknown;
@@ -91,6 +98,7 @@ export function createBundledAgentProject(
   const compiledTools = _compileTools(input.tools);
   const { dynamicToolResolvers, tools } = compiledTools;
   const stateDefinitions = _compileStates(input.states);
+  const outputDefinitions = _compileOutputs(input.outputs);
   const connections = _compileConnections(input.connections, tools);
   return createImmutableAgentProjectSnapshot({
     artifact,
@@ -103,8 +111,29 @@ export function createBundledAgentProject(
     connections,
     resources: { skills: input.skills },
     stateDefinitions,
+    outputDefinitions,
     diagnostics: [],
     fingerprint: artifact.fingerprint
+  });
+}
+
+function _compileOutputs(
+  inputs: BundledAgentProjectInput["outputs"]
+) {
+  const names = new Set<string>();
+  return inputs.map(input => {
+    if (!isAgentToolName(input.name) || names.has(input.name)) {
+      throw new TypeError(`Invalid or duplicate bundled output name: ${input.name}`);
+    }
+    names.add(input.name);
+    if (!isOutputDefinition(input.definition)) {
+      throw new TypeError(`Bundled output is invalid: ${input.name}`);
+    }
+    return compileAgentOutputDefinition(
+      input.definition,
+      input.name,
+      input.sourcePath
+    );
   });
 }
 

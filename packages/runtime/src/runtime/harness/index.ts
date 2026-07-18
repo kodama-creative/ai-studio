@@ -2,10 +2,12 @@ export { InMemorySessionStore } from "./in-memory-session-store";
 export {
   isTerminalRuntimeRunState,
   RUNTIME_RUN_STATES,
+  type RuntimeJsonValue,
   type RuntimeRunCheckpointSnapshot,
   type RuntimeRunSnapshot,
   type RuntimeRunState,
   RuntimeRunTransitionError,
+  type RuntimeStructuredOutputResult,
   transitionRuntimeRun
 } from "./runtime-run";
 export {

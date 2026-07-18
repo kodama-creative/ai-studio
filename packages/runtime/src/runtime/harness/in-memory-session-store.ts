@@ -135,6 +135,7 @@ export class InMemorySessionStore implements SessionStore {
       configurations: [...configurations.values()],
       journal
     });
+    _assertStoredSession(stored);
     this._sessions.set(input.sessionId, stored);
     return Promise.resolve(immutableSnapshot(stored));
   }
@@ -361,7 +362,17 @@ function _transitionRun({
     );
   }
   const next = transitionRuntimeRun(run, mutation.to);
-  (snapshot.runs as RuntimeRunSnapshot[])[runIndex] = next;
+  if (mutation.structuredOutput && mutation.to !== "completed") {
+    throw new SessionStoreInvariantError(
+      "Structured output can be stored only on a completed Runtime Run"
+    );
+  }
+  if (mutation.structuredOutput) {
+    _assertStructuredOutput(mutation.structuredOutput);
+  }
+  (snapshot.runs as RuntimeRunSnapshot[])[runIndex] = mutation.structuredOutput
+    ? { ...next, structuredOutput: structuredClone(mutation.structuredOutput) }
+    : next;
   if (isTerminalRuntimeRunState(next.state)) {
     (snapshot as { activeRunId: string | null; }).activeRunId = null;
   }
@@ -435,6 +446,57 @@ function _assertConfiguration(
     "Tool configuration fingerprint",
     configuration.toolConfigurationFingerprint
   );
+  if (configuration.outputContract) {
+    _assertId("Output contract name", configuration.outputContract.name);
+    if (!/^[0-9a-f]{64}$/.test(configuration.outputContract.schemaFingerprint)) {
+      throw new SessionStoreInvariantError(
+        "Output contract schema fingerprint must be lowercase SHA-256"
+      );
+    }
+  }
+  if (
+    configuration.maxStructuredOutputBytes !== undefined
+    && (!Number.isSafeInteger(configuration.maxStructuredOutputBytes)
+      || configuration.maxStructuredOutputBytes < 1024
+      || configuration.maxStructuredOutputBytes > 768 * 1024)
+  ) {
+    throw new SessionStoreInvariantError(
+      "Structured output limit must be an integer from 1024 through 786432"
+    );
+  }
+}
+
+function _assertStructuredOutput(
+  result: NonNullable<RuntimeRunSnapshot["structuredOutput"]>
+): void {
+  _assertId("Structured output contract", result.contract);
+  if (!/^[0-9a-f]{64}$/.test(result.schemaFingerprint)) {
+    throw new SessionStoreInvariantError(
+      "Structured output schema fingerprint must be lowercase SHA-256"
+    );
+  }
+  if (!_isJsonValue(result.value, new WeakSet())) {
+    throw new SessionStoreInvariantError("Structured output must be JSON data");
+  }
+}
+
+function _isJsonValue(value: unknown, ancestors: WeakSet<object>): boolean {
+  if (value === null || typeof value === "string" || typeof value === "boolean") {
+    return true;
+  }
+  if (typeof value === "number") { return Number.isFinite(value); }
+  if (typeof value !== "object" || ancestors.has(value)) { return false; }
+  const prototype = Object.getPrototypeOf(value) as object | null;
+  if (!Array.isArray(value) && prototype !== Object.prototype && prototype !== null) {
+    return false;
+  }
+  ancestors.add(value);
+  const valid = (Array.isArray(value)
+    ? value
+    : Object.values(value as Record<string, unknown>))
+    .every(child => _isJsonValue(child, ancestors));
+  ancestors.delete(value);
+  return valid;
 }
 
 function _assertExpectedVersion(version: number | null): void {
@@ -686,6 +748,9 @@ function _sameConfiguration(
     && left.model.id === right.model.id
     && left.reasoning === right.reasoning
     && left.toolConfigurationFingerprint === right.toolConfigurationFingerprint
+    && JSON.stringify(left.outputContract ?? null)
+    === JSON.stringify(right.outputContract ?? null)
+    && left.maxStructuredOutputBytes === right.maxStructuredOutputBytes
   );
 }
 
@@ -785,6 +850,45 @@ function _assertStoredSession(session: StoredRuntimeSession): void {
           `Runtime Run ${run.id} has an invalid checkpoint`
         );
       }
+    }
+    if (run.structuredOutput) {
+      if (run.state !== "completed") {
+        throw new SessionStoreInvariantError(
+          `Runtime Run ${run.id} has structured output before completion`
+        );
+      }
+      _assertStructuredOutput(run.structuredOutput);
+    }
+    const configuration = configurations.get(run.configurationId);
+    if (!configuration) {
+      throw new SessionStoreInvariantError(
+        `Runtime Run ${run.id} references missing configuration ${run.configurationId}`
+      );
+    }
+    if (run.structuredOutput) {
+      if (
+        configuration.outputContract?.name !== run.structuredOutput.contract
+        || configuration.outputContract.schemaFingerprint
+        !== run.structuredOutput.schemaFingerprint
+      ) {
+        throw new SessionStoreInvariantError(
+          `Runtime Run ${run.id} structured output does not match its configuration`
+        );
+      }
+      const maxBytes = configuration.maxStructuredOutputBytes;
+      if (
+        maxBytes !== undefined
+        && new TextEncoder().encode(_canonicalJson(run.structuredOutput.value))
+          .byteLength > maxBytes
+      ) {
+        throw new SessionStoreInvariantError(
+          `Runtime Run ${run.id} structured output exceeds its configured limit`
+        );
+      }
+    } else if (configuration.outputContract && run.state === "completed") {
+      throw new SessionStoreInvariantError(
+        `Runtime Run ${run.id} completed without its configured structured output`
+      );
     }
     if (!isTerminalRuntimeRunState(run.state)) {
       activeRunCount += 1;
@@ -930,6 +1034,20 @@ function _assertStoredSession(session: StoredRuntimeSession): void {
     );
   }
   _assertJournalReconstructsSnapshot(session);
+}
+
+function _canonicalJson(value: unknown): string {
+  if (value === null || typeof value === "boolean" || typeof value === "string") {
+    return JSON.stringify(value);
+  }
+  if (typeof value === "number") { return JSON.stringify(value); }
+  if (Array.isArray(value)) {
+    return `[${value.map(_canonicalJson).join(",")}]`;
+  }
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record).sort().map(key =>
+    `${JSON.stringify(key)}:${_canonicalJson(record[key])}`)
+    .join(",")}}`;
 }
 
 function _assertJournalReconstructsSnapshot(

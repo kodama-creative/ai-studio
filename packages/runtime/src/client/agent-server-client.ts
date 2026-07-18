@@ -4,6 +4,7 @@ import {
   type AgentServerRun,
   type AgentServerSession,
   type AgentServerStreamEvent,
+  type JsonValue,
   type ServerRunTerminalOutcome
 } from "./server-protocol";
 
@@ -28,7 +29,7 @@ export interface AgentServerClientOptions {
   readonly retryCapMs?: number;
 }
 
-export interface AgentServerClient {
+export interface AgentServerClient<TValue extends JsonValue = JsonValue> {
   abortRun(options: {
     readonly continuationToken: string;
     readonly runId: string;
@@ -49,6 +50,7 @@ export interface AgentServerClient {
   createRun(options: {
     readonly continuationToken: string;
     readonly idempotencyKey?: string;
+    readonly outputContract?: string;
     readonly sessionId: string;
     readonly signal?: AbortSignal;
     readonly text: string;
@@ -74,7 +76,7 @@ export interface AgentServerClient {
     readonly runId: string;
     readonly sessionId: string;
     readonly signal?: AbortSignal;
-  }): AsyncIterable<AgentServerStreamEvent>;
+  }): AsyncIterable<AgentServerStreamEvent<TValue>>;
 }
 
 type CreateSessionInput = NonNullable<
@@ -107,9 +109,9 @@ export class AgentServerClientError extends Error {
   }
 }
 
-export function createAgentServerClient(
+export function createAgentServerClient<TValue extends JsonValue = JsonValue>(
   options: AgentServerClientOptions
-): AgentServerClient {
+): AgentServerClient<TValue> {
   const fetchImplementation = options.fetch ?? globalThis.fetch;
   const baseUrl = options.baseUrl.replace(/\/$/, "");
   return Object.freeze({
@@ -163,7 +165,12 @@ export function createAgentServerClient(
             "idempotency-key": input.idempotencyKey ?? crypto.randomUUID(),
             "llm-space-continuation": input.continuationToken
           }),
-          body: JSON.stringify({ input: { type: "text", text: input.text } }),
+          body: JSON.stringify({
+            input: { type: "text", text: input.text },
+            ...(input.outputContract
+              ? { outputContract: input.outputContract }
+              : {})
+          }),
           signal: input.signal
         }
       );
@@ -206,14 +213,16 @@ export function createAgentServerClient(
       >(response);
       return { ...value, continuationToken: nextContinuationToken };
     },
-    streamRun(input: StreamRunInput): AsyncIterable<AgentServerStreamEvent> {
+    streamRun(input: StreamRunInput): AsyncIterable<
+      AgentServerStreamEvent<TValue>
+    > {
       return _streamRun({
         ...input,
         authorization: options.authorization,
         baseUrl,
         fetchImplementation,
         retryCapMs: options.retryCapMs ?? DEFAULT_RETRY_CAP_MS
-      });
+      }) as AsyncIterable<AgentServerStreamEvent<TValue>>;
     }
   });
 }
@@ -583,7 +592,39 @@ function _validRunTerminal(
       || value.outcome === "failed"
       || value.outcome === "outcomeUnknown"
     )
-    && (value.code === undefined || typeof value.code === "string");
+    && (value.code === undefined || typeof value.code === "string")
+    && (
+      value.structuredOutput === undefined
+      || _validStructuredOutput(value.structuredOutput)
+    );
+}
+
+function _validStructuredOutput(value: unknown): boolean {
+  return _record(value)
+    && typeof value.contract === "string"
+    && value.contract.length > 0
+    && typeof value.schemaFingerprint === "string"
+    && /^[0-9a-f]{64}$/.test(value.schemaFingerprint)
+    && _validJson(value.value, new WeakSet());
+}
+
+function _validJson(value: unknown, ancestors: WeakSet<object>): boolean {
+  if (value === null || typeof value === "string" || typeof value === "boolean") {
+    return true;
+  }
+  if (typeof value === "number") { return Number.isFinite(value); }
+  if (typeof value !== "object" || ancestors.has(value)) { return false; }
+  const prototype = Object.getPrototypeOf(value) as object | null;
+  if (!Array.isArray(value) && prototype !== Object.prototype && prototype !== null) {
+    return false;
+  }
+  ancestors.add(value);
+  const valid = (Array.isArray(value)
+    ? value
+    : Object.values(value as Record<string, unknown>))
+    .every(child => _validJson(child, ancestors));
+  ancestors.delete(value);
+  return valid;
 }
 
 function _validPiEvent(value: unknown): boolean {

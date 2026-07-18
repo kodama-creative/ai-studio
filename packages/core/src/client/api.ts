@@ -12,7 +12,11 @@ import type { ModelConfig } from "../types/models";
 import type { ThreadContext } from "../types/threads";
 
 export async function* streamThread(
-  args: { context: ThreadContext; model: ModelConfig; },
+  args: {
+    context: ThreadContext;
+    model: ModelConfig;
+    outputContract?: string;
+  },
   config: {
     endpoint?: string;
     signal?: AbortSignal;
@@ -31,7 +35,8 @@ export async function* streamThread(
     config: {
       model: args.model.params
     },
-    context
+    context,
+    ...(args.outputContract ? { outputContract: args.outputContract } : {})
   };
   // Transport is the only HTTP-vs-RPC-specific piece; default to HTTP/SSE.
   const transport = config.transport ?? createHttpTransport(config.endpoint);

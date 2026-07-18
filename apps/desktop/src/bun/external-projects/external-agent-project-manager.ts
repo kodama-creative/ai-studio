@@ -288,6 +288,12 @@ export class ExternalAgentProjectManager {
         : "",
       snapshot: snapshot?.fingerprint ?? "",
       tools: snapshot ? _projectTools(projectId, snapshot) : [],
+      outputs: (snapshot?.outputDefinitions ?? []).map(output => ({
+        name: output.name,
+        description: output.description,
+        schema: structuredClone(output.schema),
+        schemaFingerprint: output.schemaFingerprint
+      })),
       skills: snapshot
         ? (snapshot.resources.skills ?? []).map(skill => ({
           name: skill.name,

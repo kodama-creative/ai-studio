@@ -7,6 +7,7 @@ import {
 
 import { assertDynamicToolSource } from "./assert-dynamic-tool-source";
 import { compileAgentDefinition } from "./compile-agent-definition";
+import { compileAgentOutputDefinition } from "./compile-agent-output-definition";
 import { compileAgentStateDefinition } from "./compile-agent-state-definition";
 import {
   type AgentProjectArtifactDependencyInput,
@@ -26,12 +27,14 @@ import {
 import { getActiveAgentSessionContextRuntime } from "../../internal/authored-state-definitions";
 import { qualifyProjectMcpToolName } from "../../internal/project-mcp-tool-name";
 import { isMcpClientConnectionDefinition } from "../../public/definitions/connections/mcp";
+import { isOutputDefinition } from "../../public/definitions/output";
 import { isStateDefinition } from "../../public/definitions/state";
 import { isToolDefinition } from "../../public/definitions/tool";
 import { createCompiledProjectTool } from "../../runtime/agent/create-compiled-project-tool";
 import { createImmutableAgentProjectSnapshot } from "../../runtime/agent/create-immutable-agent-project-snapshot";
 import { assertRuntimeSessionStateValues } from "../../runtime/harness/in-memory-session-store";
 import { isAgentToolName } from "../../shared/is-agent-tool-name";
+import { STRUCTURED_OUTPUT_TOOL_NAME } from "../../shared/structured-output";
 import {
   type AgentProjectSourceRef,
   discoverAgentProject,
@@ -40,6 +43,7 @@ import {
 
 import type {
   CompiledAgentInstructionEntry,
+  CompiledAgentOutputDefinition,
   CompiledAgentProjectSnapshot,
   CompiledAgentStateDefinition,
   CompiledDynamicToolResolver,
@@ -96,6 +100,13 @@ async function _compileAgentProject(
     discovered.root,
     sources
   );
+  const outputDefinitions = await _compileOutputDefinitions(
+    discovered.outputs,
+    diagnostics,
+    dependencies,
+    discovered.root,
+    sources
+  );
   const compiledTools = await _compileTools(
     discovered.tools,
     diagnostics,
@@ -127,6 +138,7 @@ async function _compileAgentProject(
     dynamicToolResolvers,
     skills,
     stateDefinitions,
+    outputDefinitions,
     sources,
     tools
   });
@@ -141,9 +153,76 @@ async function _compileAgentProject(
     resources: { skills },
     instructionEntries,
     stateDefinitions,
+    outputDefinitions,
     diagnostics,
     fingerprint: artifact.fingerprint
   });
+}
+
+async function _compileOutputDefinitions(
+  sourceRefs: readonly AgentProjectSourceRef[],
+  diagnostics: AgentProjectDiagnostic[],
+  dependencies: AgentProjectArtifactDependencyInput[],
+  projectRoot: string,
+  sources: AgentProjectArtifactSourceInput[]
+): Promise<CompiledAgentOutputDefinition[]> {
+  const definitions: CompiledAgentOutputDefinition[] = [];
+  const names = new Map<string, string>();
+  for (const sourceRef of sourceRefs) {
+    const name = path.basename(
+      sourceRef.absolutePath,
+      path.extname(sourceRef.absolutePath)
+    );
+    if (!isAgentToolName(name) || name === STRUCTURED_OUTPUT_TOOL_NAME) {
+      diagnostics.push({
+        severity: "error",
+        code: "output_export_invalid",
+        message: name === STRUCTURED_OUTPUT_TOOL_NAME
+          ? `Output name "${name}" is reserved`
+          : `Output filename must be a valid model-visible name: ${name}`,
+        path: sourceRef.absolutePath
+      });
+      continue;
+    }
+    const previous = names.get(name);
+    if (previous) {
+      diagnostics.push({
+        severity: "error",
+        code: "output_name_duplicate",
+        message: `Output name "${name}" is also exported by ${path.basename(previous)}`,
+        path: sourceRef.absolutePath
+      });
+      continue;
+    }
+    names.set(name, sourceRef.absolutePath);
+    try {
+      const loaded = await loadAuthoredModule({
+        projectRoot,
+        sourcePath: sourceRef.absolutePath,
+        authoredSdk: true
+      });
+      _recordDependencies(dependencies, sourceRef.logicalPath, loaded.dependencies);
+      sources.push({ id: sourceRef.logicalPath, content: loaded.source });
+      if (!isOutputDefinition(loaded.default)) {
+        throw new TypeError(
+          `${path.basename(sourceRef.absolutePath)} must default-export defineOutput({ description, schema })`
+        );
+      }
+      definitions.push(compileAgentOutputDefinition(
+        loaded.default,
+        name,
+        sourceRef.logicalPath
+      ));
+    } catch (error) {
+      diagnostics.push({
+        severity: "error",
+        code: "output_import_failed",
+        message: `Unable to import ${path.basename(sourceRef.absolutePath)}: ${_errorMessage(error)}`,
+        path: sourceRef.absolutePath
+      });
+    }
+  }
+  return definitions;
 }
 
 async function _compileStateDefinitions(
@@ -405,6 +484,15 @@ async function _compileTools(
           severity: "error",
           code: "tool_export_invalid",
           message: `Tool filename must be a valid model-visible name: ${name}`,
+          path: sourceRef.absolutePath
+        });
+        continue;
+      }
+      if (name === STRUCTURED_OUTPUT_TOOL_NAME) {
+        diagnostics.push({
+          severity: "error",
+          code: "tool_export_invalid",
+          message: `Tool name "${name}" is reserved for structured output`,
           path: sourceRef.absolutePath
         });
         continue;

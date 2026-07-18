@@ -69,6 +69,40 @@ describe("ThreadRuntimeSession", () => {
     ]);
   });
 
+  test("branches a waiting Run when its output contract selection changes", async () => {
+    const coordinator = new ThreadRuntimeSession(undefined);
+    const answer = {
+      name: "answer",
+      schemaFingerprint: "a".repeat(64)
+    };
+    const decision = {
+      name: "decision",
+      schemaFingerprint: "b".repeat(64)
+    };
+    const begun = await coordinator.begin({
+      ..._input(_threadWithUser(), "manual"),
+      outputContractSnapshot: answer
+    });
+    await coordinator.settle({
+      ..._input(_threadWithToolCall(), "manual"),
+      outputContractSnapshot: answer,
+      runId: begun.runId,
+      sawEvent: true,
+      outcome: "completed"
+    });
+
+    const branched = await coordinator.begin({
+      ..._input(_threadWithToolCall("sunny"), "manual"),
+      outputContractSnapshot: decision
+    });
+
+    expect(branched.runId).not.toBe(begun.runId);
+    expect(branched.session.snapshot.runs).toMatchObject([
+      { id: begun.runId, state: "superseded" },
+      { id: branched.runId, state: "runningModel" }
+    ]);
+  });
+
   test("branches from an earlier boundary without completing superseded tool results", async () => {
     const coordinator = new ThreadRuntimeSession(undefined);
     const begun = await coordinator.begin(_input(_threadWithUser(), "manual"));
@@ -156,6 +190,42 @@ describe("ThreadRuntimeSession", () => {
       outcome: "cancelled"
     });
     expect(abortedSettled.checkpoint?.state).toBe("cancelled");
+  });
+
+  test("binds and atomically stores the selected structured output", async () => {
+    const coordinator = new ThreadRuntimeSession(undefined);
+    const base = _input(_threadWithUser(), "react");
+    const outputContractSnapshot = {
+      name: "answer",
+      schemaFingerprint: "a".repeat(64)
+    };
+    const begun = await coordinator.begin({
+      ...base,
+      outputContractSnapshot
+    });
+    const structuredOutput = {
+      contract: "answer",
+      schemaFingerprint: "a".repeat(64),
+      value: { answer: "Ada" }
+    };
+    const settled = await coordinator.settle({
+      ...base,
+      outputContractSnapshot,
+      structuredOutput,
+      runId: begun.runId,
+      sawEvent: true,
+      outcome: "completed"
+    });
+
+    expect(settled.session.configurations[0]).toMatchObject({
+      outputContract: outputContractSnapshot,
+      maxStructuredOutputBytes: 256 * 1024
+    });
+    expect(settled.session.snapshot.runs[0]).toMatchObject({
+      state: "completed",
+      structuredOutput
+    });
+    expect(settled.checkpoint?.outputContract).toEqual(outputContractSnapshot);
   });
 
   test("terminalizes a persisted in-flight invocation instead of replaying it", async () => {

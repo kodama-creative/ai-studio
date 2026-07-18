@@ -26,6 +26,7 @@ const PROJECT = {
   promptFingerprint: "prompt",
   snapshot: "snapshot-2",
   tools: [],
+  outputs: [],
   skills: [],
   diagnostics: [],
   sourceFiles: []

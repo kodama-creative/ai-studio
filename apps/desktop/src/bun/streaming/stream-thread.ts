@@ -15,7 +15,8 @@ import {
   type AgentSession,
   AgentStateCommitUnknownError,
   createHostCapabilityPolicy,
-  type PreparedAgentTool
+  type PreparedAgentTool,
+  StructuredOutputError
 } from "@llm-space/runtime/node";
 
 import type {
@@ -108,7 +109,9 @@ export class StreamThreadController {
           ? { code: "outcomeUnknown" as const }
           : error instanceof AgentHostPolicyChangedError
             ? { code: "hostPolicyChanged" as const }
-            : {})
+            : error instanceof StructuredOutputError
+              ? { code: error.code }
+              : {})
       });
     } finally {
       this._activeStreams.delete(streamId);
@@ -135,12 +138,20 @@ export class StreamThreadController {
       throw new Error("Local Server runtime is unavailable.");
     }
     const text = _localServerText(payload.request.context.messages.at(-1));
+    let structuredOutputFailure:
+      | "structured_output_invalid"
+      | "structured_output_missing"
+      | "structured_output_too_large"
+      | undefined;
     await this._localServers.run(
       {
         projectId: payload.runtime.projectId,
         threadId: payload.runtime.threadId,
         signal,
-        text
+        text,
+        ...(payload.request.outputContract
+          ? { outputContract: payload.request.outputContract }
+          : {})
       },
       {
         onEvent: event => {
@@ -160,16 +171,29 @@ export class StreamThreadController {
             status
           });
         },
-        onTerminal: (lineage, terminalOutcome) => {
+        onTerminal: (lineage, terminalOutcome, code) => {
           send({
             streamId: payload.streamId,
             type: "localServerLineage",
             lineage,
             terminalOutcome
           });
+          if (
+            code === "structured_output_invalid"
+            || code === "structured_output_missing"
+            || code === "structured_output_too_large"
+          ) {
+            structuredOutputFailure = code;
+          }
         }
       }
     );
+    if (structuredOutputFailure) {
+      throw new StructuredOutputError(
+        structuredOutputFailure,
+        "The selected structured output did not complete"
+      );
+    }
   }
 
   private async _runDesktopThread(
@@ -408,6 +432,9 @@ export class StreamThreadController {
           }
           : {}),
         initialMessages: payload.request.context.messages as AgentMessage[],
+        ...(payload.request.outputContract
+          ? { outputContract: payload.request.outputContract }
+          : {}),
         extraTools,
         activeToolNames: activeSourceTools.map(tool => tool.name),
         systemPrompt: payload.request.context.systemPrompt,

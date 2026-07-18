@@ -16,6 +16,7 @@ export interface DiscoveredAgentProject {
   readonly definition?: AgentProjectSourceRef;
   readonly instructions?: AgentProjectSourceRef;
   readonly instructionEntries: readonly AgentProjectSourceRef[];
+  readonly outputs: readonly AgentProjectSourceRef[];
   readonly states: readonly AgentProjectSourceRef[];
   readonly tools: readonly AgentProjectSourceRef[];
   readonly connections: readonly AgentProjectSourceRef[];
@@ -46,6 +47,7 @@ export async function discoverAgentProject(
     root,
     diagnostics
   );
+  const outputs = await _discoverOutputs(root, diagnostics);
   const tools = await _discoverTools(root, diagnostics);
   const states = await _discoverStates(root, diagnostics);
   const connections = await _discoverConnections(root, diagnostics);
@@ -85,12 +87,65 @@ export async function discoverAgentProject(
     definition,
     instructions,
     instructionEntries,
+    outputs,
     states,
     tools,
     connections,
     skillsRoot,
     diagnostics
   };
+}
+
+async function _discoverOutputs(
+  root: string,
+  diagnostics: AgentProjectDiagnostic[]
+): Promise<AgentProjectSourceRef[]> {
+  const outputsRoot = path.join(root, "outputs");
+  let entries;
+  try {
+    if (await _isSymlink(outputsRoot)) {
+      diagnostics.push({
+        severity: "error",
+        code: "output_import_failed",
+        message: "The outputs source directory cannot be a symbolic link",
+        path: outputsRoot
+      });
+      return [];
+    }
+    entries = await readdir(outputsRoot, { withFileTypes: true });
+  } catch (error) {
+    if (_hasCode(error, "ENOENT")) { return []; }
+    diagnostics.push({
+      severity: "error",
+      code: "output_import_failed",
+      message: `Unable to list output definitions: ${_errorMessage(error)}`,
+      path: outputsRoot
+    });
+    return [];
+  }
+  const outputs: AgentProjectSourceRef[] = [];
+  for (const entry of entries.sort((left, right) =>
+    (left.name < right.name ? -1 : left.name > right.name ? 1 : 0))) {
+    const absolutePath = path.join(outputsRoot, entry.name);
+    if (
+      entry.isSymbolicLink()
+      || !entry.isFile()
+      || (!entry.name.endsWith(".ts") && !entry.name.endsWith(".js"))
+    ) {
+      diagnostics.push({
+        severity: "error",
+        code: "output_import_failed",
+        message: `Output source must be a regular .ts or .js file: ${entry.name}`,
+        path: absolutePath
+      });
+      continue;
+    }
+    outputs.push({
+      absolutePath,
+      logicalPath: path.posix.join("outputs", entry.name)
+    });
+  }
+  return outputs;
 }
 
 async function _discoverInstructionEntries(

@@ -89,6 +89,10 @@ export async function createAgentProjectBundle(
           markdown?: string;
           sourcePath: string;
         }>;
+        outputDefinitions?: ReadonlyArray<{
+          name: string;
+          schemaFingerprint: string;
+        }>;
         stateDefinitions?: ReadonlyArray<{
           name: string;
           schemaFingerprint: string;
@@ -112,6 +116,8 @@ export async function createAgentProjectBundle(
       })))
       || JSON.stringify(bundledProject.stateDefinitions)
       !== JSON.stringify(project.stateDefinitions)
+      || JSON.stringify(bundledProject.outputDefinitions)
+      !== JSON.stringify(project.outputDefinitions)
       || JSON.stringify(bundledProject.tools.map(tool => tool.name))
       !== JSON.stringify(project.tools.map(tool => tool.name))
       || JSON.stringify(bundledProject.dynamicToolResolvers?.map(
@@ -191,7 +197,7 @@ async function _buildInFreshBunProcess(
       builtinModules.map(name => name.replace(/^node:/, ""))
     );
     const BUN_COMPATIBILITY_BUILTINS = new Set(["node-fetch", "ws"]);
-    const RUNTIME_SPECIFIER = /^(?:@llm-space\\/runtime(?:\\/tools|\\/connections|\\/state|\\/instructions)?|typebox)$/;
+    const RUNTIME_SPECIFIER = /^(?:@llm-space\\/runtime(?:\\/tools|\\/connections|\\/state|\\/instructions|\\/outputs)?|typebox)$/;
     const PLUGIN = {
       name: "llm-space-deployment-dependencies",
       setup(build) {
@@ -332,6 +338,8 @@ function _entrySource(
       `import connection${index} from ${JSON.stringify(source.absolutePath)};`),
     ...discovered.states.map((source, index) =>
       `import state${index} from ${JSON.stringify(source.absolutePath)};`),
+    ...discovered.outputs.map((source, index) =>
+      `import output${index} from ${JSON.stringify(source.absolutePath)};`),
     ...dynamicInstructionSources.map((source, index) =>
       `import dynamicInstruction${index} from ${JSON.stringify(source.absolutePath)};`)
   ];
@@ -353,6 +361,11 @@ function _entrySource(
     sourcePath: source.logicalPath,
     definition: `state${index}`
   }));
+  const outputs = discovered.outputs.map((source, index) => ({
+    name: path.basename(source.absolutePath, path.extname(source.absolutePath)),
+    sourcePath: source.logicalPath,
+    definition: `output${index}`
+  }));
   const skills = (project.resources.skills ?? []).map(skill => ({
     ...skill,
     filePath: path.posix.join("skills", skill.name, "SKILL.md")
@@ -370,6 +383,7 @@ const INPUT = {
   tools: [${tools.map(tool => `{ kind: ${JSON.stringify(tool.kind)}, name: ${JSON.stringify(tool.name)}, sourcePath: ${JSON.stringify(tool.sourcePath)}, definition: ${tool.definition}${tool.kind === "dynamic" ? `, steps: ${tool.steps}` : ""} }`).join(",")}],
   connections: [${connections.map(connection => `{ name: ${JSON.stringify(connection.name)}, logicalPath: ${JSON.stringify(connection.logicalPath)}, definition: ${connection.definition} }`).join(",")}],
   states: [${states.map(state => `{ sourcePath: ${JSON.stringify(state.sourcePath)}, definition: ${state.definition} }`).join(",")}],
+  outputs: [${outputs.map(output => `{ name: ${JSON.stringify(output.name)}, sourcePath: ${JSON.stringify(output.sourcePath)}, definition: ${output.definition} }`).join(",")}],
   skills: ${JSON.stringify(skills)}
 };
 const EXPECTED_ARTIFACT = Object.freeze(${JSON.stringify(project.artifact)});

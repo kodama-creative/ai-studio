@@ -1,6 +1,10 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 
-import type { RuntimeRunSnapshot, RuntimeRunState } from "./runtime-run";
+import type {
+  RuntimeRunSnapshot,
+  RuntimeRunState,
+  RuntimeStructuredOutputResult
+} from "./runtime-run";
 import type {
   AgentModelOptionsDefinition,
   AgentModelSelector
@@ -81,6 +85,11 @@ export interface RuntimeRunConfigurationSnapshot {
   readonly model: AgentModelSelector;
   readonly reasoning?: ThinkingLevel;
   readonly toolConfigurationFingerprint: string;
+  readonly outputContract?: {
+    readonly name: string;
+    readonly schemaFingerprint: string;
+  };
+  readonly maxStructuredOutputBytes?: number;
 }
 
 export interface RuntimeSessionSnapshot {
@@ -165,6 +174,7 @@ export type RuntimeSessionMutation =
   }
   | {
     readonly runId: string;
+    readonly structuredOutput?: RuntimeStructuredOutputResult;
     readonly to: RuntimeRunState;
     readonly type: "transitionRun";
   }

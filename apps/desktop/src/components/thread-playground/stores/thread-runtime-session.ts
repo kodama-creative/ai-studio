@@ -5,6 +5,7 @@ import {
   recoverRuntimeSession,
   type RuntimeRunConfigurationSnapshot,
   type RuntimeRunState,
+  type RuntimeStructuredOutputResult,
   SessionStoreInvariantError,
   type StoredRuntimeSession
 } from "@llm-space/runtime/harness";
@@ -14,7 +15,8 @@ import type {
   Thread,
   ThreadContext,
   ThreadRuntimeCheckpoint,
-  ThreadRuntimeRunState
+  ThreadRuntimeRunState,
+  ThreadStructuredOutput
 } from "@llm-space/core";
 import type { RuntimeExecutionMode } from "@llm-space/runtime";
 
@@ -23,6 +25,11 @@ export interface ThreadRuntimeExecutionInput {
   readonly executionMode: RuntimeExecutionMode;
   readonly model: ModelConfig;
   readonly thread: Thread;
+  readonly outputContractSnapshot?: {
+    readonly name: string;
+    readonly schemaFingerprint: string;
+  };
+  readonly structuredOutput?: ThreadStructuredOutput;
 }
 
 export interface BegunThreadRuntimeRun {
@@ -205,7 +212,10 @@ export class ThreadRuntimeSession {
         runId: input.runId,
         state: run.checkpoint.state,
         checkpointOrder: run.checkpoint.order,
-        continuationFingerprint: run.checkpoint.continuationFingerprint
+        continuationFingerprint: run.checkpoint.continuationFingerprint,
+        ...(input.outputContractSnapshot
+          ? { outputContract: input.outputContractSnapshot }
+          : {})
       }
     };
   }
@@ -260,6 +270,7 @@ export async function threadContinuationFingerprint(
     },
     executionMode: input.executionMode,
     model: input.model,
+    outputContract: input.outputContractSnapshot ?? null,
     tools: input.context.tools ?? []
   });
 }
@@ -283,7 +294,9 @@ async function _configuration(
     model: { provider: input.model.provider, id: input.model.id },
     reasoning: input.model.params?.reasoning,
     modelParams: input.model.params,
-    toolConfigurationFingerprint
+    toolConfigurationFingerprint,
+    outputContract: input.outputContractSnapshot ?? null,
+    maxStructuredOutputBytes: 256 * 1024
   };
   return {
     id: `configuration-${await _fingerprint(identity)}`,
@@ -292,7 +305,11 @@ async function _configuration(
     executionMode: input.executionMode,
     model: identity.model,
     reasoning: input.model.params?.reasoning,
-    toolConfigurationFingerprint
+    toolConfigurationFingerprint,
+    ...(input.outputContractSnapshot
+      ? { outputContract: input.outputContractSnapshot }
+      : {}),
+    maxStructuredOutputBytes: 256 * 1024
   };
 }
 
@@ -311,10 +328,26 @@ function _settleMutations(
     runId: string;
     type: "recordCheckpoint";
   }
-  | { runId: string; to: RuntimeRunState; type: "transitionRun"; }
+  | {
+    runId: string;
+    structuredOutput?: RuntimeStructuredOutputResult;
+    to: RuntimeRunState;
+    type: "transitionRun";
+  }
 > {
   if (input.outcome !== "completed") {
     return [{ type: "transitionRun", runId: input.runId, to: input.outcome }];
+  }
+  if (input.structuredOutput) {
+    return [
+      { type: "transitionRun", runId: input.runId, to: "runningTools" },
+      {
+        type: "transitionRun",
+        runId: input.runId,
+        to: "completed",
+        structuredOutput: input.structuredOutput as RuntimeStructuredOutputResult
+      }
+    ];
   }
   const last = input.thread.context?.messages?.at(-1);
   if (last?.role !== "assistant" || !last.toolCalls?.length) {

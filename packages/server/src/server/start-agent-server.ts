@@ -37,6 +37,7 @@ export interface StartAgentServerOptions {
   readonly hostname?: string;
   readonly localDev?: boolean;
   readonly maxActiveRuns?: number;
+  readonly maxStructuredOutputBytes?: number;
   readonly models: Models;
   readonly port?: number;
   readonly project: CompiledAgentProjectSnapshot;
@@ -143,7 +144,8 @@ export async function startAgentServer(
       repository,
       models: options.models,
       project: options.project,
-      maxActiveRuns: options.maxActiveRuns
+      maxActiveRuns: options.maxActiveRuns,
+      maxStructuredOutputBytes: options.maxStructuredOutputBytes
     });
     const context: RequestContext = {
       accepting: true,
@@ -472,7 +474,10 @@ async function _createRun(
       owner: principal,
       continuationToken,
       idempotencyKey,
-      text: parsed
+      text: parsed.text,
+      ...(parsed.outputContract
+        ? { outputContract: parsed.outputContract }
+        : {})
     });
     return _json(
       { schemaVersion: 1, sessionId: run.sessionId, runId: run.runId },
@@ -752,7 +757,10 @@ async function _revokeContinuation(
   }
 }
 
-async function _runInput(request: Request): Promise<Response | string> {
+async function _runInput(request: Request): Promise<
+  | { readonly outputContract?: string; readonly text: string; }
+  | Response
+> {
   const bytes = await _bodyBytes(request);
   if (!bytes) {
     return _error(413, "request_too_large");
@@ -765,7 +773,8 @@ async function _runInput(request: Request): Promise<Response | string> {
       !value
       || typeof value !== "object"
       || Array.isArray(value)
-      || Object.keys(value).length !== 1
+      || Object.keys(value).some(key =>
+        key !== "input" && key !== "outputContract")
       || !("input" in value)
       || !value.input
       || typeof value.input !== "object"
@@ -781,10 +790,24 @@ async function _runInput(request: Request): Promise<Response | string> {
     ) {
       return _error(400, "invalid_request");
     }
+    const outputContract = "outputContract" in value
+      ? value.outputContract
+      : undefined;
+    if (
+      outputContract !== undefined
+      && (typeof outputContract !== "string"
+        || outputContract.length === 0
+        || outputContract.length > 128)
+    ) {
+      return _error(400, "invalid_request");
+    }
     if (new TextEncoder().encode(input.text).byteLength > MAX_TEXT_INPUT_BYTES) {
       return _error(413, "input_too_large");
     }
-    return input.text;
+    return {
+      text: input.text,
+      ...(outputContract ? { outputContract } : {})
+    };
   } catch {
     return _error(400, "invalid_request");
   }

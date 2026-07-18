@@ -21,6 +21,7 @@ describe("discoverAgentProject", () => {
     await mkdir(path.join(root, "tools"), { recursive: true });
     await mkdir(path.join(root, "state"), { recursive: true });
     await mkdir(path.join(root, "connections"), { recursive: true });
+    await mkdir(path.join(root, "outputs"), { recursive: true });
     await writeFile(
       path.join(root, "agent.ts"),
       "globalThis.__LLM_SPACE_DISCOVERY_EXECUTED__ = true; export default {};\n"
@@ -36,6 +37,10 @@ describe("discoverAgentProject", () => {
     );
     await writeFile(
       path.join(root, "state", "counter.ts"),
+      "globalThis.__LLM_SPACE_DISCOVERY_EXECUTED__ = true; export default {};\n"
+    );
+    await writeFile(
+      path.join(root, "outputs", "answer.ts"),
       "globalThis.__LLM_SPACE_DISCOVERY_EXECUTED__ = true; export default {};\n"
     );
 
@@ -56,6 +61,9 @@ describe("discoverAgentProject", () => {
     ]);
     expect(discovered.connections.map(connection => connection.logicalPath))
       .toEqual(["connections/project.ts"]);
+    expect(discovered.outputs.map(output => output.logicalPath)).toEqual([
+      "outputs/answer.ts"
+    ]);
     expect(discovered.diagnostics).toEqual([]);
   });
 
@@ -103,6 +111,31 @@ describe("discoverAgentProject", () => {
         path: path.join(root, "skills")
       }
     ]);
+  });
+
+  test("rejects nested, symbolic, non-regular, and unsupported output entries", async () => {
+    const root = _root();
+    const outside = `${root}-outside.ts`;
+    ROOTS.push(outside);
+    await mkdir(path.join(root, "outputs", "nested"), { recursive: true });
+    await writeFile(path.join(root, "agent.ts"), "export default {};\n");
+    await writeFile(path.join(root, "instructions.md"), "Be concise.\n");
+    await writeFile(path.join(root, "outputs", "readme.md"), "ignored\n");
+    await writeFile(outside, "export default {};\n");
+    await symlink(outside, path.join(root, "outputs", "linked.ts"));
+    await mkdir(path.join(root, "outputs", "not-a-file.ts"));
+
+    const discovered = await discoverAgentProject(root);
+
+    expect(discovered.outputs).toEqual([]);
+    expect(discovered.diagnostics.map(diagnostic => diagnostic.code)).toEqual([
+      "output_import_failed",
+      "output_import_failed",
+      "output_import_failed",
+      "output_import_failed"
+    ]);
+    expect(discovered.diagnostics.map(diagnostic => path.basename(diagnostic.path)))
+      .toEqual(["linked.ts", "nested", "not-a-file.ts", "readme.md"]);
   });
 });
 

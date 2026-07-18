@@ -67,7 +67,12 @@ export class ToolExecutionPolicy {
         ...args: Parameters<AgentTool["execute"]>
       ): Promise<Awaited<ReturnType<AgentTool["execute"]>>> => {
         const [toolCallId, input] = args;
-        if (mode === "manual" || tool.kind === "deferred") {
+        if (
+          (mode === "manual" && !(
+            tool.kind === "executable" && tool.manualAutomatic
+          ))
+          || tool.kind === "deferred"
+        ) {
           this._defer(toolCallId, tool.definition.name, input);
           return _deferredResult();
         }

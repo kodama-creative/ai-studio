@@ -68,6 +68,61 @@ describe("Thread store Runtime Harness integration", () => {
     });
   });
 
+  test("does not reuse a prior Turn's structured output for a later text Run", async () => {
+    const { createThreadStore } = await import("./thread-store");
+    let persisted: Thread = {
+      ..._initialThread(),
+      context: {
+        messages: [
+          {
+            id: "user-one",
+            role: "user",
+            content: [{ type: "text", text: "Return a contact" }]
+          },
+          {
+            id: "assistant-one",
+            role: "assistant",
+            content: [],
+            toolCalls: [{
+              id: "final-one",
+              input: { name: "final_output", arguments: { name: "Ada" } },
+              output: {
+                content: [{ type: "text", text: "{\"name\":\"Ada\"}" }],
+                details: {
+                  structuredOutput: {
+                    contract: "contact-card",
+                    schemaFingerprint: "a".repeat(64),
+                    value: { name: "Ada" }
+                  }
+                }
+              }
+            }]
+          },
+          {
+            id: "user-two",
+            role: "user",
+            content: [{ type: "text", text: "Reply in text" }]
+          }
+        ]
+      }
+    };
+    const store = createThreadStore(persisted, {
+      transport: _finalTransport(),
+      resolveModel: saved => saved ?? null,
+      runtimeOwnsToolLoop: true,
+      persistSettledThread: async thread => {
+        persisted = structuredClone(thread);
+      }
+    });
+
+    await store.getState().run();
+
+    expect(persisted.runHistory?.at(-1)?.structuredOutput).toBeUndefined();
+    expect(
+      (persisted.runtimeSession as StoredRuntimeSession).snapshot.runs.at(-1)
+    ).toMatchObject({ state: "completed" });
+  });
+
   test("persists a manual wait and reloads the same Run for prompt-free continuation", async () => {
     const { createThreadStore } = await import("./thread-store");
     let persisted: Thread = _initialThread();

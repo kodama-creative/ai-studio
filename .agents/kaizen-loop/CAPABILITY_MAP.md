@@ -1,7 +1,7 @@
 # LLM Space Capability Map
 
 - Last updated: 2026-07-18
-- Map status: refreshed through roadmap item 14 discovery. Items 12 and 13 are shipped; item 14 is confirmed decision-blocked before implementation by missing authored-maximum, Host-policy, and effective-snapshot contracts.
+- Map status: refreshed through completed roadmap item 15. Items 12 through 15 are shipped under ADRs 0006-0008 where applicable; the next unchecked dependency-ready item is 16.
 - Evidence rule: entries marked `confirmed` cite current rendered-product or current-code evidence. Entries marked `stale` rely on previous logs or code paths not fully re-inspected in this loop. Entries marked `unknown` need a future product-surface check before they can drive a recommendation.
 
 ## First-Run Model Setup
@@ -199,21 +199,20 @@
 
 ## Named Structured Output Contracts
 
-- Status: missing; roadmap item 15 decision-blocked
+- Status: shipped V1
 - Freshness: confirmed
 - Last checked: 2026-07-18
 - Evidence:
-  - `@earendil-works/pi-ai@0.80.3` exposes provider-agnostic `StreamOptions`/`SimpleStreamOptions` without an output schema, response format, or structured-result field. Its OpenAI, Anthropic, Google, Bedrock, and Mistral adapters expose no structured-output option in their Pi-facing types.
-  - Current Pi upstream `main` was rechecked on 2026-07-18 and retains the same absence. Pi `AgentEvent` ends with `agent_end`; it has no structured-result event. Pi tool calls and schema validation are the existing portable structured-data path.
-  - Eve `c1b6ad3e485f2d15a25bdb5636209aa1367a3124` injects a framework `final_output` tool whose input is the requested schema, intercepts that call as terminal, validates it, and publishes a custom `result.completed` event. Eve accepts caller-supplied per-Turn schemas and a single Agent `outputSchema`, which do not satisfy this roadmap's predeclared named-contract ceiling without an LLM Space decision.
-  - ADR 0002 fixes version-pinned Pi `AgentEvent` as the public Server execution vocabulary and permits only the existing Runtime-owned control terminal. Adding Eve's result event directly would reopen that accepted protocol decision.
-  - `packages/runtime/src/shared/agent-definition.ts` has no output definition; the artifact schema fingerprint has no named output contracts; `AgentSession.prompt()` returns no typed result; Runtime Run records carry lifecycle state but no output payload.
-  - `packages/core/src/types/threads/thread.ts` has no selected output contract or typed terminal value. Thread Run snapshots persist reduced text/tool evidence only.
-  - `packages/runtime/src/client/server-protocol.ts` exposes Pi events plus `runTerminal { outcome, code? }`. Server run creation accepts only text and has no declared-contract selector or typed terminal result.
-  - Installed provider SDKs already expose native structured-output primitives—OpenAI JSON Schema response formats, Anthropic `output_config.format`, and Google response schema fields—but Pi's current adapters do not surface a portable mapping.
-- Boundary: the planned capability lets a Thread or Channel choose only a source-declared named contract, constrains generation through an approved Pi/provider path, validates the exact final JSON value, and exposes one typed terminal result consistently across Desktop and Server.
-- Explicit non-goals: arbitrary caller-provided schemas, a second model/tool iteration loop, silent provider fallback, schema-derived UI generation, unlimited repair, hidden transcript metadata, or an unapproved replacement for Pi `AgentEvent`.
-- Visible gaps: source location and naming, Standard Schema versus TypeBox/JSON Schema acceptance, contract selection/default precedence, supported-provider detection, Eve-style `final_output` versus native provider formatting, collision/reservation behavior, finite invalid/missing-result semantics, manual-mode behavior, immutable Turn/Run identity, and Thread/Session Store/Server terminal persistence are not yet approved.
+  - ADR 0008 fixes flat filename-owned `outputs/<name>.ts|js` modules with public `defineOutput({ description, schema })` and TypeBox schemas. Discovery rejects nested, symbolic, non-regular, unsupported, duplicate, invalid, and reserved entries; compiler, immutable snapshot, artifact, schema/capability fingerprint, and closed-bundle fixtures preserve exact contract identity.
+  - Runtime adds one Eve-shaped reserved Pi tool, `final_output`, only when a caller selects a compiled name. Raw arguments are checked before Pi coercion; duplicate or mixed batches block every sibling before execution; manual mode automatically validates only this terminal tool; missing, invalid, and oversized values fail once with the three stable codes and no repair, retry, prose parsing, or fallback.
+  - Host size authority defaults to 256 KiB and is configurable only from 1–768 KiB. Runtime Run configuration records name, schema fingerprint, and effective limit; the completed terminal atomically stores the identical JSON value. Session Store hydration rejects non-JSON values, mismatched contracts/fingerprints, oversized values, and completed Runs missing their configured result.
+  - Protected Server Run creation accepts only an optional declared name. Text-only idempotency remains byte-compatible; selected-name identity, Pi execution, durable repository terminal, real stop/restart replay, and the generic browser client are covered by Server integration tests. The replayed terminal must equal the first terminal exactly. The protocol remains schema version 1 and adds the typed value only to existing `runTerminal`.
+  - Agent Project Threads persist an optional selection, snapshot it per Run, and forward only the name through Desktop Direct or Local Server. The Output row sits between Tools and Variables, schema detail is read-only, ordinary Threads have no row, and the internal tool pair renders as one generic success/failure card in the message flow and Run History.
+  - Current real-CEF audit `audits/2026-07-18-175602-named-structured-output/` proves selection, schema inspection, generic result projection, hidden `final_output` mechanics, Run History reuse, semantic controls, clean console output, and 1280×800/900×700 layouts without document overflow.
+  - Eighty-four focused compiler/Runtime/Desktop/Server/client/Core checks pass across valid, missing, invalid, mixed, duplicate, manual, Host-limit, collision, persistence, restart, replay, idempotency, stale-prior-result, and continuation-branch boundaries. Full verification runs 299 tests: 298 pass with 1166 assertions; the only failure remains the independently reproduced fixed-point Server shutdown timeout. Seven TypeScript configurations, lint, five non-packaging Bun bundles, renderer-only Vite, and diff gates pass.
+- Boundary: a trusted Agent Project may declare deterministic named TypeBox output contracts; one Thread or Channel Turn may select exactly one name or ordinary text. Pi remains the provider/tool loop and `AgentEvent` vocabulary, while the Runtime terminal is the authoritative typed result across Desktop, Server, restart, and replay.
+- Explicit non-goals: caller-supplied schemas, authored defaults/names/versions/repair logic, Standard Schema adapters, provider compatibility tables or probing, provider-native response-format forks, prose parsing, automatic repair/retry, generated forms, contract-specific UI, a second event vocabulary, or public plugin SDK.
+- Visible gaps: no credential-backed live-provider smoke was available in the isolated audit; provider-native response formats may become an internal optimization only if Pi later exposes a stable portable contract. Full assistive-technology and clipboard-permission testing, schema-generated forms, and contract evolution remain later work.
 
 ## Headless Thread Execution And Evaluation
 

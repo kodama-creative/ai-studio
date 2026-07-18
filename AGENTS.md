@@ -74,6 +74,20 @@ Electrobun RPC has no native streaming, so agent runs **simulate a stream over f
 
 Downstream, `reduceMessages()` folds the events into messages.
 
+### Named structured outputs
+
+Agent Projects may declare flat `outputs/<name>.ts|js` modules through
+`@llm-space/runtime/outputs` and `defineOutput({ description, schema })` with a
+TypeBox schema. Threads and Server callers select only a compiled contract name;
+absence means ordinary text. Runtime exposes the selected schema to Pi as the
+reserved internal `final_output` tool, requires it to be the only tool call in
+the assistant response, validates the exact JSON value once, and atomically
+stores the name, schema fingerprint, and value on the durable Runtime Run
+terminal. The public execution stream remains Pi `AgentEvent`; Server adds the
+typed value only to the existing `runTerminal`, and Desktop hides the internal
+tool pair behind the generic structured-output card in messages and Run
+History. See `docs/adr/0008-named-structured-output-contracts.md`.
+
 ### Bun composition and bundled modules
 
 The Bun process object graph is assembled in one production composition root,

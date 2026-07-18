@@ -39,6 +39,12 @@ export interface ExternalAgentProjectView extends ExternalAgentProjectSummary {
   promptFingerprint: string;
   snapshot: string;
   tools: ProjectTool[];
+  outputs: Array<{
+    description: string;
+    name: string;
+    schema: unknown;
+    schemaFingerprint: string;
+  }>;
   skills: SkillInfo[];
   diagnostics: AgentProjectDiagnostic[];
   sourceFiles: string[];

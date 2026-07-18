@@ -463,6 +463,89 @@ describe("Agent Server HTTP protocol", () => {
       event.event === "control" && event.data.type === "runTerminal")).toHaveLength(1);
   });
 
+  test("selects, validates, persists, and replays a named structured output", async () => {
+    const root = await mkdtemp(join(tmpdir(), "llm-space-server-output-"));
+    roots.push(root);
+    const fingerprint = "3".repeat(64);
+    const options = {
+      artifactFingerprint: fingerprint,
+      authenticator: createStaticBearerAuthenticator([{
+        issuer: "test",
+        principalId: "principal-one",
+        principalType: "user",
+        token: "auth-token-with-at-least-thirty-two-bytes"
+      }]),
+      hostname: "127.0.0.1",
+      localDev: true,
+      models: _models(),
+      port: 0,
+      project: _project(fingerprint),
+      repositoryRoot: root
+    };
+    const server = await startAgentServer(options);
+    servers.push(server);
+    const client = createAgentServerClient<{ answer: string; }>({
+      baseUrl: server.url,
+      authorization: "auth-token-with-at-least-thirty-two-bytes"
+    });
+    const session = await client.createSession({
+      continuationToken: _continuationToken(31),
+      idempotencyKey: "structured-session"
+    });
+    const run = await client.createRun({
+      sessionId: session.sessionId,
+      continuationToken: session.continuationToken,
+      idempotencyKey: "structured-run",
+      text: "structured",
+      outputContract: "answer"
+    });
+    let terminal: AgentServerStreamEvent<{ answer: string; }> | undefined;
+    for await (const event of client.streamRun({
+      sessionId: session.sessionId,
+      runId: run.runId,
+      continuationToken: session.continuationToken
+    })) {
+      terminal = event;
+    }
+    expect(terminal).toMatchObject({
+      event: "control",
+      data: {
+        type: "runTerminal",
+        outcome: "completed",
+        structuredOutput: {
+          contract: "answer",
+          schemaFingerprint: "b".repeat(64),
+          value: { answer: "Ada" }
+        }
+      }
+    });
+    const envelope = JSON.parse(
+      await readFile(join(root, `${session.sessionId}.json`), "utf8")
+    ) as { runtime: { snapshot: { runs: Array<{ structuredOutput?: unknown; }>; }; }; };
+    expect(envelope.runtime.snapshot.runs[0]?.structuredOutput).toEqual({
+      contract: "answer",
+      schemaFingerprint: "b".repeat(64),
+      value: { answer: "Ada" }
+    });
+
+    await server.stop();
+    const restarted = await startAgentServer(options);
+    servers.push(restarted);
+    const replayClient = createAgentServerClient<{ answer: string; }>({
+      baseUrl: restarted.url,
+      authorization: "auth-token-with-at-least-thirty-two-bytes"
+    });
+    let replayedTerminal: AgentServerStreamEvent<{ answer: string; }> | undefined;
+    for await (const event of replayClient.streamRun({
+      sessionId: session.sessionId,
+      runId: run.runId,
+      continuationToken: session.continuationToken
+    })) {
+      replayedTerminal = event;
+    }
+    expect(replayedTerminal).toEqual(terminal);
+  });
+
   test("isolates verified principal state and recovers it after restart", async () => {
     const root = await mkdtemp(join(tmpdir(), "llm-space-server-state-"));
     roots.push(root);
@@ -1473,6 +1556,13 @@ function _project(fingerprint: string): CompiledAgentProjectSnapshot {
       }
     }],
     connections: [],
+    outputDefinitions: [{
+      name: "answer",
+      description: "A structured answer.",
+      schema: Type.Object({ answer: Type.String() }),
+      schemaFingerprint: "b".repeat(64),
+      sourcePath: "outputs/answer.ts"
+    }],
     resources: { skills: [] },
     diagnostics: [],
     fingerprint
@@ -1749,6 +1839,33 @@ function _stream(context: Context, signal?: AbortSignal) {
         id: `increment-${crypto.randomUUID()}`,
         name: "increment",
         arguments: {}
+      }],
+      stopReason: "toolUse"
+    };
+    queueMicrotask(() => {
+      stream.push({ type: "start", partial });
+      stream.push({ type: "toolcall_start", contentIndex: 0, partial });
+      stream.push({
+        type: "toolcall_end",
+        contentIndex: 0,
+        toolCall: partial.content[0] as Extract<
+          AssistantMessage["content"][number],
+          { type: "toolCall"; }
+        >,
+        partial
+      });
+      stream.push({ type: "done", reason: "toolUse", message: partial });
+    });
+    return stream;
+  }
+  if (prompt === "structured") {
+    const partial: AssistantMessage = {
+      ..._partial(""),
+      content: [{
+        type: "toolCall",
+        id: `final-${crypto.randomUUID()}`,
+        name: "final_output",
+        arguments: { answer: "Ada" }
       }],
       stopReason: "toolUse"
     };

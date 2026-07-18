@@ -142,6 +142,34 @@ export const ThreadServerRunLineage = Type.Object({
 });
 export type ThreadServerRunLineage = Static<typeof ThreadServerRunLineage>;
 
+export const ThreadOutputContractSnapshot = Type.Object({
+  name: Type.String(),
+  schemaFingerprint: Type.String()
+});
+export type ThreadOutputContractSnapshot = Static<
+  typeof ThreadOutputContractSnapshot
+>;
+
+export const ThreadStructuredOutput = Type.Object({
+  contract: Type.String(),
+  schemaFingerprint: Type.String(),
+  value: Type.Unknown()
+});
+export type ThreadStructuredOutput = Static<typeof ThreadStructuredOutput>;
+
+export const ThreadStructuredOutputFailure = Type.Object({
+  contract: Type.String(),
+  schemaFingerprint: Type.String(),
+  code: Type.Union([
+    Type.Literal("structured_output_invalid"),
+    Type.Literal("structured_output_missing"),
+    Type.Literal("structured_output_too_large")
+  ])
+});
+export type ThreadStructuredOutputFailure = Static<
+  typeof ThreadStructuredOutputFailure
+>;
+
 const THREAD_FIELDS = {
   /**
    * The title of the thread.
@@ -154,6 +182,9 @@ const THREAD_FIELDS = {
    * display/running and only persists a model once the user picks one.
    */
   model: Type.Optional(ModelConfig),
+
+  /** Source-declared output name selected for the next Agent Project Turn. */
+  outputContract: Type.Optional(Type.String()),
 
   /** Effective Agent runtime identity and model provenance for saved runs. */
   agentRuntime: Type.Optional(ThreadAgentRuntimeProvenance),
@@ -193,7 +224,8 @@ export const ThreadRuntimeCheckpoint = Type.Object({
   continuationFingerprint: Type.String(),
 
   /** Non-secret Local Server authority attached to a projected checkpoint. */
-  server: Type.Optional(ThreadServerRunLineage)
+  server: Type.Optional(ThreadServerRunLineage),
+  outputContract: Type.Optional(ThreadOutputContractSnapshot)
 });
 export type ThreadRuntimeCheckpoint = Static<typeof ThreadRuntimeCheckpoint>;
 
@@ -222,6 +254,10 @@ export const ThreadRunSnapshot = Type.Object({
 
   /** Stable Runtime Run grouping and settled-boundary identity. */
   runtime: Type.Optional(ThreadRuntimeCheckpoint),
+
+  /** Runtime-validated terminal JSON value, when a contract was selected. */
+  structuredOutput: Type.Optional(ThreadStructuredOutput),
+  structuredOutputFailure: Type.Optional(ThreadStructuredOutputFailure),
 
   /**
    * Epoch milliseconds (`Date.now()`) when the run completed.

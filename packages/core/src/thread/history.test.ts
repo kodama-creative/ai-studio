@@ -291,6 +291,29 @@ describe("run history persistence", () => {
     expect(thread.runtimeSession).toBe(runtimeSession);
     expect(thread.runHistory?.[0]?.thread).not.toHaveProperty("runtimeSession");
   });
+
+  test("retains validated structured output and failure terminals", () => {
+    const fingerprint = "a".repeat(64);
+    const completed = recordRun([], { outputContract: "answer" }, 100, {
+      structuredOutput: {
+        contract: "answer",
+        schemaFingerprint: fingerprint,
+        value: { answer: "Ada" }
+      }
+    });
+    const failed = recordRun(completed, { outputContract: "answer" }, 101, {
+      structuredOutputFailure: {
+        contract: "answer",
+        schemaFingerprint: fingerprint,
+        code: "structured_output_missing"
+      }
+    });
+
+    expect(normalizeRunHistory(failed)).toMatchObject([
+      { structuredOutput: { value: { answer: "Ada" } } },
+      { structuredOutputFailure: { code: "structured_output_missing" } }
+    ]);
+  });
 });
 
 describe("structured evaluation persistence", () => {

@@ -1,7 +1,9 @@
+export type { StructuredOutputFailureCode } from "../shared/structured-output";
 export type { AgentProjectArtifact } from "./agent/agent-project-artifact";
 export type {
   AgentProjectSnapshot,
   CompiledAgentInstructionEntry,
+  CompiledAgentOutputDefinition,
   CompiledAgentProjectSnapshot,
   CompiledAgentStateDefinition,
   CompiledMcpConnection,
@@ -14,6 +16,12 @@ export {
 } from "./agent/agent-runtime";
 export { AgentHostPolicyChangedError } from "./capabilities/agent-session-capabilities";
 export { createHostCapabilityPolicy } from "./capabilities/create-host-capability-policy";
+export { StructuredOutputError } from "./outputs/structured-output-error";
+export {
+  DEFAULT_MAX_STRUCTURED_OUTPUT_BYTES,
+  MAX_MAX_STRUCTURED_OUTPUT_BYTES,
+  MIN_MAX_STRUCTURED_OUTPUT_BYTES
+} from "./outputs/structured-output-size";
 export {
   AgentStateCommitUnknownError,
   getActiveAgentSessionContext

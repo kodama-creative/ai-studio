@@ -12,6 +12,22 @@ export const RUNTIME_RUN_STATES = [
 
 export type RuntimeRunState = typeof RUNTIME_RUN_STATES[number];
 
+export type RuntimeJsonValue =
+  | { readonly [key: string]: RuntimeJsonValue; }
+  | boolean
+  | number
+  | readonly RuntimeJsonValue[]
+  | string
+  | null;
+
+export interface RuntimeStructuredOutputResult<
+  TValue extends RuntimeJsonValue = RuntimeJsonValue
+> {
+  readonly contract: string;
+  readonly schemaFingerprint: string;
+  readonly value: TValue;
+}
+
 export interface RuntimeRunCheckpointSnapshot {
   readonly continuationFingerprint: string;
   readonly order: number;
@@ -24,6 +40,7 @@ export interface RuntimeRunSnapshot {
   readonly configurationId: string;
   readonly state: RuntimeRunState;
   readonly checkpoint?: RuntimeRunCheckpointSnapshot;
+  readonly structuredOutput?: RuntimeStructuredOutputResult;
 }
 
 const LEGAL_TRANSITIONS: Readonly<

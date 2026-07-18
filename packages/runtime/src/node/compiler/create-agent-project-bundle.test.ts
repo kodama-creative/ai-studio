@@ -114,6 +114,7 @@ describe("createAgentProjectBundle", () => {
       }
     });
     expect(project.stateDefinitions).toEqual(loaded.stateDefinitions);
+    expect(project.outputDefinitions).toEqual(loaded.outputDefinitions);
     expect(project.connections.map(connection => connection.name)).toEqual([
       "fixture"
     ]);
@@ -288,6 +289,16 @@ async function _fixture(): Promise<string> {
       version: 1,
       schema: Type.Object({ count: Type.Number() }),
       initial: { count: 0 }
+    });`
+  );
+  await mkdir(join(root, "outputs"));
+  await writeFile(
+    join(root, "outputs", "answer.ts"),
+    `import { defineOutput } from "@llm-space/runtime/outputs";
+    import { Type } from "typebox";
+    export default defineOutput({
+      description: "A bundled typed answer.",
+      schema: Type.Object({ answer: Type.String() })
     });`
   );
   await mkdir(join(root, "skills", "bundle-proof"), { recursive: true });

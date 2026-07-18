@@ -6,6 +6,61 @@ import {
 } from "./agent-server-client";
 
 describe("Agent Server browser client", () => {
+  test("selects an authored contract and exposes a generic typed terminal", async () => {
+    let body = "";
+    const client = createAgentServerClient<{ answer: string; }>({
+      baseUrl: "https://agent.example",
+      authorization: "test-token",
+      fetch: (async (_url: string, init?: RequestInit) => {
+        body = typeof init?.body === "string" ? init.body : "";
+        return init?.method === "POST"
+          ? Response.json({ schemaVersion: 1, sessionId: "s", runId: "r" })
+          : _sseResponse(
+            `id: 1\nevent: control\ndata: ${JSON.stringify({
+              type: "runTerminal",
+              outcome: "completed",
+              structuredOutput: {
+                contract: "answer",
+                schemaFingerprint: "a".repeat(64),
+                value: { answer: "Ada" }
+              }
+            })}\n\n`
+          );
+      }) as unknown as typeof globalThis.fetch
+    });
+
+    await client.createRun({
+      continuationToken: "continuation-test",
+      sessionId: "s",
+      text: "Who?",
+      outputContract: "answer"
+    });
+    expect(JSON.parse(body)).toEqual({
+      input: { type: "text", text: "Who?" },
+      outputContract: "answer"
+    });
+
+    const streamingClient = createAgentServerClient<{ answer: string; }>({
+      baseUrl: "https://agent.example",
+      authorization: "test-token",
+      fetch: (async () => _sseResponse(
+        `id: 1\nevent: control\ndata: ${JSON.stringify({
+          type: "runTerminal",
+          outcome: "completed",
+          structuredOutput: {
+            contract: "answer",
+            schemaFingerprint: "a".repeat(64),
+            value: { answer: "Ada" }
+          }
+        })}\n\n`
+      )) as unknown as typeof globalThis.fetch
+    });
+    for await (const event of streamingClient.streamRun(_streamInput())) {
+      if (event.event === "control" && event.data.type === "runTerminal") {
+        expect(event.data.structuredOutput?.value.answer).toBe("Ada");
+      }
+    }
+  });
   test("honors HTTP Retry-After before reconnecting", async () => {
     let calls = 0;
     const client = createAgentServerClient({

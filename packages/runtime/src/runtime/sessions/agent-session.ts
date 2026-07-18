@@ -1,4 +1,11 @@
-import { Agent, type AgentMessage, type StreamFn, type ThinkingLevel } from "@earendil-works/pi-agent-core";
+import {
+  Agent,
+  type AgentMessage,
+  type BeforeToolCallContext,
+  type StreamFn,
+  type ThinkingLevel
+} from "@earendil-works/pi-agent-core";
+import { Compile } from "typebox/compile";
 
 import type {
   Api,
@@ -10,12 +17,18 @@ import type {
 
 import { AgentEventProjector, type AgentSessionEvent, type AgentSessionPersistence } from "../../execution/agent-event-projector";
 import { ToolExecutionPolicy } from "../../execution/tool-execution-policy";
+import { STRUCTURED_OUTPUT_TOOL_NAME } from "../../shared/structured-output";
 import { resolveAgentRuntimeModel } from "../agent/resolve-model";
 import {
   type AgentCapabilityRequest,
   AgentSessionCapabilities
 } from "../capabilities/agent-session-capabilities";
 import { AgentSessionInstructions } from "../instructions/agent-session-instructions";
+import {
+  createStructuredOutputTool
+} from "../outputs/create-structured-output-tool";
+import { StructuredOutputError } from "../outputs/structured-output-error";
+import { DEFAULT_MAX_STRUCTURED_OUTPUT_BYTES } from "../outputs/structured-output-size";
 import { AgentSessionState } from "../state/agent-session-state";
 
 import type { AgentCapabilityPolicy } from "../../shared/agent-capability-policy";
@@ -25,8 +38,12 @@ import type {
 } from "../../shared/agent-definition";
 import type { AgentSessionContext } from "../../shared/agent-session-context";
 import type { RuntimeExecutionMode } from "../../shared/runtime-execution-mode";
-import type { AgentProjectSnapshot } from "../agent/agent-project-snapshot";
+import type {
+  AgentProjectSnapshot,
+  CompiledAgentOutputDefinition
+} from "../agent/agent-project-snapshot";
 import type { PreparedAgentTool } from "../agent/prepared-agent-tool";
+import type { RuntimeStructuredOutputResult } from "../harness/runtime-run";
 import type {
   RuntimeTurnCapabilitySnapshot,
   RuntimeTurnInstructionSnapshot,
@@ -56,6 +73,8 @@ export interface AgentSessionOptions {
   onSessionCommitted?: (session: StoredRuntimeSession) => Promise<void> | void;
   persistence?: AgentSessionPersistence;
   streamFn?: StreamFn;
+  outputDefinition?: CompiledAgentOutputDefinition;
+  maxStructuredOutputBytes?: number;
 }
 
 export class AgentSession {
@@ -80,6 +99,9 @@ export class AgentSession {
   private _resolvedWithoutSessionStore = false;
   private _terminalError: Error | null = null;
   private _executionMode: RuntimeExecutionMode;
+  private readonly _outputTool?: PreparedAgentTool;
+  private readonly _outputValidator?: ReturnType<typeof Compile>;
+  private _structuredOutput: RuntimeStructuredOutputResult | null = null;
 
   constructor(options: AgentSessionOptions) {
     this._project = options.project;
@@ -89,6 +111,18 @@ export class AgentSession {
     this._modelSelector = options.modelSelector;
     this._reasoning = options.reasoning;
     this._executionMode = options.executionMode;
+    this._outputTool = options.outputDefinition
+      ? createStructuredOutputTool({
+        definition: options.outputDefinition,
+        maxBytes: options.maxStructuredOutputBytes
+          ?? DEFAULT_MAX_STRUCTURED_OUTPUT_BYTES,
+        onFailure: error => { this._terminalError = error; },
+        onResult: result => { this._structuredOutput = result; }
+      })
+      : undefined;
+    this._outputValidator = options.outputDefinition
+      ? Compile(options.outputDefinition.schema)
+      : undefined;
     this._sessionState = new AgentSessionState({
       context: options.context,
       definitions: options.project.stateDefinitions ?? [],
@@ -146,12 +180,28 @@ export class AgentSession {
           ? options.streamFn(model, context, resolvedOptions)
           : options.models.streamSimple(model, context, resolvedOptions);
       },
+      beforeToolCall: async context => this._beforeToolCall(context),
       prepareNextTurnWithContext: async ({ toolResults }) => {
         try {
+          if (
+            this._outputTool
+            && toolResults.some(result =>
+              result.toolName === STRUCTURED_OUTPUT_TOOL_NAME)
+            && !this._structuredOutput
+          ) {
+            if (!this._terminalError) {
+              this._terminalError = new StructuredOutputError(
+                "structured_output_invalid",
+                "The selected structured output was invalid"
+              );
+            }
+            throw this._terminalError;
+          }
           await this._sessionState.completeStep(toolResults, {
             deferred: toolResults.some(result =>
               this._toolPolicy.isDeferredToolResult(result))
           });
+          return undefined;
         } catch (error) {
           this._terminalError = error instanceof Error
             ? error
@@ -197,6 +247,10 @@ export class AgentSession {
     return this._capabilitySnapshot;
   }
 
+  get structuredOutput(): RuntimeStructuredOutputResult | null {
+    return this._structuredOutput;
+  }
+
   async prepareTurn(): Promise<void> {
     await this.validateState();
     await this._resolveTurnSetup();
@@ -219,9 +273,11 @@ export class AgentSession {
 
   async prompt(message: AgentMessage | AgentMessage[] | string): Promise<void> {
     this._terminalError = null;
+    this._structuredOutput = null;
     await this.validateState();
     await this._resolveTurnSetup();
     await this._agent.prompt(message as AgentMessage | AgentMessage[]);
+    this._assertStructuredOutputCompleted();
     this._throwTerminalError();
   }
 
@@ -240,9 +296,11 @@ export class AgentSession {
 
   async continue(): Promise<void> {
     this._terminalError = null;
+    this._structuredOutput = null;
     await this.validateState();
     await this._resolveTurnSetup();
     await this._agent.continue();
+    this._assertStructuredOutputCompleted();
     this._throwTerminalError();
   }
 
@@ -265,6 +323,52 @@ export class AgentSession {
     const error = this._terminalError;
     this._terminalError = null;
     if (error) { throw error; }
+  }
+
+  private async _beforeToolCall(
+    context: BeforeToolCallContext
+  ): Promise<{ block: true; reason: string; } | undefined> {
+    const calls = context.assistantMessage.content.filter(
+      content => content.type === "toolCall"
+    );
+    const finalCalls = calls.filter(
+      call => call.name === STRUCTURED_OUTPUT_TOOL_NAME
+    );
+    if (finalCalls.length === 0) { return undefined; }
+    if (finalCalls.length !== 1 || calls.length !== 1) {
+      const error = new StructuredOutputError(
+        "structured_output_invalid",
+        "final_output must be called exactly once and without sibling tools"
+      );
+      this._terminalError = error;
+      return { block: true, reason: error.message };
+    }
+    if (!this._outputValidator?.Check(finalCalls[0]?.arguments)) {
+      const error = new StructuredOutputError(
+        "structured_output_invalid",
+        "final_output arguments do not match the selected contract"
+      );
+      this._terminalError = error;
+      return { block: true, reason: error.message };
+    }
+    return undefined;
+  }
+
+  private _assertStructuredOutputCompleted(): void {
+    if (!this._outputTool || this._structuredOutput || this._terminalError) {
+      return;
+    }
+    const last = this._agent.state.messages.at(-1);
+    if (
+      last?.role === "assistant"
+      && (last.stopReason === "aborted" || last.stopReason === "error")
+    ) {
+      return;
+    }
+    this._terminalError = new StructuredOutputError(
+      "structured_output_missing",
+      "The model completed without the selected structured output"
+    );
   }
 
   private async _resolveTurnSetup(): Promise<void> {
@@ -312,7 +416,17 @@ export class AgentSession {
     this._modelSelector = capabilities.model;
     this._reasoning = capabilities.reasoning;
     this._modelOptions = capabilities.modelOptions;
-    this._toolPolicy.configure({ tools: capabilities.tools });
+    if (capabilities.tools.some(tool =>
+      tool.definition.name === STRUCTURED_OUTPUT_TOOL_NAME)) {
+      throw new Error(
+        `Runtime tool name "${STRUCTURED_OUTPUT_TOOL_NAME}" is reserved for structured output`
+      );
+    }
+    this._toolPolicy.configure({
+      tools: this._outputTool
+        ? [...capabilities.tools, this._outputTool]
+        : capabilities.tools
+    });
     this._agent.state.model = resolveAgentRuntimeModel(
       this._models,
       capabilities.model

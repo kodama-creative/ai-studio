@@ -22,6 +22,7 @@ import {
   createAuthoredToolsVirtualModule
 } from "../../internal/authored-dynamic-tools-definition";
 import { createAuthoredInstructionsVirtualModule } from "../../internal/authored-instruction-definitions";
+import { defineOutputRuntime } from "../../internal/authored-output-definitions";
 import { defineStateRuntime } from "../../internal/authored-state-definitions";
 
 import type { DynamicToolSteps } from "../../internal/dynamic-tool-step";
@@ -238,6 +239,26 @@ function _authoredSdkPlugin(): Bun.BunPlugin {
             loader: "js"
           };
         }
+      );
+      build.onResolve(
+        { filter: /^@llm-space\/runtime\/outputs$/ },
+        () => ({
+          path: "output-definition",
+          namespace: "llm-space-runtime"
+        })
+      );
+      build.onLoad(
+        {
+          filter: /^output-definition$/,
+          namespace: "llm-space-runtime"
+        },
+        () => ({
+          contents: createAuthoredDefinitionVirtualModule(
+            "defineOutput",
+            defineOutputRuntime
+          ),
+          loader: "js"
+        })
       );
       build.onResolve(
         { filter: /^@llm-space\/runtime\/connections$/ },

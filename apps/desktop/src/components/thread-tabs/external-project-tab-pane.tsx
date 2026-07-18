@@ -129,6 +129,7 @@ const _ProjectThreadPane = function ProjectThreadPane({
   const writeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pending = useRef<ExternalAgentProjectThreadRecord | null>(null);
   const recordRef = useRef(record);
+  const projectRef = useRef(project);
   const activeRunProvenance = useRef<ThreadAgentRuntimeProvenance | null>(null);
   const activeRuntimeSession = useRef<StoredRuntimeSession | null>(null);
   const activeServerRun = useRef<{
@@ -136,6 +137,7 @@ const _ProjectThreadPane = function ProjectThreadPane({
     terminalOutcome?: "cancelled" | "completed" | "failed" | "outcomeUnknown";
   } | null>(null);
   recordRef.current = record;
+  projectRef.current = project;
   const runtimeTransport = useMemo(
     () =>
       createRpcTransport({
@@ -544,6 +546,9 @@ const _ProjectThreadPane = function ProjectThreadPane({
       }
       const state = serverRun.terminalOutcome
         ?? (outcome === "cancelled" ? "cancelled" : "outcomeUnknown");
+      const selectedOutput = projectRef.current?.outputs.find(
+        output => output.name === recordRef.current?.thread.outputContract
+      );
       return {
         runId: serverRun.lineage.runId,
         state,
@@ -554,7 +559,15 @@ const _ProjectThreadPane = function ProjectThreadPane({
           serverRun.lineage.sessionId,
           serverRun.lineage.runId
         ].join(":"),
-        server: serverRun.lineage
+        server: serverRun.lineage,
+        ...(selectedOutput
+          ? {
+            outputContract: {
+              name: selectedOutput.name,
+              schemaFingerprint: selectedOutput.schemaFingerprint
+            }
+          }
+          : {})
       };
     },
     []
@@ -801,6 +814,8 @@ const _ProjectThreadPane = function ProjectThreadPane({
         onRenameTitle={handleRename}
         onStreamingEnd={handleStreamingEnd}
         onStreamingStart={handleStreamingStart}
+        outputDefinitions={project.outputs}
+        outputReadonly={localServer ? runtimeStatus.state === "stale" : false}
         path={`project/${projectId}/${threadId}.json`}
         persistSettledThread={persistSettledThread}
         prepareRunSnapshot={prepareRunSnapshot}

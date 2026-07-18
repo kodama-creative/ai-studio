@@ -1,4 +1,5 @@
 export * from "./public/definitions/agent";
+export type { OutputDefinition } from "./public/definitions/output";
 export * from "./public/models/define-dynamic";
 export * from "./shared/agent-capability-policy";
 export type {
@@ -19,3 +20,4 @@ export type {
   AgentTurnContext
 } from "./shared/agent-session-context";
 export * from "./shared/runtime-execution-mode";
+export { STRUCTURED_OUTPUT_TOOL_NAME } from "./shared/structured-output";

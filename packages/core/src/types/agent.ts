@@ -26,4 +26,5 @@ export interface AgentStreamRequest {
   model: { id: string; provider: string; };
   config?: { model?: ModelConfigParams; };
   context: PiThreadContext;
+  outputContract?: string;
 }

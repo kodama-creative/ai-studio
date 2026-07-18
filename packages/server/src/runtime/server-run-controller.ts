@@ -4,12 +4,14 @@ import {
   AgentRuntime,
   AgentStateCommitUnknownError,
   type CompiledAgentProjectSnapshot,
-  createHostCapabilityPolicy
+  createHostCapabilityPolicy,
+  StructuredOutputError
 } from "@llm-space/runtime/server";
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Models, UserMessage } from "@earendil-works/pi-ai";
 import type { AgentCapabilityPolicy } from "@llm-space/runtime";
+import type { RuntimeStructuredOutputResult } from "@llm-space/runtime/harness";
 
 import { ServerCapacityError } from "./server-capacity-error";
 import { serializePiAgentEvent } from "../protocol/pi-event-serializer";
@@ -24,6 +26,7 @@ import type {
 
 export interface ServerRunControllerOptions {
   readonly maxActiveRuns?: number;
+  readonly maxStructuredOutputBytes?: number;
   readonly models: Models;
   readonly project: CompiledAgentProjectSnapshot;
   readonly repository: ServerSessionRepository;
@@ -45,7 +48,8 @@ export class ServerRunController {
   constructor(options: ServerRunControllerOptions) {
     this._runtime = new AgentRuntime({
       models: options.models,
-      project: options.project
+      project: options.project,
+      maxStructuredOutputBytes: options.maxStructuredOutputBytes
     });
     this._capabilityPolicy = createHostCapabilityPolicy({
       models: options.models,
@@ -68,6 +72,7 @@ export class ServerRunController {
   async createRun(input: {
     readonly continuationToken: string;
     readonly idempotencyKey: string;
+    readonly outputContract?: string;
     readonly owner: ServerPrincipal;
     readonly sessionId: string;
     readonly text: string;
@@ -80,6 +85,7 @@ export class ServerRunController {
   private async _createRun(input: {
     readonly continuationToken: string;
     readonly idempotencyKey: string;
+    readonly outputContract?: string;
     readonly owner: ServerPrincipal;
     readonly sessionId: string;
     readonly text: string;
@@ -107,13 +113,31 @@ export class ServerRunController {
     const toolConfigurationFingerprint = _sha256(
       JSON.stringify(this._runtime.project.tools.map(tool => tool.name))
     );
+    const outputDefinition = input.outputContract
+      ? this._runtime.project.outputDefinitions?.find(
+        output => output.name === input.outputContract
+      )
+      : undefined;
+    if (input.outputContract && !outputDefinition) {
+      throw new TypeError(
+        `Unknown structured output contract: ${input.outputContract}`
+      );
+    }
+    const outputContract = outputDefinition
+      ? {
+        name: outputDefinition.name,
+        schemaFingerprint: outputDefinition.schemaFingerprint
+      }
+      : undefined;
     const configurationIdentity = JSON.stringify({
       agentSnapshotFingerprint: this._runtime.project.fingerprint,
       contextFingerprint,
       executionMode: "react",
       model: definition.model,
       reasoning: definition.reasoning,
-      toolConfigurationFingerprint
+      toolConfigurationFingerprint,
+      outputContract: outputContract ?? null,
+      maxStructuredOutputBytes: this._runtime.maxStructuredOutputBytes
     });
     const configuration = {
       id: `configuration-${_sha256(configurationIdentity)}`,
@@ -122,7 +146,9 @@ export class ServerRunController {
       executionMode: "react" as const,
       model: definition.model,
       reasoning: definition.reasoning,
-      toolConfigurationFingerprint
+      toolConfigurationFingerprint,
+      ...(outputContract ? { outputContract } : {}),
+      maxStructuredOutputBytes: this._runtime.maxStructuredOutputBytes
     };
     if (this._inFlight >= this._maxActiveRuns) {
       throw new ServerCapacityError();
@@ -133,7 +159,8 @@ export class ServerRunController {
         ...input,
         inputText: input.text,
         userMessage,
-        configuration
+        configuration,
+        ...(input.outputContract ? { outputContract: input.outputContract } : {})
       });
       if (created.created) {
         this._pendingRuns.add(created.runId);
@@ -184,6 +211,7 @@ export class ServerRunController {
   private async _execute(run: CreatedServerRun): Promise<void> {
     let outcome: ServerRunTerminalOutcome = "completed";
     let code: string | undefined;
+    let structuredOutput: RuntimeStructuredOutputResult | undefined;
     try {
       const session = await this._runtime.createSession({
         capabilityPolicy: this._capabilityPolicy,
@@ -201,6 +229,7 @@ export class ServerRunController {
         sessionStore: this._repository,
         executionMode: "react",
         initialMessages: run.transcript as AgentMessage[],
+        ...(run.outputContract ? { outputContract: run.outputContract } : {}),
         persistence: {
           replaceMessages: async messages => {
             if (!this._detached) {
@@ -238,6 +267,7 @@ export class ServerRunController {
         outcome = "cancelled";
       } else {
         await session.continue();
+        structuredOutput = session.structuredOutput ?? undefined;
       }
       _throwEventFailure(eventFailure);
       if (this._abortedRuns.has(run.runId)) {
@@ -261,6 +291,9 @@ export class ServerRunController {
       } else if (error instanceof AgentHostPolicyChangedError) {
         outcome = "failed";
         code = "hostPolicyChanged";
+      } else if (error instanceof StructuredOutputError) {
+        outcome = "failed";
+        code = error.code;
       } else {
         outcome = "failed";
         code = error instanceof ServerEventTooLargeError
@@ -276,7 +309,8 @@ export class ServerRunController {
             sessionId: run.sessionId,
             runId: run.runId,
             outcome,
-            ...(code ? { code } : {})
+            ...(code ? { code } : {}),
+            ...(structuredOutput ? { structuredOutput } : {})
           });
         }
       } finally {

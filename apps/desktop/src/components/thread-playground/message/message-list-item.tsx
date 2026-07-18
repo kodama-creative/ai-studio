@@ -7,12 +7,14 @@ import {
   type ToolCall
 } from "@llm-space/core";
 import { createMessagePromptVariablePlaceKey } from "@llm-space/core/thread";
+import { STRUCTURED_OUTPUT_TOOL_NAME } from "@llm-space/runtime";
 import { PlusIcon } from "lucide-react";
 import { memo, useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import type { DraggableProvidedDragHandleProps } from "@hello-pangea/dnd";
 
+import { structuredOutputFromToolCall } from "@/client/structured-output-from-tool-call";
 import { openFirecrawlLimitDialog } from "@/components/firecrawl-limit-dialog";
 import { useRenderingFidelity } from "@/components/theme-provider";
 import { cn } from "@/lib/utils";
@@ -29,6 +31,7 @@ import { CollapsibleContent } from "../../ui/collapsible-content";
 import { Marker, MarkerContent } from "../../ui/marker";
 import { ShineBorder } from "../../ui/shine-border";
 import { Skeleton } from "../../ui/skeleton";
+import { StructuredOutputCard } from "../output/structured-output-card";
 import { useThreadStore, useThreadStoreActions } from "../stores";
 import { usePromptVariableExtensionForContext } from "../variable/use-prompt-variable-extension";
 
@@ -41,6 +44,7 @@ const _MessageListItem = function MessageListItem({
   runDisabled = false,
   streaming,
   collapsed,
+  hideStructuredOutputs = false,
   autoFocus = false,
   textOnlyDraft = false,
   dragHandleProps
@@ -48,6 +52,7 @@ const _MessageListItem = function MessageListItem({
   readonly className?: string;
   readonly collapsed?: boolean;
   readonly context?: ThreadContext;
+  readonly hideStructuredOutputs?: boolean;
   readonly message: Message;
   readonly placeholder?: string;
   readonly readonly?: boolean;
@@ -80,6 +85,23 @@ const _MessageListItem = function MessageListItem({
         ? summarizeToolCalls(message.toolCalls)
         : null),
     [message]
+  );
+  const ordinaryToolCalls = useMemo(
+    () => (message.role === "assistant"
+      ? (message.toolCalls ?? []).filter(
+        toolCall => toolCall.input.name !== STRUCTURED_OUTPUT_TOOL_NAME
+      )
+      : []),
+    [message]
+  );
+  const structuredOutputs = useMemo(
+    () => (message.role === "assistant" && !hideStructuredOutputs
+      ? (message.toolCalls ?? []).flatMap(toolCall => {
+        const result = structuredOutputFromToolCall(toolCall);
+        return result ? [result] : [];
+      })
+      : []),
+    [hideStructuredOutputs, message]
   );
   const toolCallsOnlyBody = useMemo(
     () =>
@@ -239,11 +261,16 @@ const _MessageListItem = function MessageListItem({
             />
           )}
           {message.role === "assistant"
-            && message.toolCalls
-            && message.toolCalls.length > 0
+            && ((ordinaryToolCalls.length > 0) || structuredOutputs.length > 0)
             ? (
               <div className="flex w-full flex-col gap-3 px-2 pb-2">
-                {message.toolCalls.map(toolCall => (
+                {structuredOutputs.map(result => (
+                  <StructuredOutputCard
+                    key={`${result.contract}:${result.schemaFingerprint}`}
+                    result={result}
+                  />
+                ))}
+                {ordinaryToolCalls.map(toolCall => (
                   <ToolCallListItem
                     canContinue={
                       !runDisabled && (toolCallSummary?.canContinue ?? false)
@@ -256,12 +283,16 @@ const _MessageListItem = function MessageListItem({
                     toolCall={toolCall}
                   />
                 ))}
-                <ToolStepContinuation
-                  messageId={message.id}
-                  readonly={readonly}
-                  runDisabled={runDisabled}
-                  toolCalls={message.toolCalls}
-                />
+                {ordinaryToolCalls.length > 0
+                  ? (
+                    <ToolStepContinuation
+                      messageId={message.id}
+                      readonly={readonly}
+                      runDisabled={runDisabled}
+                      toolCalls={ordinaryToolCalls}
+                    />
+                  )
+                  : null}
               </div>
             )
             : null}

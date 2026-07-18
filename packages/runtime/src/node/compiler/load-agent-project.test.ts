@@ -265,6 +265,69 @@ describe("loadAgentProject", () => {
       .toContainEqual(expect.objectContaining({ id: "state:demo.counter" }));
   });
 
+  test("compiles filename-owned structured outputs into artifact identity", async () => {
+    const root = await _fixture();
+    await writeFile(join(root, "instructions.md"), "Return a typed answer.\n");
+    await mkdir(join(root, "outputs"));
+    await writeFile(
+      join(root, "outputs", "answer.ts"),
+      `import { defineOutput } from "@llm-space/runtime/outputs";
+      import { Type } from "typebox";
+      export default defineOutput({
+        description: "A typed answer.",
+        schema: Type.Object({ answer: Type.String() })
+      });`
+    );
+
+    const snapshot = await loadAgentProject(root);
+
+    expect(snapshot.diagnostics).toEqual([]);
+    expect(snapshot.outputDefinitions).toEqual([
+      expect.objectContaining({
+        name: "answer",
+        description: "A typed answer.",
+        sourcePath: "outputs/answer.ts",
+        schemaFingerprint: expect.stringMatching(/^[0-9a-f]{64}$/)
+      })
+    ]);
+    expect(snapshot.artifact.fingerprints.capabilities.entries)
+      .toContainEqual(expect.objectContaining({ id: "output:answer" }));
+    expect(snapshot.artifact.fingerprints.schemas.entries)
+      .toContainEqual(expect.objectContaining({ id: "output:answer" }));
+  });
+
+  test("rejects reserved, duplicate, unbranded, and extended output definitions", async () => {
+    const root = await _fixture();
+    await writeFile(join(root, "instructions.md"), "Output validation.\n");
+    await mkdir(join(root, "outputs"));
+    const definition = (extra = "") =>
+      `import { defineOutput } from "@llm-space/runtime/outputs";
+      import { Type } from "typebox";
+      export default defineOutput({
+        description: "A typed answer.",
+        schema: Type.Object({ answer: Type.String() })${extra}
+      });`;
+    await Promise.all([
+      writeFile(join(root, "outputs", "answer.ts"), definition()),
+      writeFile(join(root, "outputs", "answer.js"), definition()),
+      writeFile(join(root, "outputs", "final_output.ts"), definition()),
+      writeFile(join(root, "outputs", "raw.ts"), "export default {};"),
+      writeFile(join(root, "outputs", "extended.ts"), definition(", default: {}"))
+    ]);
+
+    const snapshot = await loadAgentProject(root);
+
+    expect(snapshot.outputDefinitions?.map(output => output.name)).toEqual([
+      "answer"
+    ]);
+    expect(snapshot.diagnostics.map(item => item.code)).toEqual([
+      "output_name_duplicate",
+      "output_import_failed",
+      "output_export_invalid",
+      "output_import_failed"
+    ]);
+  });
+
   test("rejects invalid, duplicate, reserved, and oversized state declarations", async () => {
     const root = await _fixture();
     await writeFile(join(root, "instructions.md"), "State validation.\n");

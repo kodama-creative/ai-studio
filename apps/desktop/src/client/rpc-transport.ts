@@ -9,6 +9,7 @@ import {
 import type { StoredRuntimeSession } from "@llm-space/runtime/harness";
 
 import { electrobun } from "@/lib/electrobun";
+import { RuntimeStructuredOutputError } from "./runtime-structured-output-error";
 
 import type {
   ExternalAgentProjectRuntimeStatus
@@ -34,6 +35,8 @@ export class RuntimeHostPolicyChangedError extends Error {
     this.name = "RuntimeHostPolicyChangedError";
   }
 }
+
+export { RuntimeStructuredOutputError } from "./runtime-structured-output-error";
 
 /**
  * An {@link AgentTransport} backed by Electrobun RPC. It sends the prepared
@@ -64,7 +67,10 @@ export function createRpcTransport(options?: {
     let aborted = false;
     let settleAbort = false;
     let errorMessage: string | null = null;
-    let errorCode: "hostPolicyChanged" | "outcomeUnknown" | undefined;
+    let errorCode: Extract<
+      StreamThreadResponsePayload,
+      { type: "error"; }
+    >["code"];
     const notify = () => {
       wake?.();
       wake = null;
@@ -145,6 +151,13 @@ export function createRpcTransport(options?: {
           }
           if (errorCode === "hostPolicyChanged") {
             throw new RuntimeHostPolicyChangedError(errorMessage);
+          }
+          if (
+            errorCode === "structured_output_invalid"
+            || errorCode === "structured_output_missing"
+            || errorCode === "structured_output_too_large"
+          ) {
+            throw new RuntimeStructuredOutputError(errorMessage, errorCode);
           }
           throw new Error(errorMessage);
         }

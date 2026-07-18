@@ -14,6 +14,7 @@ import {
   isTerminalRuntimeRunState,
   type RuntimeRunConfigurationSnapshot,
   type RuntimeRunState,
+  type RuntimeStructuredOutputResult,
   type SessionStore,
   type SessionStoreCommit,
   type StoredRuntimeSession
@@ -78,6 +79,7 @@ interface ServerRunRecord {
   readonly idempotencyKey: string;
   readonly inputHash: string;
   readonly terminal: ServerRunTerminalOutcome | null;
+  readonly outputContract?: string;
 }
 
 interface ServerRotationRecord {
@@ -125,6 +127,7 @@ export interface CreatedServerRun {
   readonly sessionId: string;
   readonly transcript: readonly AgentMessage[];
   readonly turnSequence: number;
+  readonly outputContract?: string;
 }
 
 export interface RotatedServerContinuation {
@@ -213,6 +216,7 @@ export class ServerSessionRepository implements SessionStore {
             envelope.sessionId
           );
         }
+        _assertTerminalAuthority(envelope);
         repository._sessions.set(envelope.sessionId, envelope);
       }
       return repository;
@@ -276,6 +280,7 @@ export class ServerSessionRepository implements SessionStore {
     readonly continuationToken: string;
     readonly idempotencyKey: string;
     readonly inputText: string;
+    readonly outputContract?: string;
     readonly owner: ServerPrincipal;
     readonly sessionId: string;
     readonly userMessage: UserMessage;
@@ -286,7 +291,7 @@ export class ServerSessionRepository implements SessionStore {
         input.owner,
         input.continuationToken
       );
-      const inputHash = _sha256(input.inputText);
+      const inputHash = _runInputHash(input.inputText, input.outputContract);
       const idempotent = current.runs.find(
         run => run.idempotencyKey === input.idempotencyKey
       );
@@ -301,7 +306,10 @@ export class ServerSessionRepository implements SessionStore {
           sessionId: current.sessionId,
           runId: idempotent.id,
           transcript: _snapshot(current.transcript),
-          turnSequence: current.runs.findIndex(run => run.id === idempotent.id) + 1
+          turnSequence: current.runs.findIndex(run => run.id === idempotent.id) + 1,
+          ...(idempotent.outputContract
+            ? { outputContract: idempotent.outputContract }
+            : {})
         };
       }
       if (current.runtime?.snapshot.activeRunId) {
@@ -330,7 +338,10 @@ export class ServerSessionRepository implements SessionStore {
             id: runId,
             idempotencyKey: input.idempotencyKey,
             inputHash,
-            terminal: null
+            terminal: null,
+            ...(input.outputContract
+              ? { outputContract: input.outputContract }
+              : {})
           }
         ],
         events: { ...current.events, [runId]: [] }
@@ -343,7 +354,8 @@ export class ServerSessionRepository implements SessionStore {
         sessionId: next.sessionId,
         runId,
         transcript: _snapshot(transcript),
-        turnSequence: next.runs.length
+        turnSequence: next.runs.length,
+        ...(input.outputContract ? { outputContract: input.outputContract } : {})
       };
     });
   }
@@ -352,6 +364,7 @@ export class ServerSessionRepository implements SessionStore {
     readonly continuationToken: string;
     readonly idempotencyKey: string;
     readonly inputText: string;
+    readonly outputContract?: string;
     readonly owner: ServerPrincipal;
     readonly sessionId: string;
   }): Promise<CreatedServerRun | null> {
@@ -366,7 +379,7 @@ export class ServerSessionRepository implements SessionStore {
     if (!run) {
       return null;
     }
-    if (run.inputHash !== _sha256(input.inputText)) {
+    if (run.inputHash !== _runInputHash(input.inputText, input.outputContract)) {
       throw new ServerIdempotencyConflictError();
     }
     return {
@@ -376,7 +389,8 @@ export class ServerSessionRepository implements SessionStore {
       sessionId: current.sessionId,
       runId: run.id,
       transcript: _snapshot(current.transcript),
-      turnSequence: current.runs.findIndex(candidate => candidate.id === run.id) + 1
+      turnSequence: current.runs.findIndex(candidate => candidate.id === run.id) + 1,
+      ...(run.outputContract ? { outputContract: run.outputContract } : {})
     };
   }
 
@@ -602,6 +616,7 @@ export class ServerSessionRepository implements SessionStore {
     readonly outcome: ServerRunTerminalOutcome;
     readonly runId: string;
     readonly sessionId: string;
+    readonly structuredOutput?: RuntimeStructuredOutputResult;
   }): Promise<PersistedServerEvent> {
     return this._exclusive(async () => {
       const current = this._requiredRun(input.sessionId, input.runId);
@@ -635,17 +650,40 @@ export class ServerSessionRepository implements SessionStore {
           mutations: [{
             type: "transitionRun",
             runId: input.runId,
-            to: input.outcome as RuntimeRunState
+            to: input.outcome as RuntimeRunState,
+            ...(input.structuredOutput
+              ? { structuredOutput: input.structuredOutput }
+              : {})
           }]
         });
       } else if (runtimeRun.state !== input.outcome) {
         throw new Error("Runtime Run terminal does not match Server terminal");
       }
+      const authoritativeRun = runtime.snapshot.runs.find(
+        run => run.id === input.runId
+      );
+      if (!authoritativeRun) {
+        throw new Error("Runtime Run disappeared after terminal commit");
+      }
+      if (
+        input.structuredOutput
+        && !_sameStructuredOutput(
+          input.structuredOutput,
+          authoritativeRun.structuredOutput
+        )
+      ) {
+        throw new Error(
+          "Server structured output does not match Runtime Run terminal"
+        );
+      }
       const events = current.events[input.runId] ?? [];
       const data: ServerControlEvent = {
         type: "runTerminal",
         outcome: input.outcome,
-        ...(input.code ? { code: input.code } : {})
+        ...(input.code ? { code: input.code } : {}),
+        ...(authoritativeRun.structuredOutput
+          ? { structuredOutput: authoritativeRun.structuredOutput }
+          : {})
       };
       const terminal: PersistedServerEvent = _snapshot({
         event: "control" as const,
@@ -766,6 +804,9 @@ export class ServerSessionRepository implements SessionStore {
             outcome,
             ...(outcome === "outcomeUnknown"
               ? { code: "process_interrupted" }
+              : {}),
+            ...(runtimeRun.structuredOutput
+              ? { structuredOutput: runtimeRun.structuredOutput }
               : {})
           },
           sequence: runEvents.length + 1
@@ -1062,6 +1103,12 @@ function _validRunRecord(value: unknown): value is ServerRunRecord {
     && value.idempotencyKey.length > 0
     && _isSha256(value.inputHash)
     && (
+      value.outputContract === undefined
+      || (typeof value.outputContract === "string"
+        && value.outputContract.length > 0
+        && value.outputContract.length <= 128)
+    )
+    && (
       value.terminal === null
       || value.terminal === "cancelled"
       || value.terminal === "completed"
@@ -1156,6 +1203,7 @@ function _validPersistedPiEvent(value: unknown): boolean {
 
 function _validPersistedTerminal(value: unknown): value is {
   readonly outcome: ServerRunTerminalOutcome;
+  readonly structuredOutput?: RuntimeStructuredOutputResult;
   readonly type: "runTerminal";
 } {
   return _isRecord(value)
@@ -1166,7 +1214,89 @@ function _validPersistedTerminal(value: unknown): value is {
       || value.outcome === "failed"
       || value.outcome === "outcomeUnknown"
     )
-    && (value.code === undefined || typeof value.code === "string");
+    && (value.code === undefined || typeof value.code === "string")
+    && (
+      value.structuredOutput === undefined
+      || _validStructuredOutput(value.structuredOutput)
+    );
+}
+
+function _assertTerminalAuthority(envelope: ServerSessionEnvelope): void {
+  for (const run of envelope.runs) {
+    if (run.terminal === null) { continue; }
+    const terminal = envelope.events[run.id]?.at(-1);
+    const runtimeRun = envelope.runtime?.snapshot.runs.find(
+      candidate => candidate.id === run.id
+    );
+    if (
+      terminal?.event !== "control"
+      || !_validPersistedTerminal(terminal.data)
+      || runtimeRun?.state !== terminal.data.outcome
+      || !_sameStructuredOutput(
+        terminal.data.structuredOutput,
+        runtimeRun.structuredOutput
+      )
+    ) {
+      throw new Error(
+        `Server Run ${run.id} terminal does not match Runtime authority`
+      );
+    }
+  }
+}
+
+function _sameStructuredOutput(
+  left: RuntimeStructuredOutputResult | undefined,
+  right: RuntimeStructuredOutputResult | undefined
+): boolean {
+  return left === undefined || right === undefined
+    ? left === right
+    : left.contract === right.contract
+      && left.schemaFingerprint === right.schemaFingerprint
+      && _canonicalJson(left.value) === _canonicalJson(right.value);
+}
+
+function _validStructuredOutput(
+  value: unknown
+): value is RuntimeStructuredOutputResult {
+  return _isRecord(value)
+    && typeof value.contract === "string"
+    && value.contract.length > 0
+    && typeof value.schemaFingerprint === "string"
+    && /^[0-9a-f]{64}$/.test(value.schemaFingerprint)
+    && _isJsonValue(value.value, new WeakSet());
+}
+
+function _isJsonValue(value: unknown, ancestors: WeakSet<object>): boolean {
+  if (value === null || typeof value === "string" || typeof value === "boolean") {
+    return true;
+  }
+  if (typeof value === "number") { return Number.isFinite(value); }
+  if (typeof value !== "object" || ancestors.has(value)) { return false; }
+  const prototype = Object.getPrototypeOf(value) as object | null;
+  if (!Array.isArray(value) && prototype !== Object.prototype && prototype !== null) {
+    return false;
+  }
+  ancestors.add(value);
+  const valid = (Array.isArray(value)
+    ? value
+    : Object.values(value as Record<string, unknown>))
+    .every(child => _isJsonValue(child, ancestors));
+  ancestors.delete(value);
+  return valid;
+}
+
+function _canonicalJson(value: unknown): string {
+  if (value === null || typeof value === "boolean" || typeof value === "string") {
+    return JSON.stringify(value);
+  }
+  if (typeof value === "number") { return JSON.stringify(value); }
+  if (Array.isArray(value)) {
+    return `[${value.map(_canonicalJson).join(",")}]`;
+  }
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record).sort().map(key =>
+    `${JSON.stringify(key)}:${_canonicalJson(record[key])}`)
+    .join(",")}}`;
 }
 
 function _serverTerminalOutcome(
@@ -1281,6 +1411,12 @@ function _samePrincipal(
 
 function _sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
+}
+
+function _runInputHash(text: string, outputContract?: string): string {
+  return _sha256(outputContract
+    ? JSON.stringify({ text, outputContract })
+    : text);
 }
 
 function _equalHash(left: string, right: string): boolean {

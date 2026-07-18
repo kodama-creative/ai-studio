@@ -9,6 +9,11 @@ import { assertValidAgentProject } from "./assert-valid-agent-project";
 import { createImmutableAgentProjectSnapshot } from "./create-immutable-agent-project-snapshot";
 import { prepareProjectTool } from "./prepare-project-tool";
 import { resolveAgentRuntimeModel } from "./resolve-model";
+import { STRUCTURED_OUTPUT_TOOL_NAME } from "../../shared/structured-output";
+import {
+  assertMaxStructuredOutputBytes,
+  DEFAULT_MAX_STRUCTURED_OUTPUT_BYTES
+} from "../outputs/structured-output-size";
 import {
   AgentSession,
   type AgentSessionPersistence
@@ -28,6 +33,7 @@ import type { RuntimeExecutionMode } from "../../shared/runtime-execution-mode";
 import type { SessionStore, StoredRuntimeSession } from "../harness/session-store";
 
 export interface AgentRuntimeOptions {
+  maxStructuredOutputBytes?: number;
   models: Models;
   project: AgentProjectSnapshot;
 }
@@ -49,14 +55,19 @@ export interface CreateAgentSessionOptions {
   sessionStore?: SessionStore;
   onSessionCommitted?: (session: StoredRuntimeSession) => Promise<void> | void;
   streamFn?: StreamFn;
+  outputContract?: string;
 }
 
 export class AgentRuntime {
   private readonly _models: Models;
   private readonly _project: AgentProjectSnapshot;
+  private readonly _maxStructuredOutputBytes: number;
 
   constructor(options: AgentRuntimeOptions) {
     this._models = options.models;
+    this._maxStructuredOutputBytes = assertMaxStructuredOutputBytes(
+      options.maxStructuredOutputBytes ?? DEFAULT_MAX_STRUCTURED_OUTPUT_BYTES
+    );
     this._project = createImmutableAgentProjectSnapshot(
       assertValidAgentProject(options.project)
     );
@@ -71,6 +82,10 @@ export class AgentRuntime {
 
   get models(): Models {
     return this._models;
+  }
+
+  get maxStructuredOutputBytes(): number {
+    return this._maxStructuredOutputBytes;
   }
 
   get defaultModel(): {
@@ -108,6 +123,26 @@ export class AgentRuntime {
     if (options.id && options.id !== options.context.id) {
       throw new Error("Agent Session id must match the verified Session context");
     }
+    const allTools = [
+      ...this._project.tools.map(tool => prepareProjectTool(tool)),
+      ...(options.extraTools ?? [])
+    ];
+    if (allTools.some(tool =>
+      tool.definition.name === STRUCTURED_OUTPUT_TOOL_NAME)) {
+      throw new Error(
+        `Runtime tool name "${STRUCTURED_OUTPUT_TOOL_NAME}" is reserved for structured output`
+      );
+    }
+    const outputDefinition = options.outputContract
+      ? this._project.outputDefinitions?.find(
+        output => output.name === options.outputContract
+      )
+      : undefined;
+    if (options.outputContract && !outputDefinition) {
+      throw new TypeError(
+        `Unknown structured output contract: ${options.outputContract}`
+      );
+    }
     const session = new AgentSession({
       id: sessionId,
       models: this._models,
@@ -116,10 +151,7 @@ export class AgentRuntime {
       modelSelector: selector,
       reasoning,
       initialMessages: options.initialMessages ?? [],
-      tools: [
-        ...this._project.tools.map(tool => prepareProjectTool(tool)),
-        ...(options.extraTools ?? [])
-      ],
+      tools: allTools,
       activeToolNames: options.activeToolNames,
       capabilityPolicy: options.capabilityPolicy,
       capabilityRequest: {
@@ -139,7 +171,9 @@ export class AgentRuntime {
       sessionStore: options.sessionStore,
       onSessionCommitted: options.onSessionCommitted,
       persistence: options.persistence,
-      streamFn: options.streamFn
+      streamFn: options.streamFn,
+      outputDefinition,
+      maxStructuredOutputBytes: this._maxStructuredOutputBytes
     });
     await session.validateState();
     await session.prepareTurn();

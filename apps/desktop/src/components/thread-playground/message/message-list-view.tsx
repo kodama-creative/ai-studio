@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils";
 import { MessageListItem } from "./message-list-item";
 import { Button } from "../../ui/button";
 import { ScrollArea } from "../../ui/scroll-area";
+import { StructuredOutputCard } from "../output/structured-output-card";
 import { useThreadStore, useThreadStoreActions } from "../stores";
 
 export function MessageListView({
@@ -105,6 +106,7 @@ export function MessageListView({
         {!isSnapshotView && (
           <StreamingMessageListItem streaming={status === "running"} />
         )}
+        {!isSnapshotView ? <LatestStructuredOutputFailure /> : null}
         <Button
           // No top margin: the preceding message / streaming item (or, in the
           // empty state, the list's own top padding) already provides the gap.
@@ -129,12 +131,31 @@ export function MessageListView({
   );
 }
 
+function LatestStructuredOutputFailure() {
+  const failure = useThreadStore(state => {
+    if (state.status === "running") { return undefined; }
+    const latestRun = state.runHistory.at(-1);
+    const latestRunMessageId = latestRun?.thread.context?.messages?.at(-1)?.id;
+    const latestThreadMessageId = state.thread.context?.messages?.at(-1)?.id;
+    return latestRunMessageId
+      && latestRunMessageId === latestThreadMessageId
+      && latestRun?.thread.outputContract === state.thread.outputContract
+      ? latestRun?.structuredOutputFailure
+      : undefined;
+  });
+  return failure
+    ? <StructuredOutputCard className="mb-3.5" failure={failure} />
+    : null;
+}
+
 function StaticMessageList({
   context,
+  hideStructuredOutputs,
   messages,
   readonly
 }: {
   readonly context?: ThreadContext;
+  readonly hideStructuredOutputs?: boolean;
   readonly messages: Message[];
   readonly readonly: boolean;
 }) {
@@ -144,6 +165,7 @@ function StaticMessageList({
         <MessageListItem
           className="mb-3.5"
           context={context}
+          hideStructuredOutputs={hideStructuredOutputs}
           key={message.id}
           message={message}
           readonly={readonly}
@@ -156,16 +178,23 @@ function StaticMessageList({
 export const SnapshotMessageListView = memo(({
   className,
   context,
+  hideStructuredOutputs,
   messages
 }: {
   readonly className?: string;
   readonly context?: ThreadContext;
+  readonly hideStructuredOutputs?: boolean;
   readonly messages: Message[];
 }) => {
   return (
     <ScrollArea className={cn("size-full", className)} type="auto">
       <div className="flex flex-col p-3 pt-0.5">
-        <StaticMessageList context={context} messages={messages} readonly />
+        <StaticMessageList
+          context={context}
+          hideStructuredOutputs={hideStructuredOutputs}
+          messages={messages}
+          readonly
+        />
       </div>
     </ScrollArea>
   );

@@ -6,6 +6,7 @@ import { format } from "timeago.js";
 import { cn } from "@/lib/utils";
 import { SnapshotMessageListView } from "./message/message-list-view";
 import { TokenUsageSummary } from "./message/token-usage-summary";
+import { StructuredOutputCard } from "./output/structured-output-card";
 import {
   runMessageCountLabel,
   runModelLabel,
@@ -78,6 +79,15 @@ const _RunTraceView = function RunTraceView({
           )
           : null}
         {usage ? <TokenUsageSummary className="mt-2" usage={usage} /> : null}
+        {run.structuredOutput || run.structuredOutputFailure
+          ? (
+            <StructuredOutputCard
+              className="mt-2"
+              failure={run.structuredOutputFailure}
+              result={run.structuredOutput}
+            />
+          )
+          : null}
       </div>
       <details className="group shrink-0 border-b px-3 py-2">
         <summary className="text-muted-foreground hover:text-foreground cursor-pointer text-[0.625rem] font-medium">
@@ -95,6 +105,9 @@ const _RunTraceView = function RunTraceView({
       <SnapshotMessageListView
         className="min-h-0 flex-1"
         context={run.thread.context}
+        hideStructuredOutputs={Boolean(
+          run.structuredOutput || run.structuredOutputFailure
+        )}
         messages={messages}
       />
     </div>

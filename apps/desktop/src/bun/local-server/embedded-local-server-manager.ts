@@ -42,7 +42,8 @@ export interface EmbeddedLocalServerRunCallbacks {
   readonly onStatus: (status: EmbeddedLocalServerStatus) => void;
   readonly onTerminal: (
     lineage: ThreadServerRunLineage,
-    outcome: ServerRunTerminalOutcome
+    outcome: ServerRunTerminalOutcome,
+    code?: string
   ) => void;
 }
 
@@ -120,6 +121,7 @@ export class EmbeddedLocalServerManager {
 
   async run(
     input: {
+      readonly outputContract?: string;
       readonly projectId: string;
       readonly signal: AbortSignal;
       readonly text: string;
@@ -210,7 +212,10 @@ export class EmbeddedLocalServerManager {
     const run = await managed.client.createRun({
       continuationToken: credential.continuationToken,
       sessionId: credential.sessionId,
-      text: input.text
+      text: input.text,
+      ...(input.outputContract
+        ? { outputContract: input.outputContract }
+        : {})
     });
     const lineage: ThreadServerRunLineage = {
       profile: "localServer",
@@ -255,7 +260,7 @@ export class EmbeddedLocalServerManager {
           callbacks.onStatus({ state: "reconnecting" });
         } else {
           terminalOutcome = event.data.outcome;
-          callbacks.onTerminal(lineage, terminalOutcome);
+          callbacks.onTerminal(lineage, terminalOutcome, event.data.code);
         }
       }
     } finally {

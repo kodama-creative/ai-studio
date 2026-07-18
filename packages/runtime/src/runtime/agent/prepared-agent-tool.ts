@@ -23,6 +23,7 @@ export type PreparedAgentTool =
       ...args: Parameters<AgentTool["execute"]>
     ) => Promise<PreparedAgentToolOutcome>;
     readonly kind: "executable";
+    readonly manualAutomatic?: boolean;
     readonly provenance?: PreparedAgentToolProvenance;
   }
   | {

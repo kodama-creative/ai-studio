@@ -25,6 +25,7 @@ export type ToolCallInput = Static<typeof ToolCallInput>;
  */
 export const ToolCallOutput = Type.Object({
   content: Type.Array(TextContent),
+  details: Type.Optional(Type.Unknown()),
 
   /**
    * Whether the tool runtime reported a failed call. This is forwarded back to

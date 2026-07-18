@@ -42,6 +42,10 @@ import { MessageListView } from "./message/message-list-view";
 import { ThreadPlaygroundSkeleton } from "./misc/skeleton";
 import { TitleEditor, type TitleValidator } from "./misc/title-editor";
 import { ModelConfigEditor } from "./model/model-config-editor";
+import {
+  OutputContractSelector,
+  type OutputContractSummary
+} from "./output/output-contract-selector";
 import { SystemPromptEditor } from "./prompt/system-prompt-editor";
 import { RunHistoryListView } from "./run-history-list-view";
 import {
@@ -123,6 +127,12 @@ export interface ThreadPlaygroundProps {
 
   /** Project-authored actions are source-owned and cannot be added/removed. */
   readonly toolsReadonly?: boolean;
+
+  /** Source-compiled output contracts; present only for Agent Project Threads. */
+  readonly outputDefinitions?: readonly OutputContractSummary[];
+
+  /** Lock only the per-Thread output selection. */
+  readonly outputReadonly?: boolean;
 
   /** Navigate from a source-owned action chip to its authored file. */
   readonly onOpenProjectTool?: (tool: ProjectTool) => void;
@@ -227,6 +237,8 @@ const _ThreadPlayground = function ThreadPlayground({
   loadPromptSkillsRef.current = loadPromptSkills;
   const prepareRunSnapshotRef = useRef(prepareRunSnapshot);
   prepareRunSnapshotRef.current = prepareRunSnapshot;
+  const outputDefinitionsRef = useRef(props.outputDefinitions);
+  outputDefinitionsRef.current = props.outputDefinitions;
   const [store] = useState(() =>
     createThreadStore(initialValue, {
       transport,
@@ -248,6 +260,14 @@ const _ThreadPlayground = function ThreadPlayground({
       transportOwnsRuntimeRun,
       resolveTransportRuntimeCheckpoint,
       resolveCommittedRuntimeSession,
+      resolveOutputContractSnapshot: name => {
+        const output = outputDefinitionsRef.current?.find(
+          candidate => candidate.name === name
+        );
+        return output
+          ? { name: output.name, schemaFingerprint: output.schemaFingerprint }
+          : undefined;
+      },
       renderPromptVariables,
       persistSettledThread,
       prepareRunSnapshot: thread =>
@@ -315,6 +335,8 @@ function ThreadPlaygroundContent({
   active = false,
   preserveSavedModel = false,
   toolsReadonly = false,
+  outputDefinitions,
+  outputReadonly = configurationReadonly,
   onOpenProjectTool
 }: Omit<
   ThreadPlaygroundProps,
@@ -602,6 +624,19 @@ function ThreadPlaygroundContent({
                       />
                     </div>
                   </div>
+                  {outputDefinitions
+                    ? (
+                      <div className="flex w-full border-b py-2">
+                        <div className="text-muted-foreground w-20 shrink-0 text-sm">
+                          Output
+                        </div>
+                        <OutputContractSelector
+                          disabled={readonly || outputReadonly}
+                          outputs={outputDefinitions}
+                        />
+                      </div>
+                    )
+                    : null}
                   <div className="flex w-full border-b py-2">
                     <div className="text-muted-foreground w-20 shrink-0 text-sm">
                       Variables

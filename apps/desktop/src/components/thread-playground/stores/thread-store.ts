@@ -14,6 +14,8 @@ import {
   type Thread,
   type ThreadContext,
   type ThreadRuntimeCheckpoint,
+  type ThreadStructuredOutput,
+  type ThreadStructuredOutputFailure,
   type ThreadVariable,
   type ThreadVariables,
   type ThreadVariableVariants,
@@ -62,6 +64,7 @@ import type {
 } from "@llm-space/core";
 import type { RuntimeExecutionMode } from "@llm-space/runtime";
 
+import { structuredOutputFromToolCall } from "@/client/structured-output-from-tool-call";
 import { createFrameThrottle } from "@/lib/frame-throttle";
 import { resolveRuntimeExecutionMode } from "./run-mode";
 import {
@@ -140,6 +143,7 @@ export interface ThreadState {
   syncTitle(title: string): void;
   updateModelParams(params: Partial<ModelConfigParams>): void;
   updateModel(model: Pick<ModelConfig, "id" | "provider">): void;
+  updateOutputContract(outputContract: string | undefined): void;
   updateMessageTextContent(id: string, text: string): void;
   addMessageImageContent(id: string, mimeType: string, data: string): void;
   removeMessageImageContent(id: string, contentIndex: number): void;
@@ -215,6 +219,9 @@ export function createThreadStore(
 
     /** Latest Session snapshot durably committed by the Bun project Runtime. */
     resolveCommittedRuntimeSession?: () => Thread["runtimeSession"];
+    resolveOutputContractSnapshot?: (
+      name: string | undefined
+    ) => ThreadRuntimeCheckpoint["outputContract"];
     transport: AgentTransport;
   }
 ): ThreadStore {
@@ -615,6 +622,9 @@ export function createThreadStore(
             model: { ...current, provider: model.provider, id: model.id }
           });
         },
+        updateOutputContract(outputContract: string | undefined) {
+          patchThread({ outputContract });
+        },
         updateMessageTextContent(id: string, text: string) {
           const context = get().thread.context ?? {};
           const messages = context.messages ?? [];
@@ -899,7 +909,10 @@ export function createThreadStore(
                 thread: executionThread,
                 context: preparedContext,
                 executionMode,
-                model
+                model,
+                outputContractSnapshot: options.resolveOutputContractSnapshot?.(
+                  executionThread.outputContract
+                )
               });
               runId = begun.runId;
               await persistRuntimeSession(begun.session);
@@ -957,6 +970,9 @@ export function createThreadStore(
           };
 
           let streamingMessage: AssistantMessage | null = null;
+          let structuredOutputFailureCode:
+            | ThreadStructuredOutputFailure["code"]
+            | undefined;
           let content: ReducedMessageContent[] = [];
           let sawEvent = false;
           const { schedule: schedulePreview, cancel: cancelPreview } =
@@ -983,7 +999,13 @@ export function createThreadStore(
             try {
               promptSnapshot = preparedContext.snapshot;
               const response = streamThread(
-                { context: preparedContext, model },
+                {
+                  context: preparedContext,
+                  model,
+                  ...(executionThread.outputContract
+                    ? { outputContract: executionThread.outputContract }
+                    : {})
+                },
                 {
                   signal: abortController.signal,
                   transport: options.transport
@@ -1037,6 +1059,16 @@ export function createThreadStore(
                 return "cancelled";
               }
               console.error(error);
+              if (
+                error instanceof Error
+                && error.name === "RuntimeStructuredOutputError"
+                && "code" in error
+                && (error.code === "structured_output_invalid"
+                  || error.code === "structured_output_missing"
+                  || error.code === "structured_output_too_large")
+              ) {
+                structuredOutputFailureCode = error.code;
+              }
               if (error instanceof Error) {
                 toast.error("Error", { description: error.message });
               }
@@ -1062,6 +1094,21 @@ export function createThreadStore(
             );
             const threadWithSnapshot =
               options.prepareRunSnapshot?.(finalThread) ?? finalThread;
+            const outputSnapshot = options.resolveOutputContractSnapshot?.(
+              threadWithSnapshot.outputContract
+            );
+            const structuredOutput = _structuredOutputFromThread(
+              threadWithSnapshot,
+              runStartMessageCount
+            );
+            const structuredOutputFailure =
+              structuredOutputFailureCode && outputSnapshot
+                ? {
+                  contract: outputSnapshot.name,
+                  schemaFingerprint: outputSnapshot.schemaFingerprint,
+                  code: structuredOutputFailureCode
+                }
+                : undefined;
             let settledContext = threadWithSnapshot.context ?? {};
             try {
               if (options.renderPromptVariables !== false) {
@@ -1094,7 +1141,14 @@ export function createThreadStore(
                     get().runHistory,
                     withoutRuntimeSession,
                     Date.now(),
-                    { runtime: checkpoint, usage: runUsage }
+                    {
+                      runtime: checkpoint,
+                      usage: runUsage,
+                      ...(structuredOutput ? { structuredOutput } : {}),
+                      ...(structuredOutputFailure
+                        ? { structuredOutputFailure }
+                        : {})
+                    }
                   )
                   : get().runHistory;
                 const evaluations = normalizeEvaluations(
@@ -1136,7 +1190,11 @@ export function createThreadStore(
                 model,
                 runId,
                 sawEvent,
-                outcome
+                outcome,
+                outputContractSnapshot: options.resolveOutputContractSnapshot?.(
+                  threadWithSnapshot.outputContract
+                ),
+                structuredOutput
               });
               const threadWithRuntime = {
                 ...threadWithSnapshot,
@@ -1152,7 +1210,14 @@ export function createThreadStore(
                   get().runHistory,
                   threadWithRuntime,
                   Date.now(),
-                  { runtime: settled.checkpoint, usage: runUsage }
+                  {
+                    runtime: settled.checkpoint,
+                    usage: runUsage,
+                    ...(structuredOutput ? { structuredOutput } : {}),
+                    ...(structuredOutputFailure
+                      ? { structuredOutputFailure }
+                      : {})
+                  }
                 )
                 : get().runHistory;
               const evaluations = normalizeEvaluations(
@@ -1468,6 +1533,7 @@ const selectActions = (s: ThreadState) => ({
   syncTitle: s.syncTitle,
   updateModelParams: s.updateModelParams,
   updateModel: s.updateModel,
+  updateOutputContract: s.updateOutputContract,
   updateMessageTextContent: s.updateMessageTextContent,
   addMessageImageContent: s.addMessageImageContent,
   removeMessageImageContent: s.removeMessageImageContent,
@@ -1482,4 +1548,19 @@ const selectActions = (s: ThreadState) => ({
 });
 export function useThreadStoreActions() {
   return useStore(useThreadStoreApi(), useShallow(selectActions));
+}
+
+function _structuredOutputFromThread(
+  thread: Thread,
+  fromMessageIndex: number
+): ThreadStructuredOutput | undefined {
+  const messages = (thread.context?.messages ?? []).slice(fromMessageIndex);
+  for (const message of [...messages].reverse()) {
+    if (message.role !== "assistant") { continue; }
+    for (const toolCall of [...(message.toolCalls ?? [])].reverse()) {
+      const result = structuredOutputFromToolCall(toolCall);
+      if (result) { return result; }
+    }
+  }
+  return undefined;
 }
