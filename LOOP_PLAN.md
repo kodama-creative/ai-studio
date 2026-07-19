@@ -135,13 +135,13 @@ Runtime architecture follows [ADR 0001](./docs/adr/0001-runtime-harness-over-pi-
 
 ## Pi Execution, Safety, And Durability
 
-- [ ] **16 — ExecutionEnv-backed built-in tools**
+- [x] **16 — ExecutionEnv-backed built-in tools**
   - Depends on: 04.
   - Run: `$kaizen-loop Add authored read, write, and bash helpers that execute only through Pi ExecutionEnv.`
   - Done when: the same tool contracts pass against Node and isolated/fake ExecutionEnv implementations with correct path, symlink, abort, timeout, streaming, and cleanup behavior.
   - Boundary: no direct Desktop/Server host filesystem access, implicit default tools, or policy bypass.
   - Metric: ExecutionEnv portability of built-in tools.
-  - Blocked evidence (2026-07-19): Pi already supplies the required Host-neutral filesystem/shell contract and Node reference adapter, while current LLM Space authored tools have no ExecutionEnv seam and Desktop built-ins are host-bound. Implementation would introduce a new permission surface: either only declaration-only framework read/write/bash helpers receive Host-supplied authority, or every arbitrary `defineTool()` receives the full environment. The first `$grill-me` owner decision is pending; item 16 remains unchecked.
+  - Completed evidence (2026-07-19): ADR 0009 restricts ExecutionEnv authority to canonical zero-configuration static read/write/bash helpers. Compiler/artifact/bundle and immutable Turn snapshots retain helper identity without environment data; Runtime binds only a Host-supplied Session environment after effective capability filtering and Desktop/Server fail before Pi with `executionEnvUnavailable` without fallback. One shared Node/fake suite proves paths, symlinks, UTF-8 writes, pagination, abort/cancellation, timeout, streamed updates, truncation/full-output paths, nonzero exits, no retry, and zero Runtime cleanup; 52 focused checks and all non-packaging gates pass, with only the unchanged full-suite Server teardown timeout debt.
 
 - [ ] **17 — Sandbox, workspace, and attachment delivery V1**
   - Depends on: 16.

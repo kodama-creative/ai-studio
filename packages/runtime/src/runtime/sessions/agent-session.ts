@@ -2,6 +2,7 @@ import {
   Agent,
   type AgentMessage,
   type BeforeToolCallContext,
+  type ExecutionEnv,
   type StreamFn,
   type ThinkingLevel
 } from "@earendil-works/pi-agent-core";
@@ -23,6 +24,7 @@ import {
   type AgentCapabilityRequest,
   AgentSessionCapabilities
 } from "../capabilities/agent-session-capabilities";
+import { ExecutionEnvUnavailableError } from "../execution-env/execution-env-unavailable-error";
 import { AgentSessionInstructions } from "../instructions/agent-session-instructions";
 import {
   createStructuredOutputTool
@@ -75,6 +77,7 @@ export interface AgentSessionOptions {
   streamFn?: StreamFn;
   outputDefinition?: CompiledAgentOutputDefinition;
   maxStructuredOutputBytes?: number;
+  executionEnv?: ExecutionEnv;
 }
 
 export class AgentSession {
@@ -101,6 +104,7 @@ export class AgentSession {
   private _executionMode: RuntimeExecutionMode;
   private readonly _outputTool?: PreparedAgentTool;
   private readonly _outputValidator?: ReturnType<typeof Compile>;
+  private readonly _executionEnv?: ExecutionEnv;
   private _structuredOutput: RuntimeStructuredOutputResult | null = null;
 
   constructor(options: AgentSessionOptions) {
@@ -111,6 +115,7 @@ export class AgentSession {
     this._modelSelector = options.modelSelector;
     this._reasoning = options.reasoning;
     this._executionMode = options.executionMode;
+    this._executionEnv = options.executionEnv;
     this._outputTool = options.outputDefinition
       ? createStructuredOutputTool({
         definition: options.outputDefinition,
@@ -381,6 +386,12 @@ export class AgentSession {
       this._instructions.prepare(stateScopeEnabled, stored),
       this._capabilities.prepare(stateScopeEnabled, stored)
     ]);
+    if (
+      !this._executionEnv
+      && capabilities.tools.some(tool => tool.executionEnvToolKind)
+    ) {
+      throw new ExecutionEnvUnavailableError();
+    }
     let committed = stored;
     const mutations = [];
     if (!stored?.snapshot.instructionSnapshots?.[

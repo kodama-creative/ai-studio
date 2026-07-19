@@ -7,9 +7,11 @@ import { isDynamicInstructionsDefinition } from "../../internal/authored-instruc
 import { getActiveAgentSessionContextRuntime } from "../../internal/authored-state-definitions";
 import { qualifyProjectMcpToolName } from "../../internal/project-mcp-tool-name";
 import { isMcpClientConnectionDefinition } from "../../public/definitions/connections/mcp";
+import { isExecutionEnvToolDefinition } from "../../public/definitions/execution-env-tool";
 import { isOutputDefinition } from "../../public/definitions/output";
 import { isStateDefinition } from "../../public/definitions/state";
 import { isToolDefinition } from "../../public/definitions/tool";
+import { createCompiledExecutionEnvTool } from "../../runtime/agent/create-compiled-execution-env-tool";
 import { createCompiledProjectTool } from "../../runtime/agent/create-compiled-project-tool";
 import { createImmutableAgentProjectSnapshot } from "../../runtime/agent/create-immutable-agent-project-snapshot";
 import { assertRuntimeSessionStateValues } from "../../runtime/harness/in-memory-session-store";
@@ -188,6 +190,18 @@ function _compileTools(
       throw new TypeError(`Invalid or duplicate bundled tool name: ${input.name}`);
     }
     names.add(input.name);
+    if (isExecutionEnvToolDefinition(input.definition)) {
+      if (input.name !== input.definition.kind) {
+        throw new TypeError(
+          `Bundled ExecutionEnv tool ${input.name} must match ${input.definition.kind}`
+        );
+      }
+      tools.push(createCompiledExecutionEnvTool(
+        input.definition.kind,
+        input.sourcePath
+      ));
+      continue;
+    }
     if (!isToolDefinition(input.definition)) {
       throw new TypeError(`Bundled tool is invalid: ${input.name}`);
     }

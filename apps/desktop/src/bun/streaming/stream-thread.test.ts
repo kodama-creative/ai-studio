@@ -15,7 +15,10 @@ import {
   type RuntimeRunConfigurationSnapshot,
   type StoredRuntimeSession
 } from "@llm-space/runtime/harness";
-import { AgentHostPolicyChangedError } from "@llm-space/runtime/node";
+import {
+  AgentHostPolicyChangedError,
+  ExecutionEnvUnavailableError
+} from "@llm-space/runtime/node";
 import { afterEach, describe, expect, test } from "bun:test";
 
 import type { AgentEvent } from "@earendil-works/pi-agent-core";
@@ -82,6 +85,45 @@ describe("StreamThreadController Agent Project runtime", () => {
       type: "error",
       code: "hostPolicyChanged",
       message: "The Host capability policy changed after this Turn was recorded"
+    }]);
+  });
+
+  test("reports a missing ExecutionEnv without a Desktop host fallback", async () => {
+    const manager = {
+      requiresRuntimeSessionStore: async () => Promise.resolve(false),
+      createRuntimeSession: async () => {
+        throw new ExecutionEnvUnavailableError();
+      }
+    } as unknown as ExternalAgentProjectManager;
+    const controller = new StreamThreadController(
+      _modelManager(createModels()),
+      { capture: () => undefined } as never,
+      manager
+    );
+    const responses: unknown[] = [];
+
+    await controller.run({
+      streamId: "stream-execution-env-unavailable",
+      runtime: {
+        type: "agentProject",
+        projectId: "project-one",
+        threadId: "thread-one",
+        executionMode: "react",
+        modelSource: "agent"
+      },
+      request: {
+        model: { provider: "fake", id: "fake-model" },
+        context: { messages: [], tools: [], sourceTools: [] }
+      }
+    }, message => {
+      responses.push(message);
+    });
+
+    expect(responses).toEqual([{
+      streamId: "stream-execution-env-unavailable",
+      type: "error",
+      code: "executionEnvUnavailable",
+      message: "The selected tools require a Host-provided ExecutionEnv"
     }]);
   });
 

@@ -1,5 +1,7 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 
+import type { ExecutionEnvToolKind } from "../../public/definitions/execution-env-tool";
+
 type PreparedAgentToolDefinition = Omit<AgentTool, "execute">;
 
 type PreparedAgentToolOutcome =
@@ -22,12 +24,14 @@ export type PreparedAgentTool =
     readonly execute: (
       ...args: Parameters<AgentTool["execute"]>
     ) => Promise<PreparedAgentToolOutcome>;
+    readonly executionEnvToolKind?: ExecutionEnvToolKind;
     readonly kind: "executable";
     readonly manualAutomatic?: boolean;
     readonly provenance?: PreparedAgentToolProvenance;
   }
   | {
     readonly definition: PreparedAgentToolDefinition;
+    readonly executionEnvToolKind?: ExecutionEnvToolKind;
     readonly kind: "deferred";
     readonly provenance?: PreparedAgentToolProvenance;
   };

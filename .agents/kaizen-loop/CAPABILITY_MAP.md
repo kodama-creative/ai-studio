@@ -1,7 +1,7 @@
 # LLM Space Capability Map
 
-- Last updated: 2026-07-18
-- Map status: refreshed through roadmap item 16 discovery. Items 12 through 15 are shipped under ADRs 0006-0008 where applicable; item 16 is confirmed decision-blocked before implementation by its unresolved ExecutionEnv authoring and permission surface.
+- Last updated: 2026-07-19
+- Map status: refreshed through shipped roadmap item 16. Items 12 through 16 are shipped under ADRs 0006-0009 where applicable; item 17 remains the Sandbox provider, delivery, retention, and cleanup boundary.
 - Evidence rule: entries marked `confirmed` cite current rendered-product or current-code evidence. Entries marked `stale` rely on previous logs or code paths not fully re-inspected in this loop. Entries marked `unknown` need a future product-surface check before they can drive a recommendation.
 
 ## First-Run Model Setup
@@ -332,18 +332,18 @@
 
 ## Portable Execution Tools
 
-- Status: not shipped; roadmap item 16 decision-blocked
+- Status: shipped V1
 - Freshness: confirmed
 - Last checked: 2026-07-19
 - Evidence:
   - The pinned `@earendil-works/pi-agent-core` 0.80.3 exposes a Host-neutral `ExecutionEnv` with fallible filesystem and shell operations, stable `FileError`/`ExecutionError` codes, addressed versus canonical paths, explicit symlink metadata, abort signals, shell timeout and stdout/stderr callbacks, temporary files, and best-effort cleanup. `NodeExecutionEnv` is a reference implementation, not a confinement boundary.
-  - Current Pi `main` retains that contract and tests Node behavior for files, directories, symlinks without implicit following, canonical resolution, pre-aborted file calls, timeout, process-tree abort, streaming callbacks, large-output capture, and cleanup.
-  - Pi coding-agent's current read/write/bash tools use injectable operation interfaces but still default to direct Node filesystem/process access and include coding-agent/TUI behavior. They are useful behavior evidence but cannot be imported as Runtime authority without violating the roadmap boundary.
-  - LLM Space `defineTool()` currently exposes only verified Session context, abort, call id, and tool name. Agent Project tools compile into callbacks without an ExecutionEnv dependency; Desktop built-ins in `apps/desktop/src/bun/tools/built-in/fs.ts` directly use Bun host filesystem/process APIs.
-  - ADR 0006 already requires promoted filesystem/bash built-ins to lower only to ExecutionEnv-backed tools and requires Sandbox. The owner has separately confirmed the environment itself is supplied by Sandbox, but item 16 has not decided whether full ExecutionEnv authority is limited to framework helpers or exposed to every authored `defineTool()` callback.
-- Boundary: no portable read/write/bash helper exists today. Any V1 must be explicitly authored, execute only against a Host-supplied Pi `ExecutionEnv`, fail before Pi when required authority is absent, and add no implicit tools or Desktop/Server host fallback.
+  - ADR 0009 and `packages/runtime/src/public/tools/define-{read,write,bash}-tool.ts` restrict authority to zero-configuration canonical static helpers; mismatched filenames and dynamic helper creation are compiler errors, while ordinary `defineTool()` retains its bounded context.
+  - Compiler, artifact, bundle, Runtime, and Session Store fixtures prove immutable helper kind/schema/requirement identity, effective-tool filtering before the missing-authority gate, restart rehydration with a newly supplied environment, and no persisted environment configuration or `/sandbox` path.
+  - One shared behavior suite passes against explicit `NodeExecutionEnv` and an isolated fake adapter for relative paths, parent creation, UTF-8 write bytes, pagination, symlink delegation, streamed stdout/stderr, nonzero exit, large-output truncation/full-output paths, file abort, shell cancellation/timeout, no retry, and Runtime-owned cleanup count zero.
+  - Desktop Direct and protected Server fixtures both propagate stable `executionEnvUnavailable` terminals before Pi without constructing a host fallback. Fifty-two focused checks, seven TypeScript configurations, lint, Runtime/Server bundles, renderer-only Vite, and 307/308 full tests pass; the sole failure is the unchanged Server teardown timeout debt.
+- Boundary: a project can explicitly author portable read/write/bash capability whose final effective Turn snapshot borrows exactly one Host-supplied Session-scoped Pi `ExecutionEnv`. Manual mode defers the helpers; automatic modes execute through Pi. Runtime neither translates paths nor owns environment lifecycle.
 - Explicit non-goals: sandbox/container provider, workspace or attachment delivery, implicit NodeExecutionEnv construction, direct Desktop/Server filesystem access, generic permission system, approval policy, or cleanup/retention policy owned by roadmap item 17.
-- Visible gaps: owner decision on the authoring/permission surface is required first; subsequent decisions must fix path/symlink behavior, output bounds and streaming shape, timeout bounds, and ExecutionEnv ownership/cleanup without pre-empting item 17.
+- Visible gaps: no production Sandbox provider supplies the environment yet; workspace seeds, attachments, retention and exactly-once cleanup remain item 17, approvals remain item 19, and promotion remains blocked on item 17 despite item 16 now being complete.
 
 ## Agent Project Activation
 

@@ -27,9 +27,11 @@ import {
 import { getActiveAgentSessionContextRuntime } from "../../internal/authored-state-definitions";
 import { qualifyProjectMcpToolName } from "../../internal/project-mcp-tool-name";
 import { isMcpClientConnectionDefinition } from "../../public/definitions/connections/mcp";
+import { isExecutionEnvToolDefinition } from "../../public/definitions/execution-env-tool";
 import { isOutputDefinition } from "../../public/definitions/output";
 import { isStateDefinition } from "../../public/definitions/state";
 import { isToolDefinition } from "../../public/definitions/tool";
+import { createCompiledExecutionEnvTool } from "../../runtime/agent/create-compiled-execution-env-tool";
 import { createCompiledProjectTool } from "../../runtime/agent/create-compiled-project-tool";
 import { createImmutableAgentProjectSnapshot } from "../../runtime/agent/create-immutable-agent-project-snapshot";
 import { assertRuntimeSessionStateValues } from "../../runtime/harness/in-memory-session-store";
@@ -460,11 +462,42 @@ async function _compileTools(
         });
         continue;
       }
+      const name = path.basename(
+        sourceRef.absolutePath,
+        path.extname(sourceRef.absolutePath)
+      );
+      if (isExecutionEnvToolDefinition(definition)) {
+        if (name !== definition.kind) {
+          diagnostics.push({
+            severity: "error",
+            code: "tool_export_invalid",
+            message: `${path.basename(sourceRef.absolutePath)} must be named ${definition.kind}.ts or ${definition.kind}.js`,
+            path: sourceRef.absolutePath
+          });
+          continue;
+        }
+        const previous = names.get(name);
+        if (previous) {
+          diagnostics.push({
+            severity: "error",
+            code: "tool_name_duplicate",
+            message: `Tool name "${name}" is also exported by ${path.basename(previous)}`,
+            path: sourceRef.absolutePath
+          });
+          continue;
+        }
+        names.set(name, sourceRef.absolutePath);
+        tools.push(createCompiledExecutionEnvTool(
+          definition.kind,
+          sourceRef.logicalPath
+        ));
+        continue;
+      }
       if (!isToolDefinition(definition)) {
         diagnostics.push({
           severity: "error",
           code: "tool_export_invalid",
-          message: `${path.basename(sourceRef.absolutePath)} must default-export defineTool(...) or defineDynamic(...)`,
+          message: `${path.basename(sourceRef.absolutePath)} must default-export defineTool(...), defineDynamic(...), or its matching ExecutionEnv helper`,
           path: sourceRef.absolutePath
         });
         continue;
@@ -478,7 +511,6 @@ async function _compileTools(
         });
         continue;
       }
-      const name = path.basename(sourceRef.absolutePath, path.extname(sourceRef.absolutePath));
       if (!isAgentToolName(name)) {
         diagnostics.push({
           severity: "error",

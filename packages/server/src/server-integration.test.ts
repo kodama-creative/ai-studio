@@ -546,6 +546,58 @@ describe("Agent Server HTTP protocol", () => {
     expect(replayedTerminal).toEqual(terminal);
   });
 
+  test("fails before Pi when an effective tool has no ExecutionEnv", async () => {
+    const root = await mkdtemp(join(tmpdir(), "llm-space-server-env-tool-"));
+    roots.push(root);
+    const fingerprint = "4".repeat(64);
+    const server = await startAgentServer({
+      artifactFingerprint: fingerprint,
+      authenticator: createStaticBearerAuthenticator([{
+        issuer: "test",
+        principalId: "principal-one",
+        principalType: "user",
+        token: "auth-token-with-at-least-thirty-two-bytes"
+      }]),
+      hostname: "127.0.0.1",
+      localDev: true,
+      models: _models(),
+      port: 0,
+      project: _executionEnvProject(fingerprint),
+      repositoryRoot: root
+    });
+    servers.push(server);
+    const client = createAgentServerClient({
+      baseUrl: server.url,
+      authorization: "auth-token-with-at-least-thirty-two-bytes"
+    });
+    const session = await client.createSession({
+      continuationToken: _continuationToken(32),
+      idempotencyKey: "execution-env-session"
+    });
+    const run = await client.createRun({
+      sessionId: session.sessionId,
+      continuationToken: session.continuationToken,
+      idempotencyKey: "execution-env-run",
+      text: "read"
+    });
+    const events: AgentServerStreamEvent[] = [];
+    for await (const event of client.streamRun({
+      sessionId: session.sessionId,
+      runId: run.runId,
+      continuationToken: session.continuationToken
+    })) {
+      events.push(event);
+    }
+    expect(events).toEqual([expect.objectContaining({
+      event: "control",
+      data: {
+        type: "runTerminal",
+        outcome: "failed",
+        code: "executionEnvUnavailable"
+      }
+    })]);
+  });
+
   test("isolates verified principal state and recovers it after restart", async () => {
     const root = await mkdtemp(join(tmpdir(), "llm-space-server-state-"));
     roots.push(root);
@@ -1566,6 +1618,26 @@ function _project(fingerprint: string): CompiledAgentProjectSnapshot {
     resources: { skills: [] },
     diagnostics: [],
     fingerprint
+  };
+}
+
+function _executionEnvProject(
+  fingerprint: string
+): CompiledAgentProjectSnapshot {
+  return {
+    ..._project(fingerprint),
+    tools: [{
+      name: "read",
+      label: "read",
+      description: "Read through the Host-provided ExecutionEnv.",
+      parameters: Type.Object({ path: Type.String() }),
+      executionEnvToolKind: "read",
+      requiresExecutionEnv: true,
+      sourcePath: "tools/read.ts",
+      async execute() {
+        throw new Error("Unbound ExecutionEnv helper must not execute");
+      }
+    }]
   };
 }
 

@@ -26,7 +26,8 @@ The runtime owns three boundaries:
   fetch-based SSE parsing, exact sequence replay, and Pi `AgentEvent` typing;
   it does not import Bun/Node Server code or persist credentials automatically.
 - `@llm-space/runtime/tools` is the authored local-action contract. It exports
-  `defineTool()` and the bounded `ToolContext`.
+  `defineTool()`, the bounded `ToolContext`, and the zero-configuration
+  `defineReadTool()`, `defineWriteTool()`, and `defineBashTool()` declarations.
 - `@llm-space/runtime/state` is the authored structured-state contract. It
   exports `defineState()` handles whose live values exist only inside a
   Host-verified Runtime Session scope.
@@ -213,6 +214,33 @@ export default defineTool({
   },
 });
 ```
+
+Portable filesystem and shell authority is available only through three
+canonical framework helpers:
+
+```ts
+// agent/tools/read.ts
+import { defineReadTool } from "@llm-space/runtime/tools";
+
+export default defineReadTool();
+```
+
+The equivalent `tools/write.ts` and `tools/bash.ts` files use
+`defineWriteTool()` and `defineBashTool()`. Filenames and helper kinds must
+match, declarations accept no configuration, and dynamic tool resolvers cannot
+create them. Ordinary `defineTool()` callbacks do not receive an
+`ExecutionEnv`.
+
+The Host supplies a Session-scoped Pi `ExecutionEnv` through
+`createSession({ executionEnv })`. Runtime binds it only to helpers that remain
+in the final effective capability snapshot. Without one, a selected helper
+fails before provider execution with `executionEnvUnavailable`; a helper
+filtered out by Host policy or the Turn request requires no environment.
+Runtime never creates a Node/Desktop/Server fallback and never owns cleanup.
+The three helpers use Pi read pagination/truncation, whole-file write, shell
+capture, streamed updates, abort, timeout, nonzero-exit, and full-output-path
+semantics. Sandbox provisioning, workspace/attachment delivery, retention, and
+cleanup are Host responsibilities outside this V1.
 
 Project-scoped MCP connections are flat files under `connections/`. Their file
 stem owns the connection name, and an exact non-empty allowlist controls the

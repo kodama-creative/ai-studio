@@ -104,7 +104,12 @@ export function createAgentProjectArtifact({
       })),
       ...tools.map(tool => ({
         id: `tool:${tool.name}`,
-        content: { name: tool.name, description: tool.description }
+        content: {
+          name: tool.name,
+          description: tool.description,
+          executionEnvToolKind: tool.executionEnvToolKind ?? null,
+          requiresExecutionEnv: tool.requiresExecutionEnv ?? false
+        }
       })),
       ...dynamicToolResolvers.map(resolver => ({
         id: resolver.contributionId,

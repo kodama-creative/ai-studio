@@ -74,6 +74,63 @@ describe("loadAgentProject", () => {
     ]);
   });
 
+  test("compiles canonical ExecutionEnv helpers into capability identity", async () => {
+    const root = await _fixture();
+    await writeFile(join(root, "instructions.md"), "Use portable helpers.\n");
+    await mkdir(join(root, "tools"));
+    for (const kind of ["bash", "read", "write"] as const) {
+      await writeFile(
+        join(root, "tools", `${kind}.ts`),
+        `import { define${kind[0]?.toUpperCase()}${kind.slice(1)}Tool } from "@llm-space/runtime/tools";
+        export default define${kind[0]?.toUpperCase()}${kind.slice(1)}Tool();`
+      );
+    }
+
+    const snapshot = await loadAgentProject(root);
+
+    expect(snapshot.diagnostics).toEqual([]);
+    expect(snapshot.tools.map(tool => ({
+      name: tool.name,
+      kind: tool.executionEnvToolKind,
+      required: tool.requiresExecutionEnv
+    }))).toEqual([
+      { name: "bash", kind: "bash", required: true },
+      { name: "read", kind: "read", required: true },
+      { name: "write", kind: "write", required: true }
+    ]);
+    expect(snapshot.artifact.fingerprints.capabilities.entries
+      .filter(entry => entry.id.startsWith("tool:"))
+      .map(entry => entry.id)).toEqual(["tool:bash", "tool:read", "tool:write"]);
+  });
+
+  test("rejects renamed and dynamically-created ExecutionEnv helpers", async () => {
+    const root = await _fixture();
+    await writeFile(join(root, "instructions.md"), "Reject disguised authority.\n");
+    await mkdir(join(root, "tools"));
+    await writeFile(
+      join(root, "tools", "inspect.ts"),
+      `import { defineReadTool } from "@llm-space/runtime/tools";
+      export default defineReadTool();`
+    );
+    await writeFile(
+      join(root, "tools", "dynamic.ts"),
+      `import { defineDynamic, defineBashTool } from "@llm-space/runtime/tools";
+      export default defineDynamic({ events: {
+        "turn.started": () => ({ bash: defineBashTool() })
+      }});`
+    );
+
+    const snapshot = await loadAgentProject(root);
+
+    expect(snapshot.tools).toEqual([]);
+    expect(snapshot.diagnostics.map(item => item.code)).toEqual([
+      "tool_import_failed",
+      "tool_export_invalid"
+    ]);
+    expect(snapshot.diagnostics.map(item => item.message).join("\n"))
+      .toContain("must be named read.ts or read.js");
+  });
+
   test("composes root, static, and dynamic instruction entries deterministically", async () => {
     const root = await _fixture();
     await writeFile(join(root, "instructions.md"), "Root.\n");

@@ -13,6 +13,24 @@ export function defineToolRuntime<TDefinition extends object>(
   );
 }
 
+export function defineExecutionEnvToolRuntime<
+  TKind extends "bash" | "read" | "write"
+>(kind: TKind): {
+  readonly kind: TKind;
+  readonly [key: symbol]: true;
+} {
+  return Object.defineProperty(
+    { kind },
+    Symbol.for("llm-space.execution-env-tool-definition"),
+    {
+      value: true,
+      enumerable: false,
+      configurable: false,
+      writable: false
+    }
+  );
+}
+
 export function defineMcpClientConnectionRuntime<
   TDefinition extends {
     readonly tools: { readonly allow: readonly string[]; };

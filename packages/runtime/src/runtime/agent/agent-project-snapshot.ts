@@ -6,6 +6,7 @@ import type { RuntimeDynamicToolsDefinition } from "../../internal/authored-dyna
 import type { RuntimeDynamicInstructionsDefinition } from "../../internal/authored-instruction-definitions";
 import type { DynamicToolSteps } from "../../internal/dynamic-tool-step";
 import type { McpClientConnectionDefinition } from "../../public/definitions/connections/mcp";
+import type { ExecutionEnvToolKind } from "../../public/definitions/execution-env-tool";
 import type { JsonValue } from "../../public/definitions/tool";
 import type { CompiledAgentDefinition } from "../../shared/agent-definition";
 import type { AgentProjectDiagnostic } from "../../shared/agent-project";
@@ -17,7 +18,9 @@ export interface CompiledMcpConnection {
 }
 
 export interface CompiledProjectTool extends AgentTool {
+  readonly executionEnvToolKind?: ExecutionEnvToolKind;
   readonly outputSchema?: AgentTool["parameters"];
+  readonly requiresExecutionEnv?: true;
   readonly sourcePath?: string;
 }
 

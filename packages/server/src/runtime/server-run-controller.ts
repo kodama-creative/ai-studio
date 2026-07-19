@@ -5,6 +5,7 @@ import {
   AgentStateCommitUnknownError,
   type CompiledAgentProjectSnapshot,
   createHostCapabilityPolicy,
+  ExecutionEnvUnavailableError,
   StructuredOutputError
 } from "@llm-space/runtime/server";
 
@@ -291,6 +292,9 @@ export class ServerRunController {
       } else if (error instanceof AgentHostPolicyChangedError) {
         outcome = "failed";
         code = "hostPolicyChanged";
+      } else if (error instanceof ExecutionEnvUnavailableError) {
+        outcome = "failed";
+        code = "executionEnvUnavailable";
       } else if (error instanceof StructuredOutputError) {
         outcome = "failed";
         code = error.code;

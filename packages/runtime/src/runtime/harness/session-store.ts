@@ -5,6 +5,7 @@ import type {
   RuntimeRunState,
   RuntimeStructuredOutputResult
 } from "./runtime-run";
+import type { ExecutionEnvToolKind } from "../../public/definitions/execution-env-tool";
 import type {
   AgentModelOptionsDefinition,
   AgentModelSelector
@@ -67,9 +68,11 @@ export interface RuntimeTurnCapabilitySnapshot {
     readonly closureVariables?: RuntimeSessionStateValue;
     readonly contributionId: string;
     readonly description: string;
+    readonly executionEnvToolKind?: ExecutionEnvToolKind;
     readonly inputSchema: RuntimeSessionStateValue;
     readonly name: string;
     readonly outputSchema?: RuntimeSessionStateValue;
+    readonly requiresExecutionEnv?: true;
     readonly schemaFingerprint: string;
     readonly sourcePath?: string;
     readonly stepId?: string;

@@ -23,6 +23,7 @@ export { AgentRuntimeModelUnavailableError } from "../runtime/agent/agent-runtim
 export type { PreparedAgentTool } from "../runtime/agent/prepared-agent-tool";
 export { AgentHostPolicyChangedError } from "../runtime/capabilities/agent-session-capabilities";
 export { createHostCapabilityPolicy } from "../runtime/capabilities/create-host-capability-policy";
+export { ExecutionEnvUnavailableError } from "../runtime/execution-env/execution-env-unavailable-error";
 export {
   StructuredOutputError
 } from "../runtime/outputs/structured-output-error";

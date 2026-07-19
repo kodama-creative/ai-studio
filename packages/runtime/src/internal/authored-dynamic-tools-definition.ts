@@ -43,9 +43,11 @@ export function isDynamicToolsDefinition(
 }
 
 export function createAuthoredToolsVirtualModule(
+  defineExecutionEnvToolsSource: string,
   defineToolSource: string
 ): string {
-  return `${defineToolSource}
+  return `${defineExecutionEnvToolsSource}
+    ${defineToolSource}
     export const defineDynamic = definition => Object.freeze({
       kind: "${DYNAMIC_TOOLS_KIND}",
       ...definition

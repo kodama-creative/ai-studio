@@ -626,6 +626,21 @@ function _assertCapabilitySnapshot(
     if (tool.outputSchema !== undefined) {
       _assertJsonStateValue(tool.outputSchema, tool.name, new WeakSet());
     }
+    if (tool.executionEnvToolKind !== undefined) {
+      if (
+        !["bash", "read", "write"].includes(tool.executionEnvToolKind)
+        || tool.name !== tool.executionEnvToolKind
+        || tool.requiresExecutionEnv !== true
+      ) {
+        throw new SessionStoreInvariantError(
+          `ExecutionEnv tool ${tool.name} has invalid capability identity`
+        );
+      }
+    } else if (tool.requiresExecutionEnv !== undefined) {
+      throw new SessionStoreInvariantError(
+        `Tool ${tool.name} has an invalid ExecutionEnv requirement`
+      );
+    }
     if (tool.stepId !== undefined || tool.closureVariables !== undefined) {
       _assertId("Dynamic tool step", tool.stepId ?? "");
       if (tool.closureVariables === undefined) {

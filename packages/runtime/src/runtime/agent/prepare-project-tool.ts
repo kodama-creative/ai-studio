@@ -1,3 +1,7 @@
+import type { ExecutionEnv } from "@earendil-works/pi-agent-core";
+
+import { createExecutionEnvTool } from "../execution-env/create-execution-env-tool";
+
 import type { CompiledProjectTool } from "./agent-project-snapshot";
 import type {
   PreparedAgentTool,
@@ -9,8 +13,13 @@ export function prepareProjectTool(
   provenance: PreparedAgentToolProvenance = {
     contributionId: `tool:${tool.sourcePath ?? tool.name}`,
     ...(tool.sourcePath ? { sourcePath: tool.sourcePath } : {})
-  }
+  },
+  executionEnv?: ExecutionEnv
 ): PreparedAgentTool {
+  if (tool.executionEnvToolKind) {
+    const prepared = createExecutionEnvTool({ env: executionEnv, tool });
+    return { ...prepared, provenance };
+  }
   const { execute, ...definition } = tool;
   return {
     kind: "executable",

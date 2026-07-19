@@ -9,6 +9,7 @@ import {
 import type { StoredRuntimeSession } from "@llm-space/runtime/harness";
 
 import { electrobun } from "@/lib/electrobun";
+import { RuntimeExecutionEnvUnavailableError } from "./runtime-execution-env-unavailable-error";
 import { RuntimeStructuredOutputError } from "./runtime-structured-output-error";
 
 import type {
@@ -151,6 +152,9 @@ export function createRpcTransport(options?: {
           }
           if (errorCode === "hostPolicyChanged") {
             throw new RuntimeHostPolicyChangedError(errorMessage);
+          }
+          if (errorCode === "executionEnvUnavailable") {
+            throw new RuntimeExecutionEnvUnavailableError(errorMessage);
           }
           if (
             errorCode === "structured_output_invalid"

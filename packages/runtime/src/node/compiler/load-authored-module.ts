@@ -12,6 +12,7 @@ import {
 import { assertInstructionSourceImports } from "./validate-authored-source";
 import {
   createAuthoredDefinitionVirtualModule,
+  defineExecutionEnvToolRuntime,
   defineMcpClientConnectionRuntime,
   defineToolRuntime
 } from "../../internal/authored-action-definitions";
@@ -230,12 +231,22 @@ function _authoredSdkPlugin(): Bun.BunPlugin {
           namespace: "llm-space-runtime"
         },
         () => {
+          const runtimeSource = defineExecutionEnvToolRuntime.toString();
+          const defineExecutionEnvToolsSource = `
+            const defineExecutionEnvToolRuntime = ${runtimeSource};
+            export const defineBashTool = () => defineExecutionEnvToolRuntime("bash");
+            export const defineReadTool = () => defineExecutionEnvToolRuntime("read");
+            export const defineWriteTool = () => defineExecutionEnvToolRuntime("write");
+          `;
           const defineToolSource = createAuthoredDefinitionVirtualModule(
             "defineTool",
             defineToolRuntime
           );
           return {
-            contents: createAuthoredToolsVirtualModule(defineToolSource),
+            contents: createAuthoredToolsVirtualModule(
+              defineExecutionEnvToolsSource,
+              defineToolSource
+            ),
             loader: "js"
           };
         }

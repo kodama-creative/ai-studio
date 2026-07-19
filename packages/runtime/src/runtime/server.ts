@@ -16,6 +16,7 @@ export {
 } from "./agent/agent-runtime";
 export { AgentHostPolicyChangedError } from "./capabilities/agent-session-capabilities";
 export { createHostCapabilityPolicy } from "./capabilities/create-host-capability-policy";
+export { ExecutionEnvUnavailableError } from "./execution-env/execution-env-unavailable-error";
 export { StructuredOutputError } from "./outputs/structured-output-error";
 export {
   DEFAULT_MAX_STRUCTURED_OUTPUT_BYTES,

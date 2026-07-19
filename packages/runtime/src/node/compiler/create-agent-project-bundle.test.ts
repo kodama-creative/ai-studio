@@ -78,7 +78,12 @@ describe("createAgentProjectBundle", () => {
         }
       }
     )).toMatchObject({ markdown: "turn-bundle:current" });
-    expect(project.tools.map(tool => tool.name)).toEqual(["echo"]);
+    expect(project.tools.map(tool => tool.name)).toEqual(["echo", "read"]);
+    expect(project.tools[1]).toMatchObject({
+      executionEnvToolKind: "read",
+      requiresExecutionEnv: true,
+      sourcePath: "tools/read.ts"
+    });
     const dynamicTools = project.dynamicToolResolvers?.[0];
     expect(dynamicTools?.sourcePath).toBe("tools/tenant.ts");
     const resolvedDynamicTools = await dynamicTools?.definition.events[
@@ -266,6 +271,11 @@ async function _fixture(): Promise<string> {
       outputSchema: Type.Object({ value: Type.String() }),
       execute({ value }) { return { value }; }
     });`
+  );
+  await writeFile(
+    join(root, "tools", "read.ts"),
+    `import { defineReadTool } from "@llm-space/runtime/tools";
+    export default defineReadTool();`
   );
   await mkdir(join(root, "connections"));
   await writeFile(

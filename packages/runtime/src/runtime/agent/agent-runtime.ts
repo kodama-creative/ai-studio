@@ -1,5 +1,6 @@
 import type {
   AgentMessage,
+  ExecutionEnv,
   StreamFn,
   ThinkingLevel
 } from "@earendil-works/pi-agent-core";
@@ -56,6 +57,7 @@ export interface CreateAgentSessionOptions {
   onSessionCommitted?: (session: StoredRuntimeSession) => Promise<void> | void;
   streamFn?: StreamFn;
   outputContract?: string;
+  executionEnv?: ExecutionEnv;
 }
 
 export class AgentRuntime {
@@ -124,7 +126,11 @@ export class AgentRuntime {
       throw new Error("Agent Session id must match the verified Session context");
     }
     const allTools = [
-      ...this._project.tools.map(tool => prepareProjectTool(tool)),
+      ...this._project.tools.map(tool => prepareProjectTool(
+        tool,
+        undefined,
+        options.executionEnv
+      )),
       ...(options.extraTools ?? [])
     ];
     if (allTools.some(tool =>
@@ -173,7 +179,8 @@ export class AgentRuntime {
       persistence: options.persistence,
       streamFn: options.streamFn,
       outputDefinition,
-      maxStructuredOutputBytes: this._maxStructuredOutputBytes
+      maxStructuredOutputBytes: this._maxStructuredOutputBytes,
+      ...(options.executionEnv ? { executionEnv: options.executionEnv } : {})
     });
     await session.validateState();
     await session.prepareTurn();

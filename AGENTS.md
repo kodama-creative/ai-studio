@@ -88,6 +88,26 @@ typed value only to the existing `runTerminal`, and Desktop hides the internal
 tool pair behind the generic structured-output card in messages and Run
 History. See `docs/adr/0008-named-structured-output-contracts.md`.
 
+### ExecutionEnv-backed authored tools
+
+Agent Projects may opt into the canonical `tools/read.ts`, `tools/write.ts`,
+and `tools/bash.ts` helpers exported by `@llm-space/runtime/tools`. These are
+zero-configuration framework declarations: filenames must match helper kinds,
+dynamic tool resolvers cannot create them, and ordinary `defineTool()`
+callbacks never receive filesystem or process authority. Artifacts and
+per-Turn capability snapshots record only helper identity and the
+`requiresExecutionEnv` requirement.
+
+Runtime borrows a Session-scoped Pi `ExecutionEnv` from the Host and binds it
+only after effective capability filtering. It never constructs a fallback
+environment or calls `cleanup()`. A selected helper without Host authority
+fails before Pi with `executionEnvUnavailable`; Desktop and Server propagate
+that code without using their host filesystem or shell. Read/write/bash reuse
+Pi result, truncation, shell capture, abort, timeout, and update conventions.
+Sandbox creation, workspace and attachment delivery, retention, and cleanup
+belong to roadmap item 17. See
+`docs/adr/0009-execution-env-backed-authored-tools.md`.
+
 ### Bun composition and bundled modules
 
 The Bun process object graph is assembled in one production composition root,

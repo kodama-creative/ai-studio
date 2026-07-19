@@ -79,6 +79,7 @@ export interface StreamThreadRequestPayload {
 export type StreamThreadResponsePayload =
   | {
     code?:
+      | "executionEnvUnavailable"
       | "hostPolicyChanged"
       | "outcomeUnknown"
       | "structured_output_invalid"

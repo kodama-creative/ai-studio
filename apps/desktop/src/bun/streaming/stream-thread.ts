@@ -15,6 +15,7 @@ import {
   type AgentSession,
   AgentStateCommitUnknownError,
   createHostCapabilityPolicy,
+  ExecutionEnvUnavailableError,
   type PreparedAgentTool,
   StructuredOutputError
 } from "@llm-space/runtime/node";
@@ -109,9 +110,11 @@ export class StreamThreadController {
           ? { code: "outcomeUnknown" as const }
           : error instanceof AgentHostPolicyChangedError
             ? { code: "hostPolicyChanged" as const }
-            : error instanceof StructuredOutputError
-              ? { code: error.code }
-              : {})
+            : error instanceof ExecutionEnvUnavailableError
+              ? { code: "executionEnvUnavailable" as const }
+              : error instanceof StructuredOutputError
+                ? { code: error.code }
+                : {})
       });
     } finally {
       this._activeStreams.delete(streamId);
@@ -143,6 +146,7 @@ export class StreamThreadController {
       | "structured_output_missing"
       | "structured_output_too_large"
       | undefined;
+    let executionEnvUnavailable = false;
     await this._localServers.run(
       {
         projectId: payload.runtime.projectId,
@@ -184,6 +188,8 @@ export class StreamThreadController {
             || code === "structured_output_too_large"
           ) {
             structuredOutputFailure = code;
+          } else if (code === "executionEnvUnavailable") {
+            executionEnvUnavailable = true;
           }
         }
       }
@@ -193,6 +199,9 @@ export class StreamThreadController {
         structuredOutputFailure,
         "The selected structured output did not complete"
       );
+    }
+    if (executionEnvUnavailable) {
+      throw new ExecutionEnvUnavailableError();
     }
   }
 

@@ -172,6 +172,12 @@ export class AgentSessionCapabilities {
         contributionId: tool.provenance?.contributionId
           ?? `host-tool:${tool.definition.name}`,
         description: tool.definition.description,
+        ...(tool.executionEnvToolKind
+          ? {
+            executionEnvToolKind: tool.executionEnvToolKind,
+            requiresExecutionEnv: true as const
+          }
+          : {}),
         inputSchema,
         name: tool.definition.name,
         ...(outputSchema === undefined ? {} : { outputSchema }),
