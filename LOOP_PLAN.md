@@ -149,6 +149,7 @@ Runtime architecture follows [ADR 0001](./docs/adr/0001-runtime-harness-over-pi-
   - Done when: authored environment selection works, required sandbox failure never downgrades silently, `workspace/` seeds an isolated Session, attachments are safely staged, and cleanup/retention is verified.
   - Boundary: no Vercel Sandbox, Firecracker fleet, arbitrary host paths, or source write-back without explicit Studio adoption.
   - Metric: sandbox isolation and delivery acceptance rate.
+  - Blocked evidence (2026-07-19): current Runtime can borrow an ExecutionEnv but neither source nor Thread can require/select Sandbox, Agent discovery has no `workspace/` slot, attachments are Desktop-only inline images, and no Host owns Session container retention or cleanup. Real CEF still exposes disabled `Desktop Sandbox — Unavailable`; the development host has no Docker/Podman/Apple-container engine. Implementing V1 must newly decide source-minimum × Host-profile authority, reference engine/image, fixed workspace persistence/reaping, attachment identity/limits/ownership, network/secret exposure, and cleanup failure semantics. The first `$grill-me` owner decision is whether source may require the abstract Sandbox class while Host chooses the provider and may tighten but never weaken that requirement; item 17 remains unchecked.
 
 - [ ] **18 — Durable execution V1**
   - Depends on: 04 and 06.

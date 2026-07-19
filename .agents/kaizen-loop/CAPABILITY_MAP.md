@@ -1,7 +1,7 @@
 # LLM Space Capability Map
 
 - Last updated: 2026-07-19
-- Map status: refreshed through shipped roadmap item 16. Items 12 through 16 are shipped under ADRs 0006-0009 where applicable; item 17 remains the Sandbox provider, delivery, retention, and cleanup boundary.
+- Map status: refreshed through roadmap item 17 discovery. Items 12 through 16 are shipped under ADRs 0006-0009 where applicable; item 17 is confirmed decision-blocked on source/Host authority, provider, workspace, attachment, network, and lifecycle ownership.
 - Evidence rule: entries marked `confirmed` cite current rendered-product or current-code evidence. Entries marked `stale` rely on previous logs or code paths not fully re-inspected in this loop. Entries marked `unknown` need a future product-surface check before they can drive a recommendation.
 
 ## First-Run Model Setup
@@ -344,6 +344,23 @@
 - Boundary: a project can explicitly author portable read/write/bash capability whose final effective Turn snapshot borrows exactly one Host-supplied Session-scoped Pi `ExecutionEnv`. Manual mode defers the helpers; automatic modes execute through Pi. Runtime neither translates paths nor owns environment lifecycle.
 - Explicit non-goals: sandbox/container provider, workspace or attachment delivery, implicit NodeExecutionEnv construction, direct Desktop/Server filesystem access, generic permission system, approval policy, or cleanup/retention policy owned by roadmap item 17.
 - Visible gaps: no production Sandbox provider supplies the environment yet; workspace seeds, attachments, retention and exactly-once cleanup remain item 17, approvals remain item 19, and promotion remains blocked on item 17 despite item 16 now being complete.
+
+## Sandbox Workspace And Attachment Delivery
+
+- Status: not shipped; roadmap item 17 decision-blocked
+- Freshness: confirmed
+- Last checked: 2026-07-19
+- Evidence:
+  - A current isolated Electrobun CEF session shows an Agent Project Thread as `Desktop Direct — Ready`. Its Runtime Profile menu exposes `Desktop Sandbox — Unavailable` with the exact explanation `Unavailable until isolated workspace execution ships; never falls back.` The menu is keyboard/semantic UI, and the current console contains only Vite/React development information.
+  - `ThreadRuntimeProfile` can persist only `desktopDirect` or `localServer`; the Desktop Sandbox row is disabled, profile changes create a new empty Thread, and runtime authority becomes immutable after the first Run under ADR 0003.
+  - Agent `environment` declarations currently describe config/secret names only. No source field declares an execution-environment minimum, no Host policy merges one, and Runtime receives only an already-created optional `ExecutionEnv`.
+  - Agent discovery and artifacts have no portable `workspace/` source slot. Desktop's `workspace/` is instead the application-owned Thread/project tree, so it cannot be reused as a Session sandbox without conflating ownership domains.
+  - Desktop attachments are image-only base64 values embedded in editable Thread messages. The Runtime/Server have no attachment staging contract, and ADR 0003 explicitly excludes Local Server attachments.
+  - Pi provides the Host-neutral `ExecutionEnv` contract and a non-isolating Node reference adapter, not a container provider. Local `pi-eve` likewise states that its V1 has no sandbox and requires an external sandbox/container for untrusted projects.
+  - This macOS 26 arm64 development host has no Docker, Podman, or Apple `container` executable, so a real local-container acceptance run is currently unavailable. Apple `container` is macOS-26/Apple-silicon-only and pre-1.0; Docker documents cross-host bind-mount risks and explicit `--network none` isolation.
+- Boundary: item 17 must supply a real isolated Session-scoped Pi `ExecutionEnv`, fail closed whenever Sandbox is required, seed a fixed environment-addressed workspace without mounting or writing back Agent source, stage only controlled Host-approved attachments, and give one owner durable retention and cleanup responsibility.
+- Explicit non-goals: Vercel Sandbox, Firecracker fleet, arbitrary host paths, project source write-back, silent Desktop Direct/Node fallback, approval policy, generic container orchestration, cloud control plane, or source-owned engine credentials.
+- Visible gaps: owner decisions are required for source minimum versus Thread/Host profile authority; reference engine and image/runtime contract; Session workspace persistence/restart/reaping; attachment identity, limits, persistence, and deletion; default network and secret exposure; and cleanup failure/retry semantics. The first `$grill-me` decision is whether source may require the abstract Sandbox class while Host policy chooses the provider and may only tighten that requirement.
 
 ## Agent Project Activation
 
