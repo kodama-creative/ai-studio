@@ -141,6 +141,7 @@ Runtime architecture follows [ADR 0001](./docs/adr/0001-runtime-harness-over-pi-
   - Done when: the same tool contracts pass against Node and isolated/fake ExecutionEnv implementations with correct path, symlink, abort, timeout, streaming, and cleanup behavior.
   - Boundary: no direct Desktop/Server host filesystem access, implicit default tools, or policy bypass.
   - Metric: ExecutionEnv portability of built-in tools.
+  - Blocked evidence (2026-07-19): Pi already supplies the required Host-neutral filesystem/shell contract and Node reference adapter, while current LLM Space authored tools have no ExecutionEnv seam and Desktop built-ins are host-bound. Implementation would introduce a new permission surface: either only declaration-only framework read/write/bash helpers receive Host-supplied authority, or every arbitrary `defineTool()` receives the full environment. The first `$grill-me` owner decision is pending; item 16 remains unchecked.
 
 - [ ] **17 — Sandbox, workspace, and attachment delivery V1**
   - Depends on: 16.

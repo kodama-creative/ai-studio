@@ -1,7 +1,7 @@
 # LLM Space Capability Map
 
 - Last updated: 2026-07-18
-- Map status: refreshed through completed roadmap item 15. Items 12 through 15 are shipped under ADRs 0006-0008 where applicable; the next unchecked dependency-ready item is 16.
+- Map status: refreshed through roadmap item 16 discovery. Items 12 through 15 are shipped under ADRs 0006-0008 where applicable; item 16 is confirmed decision-blocked before implementation by its unresolved ExecutionEnv authoring and permission surface.
 - Evidence rule: entries marked `confirmed` cite current rendered-product or current-code evidence. Entries marked `stale` rely on previous logs or code paths not fully re-inspected in this loop. Entries marked `unknown` need a future product-surface check before they can drive a recommendation.
 
 ## First-Run Model Setup
@@ -329,6 +329,21 @@
 - Boundary: a trusted Agent Project can package path-owned local TypeScript tools and flat source-declared Streamable HTTP MCP connections. Opening a Project Thread activates allowlisted remote descriptors without Settings or per-Thread selection; all Project actions are source-owned/read-only, remote names are qualified exactly, remote calls remain visibly manual, safe provenance/attempts persist, outcome-unknown retry is explicit and warns about duplicate side effects, and schema/connection drift blocks new runs until Sync.
 - Explicit non-goals: no project stdio, OAuth browser/refresh/account lifecycle, dynamic connection search, blocklists, `tools/listChanged`, automatic project-MCP calls, authored approval policy, OpenAPI connections, MCP resources/prompts, sandbox, or public plugin SDK.
 - Visible gaps: no durable approve/deny policy beyond manual V1 execution, no live third-party authenticated service audit, no dynamic remote tool-list subscription, and no automatic test harness for the CEF workflow yet.
+
+## Portable Execution Tools
+
+- Status: not shipped; roadmap item 16 decision-blocked
+- Freshness: confirmed
+- Last checked: 2026-07-19
+- Evidence:
+  - The pinned `@earendil-works/pi-agent-core` 0.80.3 exposes a Host-neutral `ExecutionEnv` with fallible filesystem and shell operations, stable `FileError`/`ExecutionError` codes, addressed versus canonical paths, explicit symlink metadata, abort signals, shell timeout and stdout/stderr callbacks, temporary files, and best-effort cleanup. `NodeExecutionEnv` is a reference implementation, not a confinement boundary.
+  - Current Pi `main` retains that contract and tests Node behavior for files, directories, symlinks without implicit following, canonical resolution, pre-aborted file calls, timeout, process-tree abort, streaming callbacks, large-output capture, and cleanup.
+  - Pi coding-agent's current read/write/bash tools use injectable operation interfaces but still default to direct Node filesystem/process access and include coding-agent/TUI behavior. They are useful behavior evidence but cannot be imported as Runtime authority without violating the roadmap boundary.
+  - LLM Space `defineTool()` currently exposes only verified Session context, abort, call id, and tool name. Agent Project tools compile into callbacks without an ExecutionEnv dependency; Desktop built-ins in `apps/desktop/src/bun/tools/built-in/fs.ts` directly use Bun host filesystem/process APIs.
+  - ADR 0006 already requires promoted filesystem/bash built-ins to lower only to ExecutionEnv-backed tools and requires Sandbox. The owner has separately confirmed the environment itself is supplied by Sandbox, but item 16 has not decided whether full ExecutionEnv authority is limited to framework helpers or exposed to every authored `defineTool()` callback.
+- Boundary: no portable read/write/bash helper exists today. Any V1 must be explicitly authored, execute only against a Host-supplied Pi `ExecutionEnv`, fail before Pi when required authority is absent, and add no implicit tools or Desktop/Server host fallback.
+- Explicit non-goals: sandbox/container provider, workspace or attachment delivery, implicit NodeExecutionEnv construction, direct Desktop/Server filesystem access, generic permission system, approval policy, or cleanup/retention policy owned by roadmap item 17.
+- Visible gaps: owner decision on the authoring/permission surface is required first; subsequent decisions must fix path/symlink behavior, output bounds and streaming shape, timeout bounds, and ExecutionEnv ownership/cleanup without pre-empting item 17.
 
 ## Agent Project Activation
 
