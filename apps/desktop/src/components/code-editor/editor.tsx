@@ -269,7 +269,7 @@ const _CodeEditor = function CodeEditor(
 
   const handleKeyDownCapture = useCallback(
     (e: KeyboardEvent) => {
-      if (e.key === "Enter" && e.metaKey) {
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
         commit();
       }
       onKeyDown?.(e);

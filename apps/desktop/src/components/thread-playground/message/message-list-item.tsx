@@ -9,8 +9,15 @@ import {
 } from "@llm-space/core";
 import { createMessagePromptVariablePlaceKey } from "@llm-space/core/thread";
 import { STRUCTURED_OUTPUT_TOOL_NAME } from "@llm-space/runtime";
-import { PlusIcon } from "lucide-react";
-import { memo, useCallback, useMemo, useState } from "react";
+import { CircleAlertIcon, PlusIcon, TriangleAlertIcon } from "lucide-react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState
+} from "react";
 import { toast } from "sonner";
 
 import type { DraggableProvidedDragHandleProps } from "@hello-pangea/dnd";
@@ -34,7 +41,11 @@ import { Marker, MarkerContent } from "../../ui/marker";
 import { ShineBorder } from "../../ui/shine-border";
 import { Skeleton } from "../../ui/skeleton";
 import { StructuredOutputCard } from "../output/structured-output-card";
-import { useThreadStore, useThreadStoreActions } from "../stores";
+import {
+  type RunValidationIssue,
+  useThreadStore,
+  useThreadStoreActions
+} from "../stores";
 import { usePromptVariableExtensionForContext } from "../variable/use-prompt-variable-extension";
 
 const EMPTY_SANDBOX_ATTACHMENTS: readonly SandboxAttachmentDescriptor[] = [];
@@ -46,6 +57,7 @@ const _MessageListItem = function MessageListItem({
   placeholder,
   readonly = false,
   runDisabled = false,
+  runValidationIssue = null,
   sandboxAttachments,
   streaming,
   collapsed,
@@ -62,6 +74,7 @@ const _MessageListItem = function MessageListItem({
   readonly placeholder?: string;
   readonly readonly?: boolean;
   readonly runDisabled?: boolean;
+  readonly runValidationIssue?: RunValidationIssue | null;
   readonly sandboxAttachments?: readonly SandboxAttachmentDescriptor[];
   readonly streaming?: boolean;
   readonly textOnlyDraft?: boolean;
@@ -70,6 +83,7 @@ const _MessageListItem = function MessageListItem({
   readonly autoFocus?: boolean;
   readonly dragHandleProps?: DraggableProvidedDragHandleProps | null;
 }) {
+  const containerRef = useRef<HTMLDivElement>(null);
   const { fidelity } = useRenderingFidelity();
   const variableExtension = usePromptVariableExtensionForContext(
     createMessagePromptVariablePlaceKey(message.id),
@@ -185,21 +199,44 @@ const _MessageListItem = function MessageListItem({
   );
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      if (e.key === "Enter" && e.metaKey) {
+      if (
+        message.role === "user"
+        && e.key === "Enter"
+        && (e.metaKey || e.ctrlKey)
+      ) {
         void handleRun();
         e.preventDefault();
         e.stopPropagation();
       }
     },
-    [handleRun]
+    [handleRun, message.role]
   );
+  const validationErrorId = `message-${message.id}-run-error`;
+  useEffect(() => {
+    if (!runValidationIssue) {
+      return;
+    }
+    containerRef.current?.scrollIntoView({
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? "auto"
+        : "smooth",
+      block: "nearest"
+    });
+  }, [runValidationIssue]);
   return (
     <div
+      aria-describedby={runValidationIssue ? validationErrorId : undefined}
+      aria-invalid={Boolean(runValidationIssue) || undefined}
       className={cn(
-        "hover:border-accent-foreground/20 focus-within:border-ring! group group/message relative flex size-full flex-col items-center rounded-lg border bg-(--textarea) transition-[padding-bottom,border-color]",
+        "hover:border-accent-foreground/20 focus-within:border-ring! group group/message relative flex size-full flex-col items-center rounded-lg border bg-(--textarea) transition-[padding-bottom,border-color,box-shadow]",
+        runValidationIssue?.level === "warning"
+        && "border-amber-400/30! hover:border-amber-400/40! focus-within:border-amber-400/40!",
+        runValidationIssue?.level === "error"
+        && "border-destructive/40! hover:border-destructive/50! focus-within:border-destructive/50!",
         collapsed && "pb-2.5",
         className
       )}
+      ref={containerRef}
     >
       <div
         className={cn(
@@ -322,6 +359,26 @@ const _MessageListItem = function MessageListItem({
             : null}
         </main>
       </CollapsibleContent>
+      {runValidationIssue
+        ? (
+          <div
+            className={cn(
+              "text-foreground/75 mx-2 mb-2 flex w-[calc(100%-1rem)] items-center gap-2 rounded-md px-2.5 py-1.5 text-xs",
+              collapsed && "mt-2",
+              runValidationIssue.level === "warning"
+                ? "bg-amber-400/8"
+                : "bg-destructive/8"
+            )}
+            id={validationErrorId}
+            role="alert"
+          >
+            {runValidationIssue.level === "warning"
+              ? <TriangleAlertIcon className="size-3.5 shrink-0 text-amber-400/80" />
+              : <CircleAlertIcon className="text-destructive/70 size-3.5 shrink-0" />}
+            <span className="min-w-0 grow">{runValidationIssue.message}</span>
+          </div>
+        )
+        : null}
     </div>
   );
 };
@@ -396,8 +453,7 @@ const _ToolStepContinuation = function ToolStepContinuation({
       // limit, since the dialog already explains them.
       if (errorCount > firecrawlLimitCount) {
         toast.error("Some tool calls failed", {
-          description: `${errorCount}/${outcomes.length} tool call${
-            outcomes.length === 1 ? "" : "s"
+          description: `${errorCount}/${outcomes.length} tool call${outcomes.length === 1 ? "" : "s"
           } failed.`
         });
       }

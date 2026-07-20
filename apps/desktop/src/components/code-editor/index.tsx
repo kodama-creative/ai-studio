@@ -218,7 +218,7 @@ const PlainTextCodeEditor = forwardRef<
           focusedRef.current = true;
         }}
         onKeyDown={event => {
-          if (event.key === "Enter" && event.metaKey) {
+          if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
             commit();
           }
           onKeyDown?.(event);

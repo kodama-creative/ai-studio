@@ -94,7 +94,7 @@ const _ToolCallListItem = function ToolCallListItem({
   ]);
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      if (e.key === "Enter" && e.metaKey) {
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
         e.stopPropagation();
         if (canContinue) {

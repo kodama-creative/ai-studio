@@ -19,8 +19,13 @@ import { cn } from "@/lib/utils";
 import { MessageListItem } from "./message-list-item";
 import { Button } from "../../ui/button";
 import { ScrollArea } from "../../ui/scroll-area";
+import { ShineBorder } from "../../ui/shine-border";
 import { StructuredOutputCard } from "../output/structured-output-card";
-import { useThreadStore, useThreadStoreActions } from "../stores";
+import {
+  type RunValidationIssue,
+  useThreadStore,
+  useThreadStoreActions
+} from "../stores";
 
 export function MessageListView({
   className,
@@ -41,13 +46,17 @@ export function MessageListView({
   const status = useThreadStore(s => s.status);
   const collapsedMessageIds = useThreadStore(s => s.collapsedMessageIds);
   const autoFocusMessageId = useThreadStore(s => s.autoFocusMessageId);
+  const runValidationIssue = useThreadStore(s => s.runValidationIssue);
   const storeMessages = useThreadStore(s => s.thread.context?.messages);
-  const { appendMessage, moveMessage } = useThreadStoreActions();
+  const { appendMessage, moveMessage, resolveRunValidationIssue } =
+    useThreadStoreActions();
   const [dragging, setDragging] = useState(false);
   const messages = messagesFromProps ?? storeMessages ?? [];
   const readonly = useMemo(() => {
     return readonlyFromProps || dragging || isSnapshotView;
   }, [dragging, isSnapshotView, readonlyFromProps]);
+  const addMessageSuggested =
+    runValidationIssue?.resolution?.type === "appendUserMessage";
 
   const handleDragStart = useCallback(() => {
     setDragging(true);
@@ -103,6 +112,7 @@ export function MessageListView({
                     messages={messages}
                     readonly={readonly}
                     runDisabled={runDisabled}
+                    runValidationIssue={runValidationIssue}
                   />
                 )}
               </Droppable>
@@ -112,25 +122,46 @@ export function MessageListView({
           <StreamingMessageListItem streaming={status === "running"} />
         )}
         {!isSnapshotView ? <LatestStructuredOutputFailure /> : null}
-        <Button
-          // No top margin: the preceding message / streaming item (or, in the
-          // empty state, the list's own top padding) already provides the gap.
-          className={cn(
-            "text-muted-foreground hover:text-accent-foreground w-full justify-start rounded-lg py-5",
-            dragging && "invisible",
-            (readonly
-              || (editingMode === "appendTextOnly"
-                && messages.at(-1)?.role === "user"))
-              && "hidden"
-          )}
-          disabled={readonly}
-          onClick={appendMessage}
-          size="lg"
-          variant="secondary"
-        >
-          <PlusIcon className="size-4" />
-          Add message
-        </Button>
+        <div className="relative rounded-lg">
+          <Button
+            // No top margin: the preceding message / streaming item (or, in the
+            // empty state, the list's own top padding) already provides the gap.
+            className={cn(
+              "text-muted-foreground hover:text-accent-foreground w-full justify-start rounded-lg py-5",
+              dragging && "invisible",
+              (readonly
+                || (editingMode === "appendTextOnly"
+                  && messages.at(-1)?.role === "user"))
+                && "hidden"
+            )}
+            disabled={readonly}
+            onClick={
+              addMessageSuggested ? resolveRunValidationIssue : appendMessage
+            }
+            size="lg"
+            variant="secondary"
+          >
+            <PlusIcon className="size-4" />
+            Add message
+          </Button>
+          {addMessageSuggested && !dragging && !readonly
+            ? (
+              <>
+                <ShineBorder
+                  borderWidth={1}
+                  duration={14}
+                  shineColor="var(--primary)"
+                />
+                <ShineBorder
+                  borderWidth={1}
+                  duration={14}
+                  shineColor="var(--primary)"
+                  style={{ animationDelay: "-7s" }}
+                />
+              </>
+            )
+            : null}
+        </div>
       </div>
     </ScrollArea>
   );
@@ -219,7 +250,8 @@ function DroppableMessageList({
   readonly,
   runDisabled,
   autoFocusMessageId,
-  collapsedMessageIds
+  collapsedMessageIds,
+  runValidationIssue
 }: {
   readonly autoFocusMessageId: string | null;
   readonly collapsedMessageIds: string[];
@@ -228,6 +260,7 @@ function DroppableMessageList({
   readonly messages: Message[];
   readonly readonly: boolean;
   readonly runDisabled: boolean;
+  readonly runValidationIssue: RunValidationIssue | null;
 }) {
   return (
     <div
@@ -252,6 +285,11 @@ function DroppableMessageList({
               || (editingMode === "appendTextOnly" && !textOnlyDraft)
             }
             runDisabled={runDisabled}
+            runValidationIssue={
+              message.id === runValidationIssue?.messageId
+                ? runValidationIssue
+                : null
+            }
             textOnlyDraft={textOnlyDraft}
           />
         );
@@ -277,7 +315,8 @@ const _DraggableMessageRow = function DraggableMessageRow({
   runDisabled,
   autoFocus,
   collapsed,
-  textOnlyDraft
+  textOnlyDraft,
+  runValidationIssue
 }: {
   readonly autoFocus: boolean;
   readonly collapsed: boolean;
@@ -285,6 +324,7 @@ const _DraggableMessageRow = function DraggableMessageRow({
   readonly message: Message;
   readonly readonly: boolean;
   readonly runDisabled: boolean;
+  readonly runValidationIssue: RunValidationIssue | null;
   readonly textOnlyDraft: boolean;
 }) {
   return (
@@ -309,6 +349,7 @@ const _DraggableMessageRow = function DraggableMessageRow({
               message={message}
               readonly={readonly}
               runDisabled={runDisabled}
+              runValidationIssue={runValidationIssue}
               textOnlyDraft={textOnlyDraft}
             />
           </div>

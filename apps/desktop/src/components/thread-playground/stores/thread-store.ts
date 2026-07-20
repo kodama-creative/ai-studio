@@ -2,14 +2,12 @@
 import {
   type AgentTransport,
   getMessageText,
-  isRunnableConversation,
   type MessageContent,
   type ModelConfig,
   type ModelConfigParams,
   normalizeThread,
   type ReducedMessageContent,
   reduceMessages,
-  RUN_LAST_MESSAGE_ERROR,
   type SandboxAttachmentDescriptor,
   streamThread,
   type Thread,
@@ -68,6 +66,7 @@ import type { RuntimeExecutionMode } from "@llm-space/runtime";
 import { structuredOutputFromToolCall } from "@/client/structured-output-from-tool-call";
 import { createFrameThrottle } from "@/lib/frame-throttle";
 import { resolveRuntimeExecutionMode } from "./run-mode";
+import { getRunValidationIssue } from "./run-validation";
 import {
   type ChangeHistory,
   createInitialHistory,
@@ -82,6 +81,8 @@ import {
 import { PREVIEW_THROTTLE_MS } from "../streaming-preview";
 import { listEnabledPromptVariableSkills } from "../variable/prompt-variable-skills";
 
+import type { RunValidationIssue } from "./run-validation-issue";
+
 const toolValidator = Compile(ToolSchema);
 
 export type ThreadStoreStatus = "idle" | "running";
@@ -94,6 +95,7 @@ export interface ThreadState {
   collapsedMessageIds: string[];
   sandboxAttachmentsEnabled: boolean;
   stagingSandboxAttachmentMessageIds: string[];
+  runValidationIssue: RunValidationIssue | null;
 
   /**
    * Id of the message whose editor should grab focus on mount — set only by
@@ -114,6 +116,7 @@ export interface ThreadState {
   evaluationRubrics: EvaluationRubricRecord[];
 
   run(fromMessageId?: string): Promise<void>;
+  resolveRunValidationIssue(): void;
   undo(): void;
   redo(): void;
   restoreThread(thread: Thread): void;
@@ -370,6 +373,20 @@ export function createThreadStore(
         });
       };
 
+      const reconcileRunValidationIssue = (messages: Message[]) => {
+        const current = get().runValidationIssue;
+        if (!current) {
+          return;
+        }
+        const next = getRunValidationIssue(messages);
+        if (
+          next?.messageId !== current.messageId
+          || next?.code !== current.code
+        ) {
+          set({ runValidationIssue: null });
+        }
+      };
+
       const setMessages = (messages: Message[]) => {
         const thread = get().thread;
         const messageIds = new Set(messages.map(message => message.id));
@@ -384,6 +401,7 @@ export function createThreadStore(
             ? sandboxAttachments
             : undefined
         });
+        reconcileRunValidationIssue(messages);
       };
 
       /** Replace the messages array; skips the update if nothing changed. */
@@ -465,6 +483,7 @@ export function createThreadStore(
         collapsedMessageIds: [],
         sandboxAttachmentsEnabled: Boolean(options.stageSandboxFiles),
         stagingSandboxAttachmentMessageIds: [],
+        runValidationIssue: null,
         autoFocusMessageId: null,
         changeHistory: createInitialHistory(normalizedInitialThread),
         runHistory: initialRunHistory,
@@ -475,6 +494,17 @@ export function createThreadStore(
           const message = createUserMessage();
           updateMessages(messages => [...messages, message]);
           set({ autoFocusMessageId: message.id });
+        },
+        resolveRunValidationIssue() {
+          const resolution = get().runValidationIssue?.resolution;
+          if (!resolution) {
+            return;
+          }
+          switch (resolution.type) {
+            case "appendUserMessage":
+              get().appendMessage();
+              return;
+          }
         },
         insertMessageBefore(beforeMessageId: string) {
           const messages = get().thread.context?.messages ?? [];
@@ -753,12 +783,11 @@ export function createThreadStore(
             ) {
               return;
             }
-            patchSandboxAttachmentAuthority({
-              sandboxAttachments: {
-                ...get().thread.sandboxAttachments,
-                [id]: [...attachments]
-              }
-            });
+            const sandboxAttachments = {
+              ...get().thread.sandboxAttachments,
+              [id]: [...attachments]
+            };
+            patchSandboxAttachmentAuthority({ sandboxAttachments });
           } catch (error) {
             toast.error("Unable to stage files", {
               description: error instanceof Error
@@ -978,10 +1007,12 @@ export function createThreadStore(
               truncated = true;
             }
           }
-          if (!isRunnableConversation(messages)) {
-            toast.error("Error", { description: RUN_LAST_MESSAGE_ERROR });
+          const runValidationIssue = getRunValidationIssue(messages);
+          if (runValidationIssue) {
+            set({ runValidationIssue });
             return;
           }
+          set({ runValidationIssue: null });
 
           let promptSnapshot: ThreadContext["snapshot"] =
             get().thread.context?.snapshot;
@@ -1054,9 +1085,9 @@ export function createThreadStore(
                   applyRuntimeSession(previousRuntimeSession);
                   toast.error("Unable to persist Runtime recovery", {
                     description:
-                    persistError instanceof Error
-                      ? persistError.message
-                      : "Runtime Session recovery failed"
+                      persistError instanceof Error
+                        ? persistError.message
+                        : "Runtime Session recovery failed"
                   });
                   return;
                 }
@@ -1069,7 +1100,7 @@ export function createThreadStore(
               applyRuntimeSession(previousRuntimeSession);
               toast.error("Unable to start Runtime Run", {
                 description:
-                error instanceof Error ? error.message : "Runtime Session failed"
+                  error instanceof Error ? error.message : "Runtime Session failed"
               });
               return;
             }
@@ -1413,6 +1444,7 @@ export function createThreadStore(
           });
           set({
             thread,
+            runValidationIssue: null,
             changeHistory: {
               ...result.history,
               snapshots: result.history.snapshots.map((snapshot, index) =>
@@ -1442,6 +1474,7 @@ export function createThreadStore(
           });
           set({
             thread,
+            runValidationIssue: null,
             changeHistory: {
               ...result.history,
               snapshots: result.history.snapshots.map((snapshot, index) =>
@@ -1468,6 +1501,7 @@ export function createThreadStore(
           // Replace the whole thread; recorded as a single undoable step.
           set({
             thread: next,
+            runValidationIssue: null,
             changeHistory: recordSnapshot(get().changeHistory, next)
           });
         },
@@ -1642,6 +1676,7 @@ export function useThreadStore<T>(selector: (s: ThreadState) => T): T {
 
 const selectActions = (s: ThreadState) => ({
   run: s.run,
+  resolveRunValidationIssue: s.resolveRunValidationIssue,
   abort: s.abort,
   undo: s.undo,
   redo: s.redo,
