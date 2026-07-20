@@ -76,6 +76,22 @@ _Avoid_: serialized Agent Artifact, generic Runtime image, source image
 A source-owned declaration that names required or optional runtime configuration or secret input without containing its value.
 _Avoid_: credential, environment value, secret store
 
+**Sandbox Requirement**:
+A source-owned minimum requiring isolated filesystem and process authority while leaving the concrete provider and policy to the Host.
+_Avoid_: Docker configuration, environment variable, Runtime Profile
+
+**Sandbox Session**:
+The isolated execution resource exclusively owned by one Runtime Session and retained or deleted through Host lifecycle policy.
+_Avoid_: shared container, per-Run sandbox, deployment image
+
+**Sandbox Workspace**:
+The Session-owned mutable file namespace seeded once from portable Agent source and used for staged Turn inputs and tool work.
+_Avoid_: source checkout, Desktop workspace, shared mount
+
+**Turn Attachment**:
+A Host-approved immutable Turn input whose bytes are staged into its Sandbox Workspace before execution.
+_Avoid_: Host path, source file, transcript storage
+
 **OCI Runtime Profile**:
 The fixed non-root network, environment, storage, health, and shutdown contract under which an Agent Deployment Image runs.
 _Avoid_: Thread Runtime Profile, cloud target, deployment control plane
