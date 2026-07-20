@@ -102,6 +102,34 @@ describe("loadAgentProject", () => {
     expect(JSON.stringify(snapshot.artifact)).not.toContain("outside-secret");
   });
 
+  test("rejects a workspace parent swapped to a symlink after discovery", async () => {
+    const root = await _fixture();
+    const workspaceParent = join(root, "sandbox", "workspace", "nested");
+    const outsideParent = join(root, "outside");
+    await writeFile(join(root, "instructions.md"), "Inspect the workspace.\n");
+    await mkdir(workspaceParent, { recursive: true });
+    await mkdir(outsideParent);
+    await writeFile(join(workspaceParent, "seed.txt"), "discovered\n");
+    await writeFile(join(outsideParent, "seed.txt"), "outside-secret\n");
+    await writeFile(
+      join(root, "sandbox", "sandbox.ts"),
+      `import { rm, symlink } from "node:fs/promises";
+      import { defineSandbox } from "@llm-space/runtime/sandbox";
+      await rm(${JSON.stringify(workspaceParent)}, { recursive: true });
+      await symlink(${JSON.stringify(outsideParent)}, ${JSON.stringify(workspaceParent)});
+      export default defineSandbox({});`
+    );
+
+    const snapshot = await loadAgentProject(root);
+
+    expect(snapshot.sandbox).toBeUndefined();
+    expect(snapshot.diagnostics).toContainEqual(expect.objectContaining({
+      code: "sandbox_import_failed",
+      message: expect.stringContaining("must remain a regular file")
+    }));
+    expect(JSON.stringify(snapshot.artifact)).not.toContain("outside-secret");
+  });
+
   test("loads and normalizes the required Agent definition", async () => {
     const root = await _fixture();
     await writeFile(join(root, "instructions.md"), "You are helpful.\n");

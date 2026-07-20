@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
-import { open, readFile } from "node:fs/promises";
+import { open, readFile, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import {
   loadSkills,
@@ -184,6 +184,11 @@ async function _compileSandbox(
   if (!discovered?.definition) { return undefined; }
   const sourceRef = discovered.definition;
   try {
+    const workspaceRoot = path.join(
+      await realpath(projectRoot),
+      "sandbox",
+      "workspace"
+    );
     const loaded = await loadAuthoredModule({
       projectRoot,
       sourcePath: sourceRef.absolutePath,
@@ -203,7 +208,7 @@ async function _compileSandbox(
     let totalBytes = 0;
     const workspace = [];
     for (const file of discovered.workspace) {
-      const content = await _readSandboxWorkspaceFile(file);
+      const content = await _readSandboxWorkspaceFile(file, workspaceRoot);
       totalBytes += content.byteLength;
       if (content.byteLength > 25 * 1024 * 1024) {
         throw new TypeError(
@@ -242,7 +247,8 @@ async function _compileSandbox(
 }
 
 async function _readSandboxWorkspaceFile(
-  file: AgentProjectSourceRef
+  file: AgentProjectSourceRef,
+  workspaceRoot: string
 ): Promise<Buffer> {
   const handle = await open(
     file.absolutePath,
@@ -250,7 +256,18 @@ async function _readSandboxWorkspaceFile(
   );
   try {
     const info = await handle.stat();
-    if (!info.isFile()) {
+    const canonicalPath = await realpath(file.absolutePath);
+    const relativePath = path.relative(workspaceRoot, canonicalPath);
+    const canonicalInfo = await stat(canonicalPath);
+    if (
+      relativePath.startsWith(`..${path.sep}`)
+      || relativePath === ".."
+      || path.isAbsolute(relativePath)
+      || !info.isFile()
+      || !canonicalInfo.isFile()
+      || info.dev !== canonicalInfo.dev
+      || info.ino !== canonicalInfo.ino
+    ) {
       throw new TypeError(
         `Sandbox workspace entry must remain a regular file: ${file.logicalPath}`
       );

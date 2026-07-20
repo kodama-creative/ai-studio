@@ -86,6 +86,38 @@ describe("DesktopSandboxManager", () => {
     expect(await manager.status("thread-lost")).toEqual({ state: "ready" });
   });
 
+  test("persists cleanup ownership before fresh provider acquisition", async () => {
+    const root = await _root();
+    const provider = new FakeProvider();
+    const registryFile = path.join(root, "sandboxes", "registry.json");
+    let registryDuringAcquire: unknown;
+    provider.onAcquire = async () => {
+      registryDuringAcquire = JSON.parse(await readFile(registryFile, "utf8"));
+      throw new Error("simulated process exit after provider acquisition");
+    };
+    const manager = new DesktopSandboxManager({ homePath: root, provider });
+    await manager.start();
+
+    expect(await _rejection(manager.prepareTurn({
+      sessionId: "thread-interrupted",
+      turnId: "turn-one",
+      seed: []
+    }))).toMatchObject({
+      message: "simulated process exit after provider acquisition"
+    });
+    expect(registryDuringAcquire).toMatchObject({
+      sessions: { "thread-interrupted": { state: "cleanupPending" } }
+    });
+
+    provider.onAcquire = undefined;
+    const restarted = new DesktopSandboxManager({ homePath: root, provider });
+    await restarted.start();
+    expect(provider.deleted).toContain("thread-interrupted");
+    expect(JSON.parse(await readFile(registryFile, "utf8"))).toMatchObject({
+      sessions: {}
+    });
+  });
+
   test("blocks Run until staged attachments commit or compensate", async () => {
     const root = await _root();
     const provider = new FakeProvider();
@@ -165,10 +197,12 @@ describe("DesktopSandboxManager", () => {
 
 class FakeProvider implements SandboxProvider {
   expectedExisting: boolean[] = [];
+  deleted: string[] = [];
   stopped: string[] = [];
   discarded: string[] = [];
   lost = false;
   deleteFailures = 0;
+  onAcquire?: () => Promise<void>;
 
   async readiness() { return { state: "ready" as const }; }
 
@@ -178,6 +212,7 @@ class FakeProvider implements SandboxProvider {
     sessionId: string;
   }): Promise<SandboxProviderSession> {
     this.expectedExisting.push(input.expectedExisting === true);
+    await this.onAcquire?.();
     if (this.lost && input.expectedExisting) {
       throw new SandboxWorkspaceLostError();
     }
@@ -200,7 +235,8 @@ class FakeProvider implements SandboxProvider {
 
   async stop(sessionId: string) { this.stopped.push(sessionId); }
 
-  async delete() {
+  async delete(sessionId: string) {
+    this.deleted.push(sessionId);
     if (this.deleteFailures > 0) {
       this.deleteFailures -= 1;
       throw new Error("cleanup failed");

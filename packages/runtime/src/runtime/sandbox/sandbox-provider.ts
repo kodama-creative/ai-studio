@@ -34,10 +34,12 @@ export interface SandboxProviderSession {
   readonly executionEnv: ExecutionEnv;
   readonly sessionId: string;
   discardTurn(input: {
+    readonly stagingId: string;
     readonly turnId: string;
   }): Promise<void>;
   stageTurn(input: {
     readonly attachments: readonly SandboxAttachmentInput[];
+    readonly stagingId: string;
     readonly turnId: string;
   }): Promise<readonly StagedSandboxAttachment[]>;
   workspaceManifest(): Promise<readonly string[]>;

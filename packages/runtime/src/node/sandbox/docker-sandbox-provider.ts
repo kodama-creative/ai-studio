@@ -235,20 +235,26 @@ class DockerSandboxSession implements SandboxProviderSession {
     this.executionEnv = new DockerExecutionEnv(_runner, _container);
   }
 
-  async discardTurn(input: { readonly turnId: string; }): Promise<void> {
+  async discardTurn(input: {
+    readonly stagingId: string;
+    readonly turnId: string;
+  }): Promise<void> {
     await _invokeSandboxHelper(this._runner, this._container, {
       operation: "discardTurn",
+      stagingId: input.stagingId,
       turnId: input.turnId
     });
   }
 
   async stageTurn(input: {
     readonly attachments: readonly SandboxAttachmentInput[];
+    readonly stagingId: string;
     readonly turnId: string;
   }): Promise<readonly StagedSandboxAttachment[]> {
     _assertAttachments(input.attachments);
     return _invokeSandboxHelper(this._runner, this._container, {
       operation: "stageTurn",
+      stagingId: input.stagingId,
       turnId: input.turnId,
       attachments: input.attachments.map(attachment => ({
         id: attachment.id,

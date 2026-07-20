@@ -44,6 +44,7 @@ describe("DockerSandboxProvider", () => {
     expect(runner.helperOperations).toEqual(["seed"]);
 
     const staged = await session.stageTurn({
+      stagingId: "staging-one",
       turnId: "turn-one",
       attachments: [{
         id: "attachment-one",
@@ -131,6 +132,7 @@ describe("DockerSandboxProvider", () => {
     });
 
     expect(await _rejection(session.stageTurn({
+      stagingId: "staging-large",
       turnId: "turn-large",
       attachments: Array.from({ length: 21 }, (_, index) => ({
         id: `attachment-${index}`,

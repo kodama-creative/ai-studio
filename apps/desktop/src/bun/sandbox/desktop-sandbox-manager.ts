@@ -24,6 +24,7 @@ interface SandboxRegistryRecord {
 
 interface SandboxAttachmentTransaction {
   readonly attachments?: readonly StagedSandboxAttachment[];
+  readonly stagingId: string;
   readonly turnId: string;
 }
 
@@ -92,27 +93,17 @@ export class DesktopSandboxManager implements SandboxProvider {
   }
 
   async prepareTurn(input: {
-    readonly attachments?: readonly SandboxAttachmentInput[];
     readonly seed: readonly CompiledSandboxWorkspaceFile[];
     readonly sessionId: string;
     readonly turnId: string;
-  }): Promise<{
-    readonly attachments: readonly StagedSandboxAttachment[];
-  } & SandboxTurnEnvironment> {
+  }): Promise<SandboxTurnEnvironment> {
     if (this._hasPendingAttachments(input.sessionId)) {
       throw new Error("Sandbox attachment staging is incomplete.");
     }
     const session = await this.acquire(input);
-    const attachments = input.attachments?.length
-      ? await session.stageTurn({
-        attachments: input.attachments,
-        turnId: input.turnId
-      })
-      : [];
     return {
       executionEnv: session.executionEnv,
-      workspaceManifest: await session.workspaceManifest(),
-      attachments
+      workspaceManifest: await session.workspaceManifest()
     };
   }
 
@@ -127,24 +118,31 @@ export class DesktopSandboxManager implements SandboxProvider {
     const previous = this._registry.sessions[input.sessionId]
       ?.pendingAttachments?.[input.messageId];
     if (previous) {
-      await session.discardTurn({ turnId: previous.turnId });
+      await session.discardTurn({
+        stagingId: previous.stagingId,
+        turnId: previous.turnId
+      });
     }
+    const stagingId = randomUUID();
     await this._setPendingAttachment(input.sessionId, input.messageId, {
+      stagingId,
       turnId: input.turnId
     });
     try {
       const attachments = await session.stageTurn({
         attachments: input.attachments,
+        stagingId,
         turnId: input.turnId
       });
       await this._setPendingAttachment(input.sessionId, input.messageId, {
         attachments,
+        stagingId,
         turnId: input.turnId
       });
       return attachments;
     } catch (error) {
       try {
-        await session.discardTurn({ turnId: input.turnId });
+        await session.discardTurn({ stagingId, turnId: input.turnId });
         await this._clearPendingAttachment(input.sessionId, input.messageId);
       } catch (cleanupError) {
         throw new AggregateError(
@@ -165,7 +163,10 @@ export class DesktopSandboxManager implements SandboxProvider {
       ?.pendingAttachments?.[input.messageId];
     if (!pending) { return; }
     const session = await this.acquire(input);
-    await session.discardTurn({ turnId: pending.turnId });
+    await session.discardTurn({
+      stagingId: pending.stagingId,
+      turnId: pending.turnId
+    });
     await this._clearPendingAttachment(input.sessionId, input.messageId);
   }
 
@@ -233,6 +234,19 @@ export class DesktopSandboxManager implements SandboxProvider {
     if (record?.state === "cleanupPending") {
       throw new Error("Sandbox cleanup is pending");
     }
+    const fresh = !record && input.expectedExisting !== true;
+    if (!record) {
+      this._registry = {
+        ...this._registry,
+        sessions: {
+          ...this._registry.sessions,
+          [input.sessionId]: {
+            state: fresh ? "cleanupPending" : "active"
+          }
+        }
+      };
+      await this._saveRegistry();
+    }
     try {
       const session = await this._provider.acquire({
         expectedExisting: input.expectedExisting === true
@@ -240,7 +254,7 @@ export class DesktopSandboxManager implements SandboxProvider {
         seed: input.seed,
         sessionId: input.sessionId
       });
-      if (!record) {
+      if (fresh) {
         this._registry = {
           ...this._registry,
           sessions: {
@@ -431,6 +445,8 @@ function _validRegistryRecord(value: unknown): value is SandboxRegistryRecord {
       messageId.length > 0
       && entry !== null
       && typeof entry === "object"
+      && typeof entry.stagingId === "string"
+      && entry.stagingId.length > 0
       && typeof entry.turnId === "string"
       && entry.turnId.length > 0
       && (entry.attachments === undefined

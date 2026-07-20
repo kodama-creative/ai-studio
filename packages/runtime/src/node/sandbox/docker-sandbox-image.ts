@@ -18,6 +18,7 @@ import { appendFile, lstat, mkdir, mkdtemp, open, readFile, readdir, realpath, r
 import path from "node:path";
 
 const WORKSPACE = "/workspace";
+const STAGING_OWNER_FILE = ".llm-space-staging-owner";
 
 function _result(value) {
   process.stdout.write(JSON.stringify({ type: "result", ok: true, value }) + "\n");
@@ -124,14 +125,21 @@ async function _seed(input) {
 async function _stageTurn(input) {
   const attachments = input.attachments ?? [];
   const turnKey = createHash("sha256").update(String(input.turnId)).digest("hex").slice(0, 24);
+  const stagingId = String(input.stagingId);
+  const stagingKey = createHash("sha256").update(stagingId).digest("hex").slice(0, 24);
   const destinationName = ".llm-space-attachments-" + turnKey;
   const destination = path.join(WORKSPACE, destinationName);
-  const temporary = path.join(WORKSPACE, destinationName + ".tmp");
-  await mkdir(temporary, { recursive: true });
+  const temporary = path.join(WORKSPACE, ".llm-space-staging-" + stagingKey + ".tmp");
   const staged = [];
+  let ownsTemporary = false;
   try {
+    await mkdir(temporary);
+    ownsTemporary = true;
+    await writeFile(path.join(temporary, STAGING_OWNER_FILE), stagingId, {
+      flag: "wx"
+    });
     for (const attachment of attachments) {
-      if (!_safeName(attachment.name)) {
+      if (!_safeName(attachment.name) || attachment.name === STAGING_OWNER_FILE) {
         throw new Error("Invalid Sandbox attachment name");
       }
       const content = Buffer.from(attachment.contentBase64, "base64");
@@ -148,24 +156,38 @@ async function _stageTurn(input) {
     }
     await rename(temporary, destination);
   } catch (error) {
-    await rm(temporary, { recursive: true, force: true });
+    if (ownsTemporary) {
+      await rm(temporary, { recursive: true, force: true });
+    }
     throw error;
   }
   _result(staged);
 }
 
+async function _discardOwnedDirectory(target, stagingId) {
+  try {
+    const owner = await readFile(path.join(target, STAGING_OWNER_FILE), "utf8");
+    if (owner === stagingId) {
+      await rm(target, { recursive: true, force: true });
+    }
+  } catch (error) {
+    if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
+      throw error;
+    }
+  }
+}
+
 async function _discardTurn(input) {
   const turnKey = createHash("sha256").update(String(input.turnId)).digest("hex").slice(0, 24);
+  const stagingId = String(input.stagingId);
+  const stagingKey = createHash("sha256").update(stagingId).digest("hex").slice(0, 24);
   const destinationName = ".llm-space-attachments-" + turnKey;
   await Promise.all([
-    rm(path.join(WORKSPACE, destinationName), {
-      recursive: true,
-      force: true
-    }),
-    rm(path.join(WORKSPACE, destinationName + ".tmp"), {
-      recursive: true,
-      force: true
-    })
+    _discardOwnedDirectory(path.join(WORKSPACE, destinationName), stagingId),
+    _discardOwnedDirectory(
+      path.join(WORKSPACE, ".llm-space-staging-" + stagingKey + ".tmp"),
+      stagingId
+    )
   ]);
   _result();
 }

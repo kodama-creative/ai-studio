@@ -57,6 +57,7 @@ dockerTest("real Docker isolates, retains, reconstructs, and deletes a Sandbox S
       .toEqual({ ok: true, value: "seed\n" });
 
     const staged = await first.stageTurn({
+      stagingId: "staging-one",
       turnId: "turn-one",
       attachments: [{
         id: "attachment-one",
@@ -86,6 +87,7 @@ dockerTest("real Docker isolates, retains, reconstructs, and deletes a Sandbox S
       "keep"
     )).toEqual({ ok: true, value: undefined });
     expect(await _rejection(first.stageTurn({
+      stagingId: "atomic-failure-staging",
       turnId: failedTurnId,
       attachments: [{
         id: "atomic-failure-attachment",
@@ -101,21 +103,62 @@ dockerTest("real Docker isolates, retains, reconstructs, and deletes a Sandbox S
       `${failedDestination}/existing.txt`
     )).toEqual({ ok: true, value: "keep" });
 
-    const interruptedTurnId = "interrupted-staging";
-    const interruptedTurnKey = createHash("sha256").update(interruptedTurnId)
+    const interruptedTurnId = "interrupted-turn";
+    const interruptedStagingId = "interrupted-staging";
+    const interruptedStagingKey = createHash("sha256")
+      .update(interruptedStagingId)
       .digest("hex")
       .slice(0, 24);
     const interruptedTemporary =
-      `/workspace/.llm-space-attachments-${interruptedTurnKey}.tmp`;
+      `/workspace/.llm-space-staging-${interruptedStagingKey}.tmp`;
     expect(await first.executionEnv.createDir(interruptedTemporary))
       .toEqual({ ok: true, value: undefined });
+    expect(await first.executionEnv.writeFile(
+      `${interruptedTemporary}/.llm-space-staging-owner`,
+      interruptedStagingId
+    )).toEqual({ ok: true, value: undefined });
     expect(await first.executionEnv.writeFile(
       `${interruptedTemporary}/orphan.txt`,
       "orphan"
     )).toEqual({ ok: true, value: undefined });
-    await first.discardTurn({ turnId: interruptedTurnId });
+    await first.discardTurn({
+      stagingId: interruptedStagingId,
+      turnId: interruptedTurnId
+    });
     expect(await first.executionEnv.exists(interruptedTemporary))
       .toEqual({ ok: true, value: false });
+
+    const collisionStagingId = "source-owned-staging-collision";
+    const collisionStagingKey = createHash("sha256")
+      .update(collisionStagingId)
+      .digest("hex")
+      .slice(0, 24);
+    const collisionTemporary =
+      `/workspace/.llm-space-staging-${collisionStagingKey}.tmp`;
+    expect(await first.executionEnv.createDir(collisionTemporary))
+      .toEqual({ ok: true, value: undefined });
+    expect(await first.executionEnv.writeFile(
+      `${collisionTemporary}/source-owned.txt`,
+      "keep"
+    )).toEqual({ ok: true, value: undefined });
+    expect(await _rejection(first.stageTurn({
+      stagingId: collisionStagingId,
+      turnId: "collision-turn",
+      attachments: [{
+        id: "collision-attachment",
+        name: "notes.txt",
+        fingerprint:
+          "ab5aa97074c454a0632057e704220d9a6678fbf773a0a5806fc09b8173b07309",
+        content: new TextEncoder().encode("notes")
+      }]
+    }))).toMatchObject({ message: expect.stringMatching(/EEXIST/) });
+    await first.discardTurn({
+      stagingId: collisionStagingId,
+      turnId: "collision-turn"
+    });
+    expect(await first.executionEnv.readTextFile(
+      `${collisionTemporary}/source-owned.txt`
+    )).toEqual({ ok: true, value: "keep" });
 
     expect(await first.executionEnv.writeFile("generated.txt", "durable"))
       .toEqual({ ok: true, value: undefined });
