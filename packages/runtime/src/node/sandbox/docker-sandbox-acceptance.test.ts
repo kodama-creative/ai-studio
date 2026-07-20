@@ -16,7 +16,9 @@ dockerTest("real Docker isolates, retains, reconstructs, and deletes a Sandbox S
   const provider = new DockerSandboxProvider({ runner });
   const firstId = `acceptance-first-${crypto.randomUUID()}`;
   const secondId = `acceptance-second-${crypto.randomUUID()}`;
+  const interruptedId = `acceptance-interrupted-${crypto.randomUUID()}`;
   const firstNames = _names(firstId);
+  const interruptedNames = _names(interruptedId);
   const secret = `host-secret-${crypto.randomUUID()}`;
   const seed = [{
     path: "README.md",
@@ -28,6 +30,25 @@ dockerTest("real Docker isolates, retains, reconstructs, and deletes a Sandbox S
   process.env.LLM_SPACE_SANDBOX_ACCEPTANCE_SECRET = secret;
   try {
     expect(await provider.readiness()).toEqual({ state: "ready" });
+    const seedFingerprint = createHash("sha256").update(JSON.stringify(
+      seed.map(file => ({
+        path: file.path,
+        size: file.size,
+        fingerprint: file.fingerprint
+      }))
+    )).digest("hex");
+    expect((await runner.run([
+      "volume",
+      "create",
+      "--label",
+      `llm-space.sandbox-seed=${seedFingerprint}`,
+      interruptedNames.volume
+    ])).exitCode).toBe(0);
+    expect(await _rejection(provider.acquire({
+      sessionId: interruptedId,
+      seed
+    }))).toBeInstanceOf(SandboxWorkspaceLostError);
+
     const first = await provider.acquire({
       sessionId: firstId,
       seed
@@ -48,15 +69,16 @@ dockerTest("real Docker isolates, retains, reconstructs, and deletes a Sandbox S
     expect(await first.executionEnv.readTextFile(staged[0]!.path))
       .toEqual({ ok: true, value: "notes" });
     expect(await first.workspaceManifest()).toEqual([
-      "README.md",
-      "attachments/"
+      expect.stringMatching(/^\.llm-space-attachments-[0-9a-f]{24}\/$/),
+      "README.md"
     ]);
 
     const failedTurnId = "atomic-staging-failure";
     const failedTurnKey = createHash("sha256").update(failedTurnId)
       .digest("hex")
       .slice(0, 24);
-    const failedDestination = `/workspace/attachments/${failedTurnKey}`;
+    const failedDestination =
+      `/workspace/.llm-space-attachments-${failedTurnKey}`;
     expect(await first.executionEnv.createDir(failedDestination))
       .toEqual({ ok: true, value: undefined });
     expect(await first.executionEnv.writeFile(
@@ -161,7 +183,8 @@ dockerTest("real Docker isolates, retains, reconstructs, and deletes a Sandbox S
     delete process.env.LLM_SPACE_SANDBOX_ACCEPTANCE_SECRET;
     await Promise.allSettled([
       provider.delete(firstId),
-      provider.delete(secondId)
+      provider.delete(secondId),
+      provider.delete(interruptedId)
     ]);
   }
 }, 120_000);

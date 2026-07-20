@@ -1,9 +1,11 @@
 import {
   type BuiltinTool,
   type CustomModel,
+  formatSandboxAttachmentsForPi,
   isDangerousBashCommand,
   type McpTool,
   type ProjectTool,
+  type SandboxAttachmentDescriptor,
   type Tool
 } from "@llm-space/core";
 import { streamAgent } from "@llm-space/core/server";
@@ -413,6 +415,7 @@ export class StreamThreadController {
     };
     const sessionId = runtimeState?.session.snapshot.id
       ?? payload.runtime.threadId;
+    const sandboxSessionId = payload.runtime.threadId;
     const threadRecord = await this._externalAgentProjects.readThread(
       payload.runtime.projectId,
       payload.runtime.threadId
@@ -420,15 +423,23 @@ export class StreamThreadController {
     const profile = threadRecord.thread.runtimeProfile?.type
       ?? "desktopDirect";
     if (profile === "desktopSandbox") {
+      await this._sandboxes?.reconcileAttachmentStaging(
+        sandboxSessionId,
+        threadRecord.thread.sandboxAttachments ?? {}
+      );
       await this._externalAgentProjects.lockSandboxAttachments(
         payload.runtime.projectId,
-        payload.runtime.threadId
+        payload.runtime.threadId,
+        _sandboxAttachmentMessageIds(
+          threadRecord.thread.sandboxAttachments ?? {},
+          payload.request.context.messages
+        )
       );
     }
     const sandbox = profile === "desktopSandbox"
       ? await this._prepareSandboxTurn({
         projectId: payload.runtime.projectId,
-        sessionId,
+        sessionId: sandboxSessionId,
         snapshot: threadRecord.thread.agentRuntime?.snapshot,
         turnId: activeRunId ?? payload.streamId
       })
@@ -740,6 +751,26 @@ export class StreamThreadController {
         : "custom"
     };
   }
+}
+
+function _sandboxAttachmentMessageIds(
+  attachments: Readonly<
+    Record<string, readonly SandboxAttachmentDescriptor[]>
+  >,
+  messages: StreamThreadRequestPayload["request"]["context"]["messages"]
+): string[] {
+  const userText = messages
+    .filter(message => message.role === "user")
+    .flatMap(message => (
+      Array.isArray(message.content) ? message.content : []
+    ))
+    .filter(content => content.type === "text")
+    .map(content => content.text);
+  return Object.entries(attachments)
+    .filter(([, descriptors]) => userText.includes(
+      formatSandboxAttachmentsForPi(descriptors)
+    ))
+    .map(([messageId]) => messageId);
 }
 
 function _localServerText(message: AgentMessage | undefined): string {

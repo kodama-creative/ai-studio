@@ -89,6 +89,9 @@ export class DockerSandboxProvider implements SandboxProvider {
     if (!volumeExists && input.expectedExisting) {
       throw new SandboxWorkspaceLostError();
     }
+    if (volumeExists && input.expectedExisting !== true) {
+      throw new SandboxWorkspaceLostError();
+    }
     const newVolume = !volumeExists;
     if (newVolume) {
       await this._runRequired([
@@ -232,6 +235,13 @@ class DockerSandboxSession implements SandboxProviderSession {
     this.executionEnv = new DockerExecutionEnv(_runner, _container);
   }
 
+  async discardTurn(input: { readonly turnId: string; }): Promise<void> {
+    await _invokeSandboxHelper(this._runner, this._container, {
+      operation: "discardTurn",
+      turnId: input.turnId
+    });
+  }
+
   async stageTurn(input: {
     readonly attachments: readonly SandboxAttachmentInput[];
     readonly turnId: string;
@@ -356,9 +366,6 @@ function _assertSeed(seed: readonly CompiledSandboxWorkspaceFile[]): void {
   }
   let total = 0;
   for (const file of seed) {
-    if (file.path === "attachments" || file.path.startsWith("attachments/")) {
-      throw new TypeError("Sandbox workspace reserves /workspace/attachments");
-    }
     const content = Buffer.from(file.contentBase64, "base64");
     total += content.byteLength;
     if (content.byteLength !== file.size) {

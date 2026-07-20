@@ -124,11 +124,11 @@ async function _seed(input) {
 async function _stageTurn(input) {
   const attachments = input.attachments ?? [];
   const turnKey = createHash("sha256").update(String(input.turnId)).digest("hex").slice(0, 24);
-  const attachmentRoot = path.join(WORKSPACE, "attachments");
-  const destination = path.join(attachmentRoot, turnKey);
+  const destinationName = ".llm-space-attachments-" + turnKey;
+  const destination = path.join(WORKSPACE, destinationName);
   const temporary = path.join(
-    attachmentRoot,
-    "." + turnKey + "." + randomUUID() + ".tmp"
+    WORKSPACE,
+    "." + destinationName + "." + randomUUID() + ".tmp"
   );
   await mkdir(temporary, { recursive: true });
   const staged = [];
@@ -145,7 +145,7 @@ async function _stageTurn(input) {
         name: attachment.name,
         fingerprint: attachment.fingerprint,
         ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}),
-        path: path.posix.join("/workspace/attachments", turnKey, attachment.name),
+        path: path.posix.join("/workspace", destinationName, attachment.name),
         size: content.byteLength
       });
     }
@@ -155,6 +155,15 @@ async function _stageTurn(input) {
     throw error;
   }
   _result(staged);
+}
+
+async function _discardTurn(input) {
+  const turnKey = createHash("sha256").update(String(input.turnId)).digest("hex").slice(0, 24);
+  await rm(path.join(WORKSPACE, ".llm-space-attachments-" + turnKey), {
+    recursive: true,
+    force: true
+  });
+  _result();
 }
 
 async function _manifest() {
@@ -364,6 +373,7 @@ try {
   const input = JSON.parse(await Bun.stdin.text());
   if (input.operation === "seed") await _seed(input);
   else if (input.operation === "stageTurn") await _stageTurn(input);
+  else if (input.operation === "discardTurn") await _discardTurn(input);
   else if (input.operation === "manifest") await _manifest();
   else if (input.operation === "exec") await _execute(input);
   else if (input.operation === "abort") await _abortCommand(input);

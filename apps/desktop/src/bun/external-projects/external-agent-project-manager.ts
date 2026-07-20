@@ -486,11 +486,14 @@ export class ExternalAgentProjectManager {
 
   async lockSandboxAttachments(
     projectId: string,
-    threadId: string
+    threadId: string,
+    messageIds: readonly string[]
   ): Promise<void> {
     const existing = await this._readThreadFile(projectId, threadId);
     const thread = normalizeThread(existing.thread);
-    const attachmentMessageIds = Object.keys(thread.sandboxAttachments ?? {});
+    const selectedMessageIds = new Set(messageIds);
+    const attachmentMessageIds = Object.keys(thread.sandboxAttachments ?? {})
+      .filter(messageId => selectedMessageIds.has(messageId));
     if (attachmentMessageIds.length === 0) { return; }
     const locked = [...new Set([
       ...(thread.lockedSandboxAttachmentMessageIds ?? []),

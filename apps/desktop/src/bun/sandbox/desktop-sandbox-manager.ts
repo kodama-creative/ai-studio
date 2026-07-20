@@ -3,6 +3,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { SandboxWorkspaceLostError } from "@llm-space/runtime/node";
 
+import type { SandboxAttachmentDescriptor } from "@llm-space/core";
 import type {
   CompiledSandboxWorkspaceFile,
   SandboxAttachmentInput,
@@ -16,7 +17,13 @@ import type {
 import type { ExternalAgentProjectRuntimeStatus } from "../../shared/external-agent-project";
 
 interface SandboxRegistryRecord {
+  readonly pendingAttachments?: Record<string, SandboxAttachmentTransaction>;
   readonly state: "active" | "cleanupPending" | "lost";
+}
+
+interface SandboxAttachmentTransaction {
+  readonly attachments?: readonly StagedSandboxAttachment[];
+  readonly turnId: string;
 }
 
 interface SandboxRegistry {
@@ -91,6 +98,9 @@ export class DesktopSandboxManager implements SandboxProvider {
   }): Promise<{
     readonly attachments: readonly StagedSandboxAttachment[];
   } & SandboxTurnEnvironment> {
+    if (this._hasPendingAttachments(input.sessionId)) {
+      throw new Error("Sandbox attachment staging is incomplete.");
+    }
     const session = await this.acquire(input);
     const attachments = input.attachments?.length
       ? await session.stageTurn({
@@ -103,6 +113,113 @@ export class DesktopSandboxManager implements SandboxProvider {
       workspaceManifest: await session.workspaceManifest(),
       attachments
     };
+  }
+
+  async stageAttachments(input: {
+    readonly attachments: readonly SandboxAttachmentInput[];
+    readonly messageId: string;
+    readonly seed: readonly CompiledSandboxWorkspaceFile[];
+    readonly sessionId: string;
+    readonly turnId: string;
+  }): Promise<readonly StagedSandboxAttachment[]> {
+    const session = await this.acquire(input);
+    const previous = this._registry.sessions[input.sessionId]
+      ?.pendingAttachments?.[input.messageId];
+    if (previous) {
+      await session.discardTurn({ turnId: previous.turnId });
+    }
+    await this._setPendingAttachment(input.sessionId, input.messageId, {
+      turnId: input.turnId
+    });
+    try {
+      const attachments = await session.stageTurn({
+        attachments: input.attachments,
+        turnId: input.turnId
+      });
+      await this._setPendingAttachment(input.sessionId, input.messageId, {
+        attachments,
+        turnId: input.turnId
+      });
+      return attachments;
+    } catch (error) {
+      try {
+        await session.discardTurn({ turnId: input.turnId });
+        await this._clearPendingAttachment(input.sessionId, input.messageId);
+      } catch (cleanupError) {
+        throw new AggregateError(
+          [error, cleanupError],
+          "Sandbox attachment staging and cleanup failed."
+        );
+      }
+      throw error;
+    }
+  }
+
+  async abortAttachmentStaging(input: {
+    readonly messageId: string;
+    readonly seed: readonly CompiledSandboxWorkspaceFile[];
+    readonly sessionId: string;
+  }): Promise<void> {
+    const pending = this._registry.sessions[input.sessionId]
+      ?.pendingAttachments?.[input.messageId];
+    if (!pending) { return; }
+    const session = await this.acquire(input);
+    await session.discardTurn({ turnId: pending.turnId });
+    await this._clearPendingAttachment(input.sessionId, input.messageId);
+  }
+
+  async completeAttachmentStaging(input: {
+    readonly attachments: readonly StagedSandboxAttachment[];
+    readonly messageId: string;
+    readonly sessionId: string;
+  }): Promise<void> {
+    const pending = this._registry.sessions[input.sessionId]
+      ?.pendingAttachments?.[input.messageId];
+    if (!pending?.attachments || !_sameAttachments(
+      pending.attachments,
+      input.attachments
+    )) {
+      throw new Error("Sandbox attachment staging transaction is unavailable.");
+    }
+    await this._clearPendingAttachment(input.sessionId, input.messageId);
+  }
+
+  async reconcileAttachmentStaging(
+    sessionId: string,
+    attachments: Readonly<Record<
+      string,
+      readonly SandboxAttachmentDescriptor[]
+    >>
+  ): Promise<void> {
+    const record = this._registry.sessions[sessionId];
+    const pending = record?.pendingAttachments;
+    if (!record || !pending || Object.keys(pending).length === 0) { return; }
+    const unresolved = Object.fromEntries(
+      Object.entries(pending).filter(([messageId, transaction]) =>
+        !transaction.attachments
+        || !_sameAttachments(
+          transaction.attachments,
+          attachments[messageId] ?? []
+        ))
+    );
+    if (Object.keys(unresolved).length !== Object.keys(pending).length) {
+      this._registry = {
+        ...this._registry,
+        sessions: {
+          ...this._registry.sessions,
+          [sessionId]: {
+            ...record,
+            pendingAttachments: Object.keys(unresolved).length > 0
+              ? unresolved
+              : undefined
+          }
+        }
+      };
+      await this._saveRegistry();
+    }
+    if (Object.keys(unresolved).length > 0) {
+      throw new Error("Sandbox attachment staging is incomplete.");
+    }
   }
 
   async acquire(input: {
@@ -190,6 +307,62 @@ export class DesktopSandboxManager implements SandboxProvider {
     this._registry = { ...this._registry, sessions };
   }
 
+  private _hasPendingAttachments(sessionId: string): boolean {
+    return Object.keys(
+      this._registry.sessions[sessionId]?.pendingAttachments ?? {}
+    ).length > 0;
+  }
+
+  private async _setPendingAttachment(
+    sessionId: string,
+    messageId: string,
+    transaction: SandboxAttachmentTransaction
+  ): Promise<void> {
+    const record = this._registry.sessions[sessionId];
+    if (record?.state !== "active") {
+      throw new Error("Sandbox Session is unavailable.");
+    }
+    this._registry = {
+      ...this._registry,
+      sessions: {
+        ...this._registry.sessions,
+        [sessionId]: {
+          ...record,
+          pendingAttachments: {
+            ...record.pendingAttachments,
+            [messageId]: transaction
+          }
+        }
+      }
+    };
+    await this._saveRegistry();
+  }
+
+  private async _clearPendingAttachment(
+    sessionId: string,
+    messageId: string
+  ): Promise<void> {
+    const record = this._registry.sessions[sessionId];
+    if (!record?.pendingAttachments?.[messageId]) { return; }
+    const pendingAttachments = Object.fromEntries(
+      Object.entries(record.pendingAttachments)
+        .filter(([candidate]) => candidate !== messageId)
+    );
+    this._registry = {
+      ...this._registry,
+      sessions: {
+        ...this._registry.sessions,
+        [sessionId]: {
+          ...record,
+          pendingAttachments: Object.keys(pendingAttachments).length > 0
+            ? pendingAttachments
+            : undefined
+        }
+      }
+    };
+    await this._saveRegistry();
+  }
+
   private async _loadRegistry(): Promise<SandboxRegistry> {
     try {
       const value = JSON.parse(await readFile(this._registryFile, "utf8")) as
@@ -208,13 +381,7 @@ export class DesktopSandboxManager implements SandboxProvider {
           Object.entries(value.sessions).filter((entry): entry is [
             string,
             SandboxRegistryRecord
-          ] => Boolean(
-            entry[0]
-            && entry[1]
-            && (entry[1].state === "active"
-              || entry[1].state === "cleanupPending"
-              || entry[1].state === "lost")
-          ))
+          ] => Boolean(entry[0] && _validRegistryRecord(entry[1])))
         )
       };
     } catch (error) {
@@ -234,4 +401,56 @@ export class DesktopSandboxManager implements SandboxProvider {
     );
     await rename(temporary, this._registryFile);
   }
+}
+
+function _sameAttachments(
+  left: readonly StagedSandboxAttachment[],
+  right: readonly SandboxAttachmentDescriptor[]
+): boolean {
+  return left.length === right.length && left.every((attachment, index) => {
+    const candidate = right[index];
+    return attachment.id === candidate?.id
+      && attachment.name === candidate.name
+      && attachment.path === candidate.path
+      && attachment.size === candidate.size
+      && attachment.fingerprint === candidate.fingerprint
+      && attachment.mimeType === candidate.mimeType;
+  });
+}
+
+function _validRegistryRecord(value: unknown): value is SandboxRegistryRecord {
+  if (!value || typeof value !== "object") { return false; }
+  const record = value as Partial<SandboxRegistryRecord>;
+  const validState = record.state === "active"
+    || record.state === "cleanupPending"
+    || record.state === "lost";
+  if (!validState || record.pendingAttachments === undefined) {
+    return validState;
+  }
+  return record.pendingAttachments !== null
+    && typeof record.pendingAttachments === "object"
+    && !Array.isArray(record.pendingAttachments)
+    && Object.entries(record.pendingAttachments).every(([messageId, entry]) =>
+      messageId.length > 0
+      && entry !== null
+      && typeof entry === "object"
+      && typeof entry.turnId === "string"
+      && entry.turnId.length > 0
+      && (entry.attachments === undefined
+        || (Array.isArray(entry.attachments)
+          && entry.attachments.every(_validStagedAttachment))));
+}
+
+function _validStagedAttachment(
+  value: unknown
+): value is StagedSandboxAttachment {
+  if (!value || typeof value !== "object") { return false; }
+  const attachment = value as Partial<StagedSandboxAttachment>;
+  return typeof attachment.id === "string"
+    && typeof attachment.name === "string"
+    && typeof attachment.path === "string"
+    && typeof attachment.size === "number"
+    && typeof attachment.fingerprint === "string"
+    && (attachment.mimeType === undefined
+      || typeof attachment.mimeType === "string");
 }

@@ -7,7 +7,9 @@ export const SandboxAttachmentDescriptor = Type.Object({
     maxLength: 240,
     pattern: "^[^/\\\\\\x00-\\x1f\\x7f]+$"
   }),
-  path: Type.String({ pattern: "^/workspace/attachments/" }),
+  path: Type.String({
+    pattern: "^/workspace/(?!(?:\\.\\.?)(?:/|$))(?!.*(?:/\\.\\.?)(?:/|$))[^/\\\\\\x00-\\x1f\\x7f]+(?:/[^/\\\\\\x00-\\x1f\\x7f]+)*$"
+  }),
   size: Type.Integer({ minimum: 0, maximum: 25 * 1024 * 1024 }),
   fingerprint: Type.String({ pattern: "^[0-9a-f]{64}$" }),
   mimeType: Type.Optional(Type.String())

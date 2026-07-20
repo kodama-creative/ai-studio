@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, expect, test } from "bun:test";
 
 import {
@@ -7,6 +8,10 @@ import {
   DockerSandboxProvider
 } from "./docker-sandbox-provider";
 import { SandboxWorkspaceLostError } from "../../runtime/sandbox/sandbox-workspace-lost-error";
+
+const TURN_ONE_DIRECTORY = `.llm-space-attachments-${createHash("sha256")
+  .update("turn-one").digest("hex")
+  .slice(0, 24)}/`;
 
 describe("DockerSandboxProvider", () => {
   test("creates one fixed isolated Session, stages a Turn, and deletes it", async () => {
@@ -55,8 +60,8 @@ describe("DockerSandboxProvider", () => {
       size: 5
     })]);
     expect(await session.workspaceManifest()).toEqual([
-      "README.md",
-      "attachments/"
+      TURN_ONE_DIRECTORY,
+      "README.md"
     ]);
     expect(await session.executionEnv.writeFile("generated.txt", "hello"))
       .toEqual({ ok: true, value: undefined });
@@ -103,6 +108,20 @@ describe("DockerSandboxProvider", () => {
     expect(runner.helperOperations).toEqual([]);
   });
 
+  test("rejects an uncommitted fresh acquire after a Host crash", async () => {
+    const runner = new FakeDockerRunner();
+    runner.imageExists = true;
+    runner.volumeExists = true;
+    runner.seedFingerprint = createHash("sha256").update("[]").digest("hex");
+    const provider = new DockerSandboxProvider({ runner });
+
+    expect(await _rejection(provider.acquire({
+      sessionId: "interrupted-session",
+      seed: []
+    }))).toBeInstanceOf(SandboxWorkspaceLostError);
+    expect(runner.helperOperations).toEqual([]);
+  });
+
   test("rejects an oversized Turn before Docker receives partial staging", async () => {
     const runner = new FakeDockerRunner();
     const provider = new DockerSandboxProvider({ runner });
@@ -123,11 +142,11 @@ describe("DockerSandboxProvider", () => {
     expect(runner.helperOperations).toEqual(["seed"]);
   });
 
-  test("reserves the attachment delivery namespace from source seed", async () => {
+  test("accepts attachment-named source paths without reserving a namespace", async () => {
     const runner = new FakeDockerRunner();
     const provider = new DockerSandboxProvider({ runner });
 
-    expect(await _rejection(provider.acquire({
+    await provider.acquire({
       sessionId: "reserved-seed",
       seed: [{
         path: "attachments/source.txt",
@@ -136,10 +155,9 @@ describe("DockerSandboxProvider", () => {
           "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         contentBase64: ""
       }]
-    }))).toMatchObject({
-      message: "Sandbox workspace reserves /workspace/attachments"
     });
-    expect(runner.createdVolume).toBe(false);
+    expect(runner.createdVolume).toBe(true);
+    expect(runner.helperOperations).toEqual(["seed"]);
   });
 });
 
@@ -238,7 +256,7 @@ class FakeDockerRunner implements DockerCommandRunner {
             id: attachment.id,
             name: attachment.name,
             fingerprint: attachment.fingerprint,
-            path: `/workspace/attachments/turn-one/${attachment.name}`,
+            path: `/workspace/${TURN_ONE_DIRECTORY}${attachment.name}`,
             size: Buffer.from(attachment.contentBase64, "base64").byteLength
           })) ?? []
         })}\n`);
@@ -247,7 +265,7 @@ class FakeDockerRunner implements DockerCommandRunner {
         return _result(0, `${JSON.stringify({
           type: "result",
           ok: true,
-          value: ["README.md", "attachments/"]
+          value: [TURN_ONE_DIRECTORY, "README.md"]
         })}\n`);
       }
       return _result(0, `${JSON.stringify({

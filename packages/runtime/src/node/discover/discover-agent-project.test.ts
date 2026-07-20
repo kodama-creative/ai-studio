@@ -138,7 +138,7 @@ describe("discoverAgentProject", () => {
       .toEqual(["linked.ts", "nested", "not-a-file.ts", "readme.md"]);
   });
 
-  test("rejects unsafe or oversized Sandbox workspace entries", async () => {
+  test("accepts attachment-named paths and rejects unsafe entries", async () => {
     const root = _root();
     const outside = `${root}-outside.txt`;
     ROOTS.push(outside);
@@ -173,11 +173,19 @@ describe("discoverAgentProject", () => {
 
     const discovered = await discoverAgentProject(root);
 
-    expect(discovered.sandbox?.workspace).toEqual([]);
+    expect(discovered.sandbox?.workspace).toEqual([{
+      absolutePath: path.join(
+        root,
+        "sandbox",
+        "workspace",
+        "attachments",
+        "owned.txt"
+      ),
+      logicalPath: "sandbox/workspace/attachments/owned.txt"
+    }]);
     expect(discovered.diagnostics.filter(
       diagnostic => diagnostic.code === "sandbox_workspace_invalid"
     ).map(diagnostic => diagnostic.message)).toEqual([
-      "Invalid Sandbox workspace path: attachments",
       "Sandbox workspace symlinks are not supported: linked.txt",
       "Sandbox workspace file exceeds 25 MiB: oversized.bin"
     ]);

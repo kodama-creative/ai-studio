@@ -142,6 +142,7 @@ describe("ExternalAgentProjectManager", () => {
     const threadId = opened.threads[0]!.id;
     const initial = await manager.readThread(opened.id, threadId);
     const messageId = "message-one";
+    const laterMessageId = "message-two";
     await manager.writeThread(opened.id, threadId, {
       ...initial,
       thread: {
@@ -152,6 +153,10 @@ describe("ExternalAgentProjectManager", () => {
             id: messageId,
             role: "user",
             content: [{ type: "text", text: "Inspect it." }]
+          }, {
+            id: laterMessageId,
+            role: "user",
+            content: [{ type: "text", text: "Inspect this later." }]
           }]
         }
       }
@@ -169,18 +174,41 @@ describe("ExternalAgentProjectManager", () => {
         fingerprint: "a".repeat(64)
       }]
     );
+    await manager.recordSandboxAttachments(
+      opened.id,
+      threadId,
+      laterMessageId,
+      [{
+        id: "attachment-two",
+        name: "later.txt",
+        path: "/workspace/attachments/turn/later.txt",
+        size: 5,
+        fingerprint: "b".repeat(64)
+      }]
+    );
     const staged = await manager.readThread(opened.id, threadId);
     const forged = structuredClone(staged);
     forged.thread.sandboxAttachments![messageId]![0]!.name = "forged.txt";
     await expect(manager.writeThread(opened.id, threadId, forged))
       .rejects.toThrow("immutable");
 
-    await manager.lockSandboxAttachments(opened.id, threadId);
+    await manager.lockSandboxAttachments(opened.id, threadId, [messageId]);
     const locked = await manager.readThread(opened.id, threadId);
     await expect(manager.writeThread(opened.id, threadId, {
       ...locked,
-      thread: { ...locked.thread, sandboxAttachments: undefined }
+      thread: {
+        ...locked.thread,
+        sandboxAttachments: {
+          [laterMessageId]: locked.thread.sandboxAttachments![laterMessageId]!
+        }
+      }
     })).rejects.toThrow("locked after Run starts");
+    const withoutLater = structuredClone(locked);
+    Reflect.deleteProperty(
+      withoutLater.thread.sandboxAttachments!,
+      laterMessageId
+    );
+    await manager.writeThread(opened.id, threadId, withoutLater);
     expect(
       (await manager.readThread(opened.id, threadId)).thread
         .lockedSandboxAttachmentMessageIds

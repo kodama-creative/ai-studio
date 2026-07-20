@@ -343,19 +343,42 @@ export function createMainWindowRPC({
             projectId,
             project.snapshot
           );
-          const prepared = await sandboxes.prepareTurn({
+          const turnId = `${messageId}-${randomUUID()}`;
+          const stagedAttachments = await sandboxes.stageAttachments({
             sessionId: threadId,
-            turnId: `${messageId}-${randomUUID()}`,
+            messageId,
+            turnId,
             seed: snapshot.sandbox?.workspace ?? [],
             attachments
           });
-          await externalAgentProjects.recordSandboxAttachments(
-            projectId,
-            threadId,
+          try {
+            await externalAgentProjects.recordSandboxAttachments(
+              projectId,
+              threadId,
+              messageId,
+              stagedAttachments
+            );
+          } catch (error) {
+            try {
+              await sandboxes.abortAttachmentStaging({
+                sessionId: threadId,
+                messageId,
+                seed: snapshot.sandbox?.workspace ?? []
+              });
+            } catch (cleanupError) {
+              throw new AggregateError(
+                [error, cleanupError],
+                "Unable to persist or remove Sandbox attachments. Run is blocked."
+              );
+            }
+            throw error;
+          }
+          await sandboxes.completeAttachmentStaging({
+            sessionId: threadId,
             messageId,
-            prepared.attachments
-          );
-          return [...prepared.attachments];
+            attachments: stagedAttachments
+          });
+          return [...stagedAttachments];
         },
         externalAgentProjectActivateConnections: async ({ projectId, threadId }) =>
           externalAgentProjects.activateConnections(projectId, threadId),

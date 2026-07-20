@@ -33,6 +33,9 @@ export interface StagedSandboxAttachment {
 export interface SandboxProviderSession {
   readonly executionEnv: ExecutionEnv;
   readonly sessionId: string;
+  discardTurn(input: {
+    readonly turnId: string;
+  }): Promise<void>;
   stageTurn(input: {
     readonly attachments: readonly SandboxAttachmentInput[];
     readonly turnId: string;

@@ -232,7 +232,6 @@ function _validRelativePath(value: string): boolean {
     && !value.includes("\\")
     && !hasControlCharacter(value)
     && segments.length <= SANDBOX_WORKSPACE_MAX_DEPTH
-    && segments[0] !== "attachments"
     && segments.every(segment => segment.length > 0
       && segment !== "."
       && segment !== "..")
