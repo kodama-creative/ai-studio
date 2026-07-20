@@ -144,6 +144,10 @@ dockerTest("real Docker isolates, retains, reconstructs, and deletes a Sandbox S
       `/workspace/.llm-space-staging-${racingStagingKey}.tmp`;
     const racingDestination =
       `/workspace/.llm-space-attachments-${racingStagingKey}`;
+    const racingContent = new Uint8Array(8 * 1024 * 1024);
+    const racingFingerprint = createHash("sha256")
+      .update(racingContent)
+      .digest("hex");
     const collisionRace = first.executionEnv.exec(
       `while [ ! -d '${racingTemporary}' ]; do sleep 0.01; done; mkdir '${racingDestination}'`
     );
@@ -153,8 +157,8 @@ dockerTest("real Docker isolates, retains, reconstructs, and deletes a Sandbox S
       attachments: [{
         id: "racing-collision-attachment",
         name: "large.bin",
-        fingerprint: "b".repeat(64),
-        content: new Uint8Array(8 * 1024 * 1024)
+        fingerprint: racingFingerprint,
+        content: racingContent
       }]
     }))).toMatchObject({
       message: expect.stringContaining(

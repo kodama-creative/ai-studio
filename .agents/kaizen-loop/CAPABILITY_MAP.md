@@ -1,7 +1,7 @@
 # LLM Space Capability Map
 
-- Last updated: 2026-07-19
-- Map status: refreshed through roadmap item 17 discovery. Items 12 through 16 are shipped under ADRs 0006-0009 where applicable; item 17 is confirmed decision-blocked on source/Host authority, provider, workspace, attachment, network, and lifecycle ownership.
+- Last updated: 2026-07-20
+- Map status: refreshed through roadmap item 17 implementation. Items 12 through 16 are shipped under ADRs 0006-0009 where applicable; item 17 awaits a passing real-Docker acceptance rerun before shipment, so item 10 remains dependency-blocked.
 - Evidence rule: entries marked `confirmed` cite current rendered-product or current-code evidence. Entries marked `stale` rely on previous logs or code paths not fully re-inspected in this loop. Entries marked `unknown` need a future product-surface check before they can drive a recommendation.
 
 ## First-Run Model Setup
@@ -342,28 +342,25 @@
   - One shared behavior suite passes against explicit `NodeExecutionEnv` and an isolated fake adapter for relative paths, parent creation, UTF-8 write bytes, pagination, symlink delegation, streamed stdout/stderr, nonzero exit, large-output truncation/full-output paths, file abort, shell cancellation/timeout, no retry, and Runtime-owned cleanup count zero.
   - Desktop Direct and protected Server fixtures both propagate stable `executionEnvUnavailable` terminals before Pi without constructing a host fallback. Fifty-two focused checks, seven TypeScript configurations, lint, Runtime/Server bundles, renderer-only Vite, and 307/308 full tests pass; the sole failure is the unchanged Server teardown timeout debt.
 - Boundary: a project can explicitly author portable read/write/bash capability whose final effective Turn snapshot borrows exactly one Host-supplied Session-scoped Pi `ExecutionEnv`. Manual mode defers the helpers; automatic modes execute through Pi. Runtime neither translates paths nor owns environment lifecycle.
-- Explicit non-goals: sandbox/container provider, workspace or attachment delivery, implicit NodeExecutionEnv construction, direct Desktop/Server filesystem access, generic permission system, approval policy, or cleanup/retention policy owned by roadmap item 17.
-- Visible gaps: no production Sandbox provider supplies the environment yet; workspace seeds, attachments, retention and exactly-once cleanup remain item 17, approvals remain item 19, and promotion remains blocked on item 17 despite item 16 now being complete.
+- Explicit non-goals: Sandbox/container provider implementation, workspace or attachment delivery, implicit NodeExecutionEnv construction, direct Desktop/Server filesystem access, generic permission system, approval policy, or cleanup/retention policy inside the tool definitions themselves.
+- Visible gaps: the implemented Sandbox capability supplies the production Docker reference environment where the Host enables it, but item 17 still awaits its real-provider acceptance gate; approvals remain item 19, while additional providers and numeric resource quotas remain later Sandbox work.
 
 ## Sandbox Workspace And Attachment Delivery
 
-- Status: planned V1; not shipped; implementation awaiting approval
+- Status: implemented V1; shipment blocked on real-Docker acceptance
 - Freshness: confirmed
 - Last checked: 2026-07-20
 - Evidence:
-  - A current isolated Electrobun CEF session shows an Agent Project Thread as `Desktop Direct — Ready`. Its Runtime Profile menu exposes `Desktop Sandbox — Unavailable` with the exact explanation `Unavailable until isolated workspace execution ships; never falls back.` The menu is keyboard/semantic UI, and the current console contains only Vite/React development information.
-  - `ThreadRuntimeProfile` can persist only `desktopDirect` or `localServer`; the Desktop Sandbox row is disabled, profile changes create a new empty Thread, and runtime authority becomes immutable after the first Run under ADR 0003.
-  - Agent `environment` declarations currently describe config/secret names only. No source field declares an execution-environment minimum, no Host policy merges one, and Runtime receives only an already-created optional `ExecutionEnv`.
-  - Agent discovery and artifacts have no portable `workspace/` source slot. Desktop's `workspace/` is instead the application-owned Thread/project tree, so it cannot be reused as a Session sandbox without conflating ownership domains.
-  - Desktop attachments are image-only base64 values embedded in editable Thread messages. The Runtime/Server have no attachment staging contract, and ADR 0003 explicitly excludes Local Server attachments.
-  - Pi provides the Host-neutral `ExecutionEnv` contract and a non-isolating Node reference adapter, not a container provider. Local `pi-eve` likewise states that its V1 has no sandbox and requires an external sandbox/container for untrusted projects.
-  - This macOS 26 arm64 development host has no Docker, Podman, or Apple `container` executable, so a real local-container acceptance run is currently unavailable. Apple `container` is macOS-26/Apple-silicon-only and pre-1.0; Docker documents cross-host bind-mount risks and explicit `--network none` isolation.
-  - ADR 0010 records the owner-approved interface: Eve-shaped zero-configuration `agent/sandbox` source declares only an abstract minimum; Host policy selects an internal provider and may tighten but never weaken; Docker CLI is the V1 reference without dynamic Sandbox connections.
-  - The accepted Session contract uses one fixed non-root/no-network container plus one named volume mounted at `/workspace`, one-time bounded source seeding, atomic bounded Turn attachment staging, Pi-native messages, Host restart retention, honest missing-volume failure, and tombstoned container/volume cleanup.
-  - The accepted product slice adds Desktop Sandbox readiness and `From Files` staging states but no workspace explorer/export. Manual mode still acquires and stages a real Sandbox while deferring canonical tools; protected Server requires Host provider injection and project OCI fails closed without one.
-- Boundary: item 17 must implement the accepted abstract requirement and Host provider interface, supply a real isolated Session-scoped Pi `ExecutionEnv`, fail closed whenever Sandbox is required, seed a provider-owned named-volume workspace without mounting or writing back Agent source, atomically stage controlled Host-approved attachments, and give the Host durable retention and cleanup responsibility.
+  - `defineSandbox({})`, discovery, compiler, artifact, and bundle fixtures preserve only an abstract source minimum plus a bounded immutable `agent/sandbox/workspace/**` seed. Host policy may tighten but never weaken it; unavailable required-Sandbox projects open Build without silently creating or downgrading a Thread.
+  - `SandboxProvider` and `DockerSandboxProvider` supply one Thread/Session-scoped Pi `ExecutionEnv`, one LLM Space-owned named volume mounted at `/workspace`, a fixed non-root/read-only/no-capabilities/no-network container, a deterministic bounded manifest, stop/reconnect/reconstruct/delete lifecycle, and no Host bind, login environment, provider secret, or dynamic connection surface.
+  - Host-owned Docker labels identify the seed, while a fresh acquire that finds an existing volume fails lost instead of adopting a crash-partial seed. Missing or mismatched volumes never reseed the same identity; Desktop persists active/lost/cleanup tombstones and retries partial deletion.
+  - Attachment bytes travel from Bun's native file picker directly into an exclusive Host-random staging directory and publish by rename. Its durable staging identity and ownership marker let recovery remove only Host-owned partial/final directories; collisions fail without merging or deleting Session data. The Host transaction compensates descriptor-write failure, blocks Run when compensation is incomplete, reconciles a crash after descriptor persistence, and locks exact renderer-selected message identities included in the Pi Turn. Source may still own ordinary `attachments/**` paths because delivery uses a dedicated per-Turn top-level directory rather than a reserved source namespace.
+  - Focused coverage proves source/Host policy, unavailable/lost states, seed limits and identity, same-handle no-follow workspace and Host attachment reads, attachment bounds/atomicity/locking, manual/automatic binding, isolation, Pi read/write/bash/abort/timeout behavior, cleanup tombstones, and Desktop/Server fail-closed composition.
+  - GitHub Actions Sandbox acceptance runs [29722764006](https://github.com/kodama-creative/ai-studio/actions/runs/29722764006) and [29723052932](https://github.com/kodama-creative/ai-studio/actions/runs/29723052932) failed because the collision-race fixture supplied an invalid fingerprint for its 8 MiB payload. The local fix computes the real fingerprint; a new run must still pass the complete Docker matrix before shipment.
+  - Current real Electrobun CEF evidence under `audits/2026-07-20-125359-sandbox-delivery-v1/` shows Build without an auto-created Thread, explicit new-Thread failure when Docker is absent, an inspectable unavailable existing Thread, the `From Files` menu, clean application console, and no page overflow at 1280×800 or 900×700.
+- Boundary: an Agent may require abstract Sandbox execution, while the Host exclusively selects and owns the provider, isolation arguments, Session identity, workspace, approved attachment bytes/descriptors, retention, and cleanup. Canonical tools continue to use Pi `ExecutionEnv`, and attachments remain Pi-native user text/image content plus workspace paths rather than a new message protocol.
 - Explicit non-goals: Vercel Sandbox, Firecracker fleet, Apple-container V1 adapter, arbitrary host paths, project source write-back, silent Desktop Direct/Node fallback, approval policy, numeric CPU/memory/PID/disk quotas, workspace explorer/export, dynamic provider connections, generic container orchestration, cloud control plane, or source-owned engine credentials.
-- Visible gaps: no source/compiler/provider/profile/staging/lifecycle code has been implemented and Desktop Sandbox remains unavailable. Fake conformance plus one real Docker create/seed/stage/Pi-tool/reconnect/delete acceptance path are required before the capability or roadmap item can be marked shipped.
+- Visible gaps: the development host still lacks Docker, so the corrected acceptance case requires a new GitHub Actions run. Until it passes, item 17 remains unchecked and item 10 remains dependency-blocked. Numeric quotas, export/adoption, additional providers, approvals, and fleet operations remain later capabilities.
 
 ## Agent Project Activation
 
@@ -413,13 +410,13 @@
 
 ## Thread-To-Agent Project Promotion
 
-- Status: contract accepted; blocked on prerequisite capabilities before V1
+- Status: contract accepted; blocked on item 17 acceptance; V1 not implemented
 - Freshness: confirmed
-- Last checked: 2026-07-17
+- Last checked: 2026-07-20
 - Evidence:
   - A current isolated Electrobun CEF run at 1280×800 created a real blank standalone Thread. The Thread surface exposes model, tools, variables, system prompt, editable messages, run history, and evaluations, but Welcome, Thread toolbar, menus, Command Palette metadata, typed RPC, and Bun managers contain no promotion command, preview, or materializer.
   - Core `Thread` stores optional model/reasoning parameters, system-prompt and message templates, built-in/custom variable state, four distinct tool kinds, Runtime snapshots, run history, reusable rubrics, and manual evaluations. These are Desktop development/session records rather than portable Agent source.
-  - Runtime Agent Project discovery compiles `agent.ts`, `instructions.md`, `state/*`, `tools/*`, `connections/*`, and `skills/*`. It has no variable, example, promotion-intent, or Eval source slot; adding one would change the authored source and artifact contract.
+  - Runtime Agent Project discovery compiles `agent.ts`, `instructions.md`, `state/*`, `tools/*`, `connections/*`, `skills/*`, `outputs/*`, and `sandbox.ts`/`sandbox/*`. It has no variable, example, promotion-intent, or Eval source slot; adding one would change the authored source and artifact contract.
   - Thread `function` tools carry schema/description but no executable implementation. `builtin` tools execute through the trusted Desktop registry, `mcp` tools reference Settings-owned server identity/transport/auth, and `project` tools reference another trusted project snapshot. Copying any of them as a local authored tool would be a silent substitution or authority expansion.
   - Thread custom variables are literal Desktop values that may contain private data; built-in values such as current date and available skills are Host/runtime-derived. The current project Runtime does not resolve Thread variable definitions in portable instructions.
   - Manual evaluation rubrics, run scores, verdicts, and notes are explicitly Thread-owned evidence. ADR 0005 says generated projects carry no test/Eval protocol before roadmap item 29, so item 10 cannot invent one or silently reinterpret comparison history as portable assertions.
@@ -427,7 +424,7 @@
   - ADR 0006 and the Eve state research fix the future contract: promotion is preview-first and atomic; Agent Variables, Turn context, Session State, transcript, and external memory remain distinct; local tool and stdio MCP authority is Sandbox-only; exact literals require visible confirmation; evaluation intent is non-executable; and conversation examples defer to item 29.
 - Boundary: today a standalone Thread and an Agent Project remain independent product objects. The accepted implementation will classify every field, resolve all blockers in a temporary preview tab, publish only into an absent user-owned target, and create a fresh independent Project Thread with no transcript, Run, evaluation, state, or Session identity inheritance.
 - Explicit non-goals: no hidden promotion metadata, live Thread/source synchronization, secret-store or Session-state copying, implicit Desktop built-in authority, generated fake tool implementations, Host fallback for Sandbox requirements, source overwrite/merge, transcript migration, Eve compatibility promise, conversation-example format before item 29, or premature executable Eval protocol.
-- Visible gaps: trusted Session context/state (12) is now shipped; item 10 remains dependency-blocked on dynamic instructions (13), ExecutionEnv-backed built-ins (16), and Sandbox delivery (17). Product code still lacks the planner, variable/evaluation-intent source slots, preview interaction, atomic coordinator, acceptance matrix, and real CEF audit evidence defined by ADR 0006.
+- Visible gaps: items 12, 13, and 16 are shipped, while item 17 awaits a passing real-Docker acceptance run. Product code still lacks the planner, variable/evaluation-intent source slots, preview interaction, atomic coordinator, acceptance matrix, and real CEF audit evidence defined by ADR 0006.
 
 ## Agent And Thread Workbench Navigation
 

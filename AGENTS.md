@@ -105,8 +105,34 @@ fails before Pi with `executionEnvUnavailable`; Desktop and Server propagate
 that code without using their host filesystem or shell. Read/write/bash reuse
 Pi result, truncation, shell capture, abort, timeout, and update conventions.
 Sandbox creation, workspace and attachment delivery, retention, and cleanup
-belong to roadmap item 17. See
-`docs/adr/0009-execution-env-backed-authored-tools.md`.
+are supplied by the Host-owned Sandbox boundary below. See ADRs 0009 and 0010.
+
+### Sandbox requirement and Host delivery
+
+An Agent Project may require isolated execution by default-exporting
+`defineSandbox({})` from `agent/sandbox.ts` or
+`agent/sandbox/sandbox.ts`. An optional `agent/sandbox/workspace/**` tree is a
+bounded immutable source seed; it is copied once into Session-owned storage and
+is never mounted, synced, or written back. Source declares no engine, image,
+mount, network, credential, environment value, or lifecycle setting.
+
+The Host selects an internal `SandboxProvider` and may tighten an Agent to
+Sandbox but never downgrade a required Sandbox. Desktop V1 uses a fixed Docker
+CLI provider: one non-root/read-only/no-network container and one named volume
+mounted at `/workspace` per Project Thread Session. Missing Docker, a missing or
+mismatched volume, or a provider failure blocks Run without Direct or
+`NodeExecutionEnv` fallback. Desktop quit stops the container but retains the
+workspace; Thread deletion uses a durable cleanup tombstone for container and
+volume deletion.
+
+Sandbox file attachments are selected and read only in Bun. The renderer never
+receives Host paths or authorizes descriptors. Bun stages bounded ordinary
+files through a temporary directory plus atomic rename, persists the immutable
+descriptor outside the Pi transcript, and compensates or leaves Run durably
+blocked if descriptor persistence fails. Pi receives only its existing user
+content plus `/workspace` paths and the bounded workspace manifest; there is no
+custom Sandbox message protocol. See
+`docs/adr/0010-host-owned-sandbox-session-delivery.md`.
 
 ### Bun composition and bundled modules
 

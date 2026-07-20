@@ -35,6 +35,10 @@ The runtime owns three boundaries:
   `defineDynamic()` for ordered static and trusted per-Turn instructions.
 - `@llm-space/runtime/connections` is the authored remote-action contract. It
   exports `defineMcpClientConnection()` for Streamable HTTP MCP connections.
+- `@llm-space/runtime/outputs` is the authored structured-result contract. It
+  exports `defineOutput()` for named TypeBox output schemas.
+- `@llm-space/runtime/sandbox` is the authored isolation-minimum contract. It
+  exports the zero-configuration `defineSandbox()` declaration.
 - `@llm-space/runtime/server` is a minimal Bun-only type surface used by a
   closed deployment Server bundle. It avoids importing compiler discovery or
   source-loading side effects.
@@ -93,7 +97,8 @@ Prepared tools similarly keep Pi's internal deferred-result marker inside the
 execution layer. Hosts provide typed executable/deferred tools and observe
 typed session events; they do not create Pi placeholder messages.
 
-V1 requires:
+V1 source uses the following shape; only `agent.ts` and `instructions.md` are
+required:
 
 ```text
 agent/
@@ -108,9 +113,17 @@ agent/
 │   └── *.ts
 ├── connections/
 │   └── *.ts
-└── skills/
-    └── <name>/SKILL.md
+├── skills/
+│   └── <name>/SKILL.md
+├── outputs/
+│   └── <name>.{ts,js}
+└── sandbox/
+    ├── sandbox.ts
+    └── workspace/**
 ```
+
+The folder-form Sandbox slot may instead be the single file `sandbox.ts` when
+the project has no source workspace seed.
 
 `agent.ts` default-exports a typed definition:
 
@@ -240,7 +253,39 @@ Runtime never creates a Node/Desktop/Server fallback and never owns cleanup.
 The three helpers use Pi read pagination/truncation, whole-file write, shell
 capture, streamed updates, abort, timeout, nonzero-exit, and full-output-path
 semantics. Sandbox provisioning, workspace/attachment delivery, retention, and
-cleanup are Host responsibilities outside this V1.
+cleanup remain Host responsibilities. A project declares only their abstract
+minimum through `@llm-space/runtime/sandbox`. The requirement may be the single
+file `agent/sandbox.ts`, or the folder form below when it owns a workspace seed:
+
+```ts
+// agent/sandbox/sandbox.ts
+import { defineSandbox } from "@llm-space/runtime/sandbox";
+
+export default defineSandbox({});
+```
+
+The declaration accepts no configuration. An optional sibling
+`workspace/**` tree compiles into a bounded immutable seed with strict POSIX
+relative ordinary-file paths. The artifact records the Sandbox requirement,
+seed paths, sizes, and fingerprints, but never seed bytes, a provider, image,
+mount, network, environment value, credential, or lifecycle handle. The
+compiled project and closed bundle carry the validated bytes needed for
+one-time delivery.
+
+Hosts intersect that minimum with their own Runtime Profile policy and inject a
+`SandboxProvider`. A required Sandbox can never fall back to Direct execution
+or `NodeExecutionEnv`. The Docker reference provider exported from the Node
+entrypoint uses a fixed isolated container and one named volume mounted at
+`/workspace`, seeds it once, exposes the resulting Pi `ExecutionEnv`, stages
+bounded Turn attachments atomically, returns a deterministic top-level
+manifest, and owns stop/reconnect/delete behavior. Missing or corrupt workspace
+identity is an honest terminal loss rather than a reseed.
+
+Attachment descriptors are Host-approved immutable data outside the message
+transcript. Desktop Bun owns native file selection, same-handle validation and
+reading, staging transactions, descriptor persistence, compensation, and Run
+locking. Runtime continues to consume ordinary Pi user content plus workspace
+paths and adds no Sandbox-specific message or event protocol. See ADR 0010.
 
 Project-scoped MCP connections are flat files under `connections/`. Their file
 stem owns the connection name, and an exact non-empty allowlist controls the
