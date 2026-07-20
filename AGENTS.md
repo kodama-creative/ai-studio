@@ -206,6 +206,13 @@ Prefer dropping new images into the existing `src/mainview/public/images/` folde
 - **TypeScript**: strict, ESNext, `moduleResolution: bundler`. In `apps/desktop`, `@/*` maps to `./src/*`.
 - **Layering**: `@llm-space/core` splits browser-safe code (`./client`, `./types`, `./utils`, root `.`) from Node/Bun-only server implementations (`./server`). The desktop **bun process** consumes `@llm-space/core/server`; the **renderer** consumes the client/types entrypoints and reaches the bun process over RPC (never imports `./server`).
 
+### Tests
+
+- Put new tests in the workspace's top-level `tests/` directory. Do not colocate test files under `src/`.
+- Mirror the source path exactly: `src/a/b.ts` maps to `tests/a/b.test.ts`.
+- Keep the source file name in the test file name. Do not add feature-specific suffixes such as `b-runtime.test.ts` or `b-validation.test.ts`.
+- Existing colocated tests are legacy. Move them only in a dedicated migration, not as incidental feature work.
+
 ### Naming
 
 - **File names** are **kebab-case** for every `.ts`/`.tsx` file, including component files (e.g. `tool-call-list-item.tsx`, `model-provider.tsx`). No PascalCase or camelCase filenames. One primary component/export per file, named after the file.
