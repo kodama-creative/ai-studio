@@ -75,11 +75,12 @@ dockerTest("real Docker isolates, retains, reconstructs, and deletes a Sandbox S
     ]);
 
     const failedTurnId = "atomic-staging-failure";
-    const failedTurnKey = createHash("sha256").update(failedTurnId)
+    const failedStagingId = "atomic-failure-staging";
+    const failedStagingKey = createHash("sha256").update(failedStagingId)
       .digest("hex")
       .slice(0, 24);
     const failedDestination =
-      `/workspace/.llm-space-attachments-${failedTurnKey}`;
+      `/workspace/.llm-space-attachments-${failedStagingKey}`;
     expect(await first.executionEnv.createDir(failedDestination))
       .toEqual({ ok: true, value: undefined });
     expect(await first.executionEnv.writeFile(
@@ -87,7 +88,7 @@ dockerTest("real Docker isolates, retains, reconstructs, and deletes a Sandbox S
       "keep"
     )).toEqual({ ok: true, value: undefined });
     expect(await _rejection(first.stageTurn({
-      stagingId: "atomic-failure-staging",
+      stagingId: failedStagingId,
       turnId: failedTurnId,
       attachments: [{
         id: "atomic-failure-attachment",
@@ -102,6 +103,31 @@ dockerTest("real Docker isolates, retains, reconstructs, and deletes a Sandbox S
     expect(await first.executionEnv.readTextFile(
       `${failedDestination}/existing.txt`
     )).toEqual({ ok: true, value: "keep" });
+
+    const emptyCollisionStagingId = "empty-final-collision";
+    const emptyCollisionStagingKey = createHash("sha256")
+      .update(emptyCollisionStagingId)
+      .digest("hex")
+      .slice(0, 24);
+    const emptyCollisionDestination =
+      `/workspace/.llm-space-attachments-${emptyCollisionStagingKey}`;
+    expect(await first.executionEnv.createDir(emptyCollisionDestination))
+      .toEqual({ ok: true, value: undefined });
+    expect(await _rejection(first.stageTurn({
+      stagingId: emptyCollisionStagingId,
+      turnId: "empty-collision-turn",
+      attachments: [{
+        id: "empty-collision-attachment",
+        name: "notes.txt",
+        fingerprint:
+          "ab5aa97074c454a0632057e704220d9a6678fbf773a0a5806fc09b8173b07309",
+        content: new TextEncoder().encode("notes")
+      }]
+    }))).toMatchObject({
+      message: "Sandbox attachment destination already exists"
+    });
+    expect(await first.executionEnv.exists(emptyCollisionDestination))
+      .toEqual({ ok: true, value: true });
 
     const interruptedTurnId = "interrupted-turn";
     const interruptedStagingId = "interrupted-staging";

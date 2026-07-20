@@ -10,7 +10,7 @@ import {
 import { SandboxWorkspaceLostError } from "../../runtime/sandbox/sandbox-workspace-lost-error";
 
 const TURN_ONE_DIRECTORY = `.llm-space-attachments-${createHash("sha256")
-  .update("turn-one").digest("hex")
+  .update("staging-one").digest("hex")
   .slice(0, 24)}/`;
 
 describe("DockerSandboxProvider", () => {

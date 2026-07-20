@@ -24,6 +24,10 @@ function _result(value) {
   process.stdout.write(JSON.stringify({ type: "result", ok: true, value }) + "\n");
 }
 
+function _stableKey(value) {
+  return createHash("sha256").update(String(value)).digest("hex").slice(0, 24);
+}
+
 function _failure(error) {
   process.stdout.write(JSON.stringify({
     type: "result",
@@ -124,10 +128,9 @@ async function _seed(input) {
 
 async function _stageTurn(input) {
   const attachments = input.attachments ?? [];
-  const turnKey = createHash("sha256").update(String(input.turnId)).digest("hex").slice(0, 24);
   const stagingId = String(input.stagingId);
-  const stagingKey = createHash("sha256").update(stagingId).digest("hex").slice(0, 24);
-  const destinationName = ".llm-space-attachments-" + turnKey;
+  const stagingKey = _stableKey(stagingId);
+  const destinationName = ".llm-space-attachments-" + stagingKey;
   const destination = path.join(WORKSPACE, destinationName);
   const temporary = path.join(WORKSPACE, ".llm-space-staging-" + stagingKey + ".tmp");
   const staged = [];
@@ -154,6 +157,14 @@ async function _stageTurn(input) {
         size: content.byteLength
       });
     }
+    try {
+      await lstat(destination);
+      throw new Error("Sandbox attachment destination already exists");
+    } catch (error) {
+      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
+        throw error;
+      }
+    }
     await rename(temporary, destination);
   } catch (error) {
     if (ownsTemporary) {
@@ -178,10 +189,9 @@ async function _discardOwnedDirectory(target, stagingId) {
 }
 
 async function _discardTurn(input) {
-  const turnKey = createHash("sha256").update(String(input.turnId)).digest("hex").slice(0, 24);
   const stagingId = String(input.stagingId);
-  const stagingKey = createHash("sha256").update(stagingId).digest("hex").slice(0, 24);
-  const destinationName = ".llm-space-attachments-" + turnKey;
+  const stagingKey = _stableKey(stagingId);
+  const destinationName = ".llm-space-attachments-" + stagingKey;
   await Promise.all([
     _discardOwnedDirectory(path.join(WORKSPACE, destinationName), stagingId),
     _discardOwnedDirectory(
