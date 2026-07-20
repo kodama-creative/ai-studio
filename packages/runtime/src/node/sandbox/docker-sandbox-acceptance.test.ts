@@ -97,7 +97,11 @@ dockerTest("real Docker isolates, retains, reconstructs, and deletes a Sandbox S
           "ab5aa97074c454a0632057e704220d9a6678fbf773a0a5806fc09b8173b07309",
         content: new TextEncoder().encode("notes")
       }]
-    }))).toMatchObject({ message: expect.stringMatching(/EEXIST|ENOTEMPTY/) });
+    }))).toMatchObject({
+      message: expect.stringContaining(
+        "Sandbox attachment destination already exists"
+      )
+    });
     expect(await first.executionEnv.exists(`${failedDestination}/notes.txt`))
       .toEqual({ ok: true, value: false });
     expect(await first.executionEnv.readTextFile(
