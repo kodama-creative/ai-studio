@@ -124,9 +124,44 @@ dockerTest("real Docker isolates, retains, reconstructs, and deletes a Sandbox S
         content: new TextEncoder().encode("notes")
       }]
     }))).toMatchObject({
-      message: "Sandbox attachment destination already exists"
+      message: expect.stringContaining(
+        "Sandbox attachment destination already exists"
+      )
     });
     expect(await first.executionEnv.exists(emptyCollisionDestination))
+      .toEqual({ ok: true, value: true });
+
+    const racingStagingId = "racing-final-collision";
+    const racingStagingKey = createHash("sha256")
+      .update(racingStagingId)
+      .digest("hex")
+      .slice(0, 24);
+    const racingTemporary =
+      `/workspace/.llm-space-staging-${racingStagingKey}.tmp`;
+    const racingDestination =
+      `/workspace/.llm-space-attachments-${racingStagingKey}`;
+    const collisionRace = first.executionEnv.exec(
+      `while [ ! -d '${racingTemporary}' ]; do sleep 0.01; done; mkdir '${racingDestination}'`
+    );
+    expect(await _rejection(first.stageTurn({
+      stagingId: racingStagingId,
+      turnId: "racing-collision-turn",
+      attachments: [{
+        id: "racing-collision-attachment",
+        name: "large.bin",
+        fingerprint: "b".repeat(64),
+        content: new Uint8Array(8 * 1024 * 1024)
+      }]
+    }))).toMatchObject({
+      message: expect.stringContaining(
+        "Sandbox attachment destination already exists"
+      )
+    });
+    expect(await collisionRace).toMatchObject({
+      ok: true,
+      value: { exitCode: 0 }
+    });
+    expect(await first.executionEnv.exists(racingDestination))
       .toEqual({ ok: true, value: true });
 
     const interruptedTurnId = "interrupted-turn";

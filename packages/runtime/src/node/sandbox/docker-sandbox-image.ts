@@ -14,11 +14,26 @@ CMD ["sh", "-c", "trap 'exit 0' TERM INT; while :; do sleep 3600 & wait $!; done
 
 export const DOCKER_SANDBOX_HELPER_SOURCE = String.raw`
 import { createHash, randomUUID } from "node:crypto";
-import { appendFile, lstat, mkdir, mkdtemp, open, readFile, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { dlopen, FFIType } from "bun:ffi";
+import { appendFile, lstat, mkdir, mkdtemp, open, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const WORKSPACE = "/workspace";
 const STAGING_OWNER_FILE = ".llm-space-staging-owner";
+const AT_FDCWD = -100;
+const RENAME_NOREPLACE = 1;
+const LIBC = dlopen("libc.so.6", {
+  renameat2: {
+    args: [
+      FFIType.i32,
+      FFIType.cstring,
+      FFIType.i32,
+      FFIType.cstring,
+      FFIType.u32
+    ],
+    returns: FFIType.i32
+  }
+});
 
 function _result(value) {
   process.stdout.write(JSON.stringify({ type: "result", ok: true, value }) + "\n");
@@ -26,6 +41,19 @@ function _result(value) {
 
 function _stableKey(value) {
   return createHash("sha256").update(String(value)).digest("hex").slice(0, 24);
+}
+
+function _renameNoReplace(source, destination) {
+  const result = LIBC.symbols.renameat2(
+    AT_FDCWD,
+    Buffer.from(source + "\0"),
+    AT_FDCWD,
+    Buffer.from(destination + "\0"),
+    RENAME_NOREPLACE
+  );
+  if (result !== 0) {
+    throw new Error("Sandbox attachment destination already exists or cannot be committed");
+  }
 }
 
 function _failure(error) {
@@ -157,15 +185,7 @@ async function _stageTurn(input) {
         size: content.byteLength
       });
     }
-    try {
-      await lstat(destination);
-      throw new Error("Sandbox attachment destination already exists");
-    } catch (error) {
-      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
-        throw error;
-      }
-    }
-    await rename(temporary, destination);
+    _renameNoReplace(temporary, destination);
   } catch (error) {
     if (ownsTemporary) {
       await rm(temporary, { recursive: true, force: true });
