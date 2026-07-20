@@ -29,4 +29,14 @@ jobs:
       - name: Run real Docker Sandbox acceptance
         env:
           LLM_SPACE_DOCKER_ACCEPTANCE: "1"
-        run: bun test packages/runtime/src/node/sandbox/docker-sandbox-acceptance.test.ts
+        run: |
+          set -o pipefail
+          if ! bun test packages/runtime/src/node/sandbox/docker-sandbox-acceptance.test.ts 2>&1 | tee /tmp/sandbox-acceptance.log; then
+            details=""
+            while IFS= read -r line; do
+              line="${line//'%'/'%25'}"
+              details+="${line}%0A"
+            done < <(tail -n 60 /tmp/sandbox-acceptance.log)
+            echo "::error file=.github/workflows/sandbox.yml,line=28,title=Sandbox acceptance failed::${details}"
+            exit 1
+          fi
