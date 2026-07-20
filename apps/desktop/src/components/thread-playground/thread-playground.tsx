@@ -20,6 +20,7 @@ import { usePanelRef } from "react-resizable-panels";
 import type {
   AgentTransport,
   ProjectTool,
+  SandboxAttachmentDescriptor,
   Thread,
   ThreadRuntimeCheckpoint
 } from "@llm-space/core";
@@ -125,6 +126,11 @@ export interface ThreadPlaygroundProps {
   /** Execute a tool with owning-surface context such as a Project Thread id. */
   readonly toolExecutor?: ToolExecutor;
 
+  /** Open the native picker and stage one immutable Sandbox attachment batch. */
+  readonly stageSandboxFiles?: (
+    messageId: string
+  ) => Promise<readonly SandboxAttachmentDescriptor[]>;
+
   /** Project-authored actions are source-owned and cannot be added/removed. */
   readonly toolsReadonly?: boolean;
 
@@ -209,6 +215,7 @@ const _ThreadPlayground = function ThreadPlayground({
   initialValue,
   transport,
   toolExecutor = executeTool,
+  stageSandboxFiles,
   runtimeOwnsToolLoop,
   transportOwnsRuntimeRun,
   resolveTransportRuntimeCheckpoint,
@@ -257,6 +264,7 @@ const _ThreadPlayground = function ThreadPlayground({
           (loadPromptSkillsRef.current ?? listEnabledPromptVariableSkills)()
         : undefined,
       runtimeOwnsToolLoop,
+      stageSandboxFiles,
       transportOwnsRuntimeRun,
       resolveTransportRuntimeCheckpoint,
       resolveCommittedRuntimeSession,

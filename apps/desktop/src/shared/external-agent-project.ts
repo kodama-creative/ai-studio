@@ -1,3 +1,5 @@
+import { getThreadRuntimeProfile } from "@llm-space/core";
+
 import type { ProjectTool, Thread } from "@llm-space/core";
 import type {
   AgentProjectDiagnostic,
@@ -38,6 +40,7 @@ export interface ExternalAgentProjectView extends ExternalAgentProjectSummary {
   definitionFingerprint: string;
   promptFingerprint: string;
   snapshot: string;
+  sandboxRequired: boolean;
   tools: ProjectTool[];
   outputs: Array<{
     description: string;
@@ -101,7 +104,10 @@ export interface ExternalAgentProjectChangedPayload {
 }
 
 export type ExternalAgentProjectRunBlockReason =
-  "pendingToolResult" | "sourceUnavailable" | "staleToolSnapshot";
+  | "pendingToolResult"
+  | "sandboxRequired"
+  | "sourceUnavailable"
+  | "staleToolSnapshot";
 
 /** A frozen tool step can remain earlier in an edited or reordered Thread. */
 export function hasPendingExternalAgentProjectToolResult(
@@ -127,6 +133,12 @@ export function getExternalAgentProjectRunBlockReason(
 ): ExternalAgentProjectRunBlockReason | null {
   if (project.status !== "ready") {
     return "sourceUnavailable";
+  }
+  if (
+    project.sandboxRequired
+    && getThreadRuntimeProfile(record.thread).type === "desktopDirect"
+  ) {
+    return "sandboxRequired";
   }
   if (hasPendingExternalAgentProjectToolResult(record)) {
     return "pendingToolResult";

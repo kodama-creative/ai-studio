@@ -10,6 +10,7 @@ import {
   type ReducedMessageContent,
   reduceMessages,
   RUN_LAST_MESSAGE_ERROR,
+  type SandboxAttachmentDescriptor,
   streamThread,
   type Thread,
   type ThreadContext,
@@ -91,6 +92,8 @@ export interface ThreadState {
   abortController: AbortController | null;
   activeRunId: string | null;
   collapsedMessageIds: string[];
+  sandboxAttachmentsEnabled: boolean;
+  stagingSandboxAttachmentMessageIds: string[];
 
   /**
    * Id of the message whose editor should grab focus on mount — set only by
@@ -147,6 +150,8 @@ export interface ThreadState {
   updateMessageTextContent(id: string, text: string): void;
   addMessageImageContent(id: string, mimeType: string, data: string): void;
   removeMessageImageContent(id: string, contentIndex: number): void;
+  addMessageSandboxFiles(id: string): Promise<void>;
+  removeMessageSandboxAttachment(id: string, attachmentId: string): void;
   updateToolCallOutputTextContent(
     messageId: string,
     toolCallId: string,
@@ -208,6 +213,11 @@ export function createThreadStore(
 
     /** Runtime transport owns tool execution and continuation for this Thread. */
     runtimeOwnsToolLoop?: boolean;
+
+    /** Select, validate, and stage native files through the owning Bun Host. */
+    stageSandboxFiles?: (
+      messageId: string
+    ) => Promise<readonly SandboxAttachmentDescriptor[]>;
 
     /** Runtime transport, rather than Desktop, owns Session and Run identity. */
     transportOwnsRuntimeRun?: boolean;
@@ -428,6 +438,8 @@ export function createThreadStore(
         abortController: null,
         activeRunId: null,
         collapsedMessageIds: [],
+        sandboxAttachmentsEnabled: Boolean(options.stageSandboxFiles),
+        stagingSandboxAttachmentMessageIds: [],
         autoFocusMessageId: null,
         changeHistory: createInitialHistory(normalizedInitialThread),
         runHistory: initialRunHistory,
@@ -689,6 +701,63 @@ export function createThreadStore(
             };
           });
         },
+        async addMessageSandboxFiles(id: string) {
+          const message = getMessage(id);
+          if (
+            !options.stageSandboxFiles
+            || message?.role !== "user"
+            || message.attachments?.length
+            || get().status === "running"
+          ) {
+            return;
+          }
+          set({
+            stagingSandboxAttachmentMessageIds: [
+              ...get().stagingSandboxAttachmentMessageIds,
+              id
+            ]
+          });
+          try {
+            const attachments = await options.stageSandboxFiles(id);
+            if (attachments.length === 0 || get().status === "running") {
+              return;
+            }
+            updateMessage(id, current => ({
+              ...(current as UserMessage),
+              attachments: [...attachments]
+            }));
+          } catch (error) {
+            toast.error("Unable to stage files", {
+              description: error instanceof Error
+                ? error.message
+                : "Remove the selection and try again."
+            });
+          } finally {
+            set({
+              stagingSandboxAttachmentMessageIds:
+                get().stagingSandboxAttachmentMessageIds.filter(
+                  messageId => messageId !== id
+                )
+            });
+          }
+        },
+        removeMessageSandboxAttachment(id: string, attachmentId: string) {
+          if (get().status === "running") { return; }
+          const message = getMessage(id);
+          if (message?.role !== "user" || !message.attachments?.length) {
+            return;
+          }
+          updateMessage(id, current => {
+            const user = current as UserMessage;
+            const attachments = user.attachments?.filter(
+              attachment => attachment.id !== attachmentId
+            );
+            return {
+              ...user,
+              ...(attachments?.length ? { attachments } : { attachments: undefined })
+            };
+          });
+        },
         addTool(tool) {
           const { thread } = get();
           if (thread.context?.tools?.some(t => t.name === tool.name)) {
@@ -850,6 +919,10 @@ export function createThreadStore(
         async run(fromMessageId?: string) {
           if (get().status === "running") {
             throw new Error("Thread is already running");
+          }
+          if (get().stagingSandboxAttachmentMessageIds.length > 0) {
+            toast.error("Wait for files to finish staging before running.");
+            return;
           }
           const model = options.resolveModel?.(get().thread.model) ?? null;
           if (!model) {
@@ -1537,6 +1610,8 @@ const selectActions = (s: ThreadState) => ({
   updateMessageTextContent: s.updateMessageTextContent,
   addMessageImageContent: s.addMessageImageContent,
   removeMessageImageContent: s.removeMessageImageContent,
+  addMessageSandboxFiles: s.addMessageSandboxFiles,
+  removeMessageSandboxAttachment: s.removeMessageSandboxAttachment,
   updateToolCallOutputText: s.updateToolCallOutputTextContent,
   markToolCallAttempt: s.markToolCallAttempt,
   continueAfterProjectToolResult: s.continueAfterProjectToolResult,

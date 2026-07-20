@@ -1,6 +1,7 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Usage } from "@earendil-works/pi-ai";
 
+import { formatSandboxAttachmentsForPi } from "../types/messages";
 import { uuid } from "../utils";
 
 import type {
@@ -22,21 +23,30 @@ export function convertFromPiMessages(
   for (const message of messages) {
     if (message.role === "user") {
       const previous = existing[visibleIndex];
+      const attachmentText = previous?.role === "user"
+        && previous.attachments?.length
+        ? formatSandboxAttachmentsForPi(previous.attachments)
+        : null;
       const content =
         typeof message.content === "string"
           ? [{ type: "text" as const, text: message.content }]
-          : message.content.map(item =>
-            (item.type === "text"
-              ? { type: "text" as const, text: item.text }
-              : {
-                type: "image_data" as const,
-                mimeType: item.mimeType,
-                data: item.data
-              }));
+          : message.content
+            .filter(item => item.type !== "text" || item.text !== attachmentText)
+            .map(item =>
+              (item.type === "text"
+                ? { type: "text" as const, text: item.text }
+                : {
+                  type: "image_data" as const,
+                  mimeType: item.mimeType,
+                  data: item.data
+                }));
       result.push({
         id: previous?.role === "user" ? previous.id : uuid(),
         role: "user",
-        content
+        content,
+        ...(previous?.role === "user" && previous.attachments?.length
+          ? { attachments: previous.attachments }
+          : {})
       });
       visibleIndex += 1;
       continue;

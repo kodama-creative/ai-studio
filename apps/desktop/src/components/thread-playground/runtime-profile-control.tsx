@@ -37,16 +37,23 @@ const _RuntimeProfileControl = function RuntimeProfileControl({
   disabled,
   onSelect,
   profile,
+  sandboxRequired,
+  sandboxStatus,
   status
 }: {
   readonly disabled?: boolean;
   readonly onSelect: (type: ThreadRuntimeProfile["type"]) => void;
   readonly profile: ThreadRuntimeProfile;
+  readonly sandboxRequired?: boolean;
+  readonly sandboxStatus: ExternalAgentProjectRuntimeStatus;
   readonly status: ExternalAgentProjectRuntimeStatus;
 }) {
   const localServer = profile.type === "localServer";
-  const profileLabel = localServer ? "Local Server" : "Desktop Direct";
-  const StatusIcon = localServer ? ServerIcon : LaptopIcon;
+  const sandbox = profile.type === "desktopSandbox";
+  const profileLabel = localServer
+    ? "Local Server"
+    : sandbox ? "Desktop Sandbox" : "Desktop Direct";
+  const StatusIcon = localServer ? ServerIcon : sandbox ? ShieldIcon : LaptopIcon;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -83,17 +90,20 @@ const _RuntimeProfileControl = function RuntimeProfileControl({
         <DropdownMenuSeparator />
         <_ProfileItem
           description="Editable Desktop transcript with manual, auto-once, and ReAct debugging."
+          disabled={sandboxRequired}
           icon={<LaptopIcon className="size-4" />}
           label="Desktop Direct"
           onSelect={() => { onSelect("desktopDirect"); }}
-          selected={!localServer}
+          selected={!localServer && !sandbox}
         />
         <_ProfileItem
-          description="Unavailable until isolated workspace execution ships; never falls back."
-          disabled
+          description="Isolated Session workspace with controlled files and no network or Host secrets."
+          disabled={sandboxStatus.state === "unavailable"}
           icon={<ShieldIcon className="size-4" />}
           label="Desktop Sandbox"
-          status="Unavailable"
+          onSelect={() => { onSelect("desktopSandbox"); }}
+          selected={sandbox}
+          status={sandboxStatus.state === "unavailable" ? "Unavailable" : undefined}
         />
         <_ProfileItem
           description="Protected loopback Server with Server-owned transcript and Run identity."

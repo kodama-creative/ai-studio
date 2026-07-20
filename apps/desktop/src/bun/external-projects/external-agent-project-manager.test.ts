@@ -66,6 +66,38 @@ export default defineTool({
 }
 
 describe("ExternalAgentProjectManager", () => {
+  test("defaults a required Agent to Desktop Sandbox and never permits Direct", async () => {
+    const { manager, project } = await _fixture();
+    await mkdir(path.join(project, "agent", "sandbox", "workspace"), {
+      recursive: true
+    });
+    await writeFile(
+      path.join(project, "agent", "sandbox", "sandbox.ts"),
+      `import { defineSandbox } from "@llm-space/runtime/sandbox";
+      export default defineSandbox({});`
+    );
+    await writeFile(
+      path.join(project, "agent", "sandbox", "workspace", "README.md"),
+      "seed\n"
+    );
+
+    const opened = await manager.trustAndOpen(project);
+    expect(opened.sandboxRequired).toBe(true);
+    const defaultThread = await manager.readThread(
+      opened.id,
+      opened.threads[0]!.id
+    );
+    expect(defaultThread.thread.runtimeProfile).toEqual({
+      version: 1,
+      type: "desktopSandbox"
+    });
+    await expect(manager.createThread(
+      opened.id,
+      "Unsafe Direct",
+      "desktopDirect"
+    )).rejects.toThrow("requires Sandbox");
+  });
+
   test("creates user-owned source before desktop-owned trust and Thread data", async () => {
     const { home, manager, root } = await _fixture();
     const parentDirectory = path.join(root, "user-projects");

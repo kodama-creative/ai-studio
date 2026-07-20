@@ -1,5 +1,6 @@
 import path from "node:path";
 import { getLlmSpaceHomePath } from "@llm-space/core/server";
+import { DockerSandboxProvider } from "@llm-space/runtime/node";
 import Electrobun, {
   app,
   type BrowserWindow,
@@ -20,6 +21,7 @@ import {
 import { McpManager } from "../mcp";
 import { ModelManager } from "../models";
 import { createMainWindowRPC, type MainWindowRPC } from "../rpc";
+import { DesktopSandboxManager } from "../sandbox";
 import { SearchSettingsManager } from "../search";
 import { SkillsManager } from "../skills";
 import { createLocalFileSystem } from "../storage";
@@ -45,12 +47,16 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
     workspaceRoot: workspacePath,
     getModels: async () => modelManager.getAvailableModels()
   });
+  const sandboxProvider = new DockerSandboxProvider();
   const localServers = new EmbeddedLocalServerManager({
     externalAgentProjects,
-    homePath
+    homePath,
+    sandboxProvider
   });
   const mcpManager = new McpManager();
   const searchSettings = new SearchSettingsManager();
+  const sandboxes = new DesktopSandboxManager({ homePath, provider: sandboxProvider });
+  await sandboxes.start();
   const skillsManager = new SkillsManager();
   const localFs = createLocalFileSystem(homePath);
   const traceManager = new TraceManager();
@@ -72,7 +78,8 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
     externalAgentProjects,
     mcpManager,
     host.tools,
-    localServers
+    localServers,
+    sandboxes
   );
 
   let mainWindow: BrowserWindow | null = null;
@@ -116,6 +123,7 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
       stopPromise = stopPromise ?? _stopDesktopApp([
         ["updater", () => { updater.stop(); }],
         ["streaming", () => { streaming.shutdown(); }],
+        ["sandboxes", async () => sandboxes.stop()],
         ["desktop host", async () => host.stop()],
         ["external agent projects", async () => externalAgentProjects.shutdown()],
         ["MCP manager", async () => mcpManager.shutdown()],
@@ -141,6 +149,7 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
       mcpManager,
       modelManager,
       searchSettings,
+      sandboxes,
       skillsManager,
       streaming,
       tools: host.tools,

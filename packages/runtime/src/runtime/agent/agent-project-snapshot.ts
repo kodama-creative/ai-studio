@@ -48,6 +48,18 @@ export interface CompiledAgentOutputDefinition {
   readonly sourcePath: string;
 }
 
+export interface CompiledSandboxWorkspaceFile {
+  readonly contentBase64: string;
+  readonly fingerprint: string;
+  readonly path: string;
+  readonly size: number;
+}
+
+export interface CompiledSandboxRequirement {
+  readonly sourcePath: string;
+  readonly workspace: readonly CompiledSandboxWorkspaceFile[];
+}
+
 export type CompiledAgentInstructionEntry =
   | {
     readonly definition: RuntimeDynamicInstructionsDefinition;
@@ -79,6 +91,7 @@ export interface AgentProjectSnapshot {
   readonly instructions: string;
   readonly instructionEntries?: readonly CompiledAgentInstructionEntry[];
   readonly outputDefinitions?: readonly CompiledAgentOutputDefinition[];
+  readonly sandbox?: CompiledSandboxRequirement;
   readonly tools: readonly CompiledProjectTool[];
   readonly connections: readonly CompiledMcpConnection[];
   readonly resources: Readonly<AgentProjectResources>;

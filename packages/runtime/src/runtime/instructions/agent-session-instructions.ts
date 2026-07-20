@@ -24,6 +24,7 @@ export class AgentSessionInstructions {
     instructionsPrefix,
     onCommitted,
     project,
+    sandboxInstruction,
     sessionState,
     sessionStore,
     systemPrompt
@@ -32,6 +33,7 @@ export class AgentSessionInstructions {
     instructionsPrefix: string;
     onCommitted?: (session: StoredRuntimeSession) => Promise<void> | void;
     project: AgentProjectSnapshot;
+    sandboxInstruction?: string;
     sessionState: AgentSessionState;
     sessionStore?: SessionStore;
     systemPrompt?: string;
@@ -57,6 +59,11 @@ export class AgentSessionInstructions {
       ? projectEntries.filter(entry => entry.kind === "dynamic")
       : projectEntries;
     this._hostEntries = [
+      ...(sandboxInstruction?.trim() ? [{
+        kind: "static" as const,
+        markdown: sandboxInstruction.trim(),
+        sourcePath: "host:sandbox-workspace"
+      }] : []),
       ...(systemPrompt === undefined && instructionsPrefix.trim() ? [{
         kind: "static" as const,
         markdown: instructionsPrefix.trim(),

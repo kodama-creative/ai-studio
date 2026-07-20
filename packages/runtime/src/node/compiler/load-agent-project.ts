@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -29,6 +30,7 @@ import { qualifyProjectMcpToolName } from "../../internal/project-mcp-tool-name"
 import { isMcpClientConnectionDefinition } from "../../public/definitions/connections/mcp";
 import { isExecutionEnvToolDefinition } from "../../public/definitions/execution-env-tool";
 import { isOutputDefinition } from "../../public/definitions/output";
+import { isSandboxDefinition } from "../../public/definitions/sandbox";
 import { isStateDefinition } from "../../public/definitions/state";
 import { isToolDefinition } from "../../public/definitions/tool";
 import { createCompiledExecutionEnvTool } from "../../runtime/agent/create-compiled-execution-env-tool";
@@ -50,7 +52,8 @@ import type {
   CompiledAgentStateDefinition,
   CompiledDynamicToolResolver,
   CompiledMcpConnection,
-  CompiledProjectTool
+  CompiledProjectTool,
+  CompiledSandboxRequirement
 } from "../../runtime/agent/agent-project-snapshot";
 import type { CompiledAgentDefinition } from "../../shared/agent-definition";
 import type { AgentProjectDiagnostic } from "../../shared/agent-project";
@@ -109,6 +112,13 @@ async function _compileAgentProject(
     discovered.root,
     sources
   );
+  const sandbox = await _compileSandbox(
+    discovered.sandbox,
+    diagnostics,
+    dependencies,
+    discovered.root,
+    sources
+  );
   const compiledTools = await _compileTools(
     discovered.tools,
     diagnostics,
@@ -141,6 +151,7 @@ async function _compileAgentProject(
     skills,
     stateDefinitions,
     outputDefinitions,
+    sandbox,
     sources,
     tools
   });
@@ -156,9 +167,77 @@ async function _compileAgentProject(
     instructionEntries,
     stateDefinitions,
     outputDefinitions,
+    sandbox,
     diagnostics,
     fingerprint: artifact.fingerprint
   });
+}
+
+async function _compileSandbox(
+  discovered: DiscoveredAgentProject["sandbox"],
+  diagnostics: AgentProjectDiagnostic[],
+  dependencies: AgentProjectArtifactDependencyInput[],
+  projectRoot: string,
+  sources: AgentProjectArtifactSourceInput[]
+): Promise<CompiledSandboxRequirement | undefined> {
+  if (!discovered?.definition) { return undefined; }
+  const sourceRef = discovered.definition;
+  try {
+    const loaded = await loadAuthoredModule({
+      projectRoot,
+      sourcePath: sourceRef.absolutePath,
+      authoredSdk: true
+    });
+    _recordDependencies(dependencies, sourceRef.logicalPath, loaded.dependencies);
+    sources.push({ id: sourceRef.logicalPath, content: loaded.source });
+    if (!isSandboxDefinition(loaded.default)) {
+      diagnostics.push({
+        severity: "error",
+        code: "sandbox_export_invalid",
+        message: `${path.basename(sourceRef.absolutePath)} must default-export defineSandbox({})`,
+        path: sourceRef.absolutePath
+      });
+      return undefined;
+    }
+    let totalBytes = 0;
+    const workspace = [];
+    for (const file of discovered.workspace) {
+      const content = await readFile(file.absolutePath);
+      totalBytes += content.byteLength;
+      if (content.byteLength > 25 * 1024 * 1024) {
+        throw new TypeError(
+          `Sandbox workspace file exceeds 25 MiB: ${file.logicalPath}`
+        );
+      }
+      if (totalBytes > 100 * 1024 * 1024) {
+        throw new TypeError("Sandbox workspace exceeds 100 MiB");
+      }
+      const relativePath = file.logicalPath.slice(
+        "sandbox/workspace/".length
+      );
+      const contentBase64 = content.toString("base64");
+      const fingerprint = createHash("sha256").update(content).digest("hex");
+      sources.push({ id: file.logicalPath, content: contentBase64 });
+      workspace.push({
+        path: relativePath,
+        size: content.byteLength,
+        fingerprint,
+        contentBase64
+      });
+    }
+    return {
+      sourcePath: sourceRef.logicalPath,
+      workspace
+    };
+  } catch (error) {
+    diagnostics.push({
+      severity: "error",
+      code: "sandbox_import_failed",
+      message: `Unable to import Sandbox definition: ${_errorMessage(error)}`,
+      path: sourceRef.absolutePath
+    });
+    return undefined;
+  }
 }
 
 async function _compileOutputDefinitions(

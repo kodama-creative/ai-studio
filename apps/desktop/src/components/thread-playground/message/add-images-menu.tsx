@@ -1,6 +1,12 @@
 "use client";
 
-import { ClipboardPasteIcon, FileIcon, ImagePlusIcon } from "lucide-react";
+import {
+  ClipboardPasteIcon,
+  FileIcon,
+  ImagePlusIcon,
+  LoaderCircleIcon,
+  PaperclipIcon
+} from "lucide-react";
 import { useCallback, useRef } from "react";
 
 import { Button } from "../../ui/button";
@@ -11,7 +17,10 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger
 } from "../../ui/dropdown-menu";
-import { useThreadStoreActions } from "../stores/thread-store";
+import {
+  useThreadStore,
+  useThreadStoreActions
+} from "../stores/thread-store";
 
 function readImageFile(
   file: File,
@@ -38,7 +47,22 @@ export function AddImagesMenu({
   readonly messageId: string;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { addMessageImageContent } = useThreadStoreActions();
+  const {
+    addMessageImageContent,
+    addMessageSandboxFiles
+  } = useThreadStoreActions();
+  const sandboxEnabled = useThreadStore(
+    state => state.sandboxAttachmentsEnabled
+  );
+  const hasSandboxAttachments = useThreadStore(state => {
+    const message = state.thread.context?.messages?.find(
+      candidate => candidate.id === messageId
+    );
+    return Boolean(message?.role === "user" && message.attachments?.length);
+  });
+  const staging = useThreadStore(state =>
+    state.stagingSandboxAttachmentMessageIds.includes(messageId));
+  const running = useThreadStore(state => state.status === "running");
 
   const addImage = useCallback(
     (mimeType: string, data: string) => {
@@ -64,8 +88,12 @@ export function AddImagesMenu({
   );
 
   const handleFromFiles = useCallback(() => {
-    fileInputRef.current?.click();
-  }, []);
+    if (sandboxEnabled) {
+      void addMessageSandboxFiles(messageId);
+    } else {
+      fileInputRef.current?.click();
+    }
+  }, [addMessageSandboxFiles, messageId, sandboxEnabled]);
 
   const handleFromClipboard = useCallback(async () => {
     try {
@@ -99,19 +127,30 @@ export function AddImagesMenu({
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
-            aria-label="Add image to message"
-            disabled={disabled}
+            aria-label={sandboxEnabled
+              ? "Add attachment to message"
+              : "Add image to message"}
+            disabled={disabled || staging || running}
             size="icon-sm"
             variant="ghost"
           >
-            <ImagePlusIcon className="size-4" />
+            {staging
+              ? <LoaderCircleIcon className="size-4 animate-spin" />
+              : sandboxEnabled
+                ? <PaperclipIcon className="size-4" />
+                : <ImagePlusIcon className="size-4" />}
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          <DropdownMenuLabel>Add Images</DropdownMenuLabel>
-          <DropdownMenuItem onSelect={handleFromFiles}>
+          <DropdownMenuLabel>
+            {sandboxEnabled ? "Add Attachments" : "Add Images"}
+          </DropdownMenuLabel>
+          <DropdownMenuItem
+            disabled={sandboxEnabled ? hasSandboxAttachments : undefined}
+            onSelect={handleFromFiles}
+          >
             <FileIcon />
-            From Files
+            {staging ? "Staging Files…" : "From Files"}
           </DropdownMenuItem>
           <DropdownMenuItem onSelect={() => { void handleFromClipboard(); }}>
             <ClipboardPasteIcon />

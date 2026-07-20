@@ -19,7 +19,8 @@ import type {
   CompiledAgentStateDefinition,
   CompiledDynamicToolResolver,
   CompiledMcpConnection,
-  CompiledProjectTool
+  CompiledProjectTool,
+  CompiledSandboxRequirement
 } from "../../runtime/agent/agent-project-snapshot";
 import type { CompiledAgentDefinition } from "../../shared/agent-definition";
 
@@ -59,6 +60,7 @@ export function createAgentProjectArtifact({
   skills,
   stateDefinitions = [],
   outputDefinitions = [],
+  sandbox,
   sources,
   tools
 }: {
@@ -69,6 +71,7 @@ export function createAgentProjectArtifact({
   instructionEntries?: readonly CompiledAgentInstructionEntry[];
   instructions: string;
   outputDefinitions?: readonly CompiledAgentOutputDefinition[];
+  sandbox?: CompiledSandboxRequirement;
   skills: readonly CompiledAgentSkill[];
   sources: readonly AgentProjectArtifactSourceInput[];
   stateDefinitions?: readonly CompiledAgentStateDefinition[];
@@ -93,6 +96,17 @@ export function createAgentProjectArtifact({
           dynamicModel: definition.dynamicModel
             ? { fallback: definition.model, events: ["turn.started"] }
             : null
+        }
+      }] : []),
+      ...(sandbox ? [{
+        id: "sandbox",
+        content: {
+          sourcePath: sandbox.sourcePath,
+          workspace: sandbox.workspace.map(file => ({
+            path: file.path,
+            size: file.size,
+            fingerprint: file.fingerprint
+          }))
         }
       }] : []),
       { id: "instructions", content: instructions },

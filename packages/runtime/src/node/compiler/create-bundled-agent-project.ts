@@ -9,6 +9,7 @@ import { qualifyProjectMcpToolName } from "../../internal/project-mcp-tool-name"
 import { isMcpClientConnectionDefinition } from "../../public/definitions/connections/mcp";
 import { isExecutionEnvToolDefinition } from "../../public/definitions/execution-env-tool";
 import { isOutputDefinition } from "../../public/definitions/output";
+import { isSandboxDefinition } from "../../public/definitions/sandbox";
 import { isStateDefinition } from "../../public/definitions/state";
 import { isToolDefinition } from "../../public/definitions/tool";
 import { createCompiledExecutionEnvTool } from "../../runtime/agent/create-compiled-execution-env-tool";
@@ -56,6 +57,11 @@ export interface BundledAgentProjectInput {
     }
   >;
   readonly skills: readonly CompiledAgentSkill[];
+  readonly sandbox?: {
+    readonly definition: unknown;
+    readonly sourcePath: string;
+    readonly workspace: NonNullable<CompiledAgentProjectSnapshot["sandbox"]>["workspace"];
+  };
   readonly states: ReadonlyArray<{
     readonly definition: unknown;
     readonly sourcePath: string;
@@ -101,6 +107,7 @@ export function createBundledAgentProject(
   const { dynamicToolResolvers, tools } = compiledTools;
   const stateDefinitions = _compileStates(input.states);
   const outputDefinitions = _compileOutputs(input.outputs);
+  const sandbox = _compileSandbox(input.sandbox);
   const connections = _compileConnections(input.connections, tools);
   return createImmutableAgentProjectSnapshot({
     artifact,
@@ -114,9 +121,23 @@ export function createBundledAgentProject(
     resources: { skills: input.skills },
     stateDefinitions,
     outputDefinitions,
+    sandbox,
     diagnostics: [],
     fingerprint: artifact.fingerprint
   });
+}
+
+function _compileSandbox(
+  input: BundledAgentProjectInput["sandbox"]
+): CompiledAgentProjectSnapshot["sandbox"] {
+  if (!input) { return undefined; }
+  if (!isSandboxDefinition(input.definition)) {
+    throw new TypeError("Bundled Sandbox definition is invalid");
+  }
+  return {
+    sourcePath: input.sourcePath,
+    workspace: input.workspace
+  };
 }
 
 function _compileOutputs(

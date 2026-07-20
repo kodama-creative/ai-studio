@@ -1,5 +1,6 @@
+import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
-import { readFile, stat, writeFile } from "node:fs/promises";
+import { lstat, readFile, stat, writeFile } from "node:fs/promises";
 import nodePath from "node:path";
 import { BrowserView, type BrowserWindow, Utils } from "electrobun/bun";
 
@@ -15,6 +16,7 @@ import type { ExternalAgentProjectManager } from "../external-projects";
 import type { EmbeddedLocalServerManager } from "../local-server";
 import type { McpManager } from "../mcp";
 import type { ModelManager } from "../models";
+import type { DesktopSandboxManager } from "../sandbox";
 import type { SearchSettingsManager } from "../search";
 import type { SkillsManager } from "../skills";
 import type { StreamThreadController } from "../streaming";
@@ -67,6 +69,7 @@ export interface MainWindowRPCDependencies {
   mcpManager: McpManager;
   modelManager: ModelManager;
   searchSettings: SearchSettingsManager;
+  sandboxes: DesktopSandboxManager;
   skillsManager: SkillsManager;
   streaming: StreamThreadController;
   tools: ToolRegistry;
@@ -89,6 +92,7 @@ export function createMainWindowRPC({
   mcpManager,
   modelManager,
   searchSettings,
+  sandboxes,
   skillsManager,
   streaming,
   tools,
@@ -296,8 +300,57 @@ export function createMainWindowRPC({
           ),
         externalAgentProjectReadThread: async ({ projectId, threadId }) =>
           externalAgentProjects.readThread(projectId, threadId),
-        externalAgentProjectRuntimeStatus: async ({ projectId, threadId }) =>
-          localServers.status(projectId, threadId),
+        externalAgentProjectRuntimeStatus: async ({ projectId, threadId }) => {
+          const record = await externalAgentProjects.readThread(
+            projectId,
+            threadId
+          );
+          const profile = record.thread.runtimeProfile?.type
+            ?? "desktopDirect";
+          if (profile === "localServer") {
+            return localServers.status(projectId, threadId);
+          }
+          if (profile === "desktopSandbox") {
+            return sandboxes.status(threadId);
+          }
+          return { state: "ready" as const };
+        },
+        externalAgentProjectSandboxStatus: async ({ threadId }) =>
+          sandboxes.status(threadId),
+        externalAgentProjectStageSandboxFiles: async ({
+          projectId,
+          threadId,
+          messageId
+        }) => {
+          const record = await externalAgentProjects.readThread(
+            projectId,
+            threadId
+          );
+          if (record.thread.runtimeProfile?.type !== "desktopSandbox") {
+            throw new Error("Files can be staged only for Desktop Sandbox.");
+          }
+          const selected = await Utils.openFileDialog({
+            startingFolder: "~/",
+            canChooseFiles: true,
+            canChooseDirectory: false,
+            allowsMultipleSelection: true
+          });
+          const paths = selected.map(item => item.trim()).filter(Boolean);
+          if (paths.length === 0) { return []; }
+          const attachments = await _readSandboxAttachments(paths);
+          const project = await externalAgentProjects.inspect(projectId);
+          const snapshot = await externalAgentProjects.getCompiledProject(
+            projectId,
+            project.snapshot
+          );
+          const prepared = await sandboxes.prepareTurn({
+            sessionId: threadId,
+            turnId: `${messageId}-${randomUUID()}`,
+            seed: snapshot.sandbox?.workspace ?? [],
+            attachments
+          });
+          return [...prepared.attachments];
+        },
         externalAgentProjectActivateConnections: async ({ projectId, threadId }) =>
           externalAgentProjects.activateConnections(projectId, threadId),
         externalAgentProjectDeactivateConnections: async ({
@@ -322,6 +375,7 @@ export function createMainWindowRPC({
           externalAgentProjects.duplicateThread(projectId, threadId),
         externalAgentProjectDeleteThread: async ({ projectId, threadId }) => {
           await localServers.detachThread(projectId, threadId);
+          await sandboxes.delete(threadId);
           await externalAgentProjects.deleteThread(projectId, threadId);
           return null;
         },
@@ -432,4 +486,50 @@ export function createMainWindowRPC({
     rpc.send.externalAgentProjectChanged({ projectId });
   });
   return rpc;
+}
+
+async function _readSandboxAttachments(paths: readonly string[]) {
+  if (paths.length > 20) {
+    throw new TypeError("A Turn supports at most 20 attachments.");
+  }
+  const names = new Set<string>();
+  let totalBytes = 0;
+  return Promise.all(paths.map(async filePath => {
+    const name = nodePath.basename(filePath);
+    let info;
+    try {
+      info = await lstat(filePath);
+    } catch {
+      throw new Error(`Unable to read attachment: ${name}`);
+    }
+    if (info.isSymbolicLink() || !info.isFile()) {
+      throw new TypeError("Sandbox attachments must be regular files.");
+    }
+    if (info.size > 25 * 1024 * 1024) {
+      throw new TypeError(`Attachment exceeds 25 MiB: ${name}`);
+    }
+    totalBytes += info.size;
+    if (totalBytes > 100 * 1024 * 1024) {
+      throw new TypeError("Turn attachments exceed 100 MiB.");
+    }
+    if (names.has(name)) {
+      throw new TypeError(`Duplicate attachment name: ${name}`);
+    }
+    names.add(name);
+    let content;
+    try {
+      content = await readFile(filePath);
+    } catch {
+      throw new Error(`Unable to read attachment: ${name}`);
+    }
+    if (content.byteLength !== info.size) {
+      throw new Error(`Attachment changed while staging: ${name}`);
+    }
+    return {
+      id: randomUUID(),
+      name,
+      fingerprint: createHash("sha256").update(content).digest("hex"),
+      content: new Uint8Array(content)
+    };
+  }));
 }

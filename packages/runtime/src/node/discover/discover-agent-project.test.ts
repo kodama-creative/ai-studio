@@ -1,4 +1,4 @@
-import { mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, rm, symlink, truncate, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
@@ -136,6 +136,42 @@ describe("discoverAgentProject", () => {
     ]);
     expect(discovered.diagnostics.map(diagnostic => path.basename(diagnostic.path)))
       .toEqual(["linked.ts", "nested", "not-a-file.ts", "readme.md"]);
+  });
+
+  test("rejects unsafe or oversized Sandbox workspace entries", async () => {
+    const root = _root();
+    const outside = `${root}-outside.txt`;
+    ROOTS.push(outside);
+    await mkdir(path.join(root, "sandbox", "workspace"), { recursive: true });
+    await writeFile(path.join(root, "agent.ts"), "export default {};\n");
+    await writeFile(path.join(root, "instructions.md"), "Be concise.\n");
+    await writeFile(
+      path.join(root, "sandbox", "sandbox.ts"),
+      "export default {};\n"
+    );
+    await writeFile(outside, "outside\n");
+    await symlink(
+      outside,
+      path.join(root, "sandbox", "workspace", "linked.txt")
+    );
+    const oversized = path.join(
+      root,
+      "sandbox",
+      "workspace",
+      "oversized.bin"
+    );
+    await writeFile(oversized, "");
+    await truncate(oversized, (25 * 1024 * 1024) + 1);
+
+    const discovered = await discoverAgentProject(root);
+
+    expect(discovered.sandbox?.workspace).toEqual([]);
+    expect(discovered.diagnostics.filter(
+      diagnostic => diagnostic.code === "sandbox_workspace_invalid"
+    ).map(diagnostic => diagnostic.message)).toEqual([
+      "Sandbox workspace symlinks are not supported: linked.txt",
+      "Sandbox workspace file exceeds 25 MiB: oversized.bin"
+    ]);
   });
 });
 

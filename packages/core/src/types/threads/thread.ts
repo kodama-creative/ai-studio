@@ -127,6 +127,10 @@ export const ThreadRuntimeProfile = Type.Union([
   }),
   Type.Object({
     version: Type.Literal(1),
+    type: Type.Literal("desktopSandbox")
+  }),
+  Type.Object({
+    version: Type.Literal(1),
     type: Type.Literal("localServer"),
     artifactFingerprint: Type.String(),
     serverSessionId: Type.Optional(Type.String())
@@ -495,6 +499,9 @@ export function normalizeThreadRuntimeProfile(
   }
   if (record.type === "desktopDirect") {
     return { version: 1, type: "desktopDirect" };
+  }
+  if (record.type === "desktopSandbox") {
+    return { version: 1, type: "desktopSandbox" };
   }
   if (record.type !== "localServer") {
     return undefined;

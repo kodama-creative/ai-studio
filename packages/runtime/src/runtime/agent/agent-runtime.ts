@@ -15,6 +15,7 @@ import {
   assertMaxStructuredOutputBytes,
   DEFAULT_MAX_STRUCTURED_OUTPUT_BYTES
 } from "../outputs/structured-output-size";
+import { SandboxUnavailableError } from "../sandbox/sandbox-unavailable-error";
 import {
   AgentSession,
   type AgentSessionPersistence
@@ -32,6 +33,7 @@ import type {
 import type { AgentSessionContext } from "../../shared/agent-session-context";
 import type { RuntimeExecutionMode } from "../../shared/runtime-execution-mode";
 import type { SessionStore, StoredRuntimeSession } from "../harness/session-store";
+import type { SandboxTurnEnvironment } from "../sandbox/sandbox-provider";
 
 export interface AgentRuntimeOptions {
   maxStructuredOutputBytes?: number;
@@ -58,6 +60,7 @@ export interface CreateAgentSessionOptions {
   streamFn?: StreamFn;
   outputContract?: string;
   executionEnv?: ExecutionEnv;
+  sandbox?: SandboxTurnEnvironment;
 }
 
 export class AgentRuntime {
@@ -118,6 +121,10 @@ export class AgentRuntime {
       throw new Error("Agent runtime definition is unavailable");
     }
     const selector = options.model ?? definition.model;
+    if (this._project.sandbox && !options.sandbox) {
+      throw new SandboxUnavailableError();
+    }
+    const executionEnv = options.sandbox?.executionEnv ?? options.executionEnv;
     const reasoning = Object.hasOwn(options, "reasoning")
       ? options.reasoning
       : definition.reasoning;
@@ -129,7 +136,7 @@ export class AgentRuntime {
       ...this._project.tools.map(tool => prepareProjectTool(
         tool,
         undefined,
-        options.executionEnv
+        executionEnv
       )),
       ...(options.extraTools ?? [])
     ];
@@ -171,6 +178,9 @@ export class AgentRuntime {
           : {})
       },
       instructionsPrefix: options.instructionsPrefix ?? "",
+      sandboxInstruction: options.sandbox
+        ? _sandboxWorkspaceInstruction(options.sandbox.workspaceManifest)
+        : undefined,
       systemPrompt: options.systemPrompt,
       executionMode: options.executionMode ?? "react",
       context: options.context,
@@ -180,10 +190,25 @@ export class AgentRuntime {
       streamFn: options.streamFn,
       outputDefinition,
       maxStructuredOutputBytes: this._maxStructuredOutputBytes,
-      ...(options.executionEnv ? { executionEnv: options.executionEnv } : {})
+      ...(executionEnv ? { executionEnv } : {})
     });
     await session.validateState();
     await session.prepareTurn();
     return session;
   }
+}
+
+function _sandboxWorkspaceInstruction(
+  manifest: readonly string[]
+): string {
+  const entries = [...manifest]
+    .filter(entry => typeof entry === "string")
+    .toSorted()
+    .slice(0, 1_000)
+    .map(entry => `- ${JSON.stringify(entry)}`);
+  return [
+    '<workspace path="/workspace">',
+    ...entries,
+    "</workspace>"
+  ].join("\n");
 }

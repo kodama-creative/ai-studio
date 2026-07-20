@@ -24,6 +24,7 @@ import {
 } from "../../internal/authored-dynamic-tools-definition";
 import { createAuthoredInstructionsVirtualModule } from "../../internal/authored-instruction-definitions";
 import { defineOutputRuntime } from "../../internal/authored-output-definitions";
+import { defineSandboxRuntime } from "../../internal/authored-sandbox-definition";
 import { defineStateRuntime } from "../../internal/authored-state-definitions";
 
 import type { DynamicToolSteps } from "../../internal/dynamic-tool-step";
@@ -267,6 +268,26 @@ function _authoredSdkPlugin(): Bun.BunPlugin {
           contents: createAuthoredDefinitionVirtualModule(
             "defineOutput",
             defineOutputRuntime
+          ),
+          loader: "js"
+        })
+      );
+      build.onResolve(
+        { filter: /^@llm-space\/runtime\/sandbox$/ },
+        () => ({
+          path: "sandbox-definition",
+          namespace: "llm-space-runtime"
+        })
+      );
+      build.onLoad(
+        {
+          filter: /^sandbox-definition$/,
+          namespace: "llm-space-runtime"
+        },
+        () => ({
+          contents: createAuthoredDefinitionVirtualModule(
+            "defineSandbox",
+            defineSandboxRuntime
           ),
           loader: "js"
         })

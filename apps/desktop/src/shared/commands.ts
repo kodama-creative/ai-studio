@@ -65,7 +65,7 @@ export interface CreateExternalAgentProjectThreadCommand extends GenericCommand<
   "createExternalAgentProjectThread",
   {
     projectId: string;
-    runtimeProfileType?: "desktopDirect" | "localServer";
+    runtimeProfileType?: "desktopDirect" | "desktopSandbox" | "localServer";
   }
 > {}
 

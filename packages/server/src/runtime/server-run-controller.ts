@@ -6,6 +6,9 @@ import {
   type CompiledAgentProjectSnapshot,
   createHostCapabilityPolicy,
   ExecutionEnvUnavailableError,
+  type SandboxProvider,
+  SandboxUnavailableError,
+  SandboxWorkspaceLostError,
   StructuredOutputError
 } from "@llm-space/runtime/server";
 
@@ -31,12 +34,14 @@ export interface ServerRunControllerOptions {
   readonly models: Models;
   readonly project: CompiledAgentProjectSnapshot;
   readonly repository: ServerSessionRepository;
+  readonly sandboxProvider?: SandboxProvider;
 }
 
 export class ServerRunController {
   private readonly _runtime: AgentRuntime;
   private readonly _capabilityPolicy: AgentCapabilityPolicy;
   private readonly _repository: ServerSessionRepository;
+  private readonly _sandboxProvider?: SandboxProvider;
   private readonly _active = new Map<string, { abort(): void; }>();
   private readonly _abortedRuns = new Set<string>();
   private readonly _pendingRuns = new Set<string>();
@@ -56,6 +61,12 @@ export class ServerRunController {
       models: options.models,
       project: options.project
     });
+    this._sandboxProvider = options.sandboxProvider;
+    if (this._runtime.project.sandbox && !this._sandboxProvider) {
+      throw new SandboxUnavailableError(
+        "The Agent requires Sandbox but this Server Host has no SandboxProvider"
+      );
+    }
     if (!this._runtime.defaultModel.available) {
       throw new Error("Compiled Agent default model is unavailable");
     }
@@ -214,6 +225,19 @@ export class ServerRunController {
     let code: string | undefined;
     let structuredOutput: RuntimeStructuredOutputResult | undefined;
     try {
+      const sandboxSession = this._sandboxProvider
+        ? await this._sandboxProvider.acquire({
+          expectedExisting: run.turnSequence > 1,
+          seed: this._runtime.project.sandbox?.workspace ?? [],
+          sessionId: run.sessionId
+        })
+        : undefined;
+      const sandbox = sandboxSession
+        ? {
+          executionEnv: sandboxSession.executionEnv,
+          workspaceManifest: await sandboxSession.workspaceManifest()
+        }
+        : undefined;
       const session = await this._runtime.createSession({
         capabilityPolicy: this._capabilityPolicy,
         id: run.sessionId,
@@ -230,6 +254,7 @@ export class ServerRunController {
         sessionStore: this._repository,
         executionMode: "react",
         initialMessages: run.transcript as AgentMessage[],
+        ...(sandbox ? { sandbox } : {}),
         ...(run.outputContract ? { outputContract: run.outputContract } : {}),
         persistence: {
           replaceMessages: async messages => {
@@ -295,6 +320,12 @@ export class ServerRunController {
       } else if (error instanceof ExecutionEnvUnavailableError) {
         outcome = "failed";
         code = "executionEnvUnavailable";
+      } else if (error instanceof SandboxUnavailableError) {
+        outcome = "failed";
+        code = error.code;
+      } else if (error instanceof SandboxWorkspaceLostError) {
+        outcome = "failed";
+        code = error.code;
       } else if (error instanceof StructuredOutputError) {
         outcome = "failed";
         code = error.code;

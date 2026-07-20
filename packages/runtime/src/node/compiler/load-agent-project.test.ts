@@ -22,6 +22,59 @@ afterEach(async () => {
 });
 
 describe("loadAgentProject", () => {
+  test("compiles a Sandbox requirement and immutable workspace seed", async () => {
+    const root = await _fixture();
+    await writeFile(join(root, "instructions.md"), "Inspect the workspace.\n");
+    await mkdir(join(root, "sandbox", "workspace", "nested"), {
+      recursive: true
+    });
+    await writeFile(
+      join(root, "sandbox", "sandbox.ts"),
+      `import { defineSandbox } from "@llm-space/runtime/sandbox";
+      export default defineSandbox({});`
+    );
+    await writeFile(
+      join(root, "sandbox", "workspace", "README.md"),
+      "seed\n"
+    );
+    await writeFile(
+      join(root, "sandbox", "workspace", "nested", "data.bin"),
+      Buffer.from([0, 255, 1])
+    );
+
+    const snapshot = await loadAgentProject(root);
+
+    expect(snapshot.diagnostics).toEqual([]);
+    expect(snapshot.sandbox).toEqual({
+      sourcePath: "sandbox/sandbox.ts",
+      workspace: [
+        {
+          path: "README.md",
+          size: 5,
+          fingerprint:
+            "4a6689419b00b11700c9b6246bcfa8936c8f5e1e824db3a7e57030e2d1c1a684",
+          contentBase64: "c2VlZAo="
+        },
+        {
+          path: "nested/data.bin",
+          size: 3,
+          fingerprint:
+            "47ffa3ea45a70b8a41c2c0825df323c00a8b7a01c1ea06083cc41dddcc001123",
+          contentBase64: "AP8B"
+        }
+      ]
+    });
+    expect(Object.isFrozen(snapshot.sandbox?.workspace)).toBe(true);
+    expect(snapshot.artifact.fingerprints.capabilities.entries)
+      .toContainEqual(expect.objectContaining({ id: "sandbox" }));
+    expect(snapshot.artifact.fingerprints.sources.entries.map(entry => entry.id))
+      .toEqual(expect.arrayContaining([
+        "sandbox/sandbox.ts",
+        "sandbox/workspace/README.md",
+        "sandbox/workspace/nested/data.bin"
+      ]));
+  });
+
   test("loads and normalizes the required Agent definition", async () => {
     const root = await _fixture();
     await writeFile(join(root, "instructions.md"), "You are helpful.\n");

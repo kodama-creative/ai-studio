@@ -1,5 +1,7 @@
 import type * as pi from "@earendil-works/pi-ai";
 
+import { formatSandboxAttachmentsForPi } from "../types/messages";
+
 import type { PiThreadContext } from "../types/agent";
 import type { Message, ModelUsage } from "../types/messages";
 import type { ThreadContext } from "../types/threads";
@@ -81,7 +83,7 @@ function _convertMessageContents(
   message: Message
 ): Array<pi.ImageContent | pi.TextContent | pi.ThinkingContent | pi.ToolCall> {
   if (message.role === "user") {
-    return message.content.map(content => {
+    const contents = message.content.map(content => {
       if (content.type === "text") {
         return { ...content } satisfies pi.TextContent;
       } else if (content.type === "image_data") {
@@ -94,6 +96,13 @@ function _convertMessageContents(
         throw new Error(`Unsupported content type: ${JSON.stringify(content)}`);
       }
     });
+    if (message.attachments?.length) {
+      contents.push({
+        type: "text",
+        text: formatSandboxAttachmentsForPi(message.attachments)
+      });
+    }
+    return contents;
   } else if (message.role === "assistant") {
     const contents: Array<pi.ImageContent | pi.TextContent | pi.ThinkingContent | pi.ToolCall> = [];
     if (message.thinking) {

@@ -25,6 +25,7 @@ const PROJECT = {
   definitionFingerprint: "definition",
   promptFingerprint: "prompt",
   snapshot: "snapshot-2",
+  sandboxRequired: false,
   tools: [],
   outputs: [],
   skills: [],
@@ -43,6 +44,13 @@ function _record(thread: Thread): ExternalAgentProjectThreadRecord {
 }
 
 describe("external Agent Project run gate", () => {
+  test("makes a Direct Thread stale when current source requires Sandbox", () => {
+    expect(getExternalAgentProjectRunBlockReason(
+      { ...PROJECT, sandboxRequired: true },
+      _record({ runtimeProfile: { version: 1, type: "desktopDirect" } })
+    )).toBe("sandboxRequired");
+  });
+
   test("blocks a new run while a frozen tool call still needs a result", () => {
     const record = _record({
       context: {

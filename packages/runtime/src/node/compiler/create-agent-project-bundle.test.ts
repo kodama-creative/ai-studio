@@ -120,6 +120,7 @@ describe("createAgentProjectBundle", () => {
     });
     expect(project.stateDefinitions).toEqual(loaded.stateDefinitions);
     expect(project.outputDefinitions).toEqual(loaded.outputDefinitions);
+    expect(project.sandbox).toEqual(loaded.sandbox);
     expect(project.connections.map(connection => connection.name)).toEqual([
       "fixture"
     ]);
@@ -220,6 +221,16 @@ async function _fixture(): Promise<string> {
     });`
   );
   await writeFile(join(root, "instructions.md"), "Echo the input.\n");
+  await mkdir(join(root, "sandbox", "workspace"), { recursive: true });
+  await writeFile(
+    join(root, "sandbox", "sandbox.ts"),
+    `import { defineSandbox } from "@llm-space/runtime/sandbox";
+    export default defineSandbox({});`
+  );
+  await writeFile(
+    join(root, "sandbox", "workspace", "bundle.txt"),
+    "portable seed\n"
+  );
   await mkdir(join(root, "instructions"));
   await writeFile(
     join(root, "instructions", "01-deterministic.md"),

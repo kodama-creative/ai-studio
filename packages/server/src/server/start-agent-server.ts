@@ -1,7 +1,10 @@
 import { recoverRuntimeSession } from "@llm-space/runtime/harness";
 
 import type { Models } from "@earendil-works/pi-ai";
-import type { CompiledAgentProjectSnapshot } from "@llm-space/runtime/server";
+import type {
+  CompiledAgentProjectSnapshot,
+  SandboxProvider
+} from "@llm-space/runtime/server";
 
 import {
   assertValidTrustedProxyRanges,
@@ -43,6 +46,7 @@ export interface StartAgentServerOptions {
   readonly project: CompiledAgentProjectSnapshot;
   readonly repositoryRoot: string;
   readonly shutdownTimeoutSeconds?: number;
+  readonly sandboxProvider?: SandboxProvider;
   readonly tls?: Bun.TLSOptions;
   readonly trustedProxyCidrs?: readonly string[];
 }
@@ -145,7 +149,10 @@ export async function startAgentServer(
       models: options.models,
       project: options.project,
       maxActiveRuns: options.maxActiveRuns,
-      maxStructuredOutputBytes: options.maxStructuredOutputBytes
+      maxStructuredOutputBytes: options.maxStructuredOutputBytes,
+      ...(options.sandboxProvider
+        ? { sandboxProvider: options.sandboxProvider }
+        : {})
     });
     const context: RequestContext = {
       accepting: true,
@@ -203,6 +210,13 @@ export async function startAgentServer(
         try {
           await server.stop(true);
         } finally {
+          const sandboxProvider = options.sandboxProvider;
+          if (sandboxProvider) {
+            await Promise.allSettled(
+              repository.sessionIds().map(async sessionId =>
+                sandboxProvider.stop(sessionId))
+            );
+          }
           await repository.close();
         }
       }

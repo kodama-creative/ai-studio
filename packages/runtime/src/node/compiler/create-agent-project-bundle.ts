@@ -93,6 +93,15 @@ export async function createAgentProjectBundle(
           name: string;
           schemaFingerprint: string;
         }>;
+        sandbox?: {
+          sourcePath: string;
+          workspace: ReadonlyArray<{
+            contentBase64: string;
+            fingerprint: string;
+            path: string;
+            size: number;
+          }>;
+        };
         stateDefinitions?: ReadonlyArray<{
           name: string;
           schemaFingerprint: string;
@@ -118,6 +127,8 @@ export async function createAgentProjectBundle(
       !== JSON.stringify(project.stateDefinitions)
       || JSON.stringify(bundledProject.outputDefinitions)
       !== JSON.stringify(project.outputDefinitions)
+      || JSON.stringify(bundledProject.sandbox)
+      !== JSON.stringify(project.sandbox)
       || JSON.stringify(bundledProject.tools.map(tool => tool.name))
       !== JSON.stringify(project.tools.map(tool => tool.name))
       || JSON.stringify(bundledProject.dynamicToolResolvers?.map(
@@ -197,7 +208,7 @@ async function _buildInFreshBunProcess(
       builtinModules.map(name => name.replace(/^node:/, ""))
     );
     const BUN_COMPATIBILITY_BUILTINS = new Set(["node-fetch", "ws"]);
-    const RUNTIME_SPECIFIER = /^(?:@llm-space\\/runtime(?:\\/tools|\\/connections|\\/state|\\/instructions|\\/outputs)?|typebox)$/;
+    const RUNTIME_SPECIFIER = /^(?:@llm-space\\/runtime(?:\\/tools|\\/connections|\\/state|\\/instructions|\\/outputs|\\/sandbox)?|typebox)$/;
     const PLUGIN = {
       name: "llm-space-deployment-dependencies",
       setup(build) {
@@ -326,6 +337,11 @@ function _entrySource(
   const imports = [
     `import { createBundledAgentProject } from ${JSON.stringify(helperPath)};`,
     `import definition from ${JSON.stringify(definitionPath)};`,
+    ...(discovered.sandbox?.definition
+      ? [
+        `import sandboxDefinition from ${JSON.stringify(discovered.sandbox.definition.absolutePath)};`
+      ]
+      : []),
     ...discovered.tools.map((source, index) => {
       const dynamic = project.dynamicToolResolvers?.some(
         resolver => resolver.sourcePath === source.logicalPath
@@ -370,6 +386,9 @@ function _entrySource(
     ...skill,
     filePath: path.posix.join("skills", skill.name, "SKILL.md")
   }));
+  const sandbox = project.sandbox
+    ? `{ definition: sandboxDefinition, sourcePath: ${JSON.stringify(project.sandbox.sourcePath)}, workspace: ${JSON.stringify(project.sandbox.workspace)} }`
+    : "undefined";
   let dynamicIndex = 0;
   const instructionEntries = (project.instructionEntries ?? []).map(entry =>
     (entry.kind === "static"
@@ -384,6 +403,7 @@ const INPUT = {
   connections: [${connections.map(connection => `{ name: ${JSON.stringify(connection.name)}, logicalPath: ${JSON.stringify(connection.logicalPath)}, definition: ${connection.definition} }`).join(",")}],
   states: [${states.map(state => `{ sourcePath: ${JSON.stringify(state.sourcePath)}, definition: ${state.definition} }`).join(",")}],
   outputs: [${outputs.map(output => `{ name: ${JSON.stringify(output.name)}, sourcePath: ${JSON.stringify(output.sourcePath)}, definition: ${output.definition} }`).join(",")}],
+  sandbox: ${sandbox},
   skills: ${JSON.stringify(skills)}
 };
 const EXPECTED_ARTIFACT = Object.freeze(${JSON.stringify(project.artifact)});

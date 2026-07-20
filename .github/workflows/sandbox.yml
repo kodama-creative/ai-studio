@@ -1,0 +1,32 @@
+name: Sandbox acceptance
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "packages/runtime/src/node/sandbox/**"
+      - "packages/runtime/src/runtime/sandbox/**"
+      - ".github/workflows/sandbox.yml"
+  pull_request:
+    paths:
+      - "packages/runtime/src/node/sandbox/**"
+      - "packages/runtime/src/runtime/sandbox/**"
+      - ".github/workflows/sandbox.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  docker-sandbox:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
+      - name: Run real Docker Sandbox acceptance
+        env:
+          LLM_SPACE_DOCKER_ACCEPTANCE: "1"
+        run: bun test packages/runtime/src/node/sandbox/docker-sandbox-acceptance.test.ts

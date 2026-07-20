@@ -12,7 +12,9 @@ export {
   type CompiledAgentProjectSnapshot,
   type CompiledAgentStateDefinition,
   type CompiledMcpConnection,
-  type CompiledProjectTool
+  type CompiledProjectTool,
+  type CompiledSandboxRequirement,
+  type CompiledSandboxWorkspaceFile
 } from "../runtime/agent/agent-project-snapshot";
 export {
   AgentRuntime,
@@ -27,6 +29,16 @@ export { ExecutionEnvUnavailableError } from "../runtime/execution-env/execution
 export {
   StructuredOutputError
 } from "../runtime/outputs/structured-output-error";
+export type {
+  SandboxAttachmentInput,
+  SandboxProvider,
+  SandboxProviderReadiness,
+  SandboxProviderSession,
+  SandboxTurnEnvironment,
+  StagedSandboxAttachment
+} from "../runtime/sandbox/sandbox-provider";
+export { SandboxUnavailableError } from "../runtime/sandbox/sandbox-unavailable-error";
+export { SandboxWorkspaceLostError } from "../runtime/sandbox/sandbox-workspace-lost-error";
 export {
   AgentSession,
   type AgentSessionEvent,
@@ -71,6 +83,13 @@ export {
   LocalAgentRuntime,
   type LocalAgentRuntimeOptions
 } from "./local-agent-runtime";
+export {
+  BunDockerCommandRunner,
+  type DockerCommandOptions,
+  type DockerCommandResult,
+  type DockerCommandRunner
+} from "./sandbox/docker-command-runner";
+export { DockerSandboxProvider } from "./sandbox/docker-sandbox-provider";
 export {
   scaffoldAgentProject,
   type ScaffoldAgentProjectOptions,

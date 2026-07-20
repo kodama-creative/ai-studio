@@ -6,6 +6,7 @@ import type {
   FileNode,
   ModelConfig,
   ModelProviderGroup,
+  SandboxAttachmentDescriptor,
   Thread,
   ThreadAgentRuntimeProvenance,
   ThreadServerRunLineage
@@ -82,6 +83,8 @@ export type StreamThreadResponsePayload =
       | "executionEnvUnavailable"
       | "hostPolicyChanged"
       | "outcomeUnknown"
+      | "sandboxUnavailable"
+      | "sandboxWorkspaceLost"
       | "structured_output_invalid"
       | "structured_output_missing"
       | "structured_output_too_large";
@@ -215,7 +218,7 @@ export interface DesktopRPCType {
       externalAgentProjectCreateThread: {
         params: {
           projectId: string;
-          runtimeProfileType?: "desktopDirect" | "localServer";
+          runtimeProfileType?: "desktopDirect" | "desktopSandbox" | "localServer";
           title?: string;
         };
         response: { id: string; record: ExternalAgentProjectThreadRecord; };
@@ -259,6 +262,14 @@ export interface DesktopRPCType {
       externalAgentProjectRuntimeStatus: {
         params: { projectId: string; threadId: string; };
         response: ExternalAgentProjectRuntimeStatus;
+      };
+      externalAgentProjectSandboxStatus: {
+        params: { threadId: string; };
+        response: ExternalAgentProjectRuntimeStatus;
+      };
+      externalAgentProjectStageSandboxFiles: {
+        params: { messageId: string; projectId: string; threadId: string; };
+        response: SandboxAttachmentDescriptor[];
       };
       externalAgentProjectSyncThreadFromAgent: {
         params: { projectId: string; threadId: string; };

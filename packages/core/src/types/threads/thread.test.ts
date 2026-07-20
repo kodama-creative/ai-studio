@@ -210,4 +210,16 @@ describe("Thread Runtime Profile schema", () => {
       type: "desktopDirect"
     });
   });
+
+  test("preserves Desktop Sandbox as a distinct immutable authority", () => {
+    const thread = normalizeThread({
+      runtimeProfile: { version: 1, type: "desktopSandbox" }
+    });
+
+    expect(getThreadRuntimeProfile(thread)).toEqual({
+      version: 1,
+      type: "desktopSandbox"
+    });
+    expect(validator.Check(thread)).toBe(true);
+  });
 });

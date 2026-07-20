@@ -79,6 +79,17 @@ test("terminalizes a continued Turn when Host capability policy changed", async 
   });
 });
 
+test("fails closed when a required Sandbox has no Host provider", () => {
+  expect(() => new ServerRunController({
+    models: _models(),
+    project: {
+      ..._project(),
+      sandbox: { sourcePath: "sandbox.ts", workspace: [] }
+    },
+    repository: {} as ServerSessionRepository
+  })).toThrow("this Server Host has no SandboxProvider");
+});
+
 function _models() {
   const model: Model<"fake"> = {
     id: "fake-model",

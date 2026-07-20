@@ -18,6 +18,7 @@ import type { ThreadServerRunLineage } from "@llm-space/core";
 import type {
   ServerRunTerminalOutcome
 } from "@llm-space/runtime/client";
+import type { SandboxProvider } from "@llm-space/runtime/server";
 
 import { LocalServerCredentialStore } from "./local-server-credential-store";
 
@@ -65,6 +66,7 @@ export class EmbeddedLocalServerManager {
       externalAgentProjects: ExternalAgentProjectManager;
       homePath: string;
       models?: Models;
+      sandboxProvider?: SandboxProvider;
     }
   ) {
     this._credentials = new LocalServerCredentialStore(_options.homePath);
@@ -94,6 +96,17 @@ export class EmbeddedLocalServerManager {
         state: "stale",
         message: "This Thread is bound to an older compiled Agent artifact."
       };
+    }
+    if (project.sandboxRequired) {
+      const readiness = await this._options.sandboxProvider?.readiness();
+      if (readiness?.state !== "ready") {
+        return {
+          state: "unavailable",
+          message: readiness?.state === "unavailable"
+            ? readiness.message
+            : "The Local Server Host has no SandboxProvider."
+        };
+      }
     }
     if (profile.serverSessionId) {
       let credential;
@@ -319,6 +332,7 @@ export class EmbeddedLocalServerManager {
         throw error;
       }
     }
+    await this._options.sandboxProvider?.delete(credential.sessionId);
     await this._credentials.delete(projectId, threadId);
   }
 
@@ -374,7 +388,10 @@ export class EmbeddedLocalServerManager {
         this._options.homePath,
         "servers",
         artifactFingerprint
-      )
+      ),
+      ...(this._options.sandboxProvider
+        ? { sandboxProvider: this._options.sandboxProvider }
+        : {})
     });
     return {
       server,

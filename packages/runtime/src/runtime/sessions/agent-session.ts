@@ -78,6 +78,7 @@ export interface AgentSessionOptions {
   outputDefinition?: CompiledAgentOutputDefinition;
   maxStructuredOutputBytes?: number;
   executionEnv?: ExecutionEnv;
+  sandboxInstruction?: string;
 }
 
 export class AgentSession {
@@ -139,6 +140,7 @@ export class AgentSession {
       instructionsPrefix: options.instructionsPrefix,
       onCommitted: options.onSessionCommitted,
       project: options.project,
+      sandboxInstruction: options.sandboxInstruction,
       sessionState: this._sessionState,
       sessionStore: options.sessionStore,
       systemPrompt: options.systemPrompt

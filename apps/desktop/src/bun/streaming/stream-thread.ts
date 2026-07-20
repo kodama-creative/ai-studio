@@ -17,6 +17,8 @@ import {
   createHostCapabilityPolicy,
   ExecutionEnvUnavailableError,
   type PreparedAgentTool,
+  SandboxUnavailableError,
+  SandboxWorkspaceLostError,
   StructuredOutputError
 } from "@llm-space/runtime/node";
 
@@ -38,6 +40,7 @@ import type { ExternalAgentProjectManager } from "../external-projects";
 import type { EmbeddedLocalServerManager } from "../local-server";
 import type { McpManager } from "../mcp";
 import type { ModelManager } from "../models";
+import type { DesktopSandboxManager } from "../sandbox";
 import type { ToolRegistry } from "../tools/tool-registry";
 
 /** Process-scoped agent streaming and model-connection controller. */
@@ -50,7 +53,8 @@ export class StreamThreadController {
     private readonly _externalAgentProjects?: ExternalAgentProjectManager,
     private readonly _mcpManager?: McpManager,
     private readonly _tools?: ToolRegistry,
-    private readonly _localServers?: EmbeddedLocalServerManager
+    private readonly _localServers?: EmbeddedLocalServerManager,
+    private readonly _sandboxes?: DesktopSandboxManager
   ) {}
 
   /** Run an agent stream and push each event back through the caller's sender. */
@@ -112,9 +116,13 @@ export class StreamThreadController {
             ? { code: "hostPolicyChanged" as const }
             : error instanceof ExecutionEnvUnavailableError
               ? { code: "executionEnvUnavailable" as const }
-              : error instanceof StructuredOutputError
-                ? { code: error.code }
-                : {})
+              : error instanceof SandboxWorkspaceLostError
+                ? { code: "sandboxWorkspaceLost" as const }
+                : error instanceof SandboxUnavailableError
+                  ? { code: "sandboxUnavailable" as const }
+                  : error instanceof StructuredOutputError
+                    ? { code: error.code }
+                    : {})
       });
     } finally {
       this._activeStreams.delete(streamId);
@@ -147,6 +155,7 @@ export class StreamThreadController {
       | "structured_output_too_large"
       | undefined;
     let executionEnvUnavailable = false;
+    let sandboxFailure: "sandboxUnavailable" | "sandboxWorkspaceLost" | undefined;
     await this._localServers.run(
       {
         projectId: payload.runtime.projectId,
@@ -190,6 +199,11 @@ export class StreamThreadController {
             structuredOutputFailure = code;
           } else if (code === "executionEnvUnavailable") {
             executionEnvUnavailable = true;
+          } else if (
+            code === "sandboxUnavailable"
+            || code === "sandboxWorkspaceLost"
+          ) {
+            sandboxFailure = code;
           }
         }
       }
@@ -202,6 +216,12 @@ export class StreamThreadController {
     }
     if (executionEnvUnavailable) {
       throw new ExecutionEnvUnavailableError();
+    }
+    if (sandboxFailure === "sandboxWorkspaceLost") {
+      throw new SandboxWorkspaceLostError();
+    }
+    if (sandboxFailure === "sandboxUnavailable") {
+      throw new SandboxUnavailableError();
     }
   }
 
@@ -393,6 +413,20 @@ export class StreamThreadController {
     };
     const sessionId = runtimeState?.session.snapshot.id
       ?? payload.runtime.threadId;
+    const threadRecord = await this._externalAgentProjects.readThread(
+      payload.runtime.projectId,
+      payload.runtime.threadId
+    );
+    const profile = threadRecord.thread.runtimeProfile?.type
+      ?? "desktopDirect";
+    const sandbox = profile === "desktopSandbox"
+      ? await this._prepareSandboxTurn({
+        projectId: payload.runtime.projectId,
+        sessionId,
+        snapshot: threadRecord.thread.agentRuntime?.snapshot,
+        turnId: activeRunId ?? payload.streamId
+      })
+      : undefined;
     const publishRuntimeSession = (runtimeSession: StoredRuntimeSession) => {
       send({
         streamId: payload.streamId,
@@ -448,7 +482,8 @@ export class StreamThreadController {
         activeToolNames: activeSourceTools.map(tool => tool.name),
         systemPrompt: payload.request.context.systemPrompt,
         executionMode: payload.runtime.executionMode,
-        streamFn: this._streamFn(payload)
+        streamFn: this._streamFn(payload),
+        ...(sandbox ? { sandbox } : {})
       }
     );
     const definition = session.project.definition;
@@ -472,6 +507,27 @@ export class StreamThreadController {
       }
     });
     await this._streamSession(payload.streamId, session, send, onAbort);
+  }
+
+  private async _prepareSandboxTurn(input: {
+    projectId: string;
+    sessionId: string;
+    snapshot?: string;
+    turnId: string;
+  }) {
+    if (!this._sandboxes) { throw new SandboxUnavailableError(); }
+    const project = input.snapshot
+      ? await this._externalAgentProjects!.getCompiledProject(
+        input.projectId,
+        input.snapshot
+      )
+      : null;
+    if (!project) { throw new SandboxUnavailableError(); }
+    return this._sandboxes.prepareTurn({
+      sessionId: input.sessionId,
+      turnId: input.turnId,
+      seed: project.sandbox?.workspace ?? []
+    });
   }
 
   private async _streamSession(

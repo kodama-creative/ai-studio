@@ -1,6 +1,8 @@
 import { lstat, readdir } from "node:fs/promises";
 import path from "node:path";
 
+import { discoverAgentSandbox } from "./discover-agent-sandbox";
+
 import type { AgentProjectDiagnostic } from "../../shared/agent-project";
 
 const DEFINITION_FILE = "agent.ts";
@@ -17,6 +19,7 @@ export interface DiscoveredAgentProject {
   readonly instructions?: AgentProjectSourceRef;
   readonly instructionEntries: readonly AgentProjectSourceRef[];
   readonly outputs: readonly AgentProjectSourceRef[];
+  readonly sandbox?: Awaited<ReturnType<typeof discoverAgentSandbox>>;
   readonly states: readonly AgentProjectSourceRef[];
   readonly tools: readonly AgentProjectSourceRef[];
   readonly connections: readonly AgentProjectSourceRef[];
@@ -51,6 +54,7 @@ export async function discoverAgentProject(
   const tools = await _discoverTools(root, diagnostics);
   const states = await _discoverStates(root, diagnostics);
   const connections = await _discoverConnections(root, diagnostics);
+  const sandbox = await discoverAgentSandbox(root, diagnostics);
   const skillsRootCandidate = path.join(root, "skills");
   let skillsRoot: string | undefined = skillsRootCandidate;
   try {
@@ -88,6 +92,7 @@ export async function discoverAgentProject(
     instructions,
     instructionEntries,
     outputs,
+    sandbox,
     states,
     tools,
     connections,

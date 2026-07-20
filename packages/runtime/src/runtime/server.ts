@@ -7,7 +7,9 @@ export type {
   CompiledAgentProjectSnapshot,
   CompiledAgentStateDefinition,
   CompiledMcpConnection,
-  CompiledProjectTool
+  CompiledProjectTool,
+  CompiledSandboxRequirement,
+  CompiledSandboxWorkspaceFile
 } from "./agent/agent-project-snapshot";
 export {
   AgentRuntime,
@@ -23,6 +25,16 @@ export {
   MAX_MAX_STRUCTURED_OUTPUT_BYTES,
   MIN_MAX_STRUCTURED_OUTPUT_BYTES
 } from "./outputs/structured-output-size";
+export type {
+  SandboxAttachmentInput,
+  SandboxProvider,
+  SandboxProviderReadiness,
+  SandboxProviderSession,
+  SandboxTurnEnvironment,
+  StagedSandboxAttachment
+} from "./sandbox/sandbox-provider";
+export { SandboxUnavailableError } from "./sandbox/sandbox-unavailable-error";
+export { SandboxWorkspaceLostError } from "./sandbox/sandbox-workspace-lost-error";
 export {
   AgentStateCommitUnknownError,
   getActiveAgentSessionContext

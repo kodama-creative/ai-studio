@@ -20,6 +20,7 @@ import { useRenderingFidelity } from "@/components/theme-provider";
 import { cn } from "@/lib/utils";
 import { ImageContentList } from "./image-content-view";
 import { MessageListItemHeader } from "./message-list-item-header";
+import { SandboxAttachmentList } from "./sandbox-attachment-list";
 import { ThinkingView } from "./thinking-view";
 import { ToolCallListItem } from "./tool-call-list-item";
 import { isToolCallPending, summarizeToolCalls } from "./tool-call-status";
@@ -239,6 +240,15 @@ const _MessageListItem = function MessageListItem({
             messageId={message.id}
             readonly={readonly || textOnlyDraft}
           />
+          {message.role === "user"
+            ? (
+              <SandboxAttachmentList
+                attachments={message.attachments ?? []}
+                messageId={message.id}
+                readonly={readonly || streaming}
+              />
+            )
+            : null}
           {message.content.length > 0 && (
             <CodeEditor
               autoFocus={autoFocus}

@@ -287,6 +287,7 @@ export class ExternalAgentProjectManager {
         ? _textFingerprint(snapshot.instructions)
         : "",
       snapshot: snapshot?.fingerprint ?? "",
+      sandboxRequired: Boolean(snapshot?.sandbox),
       tools: snapshot ? _projectTools(projectId, snapshot) : [],
       outputs: (snapshot?.outputDefinitions ?? []).map(output => ({
         name: output.name,
@@ -323,7 +324,7 @@ export class ExternalAgentProjectManager {
   async createThread(
     projectId: string,
     title = "untitled",
-    runtimeProfileType?: "desktopDirect" | "localServer"
+    runtimeProfileType?: "desktopDirect" | "desktopSandbox" | "localServer"
   ): Promise<{ id: string; record: ExternalAgentProjectThreadRecord; }> {
     const view = await this.inspect(projectId);
     if (view.status !== "ready") {
@@ -331,6 +332,11 @@ export class ExternalAgentProjectManager {
     }
     if (!view.definition) {
       throw new Error("Agent Project has no valid definition.");
+    }
+    const selectedProfile = runtimeProfileType
+      ?? (view.sandboxRequired ? "desktopSandbox" : "desktopDirect");
+    if (view.sandboxRequired && selectedProfile === "desktopDirect") {
+      throw new Error("This Agent requires Sandbox and cannot run Desktop Direct.");
     }
     const id = randomUUID();
     const variables = createDefaultThreadVariables();
@@ -343,17 +349,24 @@ export class ExternalAgentProjectManager {
     }
     const thread: Thread = ensureThreadVariableState({
       title,
-      ...(runtimeProfileType === "desktopDirect"
+      ...(selectedProfile === "desktopDirect"
         ? { runtimeProfile: { version: 1 as const, type: "desktopDirect" as const } }
-        : runtimeProfileType === "localServer"
+        : selectedProfile === "desktopSandbox"
           ? {
             runtimeProfile: {
               version: 1 as const,
-              type: "localServer" as const,
-              artifactFingerprint: view.artifactFingerprint
+              type: "desktopSandbox" as const
             }
           }
-          : {}),
+          : selectedProfile === "localServer"
+            ? {
+              runtimeProfile: {
+                version: 1 as const,
+                type: "localServer" as const,
+                artifactFingerprint: view.artifactFingerprint
+              }
+            }
+            : {}),
       model: _modelFromDefinition(view.definition),
       agentRuntime: {
         projectId,
@@ -424,11 +437,14 @@ export class ExternalAgentProjectManager {
     threadId: string
   ): Promise<{ id: string; record: ExternalAgentProjectThreadRecord; }> {
     const source = await this.readThread(projectId, threadId);
-    if (source.thread.runtimeProfile?.type === "localServer") {
+    if (
+      source.thread.runtimeProfile?.type === "localServer"
+      || source.thread.runtimeProfile?.type === "desktopSandbox"
+    ) {
       return this.createThread(
         projectId,
         `${source.thread.title ?? "untitled"} copy`,
-        "localServer"
+        source.thread.runtimeProfile.type
       );
     }
     const id = randomUUID();
@@ -517,6 +533,14 @@ export class ExternalAgentProjectManager {
     if (record.thread.runtimeProfile?.type === "localServer") {
       throw new Error(
         "A Local Server Thread cannot adopt new Agent source. Create a Thread for the latest artifact."
+      );
+    }
+    if (
+      project.sandboxRequired
+      && getThreadRuntimeProfile(record.thread).type !== "desktopSandbox"
+    ) {
+      throw new Error(
+        "The latest Agent requires Sandbox. Create a new Desktop Sandbox Thread."
       );
     }
     if (!project.definition) {

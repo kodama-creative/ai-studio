@@ -51,6 +51,9 @@ afterEach(async () => {
 describe("StreamThreadController Agent Project runtime", () => {
   test("reports a Host policy change with an explicit terminal code", async () => {
     const manager = {
+      readThread: async () => Promise.resolve({
+        thread: { runtimeProfile: { type: "desktopDirect" } }
+      }),
       requiresRuntimeSessionStore: async () => Promise.resolve(false),
       createRuntimeSession: async () => {
         throw new AgentHostPolicyChangedError();
@@ -90,6 +93,9 @@ describe("StreamThreadController Agent Project runtime", () => {
 
   test("reports a missing ExecutionEnv without a Desktop host fallback", async () => {
     const manager = {
+      readThread: async () => Promise.resolve({
+        thread: { runtimeProfile: { type: "desktopDirect" } }
+      }),
       requiresRuntimeSessionStore: async () => Promise.resolve(false),
       createRuntimeSession: async () => {
         throw new ExecutionEnvUnavailableError();

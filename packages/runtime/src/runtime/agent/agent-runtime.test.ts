@@ -22,10 +22,46 @@ import {
 import { defineDynamic as defineDynamicModel } from "../../public/models/define-dynamic";
 import { defineDynamic as defineDynamicTools } from "../../public/tools/define-dynamic";
 import { InMemorySessionStore } from "../harness/in-memory-session-store";
+import { SandboxUnavailableError } from "../sandbox/sandbox-unavailable-error";
 
 import type { AgentProjectSnapshot } from "./agent-project-snapshot";
 
 describe("AgentRuntime", () => {
+  test("requires a real Sandbox and snapshots its workspace manifest", async () => {
+    const runtime = new AgentRuntime({
+      models: _models(),
+      project: {
+        ..._project(),
+        sandbox: {
+          sourcePath: "sandbox.ts",
+          workspace: []
+        }
+      }
+    });
+    const options = {
+      capabilityPolicy: _policy(),
+      context: _context("sandbox-session")
+    };
+
+    expect(await _rejection(runtime.createSession(options)))
+      .toBeInstanceOf(SandboxUnavailableError);
+
+    const session = await runtime.createSession({
+      ...options,
+      sandbox: {
+        executionEnv: {} as never,
+        workspaceManifest: ["README.md", "src/"]
+      }
+    });
+
+    expect(session.instructionSnapshot?.entries[0]).toEqual({
+      kind: "static",
+      markdown:
+        "<workspace path=\"/workspace\">\n- \"README.md\"\n- \"src/\"\n</workspace>",
+      sourcePath: "host:sandbox-workspace"
+    });
+  });
+
   test("owns an immutable project and its definition default", () => {
     const project = _project();
     (project.tools as AgentTool[]).push(_tool("original-tool"));

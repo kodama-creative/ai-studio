@@ -10,6 +10,22 @@ import { ModelUsage } from "./usage";
 export const UserMessageContent = Type.Union([TextContent, ImageDataContent]);
 export type UserMessageContent = ImageDataContent | TextContent;
 
+export const SandboxAttachmentDescriptor = Type.Object({
+  id: Type.String({ minLength: 1 }),
+  name: Type.String({
+    minLength: 1,
+    maxLength: 240,
+    pattern: "^[^/\\\\\\x00-\\x1f\\x7f]+$"
+  }),
+  path: Type.String({ pattern: "^/workspace/attachments/" }),
+  size: Type.Integer({ minimum: 0, maximum: 25 * 1024 * 1024 }),
+  fingerprint: Type.String({ pattern: "^[0-9a-f]{64}$" }),
+  mimeType: Type.Optional(Type.String())
+});
+export type SandboxAttachmentDescriptor = Static<
+  typeof SandboxAttachmentDescriptor
+>;
+
 /**
  * A message sent from user.
  */
@@ -27,7 +43,8 @@ export const UserMessage = Type.Object({
   /**
    * The content of the message.
    */
-  content: Type.Array(UserMessageContent)
+  content: Type.Array(UserMessageContent),
+  attachments: Type.Optional(Type.Array(SandboxAttachmentDescriptor))
 });
 export type UserMessage = Static<typeof UserMessage>;
 
@@ -90,4 +107,15 @@ export function getMessageText(message: Message): string {
     }
   }
   return parts.join("\n");
+}
+
+export function formatSandboxAttachmentsForPi(
+  attachments: readonly SandboxAttachmentDescriptor[]
+): string {
+  return [
+    "<attachments>",
+    ...attachments.map(attachment =>
+      `- ${attachment.name}: ${attachment.path}`),
+    "</attachments>"
+  ].join("\n");
 }

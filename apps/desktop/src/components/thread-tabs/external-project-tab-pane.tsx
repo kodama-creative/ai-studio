@@ -120,6 +120,11 @@ const _ProjectThreadPane = function ProjectThreadPane({
   const [running, setRunning] = useState(false);
   const [runtimeStatus, setRuntimeStatus] =
     useState<ExternalAgentProjectRuntimeStatus>({ state: "ready" });
+  const [sandboxStatus, setSandboxStatus] =
+    useState<ExternalAgentProjectRuntimeStatus>({
+      state: "unavailable",
+      message: "Checking Docker Engine availability."
+    });
   const [inspectRunRequest, setInspectRunRequest] = useState<{
     revision: number;
     runId: string;
@@ -201,9 +206,10 @@ const _ProjectThreadPane = function ProjectThreadPane({
   const load = useCallback(async () => {
     await flush();
     try {
-      const [nextProject, nextRecord] = await Promise.all([
+      const [nextProject, nextRecord, nextSandboxStatus] = await Promise.all([
         externalAgentProjects.inspect(projectId),
-        externalAgentProjects.readThread(projectId, threadId)
+        externalAgentProjects.readThread(projectId, threadId),
+        externalAgentProjects.sandboxStatus(threadId)
       ]);
       const nextProfile = getThreadRuntimeProfile(nextRecord.thread);
       const nextActivation =
@@ -214,9 +220,16 @@ const _ProjectThreadPane = function ProjectThreadPane({
           )
           : null;
       const nextRuntimeStatus = nextProfile.type === "localServer"
+        || nextProfile.type === "desktopSandbox"
         ? await externalAgentProjects.runtimeStatus(projectId, threadId)
-        : { state: "ready" as const };
+        : nextProject.sandboxRequired
+          ? {
+            state: "stale" as const,
+            message: "The latest Agent requires Sandbox. Create a new Desktop Sandbox Thread."
+          }
+          : { state: "ready" as const };
       setConnectionActivation(nextActivation);
+      setSandboxStatus(nextSandboxStatus);
       setRuntimeStatus(nextRuntimeStatus);
       setProject(nextProject);
       if (
@@ -330,7 +343,7 @@ const _ProjectThreadPane = function ProjectThreadPane({
   );
 
   const selectRuntimeProfile = useCallback(
-    (type: "desktopDirect" | "localServer") => {
+    (type: "desktopDirect" | "desktopSandbox" | "localServer") => {
       const current = recordRef.current;
       if (!current) {
         return;
@@ -419,6 +432,14 @@ const _ProjectThreadPane = function ProjectThreadPane({
   const loadPromptSkills = useCallback(
     async () => Promise.resolve(project?.skills ?? []),
     [project?.skills]
+  );
+  const stageSandboxFiles = useCallback(
+    async (messageId: string) => externalAgentProjects.stageSandboxFiles(
+      projectId,
+      threadId,
+      messageId
+    ),
+    [projectId, threadId]
   );
   const openProjectToolSource = useCallback(
     (tool: ProjectTool) => {
@@ -576,6 +597,9 @@ const _ProjectThreadPane = function ProjectThreadPane({
   const localServer = record
     ? getThreadRuntimeProfile(record.thread).type === "localServer"
     : false;
+  const desktopSandbox = record
+    ? getThreadRuntimeProfile(record.thread).type === "desktopSandbox"
+    : false;
   const awaitingToolResult = record
     ? hasPendingExternalAgentProjectToolResult(record)
     : false;
@@ -691,10 +715,11 @@ const _ProjectThreadPane = function ProjectThreadPane({
               disabled={running}
               onSelect={selectRuntimeProfile}
               profile={runtimeProfile}
+              sandboxRequired={project.sandboxRequired}
+              sandboxStatus={sandboxStatus}
               status={runtimeStatus}
             />
-            {localServer
-              && runtimeStatus.message
+            {runtimeStatus.message
               && (runtimeStatus.state === "stale"
                 || runtimeStatus.state === "unavailable")
               ? (
@@ -716,7 +741,7 @@ const _ProjectThreadPane = function ProjectThreadPane({
                 </span>
               )
               : null}
-            {agentOutOfSync
+            {agentOutOfSync && runBlockReason !== "sandboxRequired"
               ? (
                 <Button
                   className="h-5 px-1.5 text-[10px]"
@@ -738,14 +763,21 @@ const _ProjectThreadPane = function ProjectThreadPane({
                 </Button>
               )
               : null}
-            {localServer && runtimeStatus.state === "stale"
+            {((localServer || desktopSandbox)
+              && runtimeStatus.state === "stale")
+            || runBlockReason === "sandboxRequired"
               ? (
                 <Button
                   className="h-5 px-1.5 text-[10px]"
                   onClick={() => {
                     executeCommand({
                       type: "createExternalAgentProjectThread",
-                      args: { projectId, runtimeProfileType: "localServer" }
+                      args: {
+                        projectId,
+                        runtimeProfileType: localServer
+                          ? "localServer"
+                          : "desktopSandbox"
+                      }
                     });
                   }}
                   size="sm"
@@ -758,7 +790,8 @@ const _ProjectThreadPane = function ProjectThreadPane({
                   <span className="min-[1100px]:hidden">New thread</span>
                 </Button>
               )
-              : localServer && runtimeStatus.state === "unavailable"
+              : (localServer || desktopSandbox)
+                && runtimeStatus.state === "unavailable"
                 ? (
                   <Button
                     className="h-5 px-1.5 text-[10px]"
@@ -833,13 +866,14 @@ const _ProjectThreadPane = function ProjectThreadPane({
           runBlockReason !== null
           || !savedModelAvailable
           || (!localServer && connectionActivation?.hasSchemaDrift === true)
-          || (localServer
+          || ((localServer || desktopSandbox)
             && runtimeStatus.state !== "ready"
             && runtimeStatus.state !== "running")
           || (localServer && !_isLocalServerDraftReady(record.thread))
         }
         runSettingsReadonly={localServer}
         runtimeOwnsToolLoop
+        stageSandboxFiles={desktopSandbox ? stageSandboxFiles : undefined}
         title={record.thread.title ?? "untitled"}
         toolExecutor={projectToolExecutor}
         toolsReadonly

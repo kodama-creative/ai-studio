@@ -10,6 +10,10 @@ import type { StoredRuntimeSession } from "@llm-space/runtime/harness";
 
 import { electrobun } from "@/lib/electrobun";
 import { RuntimeExecutionEnvUnavailableError } from "./runtime-execution-env-unavailable-error";
+import {
+  RuntimeSandboxUnavailableError,
+  RuntimeSandboxWorkspaceLostError
+} from "./runtime-sandbox-error";
 import { RuntimeStructuredOutputError } from "./runtime-structured-output-error";
 
 import type {
@@ -155,6 +159,12 @@ export function createRpcTransport(options?: {
           }
           if (errorCode === "executionEnvUnavailable") {
             throw new RuntimeExecutionEnvUnavailableError(errorMessage);
+          }
+          if (errorCode === "sandboxUnavailable") {
+            throw new RuntimeSandboxUnavailableError(errorMessage);
+          }
+          if (errorCode === "sandboxWorkspaceLost") {
+            throw new RuntimeSandboxWorkspaceLostError(errorMessage);
           }
           if (
             errorCode === "structured_output_invalid"
