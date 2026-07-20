@@ -125,7 +125,7 @@ async function seed(input) {
     JSON.stringify({ fingerprint: input.fingerprint ?? null }),
     { flag: "wx" }
   );
-  result(null);
+  result();
 }
 
 async function stageTurn(input) {
@@ -248,7 +248,7 @@ async function fileOperation(input) {
           ? String(input.contentText ?? "")
           : Buffer.from(input.contentBase64, "base64")
       );
-      result(null);
+      result();
     } else if (input.operation === "appendFile") {
       await mkdir(path.posix.dirname(target), { recursive: true });
       await appendFile(
@@ -257,7 +257,7 @@ async function fileOperation(input) {
           ? String(input.contentText ?? "")
           : Buffer.from(input.contentBase64, "base64")
       );
-      result(null);
+      result();
     } else if (input.operation === "fileInfo") {
       result(fileInfoValue(target, await lstat(target)));
     } else if (input.operation === "listDir") {
@@ -283,13 +283,13 @@ async function fileOperation(input) {
       }
     } else if (input.operation === "createDir") {
       await mkdir(target, { recursive: input.recursive !== false });
-      result(null);
+      result();
     } else if (input.operation === "remove") {
       await rm(target, {
         recursive: input.recursive === true,
         force: input.force === true
       });
-      result(null);
+      result();
     } else {
       throw Object.assign(new Error("Unsupported file operation"), {
         code: "ENOTSUP"
@@ -382,7 +382,7 @@ async function abortCommand(input) {
       killGroup(pid, "SIGTERM");
       await Bun.sleep(100);
       killGroup(pid, "SIGKILL");
-      result(null);
+      result();
       return;
     } catch (error) {
       if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
@@ -391,7 +391,7 @@ async function abortCommand(input) {
       await Bun.sleep(10);
     }
   }
-  result(null);
+  result();
 }
 
 try {
