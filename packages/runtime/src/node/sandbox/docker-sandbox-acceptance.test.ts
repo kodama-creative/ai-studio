@@ -18,18 +18,19 @@ dockerTest("real Docker isolates, retains, reconstructs, and deletes a Sandbox S
   const secondId = `acceptance-second-${crypto.randomUUID()}`;
   const firstNames = _names(firstId);
   const secret = `host-secret-${crypto.randomUUID()}`;
+  const seed = [{
+    path: "README.md",
+    size: 5,
+    fingerprint:
+      "4a6689419b00b11700c9b6246bcfa8936c8f5e1e824db3a7e57030e2d1c1a684",
+    contentBase64: "c2VlZAo="
+  }];
   process.env.LLM_SPACE_SANDBOX_ACCEPTANCE_SECRET = secret;
   try {
     expect(await provider.readiness()).toEqual({ state: "ready" });
     const first = await provider.acquire({
       sessionId: firstId,
-      seed: [{
-        path: "README.md",
-        size: 5,
-        fingerprint:
-          "4a6689419b00b11700c9b6246bcfa8936c8f5e1e824db3a7e57030e2d1c1a684",
-        contentBase64: "c2VlZAo="
-      }]
+      seed
     });
     expect(await first.executionEnv.readTextFile("README.md"))
       .toEqual({ ok: true, value: "seed\n" });
@@ -129,7 +130,7 @@ dockerTest("real Docker isolates, retains, reconstructs, and deletes a Sandbox S
     const reconnected = await provider.acquire({
       expectedExisting: true,
       sessionId: firstId,
-      seed: []
+      seed
     });
     expect(await reconnected.executionEnv.readTextFile("generated.txt"))
       .toEqual({ ok: true, value: "durable" });
@@ -140,7 +141,7 @@ dockerTest("real Docker isolates, retains, reconstructs, and deletes a Sandbox S
     const reconstructed = await provider.acquire({
       expectedExisting: true,
       sessionId: firstId,
-      seed: []
+      seed
     });
     expect(await reconstructed.executionEnv.readTextFile("generated.txt"))
       .toEqual({ ok: true, value: "durable" });
@@ -154,7 +155,7 @@ dockerTest("real Docker isolates, retains, reconstructs, and deletes a Sandbox S
     expect(await _rejection(provider.acquire({
       expectedExisting: true,
       sessionId: firstId,
-      seed: []
+      seed
     }))).toBeInstanceOf(SandboxWorkspaceLostError);
   } finally {
     delete process.env.LLM_SPACE_SANDBOX_ACCEPTANCE_SECRET;
