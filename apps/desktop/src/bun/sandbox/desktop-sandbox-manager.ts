@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { sameSandboxAttachmentDescriptor } from "@llm-space/core";
 import { SandboxWorkspaceLostError } from "@llm-space/runtime/node";
 
 import type { SandboxAttachmentDescriptor } from "@llm-space/core";
@@ -409,12 +410,8 @@ function _sameAttachments(
 ): boolean {
   return left.length === right.length && left.every((attachment, index) => {
     const candidate = right[index];
-    return attachment.id === candidate?.id
-      && attachment.name === candidate.name
-      && attachment.path === candidate.path
-      && attachment.size === candidate.size
-      && attachment.fingerprint === candidate.fingerprint
-      && attachment.mimeType === candidate.mimeType;
+    return candidate !== undefined
+      && sameSandboxAttachmentDescriptor(attachment, candidate);
   });
 }
 

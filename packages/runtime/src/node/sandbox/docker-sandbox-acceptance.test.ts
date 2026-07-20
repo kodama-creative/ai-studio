@@ -101,6 +101,22 @@ dockerTest("real Docker isolates, retains, reconstructs, and deletes a Sandbox S
       `${failedDestination}/existing.txt`
     )).toEqual({ ok: true, value: "keep" });
 
+    const interruptedTurnId = "interrupted-staging";
+    const interruptedTurnKey = createHash("sha256").update(interruptedTurnId)
+      .digest("hex")
+      .slice(0, 24);
+    const interruptedTemporary =
+      `/workspace/.llm-space-attachments-${interruptedTurnKey}.tmp`;
+    expect(await first.executionEnv.createDir(interruptedTemporary))
+      .toEqual({ ok: true, value: undefined });
+    expect(await first.executionEnv.writeFile(
+      `${interruptedTemporary}/orphan.txt`,
+      "orphan"
+    )).toEqual({ ok: true, value: undefined });
+    await first.discardTurn({ turnId: interruptedTurnId });
+    expect(await first.executionEnv.exists(interruptedTemporary))
+      .toEqual({ ok: true, value: false });
+
     expect(await first.executionEnv.writeFile("generated.txt", "durable"))
       .toEqual({ ok: true, value: undefined });
     const chunks: string[] = [];

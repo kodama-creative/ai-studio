@@ -75,6 +75,33 @@ describe("loadAgentProject", () => {
       ]));
   });
 
+  test("rejects a workspace file swapped to a symlink after discovery", async () => {
+    const root = await _fixture();
+    const workspaceFile = join(root, "sandbox", "workspace", "seed.txt");
+    const outsideFile = join(root, "outside.txt");
+    await writeFile(join(root, "instructions.md"), "Inspect the workspace.\n");
+    await mkdir(join(root, "sandbox", "workspace"), { recursive: true });
+    await writeFile(workspaceFile, "discovered\n");
+    await writeFile(outsideFile, "outside-secret\n");
+    await writeFile(
+      join(root, "sandbox", "sandbox.ts"),
+      `import { rm, symlink } from "node:fs/promises";
+      import { defineSandbox } from "@llm-space/runtime/sandbox";
+      await rm(${JSON.stringify(workspaceFile)});
+      await symlink(${JSON.stringify(outsideFile)}, ${JSON.stringify(workspaceFile)});
+      export default defineSandbox({});`
+    );
+
+    const snapshot = await loadAgentProject(root);
+
+    expect(snapshot.sandbox).toBeUndefined();
+    expect(snapshot.diagnostics).toContainEqual(expect.objectContaining({
+      code: "sandbox_import_failed",
+      message: expect.stringContaining("Unable to import Sandbox definition")
+    }));
+    expect(JSON.stringify(snapshot.artifact)).not.toContain("outside-secret");
+  });
+
   test("loads and normalizes the required Agent definition", async () => {
     const root = await _fixture();
     await writeFile(join(root, "instructions.md"), "You are helpful.\n");

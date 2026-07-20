@@ -225,10 +225,15 @@ export class ServerRunController {
     let code: string | undefined;
     let structuredOutput: RuntimeStructuredOutputResult | undefined;
     try {
+      const persistedRuntime = this._runtime.project.sandbox
+        ? await this._repository.load(run.sessionId)
+        : null;
       const sandboxSession = this._runtime.project.sandbox
         && this._sandboxProvider
         ? await this._sandboxProvider.acquire({
-          expectedExisting: run.turnSequence > 1,
+          expectedExisting: Object.keys(
+            persistedRuntime?.snapshot.instructionSnapshots ?? {}
+          ).length > 0,
           seed: this._runtime.project.sandbox?.workspace ?? [],
           sessionId: run.sessionId
         })

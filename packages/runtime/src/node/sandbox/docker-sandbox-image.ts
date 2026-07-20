@@ -126,10 +126,7 @@ async function _stageTurn(input) {
   const turnKey = createHash("sha256").update(String(input.turnId)).digest("hex").slice(0, 24);
   const destinationName = ".llm-space-attachments-" + turnKey;
   const destination = path.join(WORKSPACE, destinationName);
-  const temporary = path.join(
-    WORKSPACE,
-    "." + destinationName + "." + randomUUID() + ".tmp"
-  );
+  const temporary = path.join(WORKSPACE, destinationName + ".tmp");
   await mkdir(temporary, { recursive: true });
   const staged = [];
   try {
@@ -159,10 +156,17 @@ async function _stageTurn(input) {
 
 async function _discardTurn(input) {
   const turnKey = createHash("sha256").update(String(input.turnId)).digest("hex").slice(0, 24);
-  await rm(path.join(WORKSPACE, ".llm-space-attachments-" + turnKey), {
-    recursive: true,
-    force: true
-  });
+  const destinationName = ".llm-space-attachments-" + turnKey;
+  await Promise.all([
+    rm(path.join(WORKSPACE, destinationName), {
+      recursive: true,
+      force: true
+    }),
+    rm(path.join(WORKSPACE, destinationName + ".tmp"), {
+      recursive: true,
+      force: true
+    })
+  ]);
   _result();
 }
 

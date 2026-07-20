@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { open, readFile } from "node:fs/promises";
 import path from "node:path";
 import {
   loadSkills,
@@ -202,7 +203,7 @@ async function _compileSandbox(
     let totalBytes = 0;
     const workspace = [];
     for (const file of discovered.workspace) {
-      const content = await readFile(file.absolutePath);
+      const content = await _readSandboxWorkspaceFile(file);
       totalBytes += content.byteLength;
       if (content.byteLength > 25 * 1024 * 1024) {
         throw new TypeError(
@@ -237,6 +238,26 @@ async function _compileSandbox(
       path: sourceRef.absolutePath
     });
     return undefined;
+  }
+}
+
+async function _readSandboxWorkspaceFile(
+  file: AgentProjectSourceRef
+): Promise<Buffer> {
+  const handle = await open(
+    file.absolutePath,
+    constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
+  );
+  try {
+    const info = await handle.stat();
+    if (!info.isFile()) {
+      throw new TypeError(
+        `Sandbox workspace entry must remain a regular file: ${file.logicalPath}`
+      );
+    }
+    return await handle.readFile();
+  } finally {
+    await handle.close();
   }
 }
 

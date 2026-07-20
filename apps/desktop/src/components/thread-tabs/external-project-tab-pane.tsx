@@ -137,6 +137,7 @@ const _ProjectThreadPane = function ProjectThreadPane({
   const projectRef = useRef(project);
   const activeRunProvenance = useRef<ThreadAgentRuntimeProvenance | null>(null);
   const activeRuntimeSession = useRef<StoredRuntimeSession | null>(null);
+  const activeSandboxAttachmentMessageIds = useRef<readonly string[]>([]);
   const activeServerRun = useRef<{
     lineage: ThreadServerRunLineage;
     terminalOutcome?: "cancelled" | "completed" | "failed" | "outcomeUnknown";
@@ -160,6 +161,8 @@ const _ProjectThreadPane = function ProjectThreadPane({
               type: "agentProject" as const,
               projectId,
               threadId,
+              sandboxAttachmentMessageIds:
+                activeSandboxAttachmentMessageIds.current,
               modelSource:
                   current?.agentRuntime?.modelSource ?? "threadOverride",
               executionMode: getRuntimeExecutionMode()
@@ -459,6 +462,13 @@ const _ProjectThreadPane = function ProjectThreadPane({
   const prepareRunSnapshot = useCallback(
     (thread: Thread): Thread => {
       const profile = getThreadRuntimeProfile(thread);
+      activeSandboxAttachmentMessageIds.current = profile.type === "desktopSandbox"
+        ? (thread.context?.messages ?? [])
+          .map(message => message.id)
+          .filter(messageId => Boolean(
+            thread.sandboxAttachments?.[messageId]?.length
+          ))
+        : [];
       if (profile.type === "localServer") {
         const serverRun = activeServerRun.current;
         const { runtimeSession: _runtimeSession, ...withoutRuntimeSession } =

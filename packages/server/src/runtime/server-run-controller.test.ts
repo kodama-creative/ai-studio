@@ -101,6 +101,129 @@ test("fails closed when a required Sandbox has no Host provider", () => {
   })).toThrow("this Server Host has no SandboxProvider");
 });
 
+test("does not reconnect a Sandbox after an uncommitted first seed", async () => {
+  const principal: ServerPrincipal = {
+    issuer: "test",
+    principalId: "principal-one",
+    principalType: "user"
+  };
+  let expectedExisting: boolean | undefined;
+  const repository = {
+    findIdempotentRun: async () => Promise.resolve(null),
+    authorizedTranscript: () => [],
+    createRun: async () => Promise.resolve({
+      created: true,
+      initiator: principal,
+      owner: principal,
+      runId: "run-two",
+      sessionId: "session-one",
+      transcript: [],
+      turnSequence: 2
+    }),
+    load: async () => Promise.resolve({
+      version: 2,
+      snapshot: {
+        schemaVersion: 1,
+        id: "session-one",
+        activeRunId: "run-two",
+        runs: []
+      },
+      journal: []
+    }),
+    completeRun: async () => Promise.resolve()
+  } as unknown as ServerSessionRepository;
+  const controller = new ServerRunController({
+    models: _models(),
+    project: {
+      ..._project(),
+      sandbox: { sourcePath: "sandbox.ts", workspace: [] }
+    },
+    repository,
+    sandboxProvider: {
+      readiness: async () => Promise.resolve({ state: "ready" }),
+      acquire: async input => {
+        expectedExisting = input.expectedExisting;
+        throw new Error("seed failed");
+      },
+      delete: async () => Promise.resolve(),
+      stop: async () => Promise.resolve()
+    }
+  });
+
+  await controller.createRun({
+    continuationToken: "continuation",
+    idempotencyKey: "run-two",
+    owner: principal,
+    sessionId: "session-one",
+    text: "retry"
+  });
+  await controller.waitForIdle();
+
+  expect(expectedExisting).toBe(false);
+});
+
+test("reconnects a Sandbox after the Turn snapshot commits durably", async () => {
+  const principal: ServerPrincipal = {
+    issuer: "test",
+    principalId: "principal-one",
+    principalType: "user"
+  };
+  let expectedExisting: boolean | undefined;
+  const repository = {
+    findIdempotentRun: async () => Promise.resolve(null),
+    authorizedTranscript: () => [],
+    createRun: async () => Promise.resolve({
+      created: true,
+      initiator: principal,
+      owner: principal,
+      runId: "run-one",
+      sessionId: "session-one",
+      transcript: [],
+      turnSequence: 1
+    }),
+    load: async () => Promise.resolve({
+      version: 2,
+      snapshot: {
+        schemaVersion: 1,
+        id: "session-one",
+        activeRunId: "run-one",
+        runs: [],
+        instructionSnapshots: { "run-one": {} }
+      },
+      journal: []
+    }),
+    completeRun: async () => Promise.resolve()
+  } as unknown as ServerSessionRepository;
+  const controller = new ServerRunController({
+    models: _models(),
+    project: {
+      ..._project(),
+      sandbox: { sourcePath: "sandbox.ts", workspace: [] }
+    },
+    repository,
+    sandboxProvider: {
+      readiness: async () => Promise.resolve({ state: "ready" }),
+      acquire: async input => {
+        expectedExisting = input.expectedExisting;
+        throw new Error("stop after acquire");
+      },
+      delete: async () => Promise.resolve(),
+      stop: async () => Promise.resolve()
+    }
+  });
+
+  await controller.createRun({
+    continuationToken: "continuation",
+    idempotencyKey: "run-one",
+    owner: principal,
+    sessionId: "session-one",
+    text: "continue"
+  });
+  await controller.waitForIdle();
+
+  expect(expectedExisting).toBe(true);
+});
+
 function _models() {
   const model: Model<"fake"> = {
     id: "fake-model",

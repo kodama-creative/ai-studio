@@ -62,6 +62,7 @@ export interface StreamThreadRequestPayload {
       executionMode: RuntimeExecutionMode;
       modelSource: ThreadAgentRuntimeProvenance["modelSource"];
       projectId: string;
+      sandboxAttachmentMessageIds: readonly string[];
       threadId: string;
       type: "agentProject";
     }

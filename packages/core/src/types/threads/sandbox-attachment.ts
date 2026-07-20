@@ -34,6 +34,18 @@ export type LockedSandboxAttachmentMessageIds = Static<
   typeof LockedSandboxAttachmentMessageIds
 >;
 
+export function sameSandboxAttachmentDescriptor(
+  left: SandboxAttachmentDescriptor,
+  right: SandboxAttachmentDescriptor
+): boolean {
+  return left.id === right.id
+    && left.name === right.name
+    && left.path === right.path
+    && left.size === right.size
+    && left.fingerprint === right.fingerprint
+    && left.mimeType === right.mimeType;
+}
+
 export function formatSandboxAttachmentsForPi(
   attachments: readonly SandboxAttachmentDescriptor[]
 ): string {

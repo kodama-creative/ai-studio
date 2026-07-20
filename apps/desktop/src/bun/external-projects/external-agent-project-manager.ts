@@ -16,6 +16,7 @@ import {
   type ModelConfig,
   normalizeThread,
   type ProjectTool,
+  sameSandboxAttachmentDescriptor,
   type SandboxAttachmentDescriptor,
   type Thread
 } from "@llm-space/core";
@@ -1745,7 +1746,7 @@ function _reconcileSandboxThreadAuthority(
     }
     const accepted = proposed.map(descriptor => {
       const authoritative = approvedById.get(descriptor.id);
-      if (!authoritative || !_sameSandboxAttachment(
+      if (!authoritative || !sameSandboxAttachmentDescriptor(
         authoritative,
         descriptor
       )) {
@@ -1776,18 +1777,6 @@ function _reconcileSandboxThreadAuthority(
       : undefined,
     lockedSandboxAttachmentMessageIds: locked.length > 0 ? locked : undefined
   };
-}
-
-function _sameSandboxAttachment(
-  left: SandboxAttachmentDescriptor,
-  right: SandboxAttachmentDescriptor
-): boolean {
-  return left.id === right.id
-    && left.name === right.name
-    && left.path === right.path
-    && left.size === right.size
-    && left.fingerprint === right.fingerprint
-    && left.mimeType === right.mimeType;
 }
 
 function _assertRuntimeProfileWrite(current: Thread, next: Thread): void {

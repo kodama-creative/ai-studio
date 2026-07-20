@@ -70,6 +70,7 @@ describe("StreamThreadController Agent Project runtime", () => {
       streamId: "stream-host-policy-changed",
       runtime: {
         type: "agentProject",
+        sandboxAttachmentMessageIds: [],
         projectId: "project-one",
         threadId: "thread-one",
         executionMode: "react",
@@ -112,6 +113,7 @@ describe("StreamThreadController Agent Project runtime", () => {
       streamId: "stream-execution-env-unavailable",
       runtime: {
         type: "agentProject",
+        sandboxAttachmentMessageIds: [],
         projectId: "project-one",
         threadId: "thread-one",
         executionMode: "react",
@@ -160,6 +162,7 @@ describe("StreamThreadController Agent Project runtime", () => {
       streamId: "stream-connection-unavailable",
       runtime: {
         type: "agentProject",
+        sandboxAttachmentMessageIds: [],
         projectId: "project-one",
         threadId: "thread-one",
         executionMode: "react",
@@ -184,6 +187,71 @@ describe("StreamThreadController Agent Project runtime", () => {
     }]);
   });
 
+  test("locks Sandbox attachments by renderer-selected message identity", async () => {
+    const lockedMessageIds: Array<readonly string[]> = [];
+    const descriptor = {
+      id: "attachment-one",
+      name: "notes.txt",
+      path: "/workspace/.llm-space-attachments-fixture/notes.txt",
+      size: 5,
+      fingerprint: "a".repeat(64)
+    };
+    const manager = {
+      requiresRuntimeSessionStore: async () => Promise.resolve(false),
+      readThread: async () => Promise.resolve({
+        thread: {
+          runtimeProfile: { type: "desktopSandbox" },
+          sandboxAttachments: {
+            "message-selected": [descriptor],
+            "message-collision": [descriptor]
+          }
+        }
+      }),
+      lockSandboxAttachments: async (
+        _projectId: string,
+        _threadId: string,
+        messageIds: readonly string[]
+      ) => {
+        lockedMessageIds.push(messageIds);
+        throw new Error("stop after lock");
+      }
+    } as unknown as ExternalAgentProjectManager;
+    const controller = new StreamThreadController(
+      _modelManager(createModels()),
+      { capture: () => undefined } as never,
+      manager
+    );
+
+    await controller.run({
+      streamId: "stream-sandbox-attachment-identity",
+      runtime: {
+        type: "agentProject",
+        sandboxAttachmentMessageIds: ["message-selected"],
+        projectId: "project-one",
+        threadId: "thread-one",
+        executionMode: "react",
+        modelSource: "agent"
+      },
+      request: {
+        model: { provider: "fake", id: "fake-model" },
+        context: {
+          messages: [{
+            role: "user",
+            content: [{
+              type: "text",
+              text: "<attachments>\n- notes.txt: /workspace/.llm-space-attachments-fixture/notes.txt\n</attachments>"
+            }],
+            timestamp: Date.now()
+          }],
+          tools: [],
+          sourceTools: []
+        }
+      }
+    }, () => undefined);
+
+    expect(lockedMessageIds).toEqual([["message-selected"]]);
+  });
+
   test("persists dynamic Turn instructions before Desktop Project execution and reopens them", async () => {
     const { home, models, manager, opened, project, threadId, workspace } =
       await _fixture({
@@ -205,6 +273,7 @@ describe("StreamThreadController Agent Project runtime", () => {
         streamId: "stream-dynamic-instructions",
         runtime: {
           type: "agentProject",
+          sandboxAttachmentMessageIds: [],
           projectId: opened.id,
           threadId,
           executionMode: "react",
@@ -287,6 +356,7 @@ describe("StreamThreadController Agent Project runtime", () => {
         streamId: "stream-stateful-project",
         runtime: {
           type: "agentProject",
+          sandboxAttachmentMessageIds: [],
           projectId: opened.id,
           threadId,
           executionMode: "react",
@@ -365,6 +435,7 @@ describe("StreamThreadController Agent Project runtime", () => {
         streamId: "stream-direct-parity",
         runtime: {
           type: "agentProject",
+          sandboxAttachmentMessageIds: [],
           projectId: opened.id,
           threadId: directThreadId,
           executionMode: "react",
@@ -599,6 +670,7 @@ describe("StreamThreadController Agent Project runtime", () => {
         streamId: "stream-one",
         runtime: {
           type: "agentProject",
+          sandboxAttachmentMessageIds: [],
           projectId: opened.id,
           threadId,
           executionMode: "react",
@@ -681,6 +753,7 @@ describe("StreamThreadController Agent Project runtime", () => {
         streamId: "stream-risky-bash",
         runtime: {
           type: "agentProject",
+          sandboxAttachmentMessageIds: [],
           projectId: opened.id,
           threadId,
           executionMode: "react",
@@ -748,6 +821,7 @@ describe("StreamThreadController Agent Project runtime", () => {
         streamId: "stream-mcp-error",
         runtime: {
           type: "agentProject",
+          sandboxAttachmentMessageIds: [],
           projectId: opened.id,
           threadId,
           executionMode: "react",
