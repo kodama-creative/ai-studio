@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { useCallback, useRef } from "react";
 
+import { useCommands } from "@/commands";
 import { Button } from "../../ui/button";
 import {
   DropdownMenu,
@@ -18,6 +19,7 @@ import {
   DropdownMenuTrigger
 } from "../../ui/dropdown-menu";
 import {
+  isMessageIncludedInRunHistory,
   useThreadStore,
   useThreadStoreActions
 } from "../stores/thread-store";
@@ -47,19 +49,16 @@ export function AddImagesMenu({
   readonly messageId: string;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const {
-    addMessageImageContent,
-    addMessageSandboxFiles
-  } = useThreadStoreActions();
+  const { executeCommand } = useCommands();
+  const { addMessageImageContent } = useThreadStoreActions();
   const sandboxEnabled = useThreadStore(
     state => state.sandboxAttachmentsEnabled
   );
   const hasSandboxAttachments = useThreadStore(state => {
-    const message = state.thread.context?.messages?.find(
-      candidate => candidate.id === messageId
-    );
-    return Boolean(message?.role === "user" && message.attachments?.length);
+    return Boolean(state.thread.sandboxAttachments?.[messageId]?.length);
   });
+  const sandboxAttachmentsLocked = useThreadStore(state =>
+    isMessageIncludedInRunHistory(state.runHistory, messageId));
   const staging = useThreadStore(state =>
     state.stagingSandboxAttachmentMessageIds.includes(messageId));
   const running = useThreadStore(state => state.status === "running");
@@ -89,11 +88,14 @@ export function AddImagesMenu({
 
   const handleFromFiles = useCallback(() => {
     if (sandboxEnabled) {
-      void addMessageSandboxFiles(messageId);
+      executeCommand({
+        type: "stageSandboxAttachments",
+        args: { messageId }
+      });
     } else {
       fileInputRef.current?.click();
     }
-  }, [addMessageSandboxFiles, messageId, sandboxEnabled]);
+  }, [executeCommand, messageId, sandboxEnabled]);
 
   const handleFromClipboard = useCallback(async () => {
     try {
@@ -146,7 +148,9 @@ export function AddImagesMenu({
             {sandboxEnabled ? "Add Attachments" : "Add Images"}
           </DropdownMenuLabel>
           <DropdownMenuItem
-            disabled={sandboxEnabled ? hasSandboxAttachments : undefined}
+            disabled={sandboxEnabled
+              ? hasSandboxAttachments || sandboxAttachmentsLocked
+              : undefined}
             onSelect={handleFromFiles}
           >
             <FileIcon />

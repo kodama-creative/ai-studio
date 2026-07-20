@@ -109,6 +109,7 @@ const _RunTraceView = function RunTraceView({
           run.structuredOutput || run.structuredOutputFailure
         )}
         messages={messages}
+        sandboxAttachments={run.thread.sandboxAttachments}
       />
     </div>
   );

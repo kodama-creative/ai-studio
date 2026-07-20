@@ -76,6 +76,11 @@ interface RegistryFile {
   projects: Array<Pick<RegistryEntry, "path" | "trusted">>;
 }
 
+interface SandboxReadiness {
+  readonly message?: string;
+  readonly state: "ready" | "unavailable";
+}
+
 interface LoadedProject {
   resolved: ResolvedAgentProjectManifest | null;
   snapshot: AgentProjectSnapshot | null;
@@ -117,6 +122,7 @@ export class ExternalAgentProjectManager {
   private readonly _workspaceRoot: string;
   private readonly _getModels: () => Promise<Models>;
   private readonly _projectMcpConnector?: ProjectMcpConnector;
+  private readonly _sandboxReadiness?: () => Promise<SandboxReadiness>;
   private readonly _registry = new Map<string, RegistryEntry>();
   private readonly _loaded = new Map<string, LoadedProject>();
   private _loadedRegistry = false;
@@ -126,6 +132,7 @@ export class ExternalAgentProjectManager {
     getModels?: () => Promise<Models>;
     homePath: string;
     projectMcpConnector?: ProjectMcpConnector;
+    sandboxReadiness?: () => Promise<SandboxReadiness>;
     workspaceRoot: string;
   }) {
     const { homePath, workspaceRoot } = options;
@@ -134,6 +141,7 @@ export class ExternalAgentProjectManager {
       ?? (async () =>
         Promise.resolve({ getModel: () => undefined } as unknown as Models));
     this._projectMcpConnector = options.projectMcpConnector;
+    this._sandboxReadiness = options.sandboxReadiness;
     this._settingsFile = path.join(
       homePath,
       "settings",
@@ -337,6 +345,9 @@ export class ExternalAgentProjectManager {
       ?? (view.sandboxRequired ? "desktopSandbox" : "desktopDirect");
     if (view.sandboxRequired && selectedProfile === "desktopDirect") {
       throw new Error("This Agent requires Sandbox and cannot run Desktop Direct.");
+    }
+    if (selectedProfile === "desktopSandbox") {
+      await this._assertSandboxReady();
     }
     const id = randomUUID();
     const variables = createDefaultThreadVariables();
@@ -1197,8 +1208,25 @@ export class ExternalAgentProjectManager {
 
   private async _ensureDefaultThread(projectId: string): Promise<void> {
     if ((await this._listThreads(projectId)).length === 0) {
+      const project = this._state(projectId).snapshot;
+      if (project?.sandbox && !await this._sandboxReady()) {
+        return;
+      }
       await this.createThread(projectId);
     }
+  }
+
+  private async _assertSandboxReady(): Promise<void> {
+    const readiness = await this._sandboxReadiness?.();
+    if (readiness?.state !== "ready") {
+      throw new Error(
+        readiness?.message ?? "The Desktop Host has no SandboxProvider."
+      );
+    }
+  }
+
+  private async _sandboxReady(): Promise<boolean> {
+    return (await this._sandboxReadiness?.())?.state === "ready";
   }
 
   private async _readThreadFile(

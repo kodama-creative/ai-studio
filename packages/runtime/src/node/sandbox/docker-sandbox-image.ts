@@ -20,11 +20,11 @@ import path from "node:path";
 const WORKSPACE = "/workspace";
 const INTERNAL = path.join(WORKSPACE, ".llm-space");
 
-function result(value) {
+function _result(value) {
   process.stdout.write(JSON.stringify({ type: "result", ok: true, value }) + "\n");
 }
 
-function failure(error) {
+function _failure(error) {
   process.stdout.write(JSON.stringify({
     type: "result",
     ok: false,
@@ -32,7 +32,7 @@ function failure(error) {
   }) + "\n");
 }
 
-function fileFailure(error, target) {
+function _fileFailure(error, target) {
   const code = error instanceof Error && "code" in error ? error.code : "";
   const stable = code === "ENOENT" ? "not_found"
     : code === "EACCES" || code === "EPERM" || code === "EROFS"
@@ -52,7 +52,7 @@ function fileFailure(error, target) {
   }) + "\n");
 }
 
-function executionFailure(code, error) {
+function _executionFailure(code, error) {
   process.stdout.write(JSON.stringify({
     type: "result",
     ok: false,
@@ -64,7 +64,7 @@ function executionFailure(code, error) {
   }) + "\n");
 }
 
-function addressed(value) {
+function _addressed(value) {
   if (typeof value !== "string" || value.includes("\0")) {
     throw Object.assign(new Error("Sandbox path must be a string"), {
       code: "EINVAL"
@@ -85,7 +85,7 @@ function addressed(value) {
   return absolute;
 }
 
-function fileInfoValue(target, info) {
+function _fileInfoValue(target, info) {
   return {
     name: path.posix.basename(target),
     path: target,
@@ -96,7 +96,7 @@ function fileInfoValue(target, info) {
   };
 }
 
-function safeName(value) {
+function _safeName(value) {
   return typeof value === "string"
     && value.length > 0
     && value === path.posix.basename(value)
@@ -105,7 +105,7 @@ function safeName(value) {
     && Buffer.byteLength(value, "utf8") <= 240;
 }
 
-async function seed(input) {
+async function _seed(input) {
   await mkdir(INTERNAL, { recursive: true });
   for (const file of input.files ?? []) {
     if (typeof file.path !== "string" || file.path.startsWith("/")
@@ -125,10 +125,20 @@ async function seed(input) {
     JSON.stringify({ fingerprint: input.fingerprint ?? null }),
     { flag: "wx" }
   );
-  result();
+  _result();
 }
 
-async function stageTurn(input) {
+async function _readSeedFingerprint() {
+  const marker = JSON.parse(
+    await readFile(path.join(INTERNAL, "seed.json"), "utf8")
+  );
+  if (typeof marker.fingerprint !== "string") {
+    throw new Error("Sandbox seed marker is invalid");
+  }
+  _result(marker.fingerprint);
+}
+
+async function _stageTurn(input) {
   const attachments = input.attachments ?? [];
   const turnKey = createHash("sha256").update(String(input.turnId)).digest("hex").slice(0, 24);
   const attachmentRoot = path.join(WORKSPACE, "attachments");
@@ -141,7 +151,7 @@ async function stageTurn(input) {
     ))) {
       throw new Error("Turn attachments already exist with different identity");
     }
-    result(existing.staged);
+    _result(existing.staged);
     return;
   } catch (error) {
     if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
@@ -154,7 +164,7 @@ async function stageTurn(input) {
   const staged = [];
   try {
     for (const attachment of attachments) {
-      if (!safeName(attachment.name)) {
+      if (!_safeName(attachment.name)) {
         throw new Error("Invalid Sandbox attachment name");
       }
       const content = Buffer.from(attachment.contentBase64, "base64");
@@ -187,23 +197,23 @@ async function stageTurn(input) {
     await rm(temporary, { recursive: true, force: true });
     throw error;
   }
-  result(staged);
+  _result(staged);
 }
 
-async function manifest() {
+async function _manifest() {
   const entries = await readdir(WORKSPACE, { withFileTypes: true });
-  result(entries
+  _result(entries
     .filter(entry => entry.name !== ".llm-space")
     .map(entry => entry.isDirectory() ? entry.name + "/" : entry.name)
     .sort()
     .slice(0, 1000));
 }
 
-async function fileOperation(input) {
+async function _fileOperation(input) {
   let target;
   try {
     if (input.operation === "absolutePath") {
-      result(addressed(input.path));
+      _result(_addressed(input.path));
       return;
     }
     if (input.operation === "joinPath") {
@@ -212,34 +222,34 @@ async function fileOperation(input) {
           code: "EINVAL"
         });
       }
-      result(addressed(path.posix.join(...input.parts)));
+      _result(_addressed(path.posix.join(...input.parts)));
       return;
     }
     if (input.operation === "createTempDir") {
-      const prefix = safeName(input.prefix || "tmp-") ? input.prefix || "tmp-" : "tmp-";
-      result(await mkdtemp(path.posix.join("/tmp", prefix)));
+      const prefix = _safeName(input.prefix || "tmp-") ? input.prefix || "tmp-" : "tmp-";
+      _result(await mkdtemp(path.posix.join("/tmp", prefix)));
       return;
     }
     if (input.operation === "createTempFile") {
-      const prefix = safeName(input.prefix || "file") ? input.prefix || "file" : "file";
+      const prefix = _safeName(input.prefix || "file") ? input.prefix || "file" : "file";
       const suffix = typeof input.suffix === "string" && !input.suffix.includes("/")
         ? input.suffix : "";
       const targetFile = path.posix.join("/tmp", prefix + randomUUID() + suffix);
       const handle = await open(targetFile, "wx");
       await handle.close();
-      result(targetFile);
+      _result(targetFile);
       return;
     }
-    target = addressed(input.path);
+    target = _addressed(input.path);
     if (input.operation === "readTextFile") {
-      result(await readFile(target, "utf8"));
+      _result(await readFile(target, "utf8"));
     } else if (input.operation === "readTextLines") {
       const text = await readFile(target, "utf8");
       const lines = text.split(/\r?\n/);
       if (lines.at(-1) === "") lines.pop();
-      result(input.maxLines === undefined ? lines : lines.slice(0, input.maxLines));
+      _result(input.maxLines === undefined ? lines : lines.slice(0, input.maxLines));
     } else if (input.operation === "readBinaryFile") {
-      result({ contentBase64: (await readFile(target)).toString("base64") });
+      _result({ contentBase64: (await readFile(target)).toString("base64") });
     } else if (input.operation === "writeFile") {
       await mkdir(path.posix.dirname(target), { recursive: true });
       await writeFile(
@@ -248,7 +258,7 @@ async function fileOperation(input) {
           ? String(input.contentText ?? "")
           : Buffer.from(input.contentBase64, "base64")
       );
-      result();
+      _result();
     } else if (input.operation === "appendFile") {
       await mkdir(path.posix.dirname(target), { recursive: true });
       await appendFile(
@@ -257,50 +267,50 @@ async function fileOperation(input) {
           ? String(input.contentText ?? "")
           : Buffer.from(input.contentBase64, "base64")
       );
-      result();
+      _result();
     } else if (input.operation === "fileInfo") {
-      result(fileInfoValue(target, await lstat(target)));
+      _result(_fileInfoValue(target, await lstat(target)));
     } else if (input.operation === "listDir") {
       const entries = await readdir(target, { withFileTypes: true });
       const infos = [];
       for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
         const child = path.posix.join(target, entry.name);
-        infos.push(fileInfoValue(child, await lstat(child)));
+        infos.push(_fileInfoValue(child, await lstat(child)));
       }
-      result(infos);
+      _result(infos);
     } else if (input.operation === "canonicalPath") {
-      result(await realpath(target));
+      _result(await realpath(target));
     } else if (input.operation === "exists") {
       try {
         await lstat(target);
-        result(true);
+        _result(true);
       } catch (error) {
         if (error instanceof Error && "code" in error && error.code === "ENOENT") {
-          result(false);
+          _result(false);
         } else {
           throw error;
         }
       }
     } else if (input.operation === "createDir") {
       await mkdir(target, { recursive: input.recursive !== false });
-      result();
+      _result();
     } else if (input.operation === "remove") {
       await rm(target, {
         recursive: input.recursive === true,
         force: input.force === true
       });
-      result();
+      _result();
     } else {
       throw Object.assign(new Error("Unsupported file operation"), {
         code: "ENOTSUP"
       });
     }
   } catch (error) {
-    fileFailure(error, target);
+    _fileFailure(error, target);
   }
 }
 
-async function streamText(stream, type) {
+async function _streamText(stream, type) {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   let collected = "";
@@ -319,16 +329,16 @@ async function streamText(stream, type) {
   return collected;
 }
 
-function killGroup(pid, signal) {
+function _killGroup(pid, signal) {
   try { process.kill(-pid, signal); } catch {}
 }
 
-async function execute(input) {
+async function _execute(input) {
   if (input.env && Object.keys(input.env).length > 0) {
-    executionFailure("shell_unavailable", "Sandbox shell environment overrides are disabled");
+    _executionFailure("shell_unavailable", "Sandbox shell environment overrides are disabled");
     return;
   }
-  const cwd = addressed(input.cwd || WORKSPACE);
+  const cwd = _addressed(input.cwd || WORKSPACE);
   const commandId = String(input.commandId || "");
   const marker = path.posix.join("/tmp", "llm-space-process-" + commandId + ".json");
   let child;
@@ -349,29 +359,29 @@ async function execute(input) {
     if (typeof input.timeout === "number") {
       timer = setTimeout(() => {
         timedOut = true;
-        killGroup(child.pid, "SIGTERM");
-        setTimeout(() => killGroup(child.pid, "SIGKILL"), 250);
+        _killGroup(child.pid, "SIGTERM");
+        setTimeout(() => _killGroup(child.pid, "SIGKILL"), 250);
       }, Math.max(0, input.timeout * 1000));
     }
     const [exitCode, stdout, stderr] = await Promise.all([
       child.exited,
-      streamText(child.stdout, "stdout"),
-      streamText(child.stderr, "stderr")
+      _streamText(child.stdout, "stdout"),
+      _streamText(child.stderr, "stderr")
     ]);
     if (timedOut) {
-      executionFailure("timeout", "Sandbox command timed out");
+      _executionFailure("timeout", "Sandbox command timed out");
     } else {
-      result({ stdout, stderr, exitCode });
+      _result({ stdout, stderr, exitCode });
     }
   } catch (error) {
-    executionFailure("spawn_error", error);
+    _executionFailure("spawn_error", error);
   } finally {
     if (timer) clearTimeout(timer);
     await rm(marker, { force: true });
   }
 }
 
-async function abortCommand(input) {
+async function _abortCommand(input) {
   const marker = path.posix.join(
     "/tmp",
     "llm-space-process-" + String(input.commandId || "") + ".json"
@@ -379,10 +389,10 @@ async function abortCommand(input) {
   for (let attempt = 0; attempt < 50; attempt += 1) {
     try {
       const { pid } = JSON.parse(await readFile(marker, "utf8"));
-      killGroup(pid, "SIGTERM");
+      _killGroup(pid, "SIGTERM");
       await Bun.sleep(100);
-      killGroup(pid, "SIGKILL");
-      result();
+      _killGroup(pid, "SIGKILL");
+      _result();
       return;
     } catch (error) {
       if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
@@ -391,18 +401,19 @@ async function abortCommand(input) {
       await Bun.sleep(10);
     }
   }
-  result();
+  _result();
 }
 
 try {
   const input = JSON.parse(await Bun.stdin.text());
-  if (input.operation === "seed") await seed(input);
-  else if (input.operation === "stageTurn") await stageTurn(input);
-  else if (input.operation === "manifest") await manifest();
-  else if (input.operation === "exec") await execute(input);
-  else if (input.operation === "abort") await abortCommand(input);
-  else await fileOperation(input);
+  if (input.operation === "seed") await _seed(input);
+  else if (input.operation === "seedFingerprint") await _readSeedFingerprint();
+  else if (input.operation === "stageTurn") await _stageTurn(input);
+  else if (input.operation === "manifest") await _manifest();
+  else if (input.operation === "exec") await _execute(input);
+  else if (input.operation === "abort") await _abortCommand(input);
+  else await _fileOperation(input);
 } catch (error) {
-  failure(error);
+  _failure(error);
 }
 `;

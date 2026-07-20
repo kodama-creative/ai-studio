@@ -7,14 +7,15 @@ test("delivers staged Turn attachments as Pi-native user text", () => {
     messages: [{
       id: "turn-one",
       role: "user",
-      content: [{ type: "text", text: "Inspect the file." }],
-      attachments: [{
-        id: "attachment-one",
-        name: "notes.txt",
-        path: "/workspace/attachments/turn-one/notes.txt",
-        size: 5,
-        fingerprint: "a".repeat(64)
-      }]
+      content: [{ type: "text", text: "Inspect the file." }]
+    }]
+  }, {
+    "turn-one": [{
+      id: "attachment-one",
+      name: "notes.txt",
+      path: "/workspace/attachments/turn-one/notes.txt",
+      size: 5,
+      fingerprint: "a".repeat(64)
     }]
   });
 

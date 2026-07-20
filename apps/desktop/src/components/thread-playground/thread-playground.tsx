@@ -366,7 +366,14 @@ function ThreadPlaygroundContent({
   const redoable = useThreadStore(s => canRedo(s.changeHistory));
   const { effectiveAutoRunTools, reactLoop, setAutoRunTools, setReactLoop } =
     useRunMode();
-  const { run, abort, undo, redo, syncTitle } = useThreadStoreActions();
+  const {
+    abort,
+    addMessageSandboxFiles,
+    redo,
+    run,
+    syncTitle,
+    undo
+  } = useThreadStoreActions();
   const [systemPromptStreaming, setSystemPromptStreaming] = useState(false);
   const title = useMemo(
     () => titleFromProps ?? threadTitleFromPath(path),
@@ -389,6 +396,11 @@ function ThreadPlaygroundContent({
     {
       runThread: () => {
         if (status !== "running" && !runDisabled) { void run(); }
+      },
+      stageSandboxAttachments: ({ messageId }) => {
+        if (status !== "running") {
+          void addMessageSandboxFiles(messageId);
+        }
       }
     },
     active

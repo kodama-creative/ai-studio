@@ -88,6 +88,7 @@ export class DockerSandboxProvider implements SandboxProvider {
       throw new SandboxWorkspaceLostError();
     }
     const newVolume = !volumeExists;
+    const seedFingerprint = _seedFingerprint(input.seed);
     if (newVolume) {
       await this._runRequired(["volume", "create", names.volume]);
     }
@@ -122,9 +123,21 @@ export class DockerSandboxProvider implements SandboxProvider {
       if (newVolume) {
         await this._helper(names.container, {
           operation: "seed",
-          fingerprint: _seedFingerprint(input.seed),
+          fingerprint: seedFingerprint,
           files: input.seed
         });
+      } else {
+        try {
+          const existingFingerprint = await this._helper(
+            names.container,
+            { operation: "seedFingerprint" }
+          );
+          if (existingFingerprint !== seedFingerprint) {
+            throw new Error("Sandbox seed fingerprint changed");
+          }
+        } catch {
+          throw new SandboxWorkspaceLostError();
+        }
       }
     } catch (error) {
       if (newVolume) {
@@ -191,30 +204,7 @@ export class DockerSandboxProvider implements SandboxProvider {
   }
 
   private async _helper(container: string, input: unknown): Promise<unknown> {
-    const result = await this._runner.run([
-      "exec",
-      "--interactive",
-      "--user",
-      "1000:1000",
-      container,
-      "bun",
-      DOCKER_SANDBOX_HELPER_PATH
-    ], { stdin: JSON.stringify(input) });
-    if (result.exitCode !== 0) {
-      throw new Error(result.stderr.trim() || "Sandbox helper failed");
-    }
-    const terminal = result.stdout.trim().split("\n")
-      .map(line => JSON.parse(line) as {
-        error?: { message?: string; };
-        ok?: boolean;
-        type?: string;
-        value?: unknown;
-      })
-      .findLast(message => message.type === "result");
-    if (!terminal?.ok) {
-      throw new Error(terminal?.error?.message || "Sandbox helper failed");
-    }
-    return terminal.value;
+    return _invokeSandboxHelper(this._runner, container, input);
   }
 
   private async _runRequired(arguments_: readonly string[]): Promise<void> {
@@ -261,31 +251,39 @@ class DockerSandboxSession implements SandboxProviderSession {
   }
 
   private async _helper(input: unknown): Promise<unknown> {
-    const result = await this._runner.run([
-      "exec",
-      "--interactive",
-      "--user",
-      "1000:1000",
-      this._container,
-      "bun",
-      DOCKER_SANDBOX_HELPER_PATH
-    ], { stdin: JSON.stringify(input) });
-    if (result.exitCode !== 0) {
-      throw new Error(result.stderr.trim() || "Sandbox helper failed");
-    }
-    const terminal = result.stdout.trim().split("\n")
-      .map(line => JSON.parse(line) as {
-        error?: { message?: string; };
-        ok?: boolean;
-        type?: string;
-        value?: unknown;
-      })
-      .findLast(message => message.type === "result");
-    if (!terminal?.ok) {
-      throw new Error(terminal?.error?.message || "Sandbox helper failed");
-    }
-    return terminal.value;
+    return _invokeSandboxHelper(this._runner, this._container, input);
   }
+}
+
+async function _invokeSandboxHelper(
+  runner: DockerCommandRunner,
+  container: string,
+  input: unknown
+): Promise<unknown> {
+  const result = await runner.run([
+    "exec",
+    "--interactive",
+    "--user",
+    "1000:1000",
+    container,
+    "bun",
+    DOCKER_SANDBOX_HELPER_PATH
+  ], { stdin: JSON.stringify(input) });
+  if (result.exitCode !== 0) {
+    throw new Error(result.stderr.trim() || "Sandbox helper failed");
+  }
+  const terminal = result.stdout.trim().split("\n")
+    .map(line => JSON.parse(line) as {
+      error?: { message?: string; };
+      ok?: boolean;
+      type?: string;
+      value?: unknown;
+    })
+    .findLast(message => message.type === "result");
+  if (!terminal?.ok) {
+    throw new Error(terminal?.error?.message || "Sandbox helper failed");
+  }
+  return terminal.value;
 }
 
 function _resourceNames(sessionId: string): {

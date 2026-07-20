@@ -123,6 +123,12 @@ export interface RetryExternalAgentProjectRuntimeCommand extends GenericCommand<
   { projectId: string; threadId: string; }
 > {}
 
+/** Open the native picker and stage attachments for the active Sandbox Thread. */
+export interface StageSandboxAttachmentsCommand extends GenericCommand<
+  "stageSandboxAttachments",
+  { messageId: string; }
+> {}
+
 /** Open the Build tab and focus the source that owns a project action. */
 export interface OpenExternalAgentProjectSourceCommand extends GenericCommand<
   "openExternalAgentProjectSource",
@@ -411,6 +417,7 @@ export type Command =
   | SaveExternalAgentProjectSourceCommand
   | SelectNextTabCommand
   | SelectPreviousTabCommand
+  | StageSandboxAttachmentsCommand
   | SyncExternalAgentProjectThreadFromAgentCommand
   | SyncLangfuseTraceIdsCommand
   | ToggleSidebarCommand
@@ -493,6 +500,10 @@ export const COMMAND_META = {
   },
   retryExternalAgentProjectRuntime: {
     label: "Retry Local Server Runtime",
+    target: "webview"
+  },
+  stageSandboxAttachments: {
+    label: "Add Attachments",
     target: "webview"
   },
   openExternalAgentProjectSource: {

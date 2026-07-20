@@ -74,6 +74,13 @@ export class DesktopSandboxManager {
         message: "Sandbox cleanup is pending. Create a new Thread."
       };
     }
+    return this.readiness();
+  }
+
+  async readiness(): Promise<{
+    message?: string;
+    state: "ready" | "unavailable";
+  }> {
     const readiness = await this._provider.readiness();
     return readiness.state === "ready"
       ? { state: "ready" }

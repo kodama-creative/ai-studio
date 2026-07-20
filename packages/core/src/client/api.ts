@@ -9,13 +9,17 @@ import { type AgentTransport, createHttpTransport } from "./transport";
 
 import type { AgentStreamRequest } from "../types/agent";
 import type { ModelConfig } from "../types/models";
-import type { ThreadContext } from "../types/threads";
+import type {
+  ThreadContext,
+  ThreadSandboxAttachments
+} from "../types/threads";
 
 export async function* streamThread(
   args: {
     context: ThreadContext;
     model: ModelConfig;
     outputContract?: string;
+    sandboxAttachments?: ThreadSandboxAttachments;
   },
   config: {
     endpoint?: string;
@@ -26,7 +30,10 @@ export async function* streamThread(
   if (!isRunnableConversation(args.context.messages)) {
     throw new Error(RUN_LAST_MESSAGE_ERROR);
   }
-  const context = convertToPiContext(args.context);
+  const context = convertToPiContext(
+    args.context,
+    args.sandboxAttachments
+  );
   const request: AgentStreamRequest = {
     model: {
       provider: args.model.provider,

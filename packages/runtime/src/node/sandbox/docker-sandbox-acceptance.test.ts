@@ -51,6 +51,24 @@ dockerTest("real Docker isolates, retains, reconstructs, and deletes a Sandbox S
       "attachments/"
     ]);
 
+    const failedTurnId = "atomic-staging-failure";
+    const failedTurnKey = createHash("sha256").update(failedTurnId)
+      .digest("hex")
+      .slice(0, 24);
+    expect(await _rejection(first.stageTurn({
+      turnId: failedTurnId,
+      attachments: [{
+        id: "reserved-marker-collision",
+        name: ".attachments.json",
+        fingerprint:
+          "ab5aa97074c454a0632057e704220d9a6678fbf773a0a5806fc09b8173b07309",
+        content: new TextEncoder().encode("notes")
+      }]
+    }))).toMatchObject({ message: expect.stringContaining("EEXIST") });
+    expect(await first.executionEnv.exists(
+      `/workspace/attachments/${failedTurnKey}`
+    )).toEqual({ ok: true, value: false });
+
     expect(await first.executionEnv.writeFile("generated.txt", "durable"))
       .toEqual({ ok: true, value: undefined });
     const chunks: string[] = [];

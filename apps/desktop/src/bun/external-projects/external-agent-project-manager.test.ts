@@ -18,7 +18,13 @@ afterEach(async () => {
   );
 });
 
-async function _fixture(options: { connector?: ProjectMcpConnector; } = {}) {
+async function _fixture(options: {
+  connector?: ProjectMcpConnector;
+  sandboxReadiness?: () => Promise<{
+    message?: string;
+    state: "ready" | "unavailable";
+  }>;
+} = {}) {
   const root = path.join(tmpdir(), `llm-space-external-${crypto.randomUUID()}`);
   const home = path.join(root, "home");
   const workspace = path.join(home, "workspace");
@@ -59,7 +65,9 @@ export default defineTool({
   const manager = new ExternalAgentProjectManager({
     homePath: home,
     workspaceRoot: workspace,
-    projectMcpConnector: options.connector
+    projectMcpConnector: options.connector,
+    sandboxReadiness: options.sandboxReadiness
+      ?? (async () => Promise.resolve({ state: "ready" }))
   });
   managers.push(manager);
   return { home, manager, marker, project, root, workspace };
@@ -96,6 +104,30 @@ describe("ExternalAgentProjectManager", () => {
       "Unsafe Direct",
       "desktopDirect"
     )).rejects.toThrow("requires Sandbox");
+  });
+
+  test("opens required Sandbox source without creating a Thread when unavailable", async () => {
+    const { manager, project } = await _fixture({
+      sandboxReadiness: async () => Promise.resolve({
+        state: "unavailable",
+        message: "Docker is unavailable."
+      })
+    });
+    await mkdir(path.join(project, "agent", "sandbox"), { recursive: true });
+    await writeFile(
+      path.join(project, "agent", "sandbox", "sandbox.ts"),
+      `import { defineSandbox } from "@llm-space/runtime/sandbox";
+      export default defineSandbox({});`
+    );
+
+    const opened = await manager.trustAndOpen(project);
+
+    expect(opened.status).toBe("ready");
+    expect(opened.sandboxRequired).toBe(true);
+    expect(opened.threads).toEqual([]);
+    await expect(manager.createThread(opened.id)).rejects.toThrow(
+      "Docker is unavailable."
+    );
   });
 
   test("creates user-owned source before desktop-owned trust and Thread data", async () => {

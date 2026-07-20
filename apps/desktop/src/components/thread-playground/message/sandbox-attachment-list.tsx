@@ -7,7 +7,7 @@ import { Tooltip } from "../../tooltip";
 import { Button } from "../../ui/button";
 import { useThreadStore, useThreadStoreActions } from "../stores";
 
-const _SandboxAttachmentList = function SandboxAttachmentList({
+const SandboxAttachmentListImpl = function SandboxAttachmentListImpl({
   attachments,
   messageId,
   readonly
@@ -59,7 +59,7 @@ const _SandboxAttachmentList = function SandboxAttachmentList({
   );
 };
 
-export const SandboxAttachmentList = memo(_SandboxAttachmentList);
+export const SandboxAttachmentList = memo(SandboxAttachmentListImpl);
 
 function _formatBytes(bytes: number): string {
   if (bytes < 1024) { return `${bytes} B`; }

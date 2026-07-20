@@ -1,29 +1,47 @@
 import type * as pi from "@earendil-works/pi-ai";
 
-import { formatSandboxAttachmentsForPi } from "../types/messages";
+import { formatSandboxAttachmentsForPi } from "../types/threads";
 
 import type { PiThreadContext } from "../types/agent";
 import type { Message, ModelUsage } from "../types/messages";
-import type { ThreadContext } from "../types/threads";
+import type {
+  SandboxAttachmentDescriptor,
+  ThreadContext
+} from "../types/threads";
 import type { Tool } from "../types/tools";
 
-export function convertToPiContext(context: ThreadContext): PiThreadContext {
+export function convertToPiContext(
+  context: ThreadContext,
+  sandboxAttachments: Readonly<
+    Record<string, readonly SandboxAttachmentDescriptor[]>
+  > = {}
+): PiThreadContext {
   const result: PiThreadContext = {
     systemPrompt: context.systemPrompt,
-    messages: context.messages ? _convertToPiMessages(context.messages) : [],
+    messages: context.messages
+      ? _convertToPiMessages(context.messages, sandboxAttachments)
+      : [],
     tools: context.tools ? _convertToPiTools(context.tools) : [],
     sourceTools: context.tools ? [...context.tools] : []
   };
   return result;
 }
 
-function _convertToPiMessages(messages: Message[]) {
+function _convertToPiMessages(
+  messages: Message[],
+  sandboxAttachments: Readonly<
+    Record<string, readonly SandboxAttachmentDescriptor[]>
+  >
+) {
   const result: pi.Message[] = [];
   for (const message of messages) {
     if (message.role === "user") {
       const piMessage: pi.UserMessage = {
         role: "user",
-        content: _convertMessageContents(message) as Array<pi.ImageContent | pi.TextContent>,
+        content: _convertMessageContents(
+          message,
+          sandboxAttachments[message.id]
+        ) as Array<pi.ImageContent | pi.TextContent>,
         timestamp: Date.now()
       };
       result.push(piMessage);
@@ -80,7 +98,8 @@ function _convertUsage(messageUsage: ModelUsage | undefined): pi.Usage {
 }
 
 function _convertMessageContents(
-  message: Message
+  message: Message,
+  sandboxAttachments: readonly SandboxAttachmentDescriptor[] = []
 ): Array<pi.ImageContent | pi.TextContent | pi.ThinkingContent | pi.ToolCall> {
   if (message.role === "user") {
     const contents = message.content.map(content => {
@@ -96,10 +115,10 @@ function _convertMessageContents(
         throw new Error(`Unsupported content type: ${JSON.stringify(content)}`);
       }
     });
-    if (message.attachments?.length) {
+    if (sandboxAttachments.length) {
       contents.push({
         type: "text",
-        text: formatSandboxAttachmentsForPi(message.attachments)
+        text: formatSandboxAttachmentsForPi(sandboxAttachments)
       });
     }
     return contents;

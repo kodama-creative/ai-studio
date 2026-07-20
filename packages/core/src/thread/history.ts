@@ -84,6 +84,9 @@ export function snapshotThread(thread: Thread): ThreadSnapshot {
   if (thread.agentRuntime !== undefined) {
     snapshot.agentRuntime = thread.agentRuntime;
   }
+  if (thread.sandboxAttachments !== undefined) {
+    snapshot.sandboxAttachments = thread.sandboxAttachments;
+  }
   if (thread.context !== undefined) {
     snapshot.context = thread.context;
   }

@@ -42,12 +42,15 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
   const workspacePath = path.join(homePath, "workspace");
   const analytics = new Analytics();
   const modelManager = new ModelManager();
+  const sandboxProvider = new DockerSandboxProvider();
+  const sandboxes = new DesktopSandboxManager({ homePath, provider: sandboxProvider });
+  await sandboxes.start();
   const externalAgentProjects = new ExternalAgentProjectManager({
     homePath,
     workspaceRoot: workspacePath,
-    getModels: async () => modelManager.getAvailableModels()
+    getModels: async () => modelManager.getAvailableModels(),
+    sandboxReadiness: async () => sandboxes.readiness()
   });
-  const sandboxProvider = new DockerSandboxProvider();
   const localServers = new EmbeddedLocalServerManager({
     externalAgentProjects,
     homePath,
@@ -55,8 +58,6 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
   });
   const mcpManager = new McpManager();
   const searchSettings = new SearchSettingsManager();
-  const sandboxes = new DesktopSandboxManager({ homePath, provider: sandboxProvider });
-  await sandboxes.start();
   const skillsManager = new SkillsManager();
   const localFs = createLocalFileSystem(homePath);
   const traceManager = new TraceManager();

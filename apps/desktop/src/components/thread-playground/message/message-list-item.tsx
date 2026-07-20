@@ -3,6 +3,7 @@ import {
   type ImageDataContent,
   isExecutableTool,
   type Message,
+  type SandboxAttachmentDescriptor,
   type ThreadContext,
   type ToolCall
 } from "@llm-space/core";
@@ -36,6 +37,8 @@ import { StructuredOutputCard } from "../output/structured-output-card";
 import { useThreadStore, useThreadStoreActions } from "../stores";
 import { usePromptVariableExtensionForContext } from "../variable/use-prompt-variable-extension";
 
+const EMPTY_SANDBOX_ATTACHMENTS: readonly SandboxAttachmentDescriptor[] = [];
+
 const _MessageListItem = function MessageListItem({
   className,
   context,
@@ -43,6 +46,7 @@ const _MessageListItem = function MessageListItem({
   placeholder,
   readonly = false,
   runDisabled = false,
+  sandboxAttachments,
   streaming,
   collapsed,
   hideStructuredOutputs = false,
@@ -58,6 +62,7 @@ const _MessageListItem = function MessageListItem({
   readonly placeholder?: string;
   readonly readonly?: boolean;
   readonly runDisabled?: boolean;
+  readonly sandboxAttachments?: readonly SandboxAttachmentDescriptor[];
   readonly streaming?: boolean;
   readonly textOnlyDraft?: boolean;
 
@@ -112,6 +117,15 @@ const _MessageListItem = function MessageListItem({
       && (message.toolCalls?.length ?? 0) > 0,
     [message]
   );
+  const liveSandboxAttachments = useThreadStore(
+    state => state.thread.sandboxAttachments?.[message.id]
+  );
+  const sandboxAttachmentsLocked = useThreadStore(state =>
+    state.runHistory.some(run =>
+      run.thread.context?.messages?.some(item => item.id === message.id)));
+  const attachments = sandboxAttachments
+    ?? liveSandboxAttachments
+    ?? EMPTY_SANDBOX_ATTACHMENTS;
   const {
     addMessageImageContent,
     insertMessageBefore,
@@ -243,9 +257,9 @@ const _MessageListItem = function MessageListItem({
           {message.role === "user"
             ? (
               <SandboxAttachmentList
-                attachments={message.attachments ?? []}
+                attachments={attachments}
                 messageId={message.id}
-                readonly={readonly || streaming}
+                readonly={readonly || streaming || sandboxAttachmentsLocked}
               />
             )
             : null}

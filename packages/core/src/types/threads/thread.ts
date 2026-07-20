@@ -1,5 +1,6 @@
 import { type Static, Type } from "typebox";
 
+import { ThreadSandboxAttachments } from "./sandbox-attachment";
 import { Message, ModelUsage } from "../messages";
 import { ModelConfig } from "../models";
 import { normalizeTools, Tool } from "../tools";
@@ -192,6 +193,9 @@ const THREAD_FIELDS = {
 
   /** Effective Agent runtime identity and model provenance for saved runs. */
   agentRuntime: Type.Optional(ThreadAgentRuntimeProvenance),
+
+  /** Host-owned staged Turn inputs, keyed outside the message transcript. */
+  sandboxAttachments: Type.Optional(ThreadSandboxAttachments),
 
   /**
    * The context of the thread, including the system prompt, messages, and tools.

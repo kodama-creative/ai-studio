@@ -1,7 +1,7 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Usage } from "@earendil-works/pi-ai";
 
-import { formatSandboxAttachmentsForPi } from "../types/messages";
+import { formatSandboxAttachmentsForPi } from "../types/threads";
 import { uuid } from "../utils";
 
 import type {
@@ -10,11 +10,13 @@ import type {
   ModelUsage,
   ToolCall
 } from "../types/messages";
+import type { ThreadSandboxAttachments } from "../types/threads";
 
 /** Project a Pi transcript back into the durable LLM Space Thread shape. */
 export function convertFromPiMessages(
   messages: AgentMessage[],
-  existing: Message[] = []
+  existing: Message[] = [],
+  sandboxAttachments: ThreadSandboxAttachments = {}
 ): Message[] {
   const result: Message[] = [];
   const toolCallOwners = new Map<string, number>();
@@ -23,9 +25,12 @@ export function convertFromPiMessages(
   for (const message of messages) {
     if (message.role === "user") {
       const previous = existing[visibleIndex];
+      const previousAttachments = previous?.role === "user"
+        ? sandboxAttachments[previous.id]
+        : undefined;
       const attachmentText = previous?.role === "user"
-        && previous.attachments?.length
-        ? formatSandboxAttachmentsForPi(previous.attachments)
+        && previousAttachments?.length
+        ? formatSandboxAttachmentsForPi(previousAttachments)
         : null;
       const content =
         typeof message.content === "string"
@@ -43,10 +48,7 @@ export function convertFromPiMessages(
       result.push({
         id: previous?.role === "user" ? previous.id : uuid(),
         role: "user",
-        content,
-        ...(previous?.role === "user" && previous.attachments?.length
-          ? { attachments: previous.attachments }
-          : {})
+        content
       });
       visibleIndex += 1;
       continue;

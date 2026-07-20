@@ -89,6 +89,20 @@ describe("DockerSandboxProvider", () => {
     expect(runner.createdVolume).toBe(false);
   });
 
+  test("rejects an existing Session whose seed marker is missing", async () => {
+    const runner = new FakeDockerRunner();
+    runner.imageExists = true;
+    runner.volumeExists = true;
+    const provider = new DockerSandboxProvider({ runner });
+
+    expect(await _rejection(provider.acquire({
+      expectedExisting: true,
+      sessionId: "corrupt-session",
+      seed: []
+    }))).toBeInstanceOf(SandboxWorkspaceLostError);
+    expect(runner.helperOperations).toEqual(["seedFingerprint"]);
+  });
+
   test("rejects an oversized Turn before Docker receives partial staging", async () => {
     const runner = new FakeDockerRunner();
     const provider = new DockerSandboxProvider({ runner });
@@ -120,6 +134,7 @@ class FakeDockerRunner implements DockerCommandRunner {
   createdArguments: string[] = [];
   helperOperations: string[] = [];
   files = new Map<string, string>();
+  seedFingerprint: string | null = null;
 
   async run(
     arguments_: readonly string[],
@@ -167,6 +182,17 @@ class FakeDockerRunner implements DockerCommandRunner {
         operation: string;
       };
       this.helperOperations.push(input.operation);
+      if (input.operation === "seed") {
+        this.seedFingerprint = (input as {
+          fingerprint: string;
+        } & typeof input).fingerprint;
+      }
+      if (input.operation === "seedFingerprint") {
+        if (!this.seedFingerprint) {
+          return _result(1, "", "Sandbox seed marker is missing");
+        }
+        return _result(0, _terminal(this.seedFingerprint));
+      }
       if (input.operation === "writeFile") {
         const file = input as { contentText?: string; path: string; } & typeof input;
         this.files.set(file.path, file.contentText ?? "");

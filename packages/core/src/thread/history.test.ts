@@ -256,6 +256,32 @@ describe("run history persistence", () => {
     expect(next.at(-1)?.id).toBe("run-latest");
   });
 
+  test("keeps Sandbox attachment descriptors outside the message transcript", () => {
+    const next = recordRun([], {
+      sandboxAttachments: {
+        "message-one": [{
+          id: "attachment-one",
+          name: "notes.txt",
+          path: "/workspace/attachments/turn-one/notes.txt",
+          size: 5,
+          fingerprint: "a".repeat(64)
+        }]
+      },
+      context: {
+        messages: [{
+          id: "message-one",
+          role: "user",
+          content: [{ type: "text", text: "Inspect it." }]
+        }]
+      }
+    });
+
+    expect(next[0]?.thread.sandboxAttachments?.["message-one"]).toHaveLength(1);
+    expect(next[0]?.thread.context?.messages?.[0]).not.toHaveProperty(
+      "attachments"
+    );
+  });
+
   test("keeps Runtime checkpoint identity while de-nesting Session metadata", () => {
     const runtimeSession = { version: 1, opaque: true };
     const next = recordRun(

@@ -170,6 +170,14 @@ export interface ThreadState {
 
 export type ThreadStore = StoreApi<ThreadState>;
 
+export function isMessageIncludedInRunHistory(
+  runHistory: readonly RunSnapshot[],
+  messageId: string
+): boolean {
+  return runHistory.some(run =>
+    run.thread.context?.messages?.some(message => message.id === messageId));
+}
+
 export function createThreadStore(
   initialThread: Thread,
   options: {
@@ -358,7 +366,19 @@ export function createThreadStore(
       };
 
       const setMessages = (messages: Message[]) => {
-        patchContext({ messages });
+        const thread = get().thread;
+        const messageIds = new Set(messages.map(message => message.id));
+        const sandboxAttachments = Object.fromEntries(
+          Object.entries(thread.sandboxAttachments ?? {}).filter(
+            ([messageId]) => messageIds.has(messageId)
+          )
+        );
+        patchThread({
+          context: { ...thread.context, messages },
+          sandboxAttachments: Object.keys(sandboxAttachments).length > 0
+            ? sandboxAttachments
+            : undefined
+        });
       };
 
       /** Replace the messages array; skips the update if nothing changed. */
@@ -706,7 +726,8 @@ export function createThreadStore(
           if (
             !options.stageSandboxFiles
             || message?.role !== "user"
-            || message.attachments?.length
+            || get().thread.sandboxAttachments?.[id]?.length
+            || isMessageIncludedInRunHistory(get().runHistory, id)
             || get().status === "running"
           ) {
             return;
@@ -719,13 +740,20 @@ export function createThreadStore(
           });
           try {
             const attachments = await options.stageSandboxFiles(id);
-            if (attachments.length === 0 || get().status === "running") {
+            if (
+              attachments.length === 0
+              || get().status === "running"
+              || getMessage(id)?.role !== "user"
+              || isMessageIncludedInRunHistory(get().runHistory, id)
+            ) {
               return;
             }
-            updateMessage(id, current => ({
-              ...(current as UserMessage),
-              attachments: [...attachments]
-            }));
+            patchThread({
+              sandboxAttachments: {
+                ...get().thread.sandboxAttachments,
+                [id]: [...attachments]
+              }
+            });
           } catch (error) {
             toast.error("Unable to stage files", {
               description: error instanceof Error
@@ -742,20 +770,27 @@ export function createThreadStore(
           }
         },
         removeMessageSandboxAttachment(id: string, attachmentId: string) {
-          if (get().status === "running") { return; }
-          const message = getMessage(id);
-          if (message?.role !== "user" || !message.attachments?.length) {
+          if (
+            get().status === "running"
+            || isMessageIncludedInRunHistory(get().runHistory, id)
+          ) {
             return;
           }
-          updateMessage(id, current => {
-            const user = current as UserMessage;
-            const attachments = user.attachments?.filter(
-              attachment => attachment.id !== attachmentId
-            );
-            return {
-              ...user,
-              ...(attachments?.length ? { attachments } : { attachments: undefined })
-            };
+          const current = get().thread.sandboxAttachments ?? {};
+          const attachments = current[id]?.filter(
+            attachment => attachment.id !== attachmentId
+          );
+          if (!current[id] || attachments?.length === current[id]?.length) {
+            return;
+          }
+          const next = { ...current };
+          if (attachments.length > 0) {
+            next[id] = attachments;
+          } else {
+            Reflect.deleteProperty(next, id);
+          }
+          patchThread({
+            sandboxAttachments: Object.keys(next).length > 0 ? next : undefined
           });
         },
         addTool(tool) {
@@ -1075,6 +1110,7 @@ export function createThreadStore(
                 {
                   context: preparedContext,
                   model,
+                  sandboxAttachments: executionThread.sandboxAttachments,
                   ...(executionThread.outputContract
                     ? { outputContract: executionThread.outputContract }
                     : {})

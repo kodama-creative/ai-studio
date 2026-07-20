@@ -58,10 +58,20 @@ test("terminalizes a continued Turn when Host capability policy changed", async 
       terminal = input;
     }
   } as unknown as ServerSessionRepository;
+  let sandboxAcquireCount = 0;
   const controller = new ServerRunController({
     models: _models(),
     project: _project(),
-    repository
+    repository,
+    sandboxProvider: {
+      readiness: async () => Promise.resolve({ state: "ready" }),
+      acquire: async () => {
+        sandboxAcquireCount += 1;
+        throw new Error("Optional Agent must not acquire Sandbox");
+      },
+      delete: async () => Promise.resolve(),
+      stop: async () => Promise.resolve()
+    }
   });
 
   await controller.createRun({
@@ -77,6 +87,7 @@ test("terminalizes a continued Turn when Host capability policy changed", async 
     outcome: "failed",
     code: "hostPolicyChanged"
   });
+  expect(sandboxAcquireCount).toBe(0);
 });
 
 test("fails closed when a required Sandbox has no Host provider", () => {

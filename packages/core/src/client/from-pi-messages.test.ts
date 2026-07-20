@@ -62,19 +62,21 @@ test("projects Pi tool results into the owning durable assistant message", () =>
   });
 });
 
-test("keeps attachment descriptors without persisting generated Pi text", () => {
+test("keeps attachment descriptors outside transcript-generated Pi text", () => {
   const existing: Message[] = [{
     id: "user-one",
     role: "user",
-    content: [{ type: "text", text: "inspect" }],
-    attachments: [{
+    content: [{ type: "text", text: "inspect" }]
+  }];
+  const attachments = {
+    "user-one": [{
       id: "attachment-one",
       name: "notes.txt",
       path: "/workspace/attachments/batch/notes.txt",
       size: 5,
       fingerprint: "a".repeat(64)
     }]
-  }];
+  };
   const converted = convertFromPiMessages([{
     role: "user",
     content: [
@@ -86,7 +88,7 @@ test("keeps attachment descriptors without persisting generated Pi text", () => 
       }
     ],
     timestamp: 1
-  }], existing);
+  }], existing, attachments);
 
   expect(converted).toEqual(existing);
 });

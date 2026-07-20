@@ -2,7 +2,7 @@ import { expect, mock, test } from "bun:test";
 
 void mock.module("@/lib/electrobun", () => ({ electrobun: { rpc: null } }));
 
-test("locks a staged Sandbox attachment descriptor into its user Turn", async () => {
+test("keeps staged Sandbox descriptors outside messages and locks them after Run", async () => {
   const { createThreadStore } = await import("./thread-store");
   let finish: (() => void) | undefined;
   const gate = new Promise<void>(resolve => { finish = resolve; });
@@ -36,16 +36,42 @@ test("locks a staged Sandbox attachment descriptor into its user Turn", async ()
   ]);
   finish?.();
   await staging;
-  expect(store.getState().thread.context?.messages?.[0]).toMatchObject({
-    attachments: [{ id: "attachment-one", name: "notes.txt" }]
+  expect(store.getState().thread).toMatchObject({
+    sandboxAttachments: {
+      "turn-one": [{ id: "attachment-one", name: "notes.txt" }]
+    }
   });
+  expect(store.getState().thread.context?.messages?.[0]).not.toHaveProperty(
+    "attachments"
+  );
 
-  store.setState({ status: "running" });
+  store.setState({
+    runHistory: [{
+      id: "run-one",
+      timestamp: 1,
+      usage: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        cost: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+          total: 0
+        }
+      },
+      thread: store.getState().thread
+    }]
+  });
   store.getState().removeMessageSandboxAttachment(
     "turn-one",
     "attachment-one"
   );
-  expect(store.getState().thread.context?.messages?.[0]).toHaveProperty(
-    "attachments"
-  );
+  expect(store.getState().thread.sandboxAttachments?.["turn-one"]).toHaveLength(1);
+
+  store.getState().removeMessage("turn-one");
+  expect(store.getState().thread.sandboxAttachments).toBeUndefined();
 });

@@ -8,7 +8,12 @@ import {
 import { PlusIcon } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import type { AssistantMessage, Message, ThreadContext } from "@llm-space/core";
+import type {
+  AssistantMessage,
+  Message,
+  ThreadContext,
+  ThreadSandboxAttachments
+} from "@llm-space/core";
 
 import { cn } from "@/lib/utils";
 import { MessageListItem } from "./message-list-item";
@@ -149,6 +154,7 @@ function LatestStructuredOutputFailure() {
 }
 
 function StaticMessageList({
+  sandboxAttachments,
   context,
   hideStructuredOutputs,
   messages,
@@ -158,6 +164,7 @@ function StaticMessageList({
   readonly hideStructuredOutputs?: boolean;
   readonly messages: Message[];
   readonly readonly: boolean;
+  readonly sandboxAttachments?: ThreadSandboxAttachments;
 }) {
   return (
     <div className="flex flex-col pt-3">
@@ -169,6 +176,7 @@ function StaticMessageList({
           key={message.id}
           message={message}
           readonly={readonly}
+          sandboxAttachments={sandboxAttachments?.[message.id]}
         />
       ))}
     </div>
@@ -179,12 +187,14 @@ export const SnapshotMessageListView = memo(({
   className,
   context,
   hideStructuredOutputs,
-  messages
+  messages,
+  sandboxAttachments
 }: {
   readonly className?: string;
   readonly context?: ThreadContext;
   readonly hideStructuredOutputs?: boolean;
   readonly messages: Message[];
+  readonly sandboxAttachments?: ThreadSandboxAttachments;
 }) => {
   return (
     <ScrollArea className={cn("size-full", className)} type="auto">
@@ -194,6 +204,7 @@ export const SnapshotMessageListView = memo(({
           hideStructuredOutputs={hideStructuredOutputs}
           messages={messages}
           readonly
+          sandboxAttachments={sandboxAttachments}
         />
       </div>
     </ScrollArea>

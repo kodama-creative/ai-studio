@@ -225,7 +225,8 @@ export class ServerRunController {
     let code: string | undefined;
     let structuredOutput: RuntimeStructuredOutputResult | undefined;
     try {
-      const sandboxSession = this._sandboxProvider
+      const sandboxSession = this._runtime.project.sandbox
+        && this._sandboxProvider
         ? await this._sandboxProvider.acquire({
           expectedExisting: run.turnSequence > 1,
           seed: this._runtime.project.sandbox?.workspace ?? [],
