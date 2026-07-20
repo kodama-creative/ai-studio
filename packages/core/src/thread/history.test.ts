@@ -258,6 +258,7 @@ describe("run history persistence", () => {
 
   test("keeps Sandbox attachment descriptors outside the message transcript", () => {
     const next = recordRun([], {
+      lockedSandboxAttachmentMessageIds: ["message-one"],
       sandboxAttachments: {
         "message-one": [{
           id: "attachment-one",
@@ -277,6 +278,9 @@ describe("run history persistence", () => {
     });
 
     expect(next[0]?.thread.sandboxAttachments?.["message-one"]).toHaveLength(1);
+    expect(next[0]?.thread.lockedSandboxAttachmentMessageIds).toEqual([
+      "message-one"
+    ]);
     expect(next[0]?.thread.context?.messages?.[0]).not.toHaveProperty(
       "attachments"
     );

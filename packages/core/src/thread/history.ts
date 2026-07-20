@@ -87,6 +87,10 @@ export function snapshotThread(thread: Thread): ThreadSnapshot {
   if (thread.sandboxAttachments !== undefined) {
     snapshot.sandboxAttachments = thread.sandboxAttachments;
   }
+  if (thread.lockedSandboxAttachmentMessageIds !== undefined) {
+    snapshot.lockedSandboxAttachmentMessageIds =
+      thread.lockedSandboxAttachmentMessageIds;
+  }
   if (thread.context !== undefined) {
     snapshot.context = thread.context;
   }

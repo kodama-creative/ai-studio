@@ -130,6 +130,63 @@ describe("ExternalAgentProjectManager", () => {
     );
   });
 
+  test("keeps staged Sandbox descriptors Bun-owned and permanently locked", async () => {
+    const { manager, project } = await _fixture();
+    await mkdir(path.join(project, "agent", "sandbox"), { recursive: true });
+    await writeFile(
+      path.join(project, "agent", "sandbox", "sandbox.ts"),
+      `import { defineSandbox } from "@llm-space/runtime/sandbox";
+      export default defineSandbox({});`
+    );
+    const opened = await manager.trustAndOpen(project);
+    const threadId = opened.threads[0]!.id;
+    const initial = await manager.readThread(opened.id, threadId);
+    const messageId = "message-one";
+    await manager.writeThread(opened.id, threadId, {
+      ...initial,
+      thread: {
+        ...initial.thread,
+        context: {
+          ...initial.thread.context,
+          messages: [{
+            id: messageId,
+            role: "user",
+            content: [{ type: "text", text: "Inspect it." }]
+          }]
+        }
+      }
+    });
+
+    await manager.recordSandboxAttachments(
+      opened.id,
+      threadId,
+      messageId,
+      [{
+        id: "attachment-one",
+        name: "notes.txt",
+        path: "/workspace/attachments/turn/notes.txt",
+        size: 5,
+        fingerprint: "a".repeat(64)
+      }]
+    );
+    const staged = await manager.readThread(opened.id, threadId);
+    const forged = structuredClone(staged);
+    forged.thread.sandboxAttachments![messageId]![0]!.name = "forged.txt";
+    await expect(manager.writeThread(opened.id, threadId, forged))
+      .rejects.toThrow("immutable");
+
+    await manager.lockSandboxAttachments(opened.id, threadId);
+    const locked = await manager.readThread(opened.id, threadId);
+    await expect(manager.writeThread(opened.id, threadId, {
+      ...locked,
+      thread: { ...locked.thread, sandboxAttachments: undefined }
+    })).rejects.toThrow("locked after Run starts");
+    expect(
+      (await manager.readThread(opened.id, threadId)).thread
+        .lockedSandboxAttachmentMessageIds
+    ).toEqual([messageId]);
+  });
+
   test("creates user-owned source before desktop-owned trust and Thread data", async () => {
     const { home, manager, root } = await _fixture();
     const parentDirectory = path.join(root, "user-projects");

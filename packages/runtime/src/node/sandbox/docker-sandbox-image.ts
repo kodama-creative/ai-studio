@@ -18,7 +18,6 @@ import { appendFile, lstat, mkdir, mkdtemp, open, readFile, readdir, realpath, r
 import path from "node:path";
 
 const WORKSPACE = "/workspace";
-const INTERNAL = path.join(WORKSPACE, ".llm-space");
 
 function _result(value) {
   process.stdout.write(JSON.stringify({ type: "result", ok: true, value }) + "\n");
@@ -106,7 +105,6 @@ function _safeName(value) {
 }
 
 async function _seed(input) {
-  await mkdir(INTERNAL, { recursive: true });
   for (const file of input.files ?? []) {
     if (typeof file.path !== "string" || file.path.startsWith("/")
       || file.path.includes("\\") || file.path.split("/").some(
@@ -120,22 +118,7 @@ async function _seed(input) {
       flag: "wx"
     });
   }
-  await writeFile(
-    path.join(INTERNAL, "seed.json"),
-    JSON.stringify({ fingerprint: input.fingerprint ?? null }),
-    { flag: "wx" }
-  );
   _result();
-}
-
-async function _readSeedFingerprint() {
-  const marker = JSON.parse(
-    await readFile(path.join(INTERNAL, "seed.json"), "utf8")
-  );
-  if (typeof marker.fingerprint !== "string") {
-    throw new Error("Sandbox seed marker is invalid");
-  }
-  _result(marker.fingerprint);
 }
 
 async function _stageTurn(input) {
@@ -143,23 +126,10 @@ async function _stageTurn(input) {
   const turnKey = createHash("sha256").update(String(input.turnId)).digest("hex").slice(0, 24);
   const attachmentRoot = path.join(WORKSPACE, "attachments");
   const destination = path.join(attachmentRoot, turnKey);
-  const marker = path.join(destination, ".attachments.json");
-  try {
-    const existing = JSON.parse(await readFile(marker, "utf8"));
-    if (JSON.stringify(existing.input) !== JSON.stringify(attachments.map(
-      ({ id, name, fingerprint }) => ({ id, name, fingerprint })
-    ))) {
-      throw new Error("Turn attachments already exist with different identity");
-    }
-    _result(existing.staged);
-    return;
-  } catch (error) {
-    if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
-      throw error;
-    }
-  }
-  const stagingRoot = path.join(INTERNAL, "staging");
-  const temporary = path.join(stagingRoot, randomUUID());
+  const temporary = path.join(
+    attachmentRoot,
+    "." + turnKey + "." + randomUUID() + ".tmp"
+  );
   await mkdir(temporary, { recursive: true });
   const staged = [];
   try {
@@ -179,19 +149,6 @@ async function _stageTurn(input) {
         size: content.byteLength
       });
     }
-    await writeFile(
-      path.join(temporary, ".attachments.json"),
-      JSON.stringify({
-        input: attachments.map(({ id, name, fingerprint }) => ({
-          id,
-          name,
-          fingerprint
-        })),
-        staged
-      }),
-      { flag: "wx" }
-    );
-    await mkdir(attachmentRoot, { recursive: true });
     await rename(temporary, destination);
   } catch (error) {
     await rm(temporary, { recursive: true, force: true });
@@ -203,7 +160,6 @@ async function _stageTurn(input) {
 async function _manifest() {
   const entries = await readdir(WORKSPACE, { withFileTypes: true });
   _result(entries
-    .filter(entry => entry.name !== ".llm-space")
     .map(entry => entry.isDirectory() ? entry.name + "/" : entry.name)
     .sort()
     .slice(0, 1000));
@@ -407,7 +363,6 @@ async function _abortCommand(input) {
 try {
   const input = JSON.parse(await Bun.stdin.text());
   if (input.operation === "seed") await _seed(input);
-  else if (input.operation === "seedFingerprint") await _readSeedFingerprint();
   else if (input.operation === "stageTurn") await _stageTurn(input);
   else if (input.operation === "manifest") await _manifest();
   else if (input.operation === "exec") await _execute(input);

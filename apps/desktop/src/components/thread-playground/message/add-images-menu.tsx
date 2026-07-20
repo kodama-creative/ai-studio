@@ -19,7 +19,6 @@ import {
   DropdownMenuTrigger
 } from "../../ui/dropdown-menu";
 import {
-  isMessageIncludedInRunHistory,
   useThreadStore,
   useThreadStoreActions
 } from "../stores/thread-store";
@@ -58,7 +57,8 @@ export function AddImagesMenu({
     return Boolean(state.thread.sandboxAttachments?.[messageId]?.length);
   });
   const sandboxAttachmentsLocked = useThreadStore(state =>
-    isMessageIncludedInRunHistory(state.runHistory, messageId));
+    state.thread.lockedSandboxAttachmentMessageIds?.includes(messageId)
+    ?? false);
   const staging = useThreadStore(state =>
     state.stagingSandboxAttachmentMessageIds.includes(messageId));
   const running = useThreadStore(state => state.status === "running");

@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdirSync } from "node:fs";
-import { lstat, readFile, stat, writeFile } from "node:fs/promises";
+import { constants, mkdirSync } from "node:fs";
+import { open, readFile, stat, writeFile } from "node:fs/promises";
 import nodePath from "node:path";
 import { BrowserView, type BrowserWindow, Utils } from "electrobun/bun";
 
@@ -349,6 +349,12 @@ export function createMainWindowRPC({
             seed: snapshot.sandbox?.workspace ?? [],
             attachments
           });
+          await externalAgentProjects.recordSandboxAttachments(
+            projectId,
+            threadId,
+            messageId,
+            prepared.attachments
+          );
           return [...prepared.attachments];
         },
         externalAgentProjectActivateConnections: async ({ projectId, threadId }) =>
@@ -496,40 +502,43 @@ async function _readSandboxAttachments(paths: readonly string[]) {
   let totalBytes = 0;
   return Promise.all(paths.map(async filePath => {
     const name = nodePath.basename(filePath);
-    let info;
+    let handle;
     try {
-      info = await lstat(filePath);
+      handle = await open(
+        filePath,
+        constants.O_RDONLY | constants.O_NOFOLLOW
+      );
     } catch {
       throw new Error(`Unable to read attachment: ${name}`);
     }
-    if (info.isSymbolicLink() || !info.isFile()) {
-      throw new TypeError("Sandbox attachments must be regular files.");
-    }
-    if (info.size > 25 * 1024 * 1024) {
-      throw new TypeError(`Attachment exceeds 25 MiB: ${name}`);
-    }
-    totalBytes += info.size;
-    if (totalBytes > 100 * 1024 * 1024) {
-      throw new TypeError("Turn attachments exceed 100 MiB.");
-    }
-    if (names.has(name)) {
-      throw new TypeError(`Duplicate attachment name: ${name}`);
-    }
-    names.add(name);
-    let content;
     try {
-      content = await readFile(filePath);
-    } catch {
-      throw new Error(`Unable to read attachment: ${name}`);
+      const info = await handle.stat();
+      if (!info.isFile()) {
+        throw new TypeError("Sandbox attachments must be regular files.");
+      }
+      if (info.size > 25 * 1024 * 1024) {
+        throw new TypeError(`Attachment exceeds 25 MiB: ${name}`);
+      }
+      totalBytes += info.size;
+      if (totalBytes > 100 * 1024 * 1024) {
+        throw new TypeError("Turn attachments exceed 100 MiB.");
+      }
+      if (names.has(name)) {
+        throw new TypeError(`Duplicate attachment name: ${name}`);
+      }
+      names.add(name);
+      const content = await handle.readFile();
+      if (content.byteLength !== info.size) {
+        throw new Error(`Attachment changed while staging: ${name}`);
+      }
+      return {
+        id: randomUUID(),
+        name,
+        fingerprint: createHash("sha256").update(content).digest("hex"),
+        content: new Uint8Array(content)
+      };
+    } finally {
+      await handle.close();
     }
-    if (content.byteLength !== info.size) {
-      throw new Error(`Attachment changed while staging: ${name}`);
-    }
-    return {
-      id: randomUUID(),
-      name,
-      fingerprint: createHash("sha256").update(content).digest("hex"),
-      content: new Uint8Array(content)
-    };
   }));
 }

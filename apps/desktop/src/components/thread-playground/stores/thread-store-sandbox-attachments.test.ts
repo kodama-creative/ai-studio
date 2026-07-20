@@ -45,27 +45,18 @@ test("keeps staged Sandbox descriptors outside messages and locks them after Run
     "attachments"
   );
 
-  store.setState({
-    runHistory: [{
-      id: "run-one",
-      timestamp: 1,
-      usage: {
-        input: 0,
-        output: 0,
-        cacheRead: 0,
-        cacheWrite: 0,
-        totalTokens: 0,
-        cost: {
-          input: 0,
-          output: 0,
-          cacheRead: 0,
-          cacheWrite: 0,
-          total: 0
-        }
-      },
-      thread: store.getState().thread
-    }]
-  });
+  await store.getState().run();
+  expect(store.getState().thread.lockedSandboxAttachmentMessageIds).toEqual([
+    "turn-one"
+  ]);
+  const completedRun = {
+    id: "run-one",
+    thread: store.getState().thread,
+    timestamp: 1
+  };
+  store.setState({ runHistory: [completedRun] });
+  store.getState().removeRun(completedRun);
+  expect(store.getState().runHistory).toEqual([]);
   store.getState().removeMessageSandboxAttachment(
     "turn-one",
     "attachment-one"

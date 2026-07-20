@@ -150,6 +150,14 @@ describe("discoverAgentProject", () => {
       "export default {};\n"
     );
     await writeFile(outside, "outside\n");
+    await mkdir(
+      path.join(root, "sandbox", "workspace", "attachments"),
+      { recursive: true }
+    );
+    await writeFile(
+      path.join(root, "sandbox", "workspace", "attachments", "owned.txt"),
+      "reserved\n"
+    );
     await symlink(
       outside,
       path.join(root, "sandbox", "workspace", "linked.txt")
@@ -169,6 +177,7 @@ describe("discoverAgentProject", () => {
     expect(discovered.diagnostics.filter(
       diagnostic => diagnostic.code === "sandbox_workspace_invalid"
     ).map(diagnostic => diagnostic.message)).toEqual([
+      "Invalid Sandbox workspace path: attachments",
       "Sandbox workspace symlinks are not supported: linked.txt",
       "Sandbox workspace file exceeds 25 MiB: oversized.bin"
     ]);

@@ -1,6 +1,9 @@
 import { type Static, Type } from "typebox";
 
-import { ThreadSandboxAttachments } from "./sandbox-attachment";
+import {
+  LockedSandboxAttachmentMessageIds,
+  ThreadSandboxAttachments
+} from "./sandbox-attachment";
 import { Message, ModelUsage } from "../messages";
 import { ModelConfig } from "../models";
 import { normalizeTools, Tool } from "../tools";
@@ -196,6 +199,11 @@ const THREAD_FIELDS = {
 
   /** Host-owned staged Turn inputs, keyed outside the message transcript. */
   sandboxAttachments: Type.Optional(ThreadSandboxAttachments),
+
+  /** Message ids whose Host-approved Sandbox descriptors can no longer change. */
+  lockedSandboxAttachmentMessageIds: Type.Optional(
+    LockedSandboxAttachmentMessageIds
+  ),
 
   /**
    * The context of the thread, including the system prompt, messages, and tools.

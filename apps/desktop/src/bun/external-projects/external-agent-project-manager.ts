@@ -16,6 +16,7 @@ import {
   type ModelConfig,
   normalizeThread,
   type ProjectTool,
+  type SandboxAttachmentDescriptor,
   type Thread
 } from "@llm-space/core";
 import {
@@ -48,7 +49,8 @@ import {
   ProjectMcpSession,
   ProjectMcpToolCallRejectedError,
   type ResolvedAgentProjectManifest,
-  scaffoldAgentProject
+  scaffoldAgentProject,
+  type StagedSandboxAttachment
 } from "@llm-space/runtime/node";
 
 import type { Models } from "@earendil-works/pi-ai";
@@ -434,11 +436,69 @@ export class ExternalAgentProjectManager {
     const existing = await this._readThreadFile(projectId, threadId);
     _assertRuntimeProfileWrite(existing.thread, record.thread);
     await this._writeThreadFile(projectId, threadId, {
-      thread: normalizeThread(record.thread),
+      thread: _reconcileSandboxThreadAuthority(
+        existing.thread,
+        normalizeThread(record.thread)
+      ),
       promptFingerprint: record.promptFingerprint,
       syncedPrompt: record.syncedPrompt,
       definitionFingerprint: record.definitionFingerprint,
       syncedDefinition: record.syncedDefinition
+    });
+    this._notify(projectId);
+  }
+
+  async recordSandboxAttachments(
+    projectId: string,
+    threadId: string,
+    messageId: string,
+    attachments: readonly StagedSandboxAttachment[]
+  ): Promise<void> {
+    const existing = await this._readThreadFile(projectId, threadId);
+    const thread = normalizeThread(existing.thread);
+    if (getThreadRuntimeProfile(thread).type !== "desktopSandbox") {
+      throw new Error("Files can be staged only for Desktop Sandbox.");
+    }
+    if (thread.lockedSandboxAttachmentMessageIds?.includes(messageId)) {
+      throw new Error("Sandbox attachments are locked after Run starts.");
+    }
+    const message = thread.context?.messages?.find(
+      candidate => candidate.id === messageId
+    );
+    if (message?.role !== "user") {
+      throw new Error("Sandbox attachments require a user message.");
+    }
+    if (thread.sandboxAttachments?.[messageId]?.length) {
+      throw new Error("This message already has Sandbox attachments.");
+    }
+    await this._writeThreadFile(projectId, threadId, {
+      ...existing,
+      thread: {
+        ...thread,
+        sandboxAttachments: {
+          ...thread.sandboxAttachments,
+          [messageId]: [...attachments]
+        }
+      }
+    });
+    this._notify(projectId);
+  }
+
+  async lockSandboxAttachments(
+    projectId: string,
+    threadId: string
+  ): Promise<void> {
+    const existing = await this._readThreadFile(projectId, threadId);
+    const thread = normalizeThread(existing.thread);
+    const attachmentMessageIds = Object.keys(thread.sandboxAttachments ?? {});
+    if (attachmentMessageIds.length === 0) { return; }
+    const locked = [...new Set([
+      ...(thread.lockedSandboxAttachmentMessageIds ?? []),
+      ...attachmentMessageIds
+    ])].sort();
+    await this._writeThreadFile(projectId, threadId, {
+      ...existing,
+      thread: { ...thread, lockedSandboxAttachmentMessageIds: locked }
     });
     this._notify(projectId);
   }
@@ -1648,6 +1708,83 @@ function _definitionFromModel(
     model: { provider: model.provider, id: model.id },
     ...(model.params?.reasoning ? { reasoning: model.params.reasoning } : {})
   };
+}
+
+function _reconcileSandboxThreadAuthority(
+  current: Thread,
+  requested: Thread
+): Thread {
+  const currentAttachments = current.sandboxAttachments ?? {};
+  const requestedAttachments = requested.sandboxAttachments ?? {};
+  const messageIds = new Set(
+    requested.context?.messages?.map(message => message.id) ?? []
+  );
+  const locked = [...new Set(
+    current.lockedSandboxAttachmentMessageIds ?? []
+  )].sort();
+  const lockedIds = new Set(locked);
+  const attachments: Record<string, SandboxAttachmentDescriptor[]> = {};
+
+  for (const [messageId, proposed] of Object.entries(requestedAttachments)) {
+    if (!messageIds.has(messageId)) { continue; }
+    const approved = currentAttachments[messageId];
+    if (!approved) {
+      if (proposed.length > 0) {
+        throw new Error("Sandbox attachment descriptors are owned by Desktop Bun.");
+      }
+      continue;
+    }
+    const approvedById = new Map(
+      approved.map(descriptor => [descriptor.id, descriptor])
+    );
+    if (new Set(proposed.map(descriptor => descriptor.id)).size !== proposed.length) {
+      throw new Error("Sandbox attachment descriptors are immutable.");
+    }
+    const accepted = proposed.map(descriptor => {
+      const authoritative = approvedById.get(descriptor.id);
+      if (!authoritative || !_sameSandboxAttachment(
+        authoritative,
+        descriptor
+      )) {
+        throw new Error("Sandbox attachment descriptors are immutable.");
+      }
+      return authoritative;
+    });
+    if (lockedIds.has(messageId) && accepted.length !== approved.length) {
+      throw new Error("Sandbox attachments are locked after Run starts.");
+    }
+    if (accepted.length > 0) { attachments[messageId] = accepted; }
+  }
+
+  for (const messageId of Object.keys(currentAttachments)) {
+    if (
+      messageIds.has(messageId)
+      && lockedIds.has(messageId)
+      && requestedAttachments[messageId] === undefined
+    ) {
+      throw new Error("Sandbox attachments are locked after Run starts.");
+    }
+  }
+
+  return {
+    ...requested,
+    sandboxAttachments: Object.keys(attachments).length > 0
+      ? attachments
+      : undefined,
+    lockedSandboxAttachmentMessageIds: locked.length > 0 ? locked : undefined
+  };
+}
+
+function _sameSandboxAttachment(
+  left: SandboxAttachmentDescriptor,
+  right: SandboxAttachmentDescriptor
+): boolean {
+  return left.id === right.id
+    && left.name === right.name
+    && left.path === right.path
+    && left.size === right.size
+    && left.fingerprint === right.fingerprint
+    && left.mimeType === right.mimeType;
 }
 
 function _assertRuntimeProfileWrite(current: Thread, next: Thread): void {

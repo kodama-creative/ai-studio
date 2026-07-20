@@ -55,19 +55,28 @@ dockerTest("real Docker isolates, retains, reconstructs, and deletes a Sandbox S
     const failedTurnKey = createHash("sha256").update(failedTurnId)
       .digest("hex")
       .slice(0, 24);
+    const failedDestination = `/workspace/attachments/${failedTurnKey}`;
+    expect(await first.executionEnv.createDir(failedDestination))
+      .toEqual({ ok: true, value: undefined });
+    expect(await first.executionEnv.writeFile(
+      `${failedDestination}/existing.txt`,
+      "keep"
+    )).toEqual({ ok: true, value: undefined });
     expect(await _rejection(first.stageTurn({
       turnId: failedTurnId,
       attachments: [{
-        id: "reserved-marker-collision",
-        name: ".attachments.json",
+        id: "atomic-failure-attachment",
+        name: "notes.txt",
         fingerprint:
           "ab5aa97074c454a0632057e704220d9a6678fbf773a0a5806fc09b8173b07309",
         content: new TextEncoder().encode("notes")
       }]
-    }))).toMatchObject({ message: expect.stringContaining("EEXIST") });
-    expect(await first.executionEnv.exists(
-      `/workspace/attachments/${failedTurnKey}`
-    )).toEqual({ ok: true, value: false });
+    }))).toMatchObject({ message: expect.stringMatching(/EEXIST|ENOTEMPTY/) });
+    expect(await first.executionEnv.exists(`${failedDestination}/notes.txt`))
+      .toEqual({ ok: true, value: false });
+    expect(await first.executionEnv.readTextFile(
+      `${failedDestination}/existing.txt`
+    )).toEqual({ ok: true, value: "keep" });
 
     expect(await first.executionEnv.writeFile("generated.txt", "durable"))
       .toEqual({ ok: true, value: undefined });

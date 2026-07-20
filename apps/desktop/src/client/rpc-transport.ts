@@ -10,10 +10,8 @@ import type { StoredRuntimeSession } from "@llm-space/runtime/harness";
 
 import { electrobun } from "@/lib/electrobun";
 import { RuntimeExecutionEnvUnavailableError } from "./runtime-execution-env-unavailable-error";
-import {
-  RuntimeSandboxUnavailableError,
-  RuntimeSandboxWorkspaceLostError
-} from "./runtime-sandbox-error";
+import { RuntimeSandboxUnavailableError } from "./runtime-sandbox-unavailable-error";
+import { RuntimeSandboxWorkspaceLostError } from "./runtime-sandbox-workspace-lost-error";
 import { RuntimeStructuredOutputError } from "./runtime-structured-output-error";
 
 import type {

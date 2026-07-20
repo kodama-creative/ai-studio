@@ -1,6 +1,8 @@
 import { lstat, readdir } from "node:fs/promises";
 import path from "node:path";
 
+import { hasControlCharacter } from "../has-control-character";
+
 import type {
   AgentProjectSourceRef
 } from "./discover-agent-project";
@@ -228,21 +230,14 @@ function _validRelativePath(value: string): boolean {
   return value.length > 0
     && !value.startsWith("/")
     && !value.includes("\\")
-    && !_hasControlCharacter(value)
+    && !hasControlCharacter(value)
     && segments.length <= SANDBOX_WORKSPACE_MAX_DEPTH
+    && segments[0] !== "attachments"
     && segments.every(segment => segment.length > 0
       && segment !== "."
       && segment !== "..")
     && new TextEncoder().encode(value).byteLength
     <= SANDBOX_WORKSPACE_MAX_PATH_BYTES;
-}
-
-function _hasControlCharacter(value: string): boolean {
-  for (let index = 0; index < value.length; index += 1) {
-    const code = value.charCodeAt(index);
-    if (code <= 31 || code === 127) { return true; }
-  }
-  return false;
 }
 
 async function _lstat(target: string) {

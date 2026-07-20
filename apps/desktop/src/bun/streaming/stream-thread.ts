@@ -419,6 +419,12 @@ export class StreamThreadController {
     );
     const profile = threadRecord.thread.runtimeProfile?.type
       ?? "desktopDirect";
+    if (profile === "desktopSandbox") {
+      await this._externalAgentProjects.lockSandboxAttachments(
+        payload.runtime.projectId,
+        payload.runtime.threadId
+      );
+    }
     const sandbox = profile === "desktopSandbox"
       ? await this._prepareSandboxTurn({
         projectId: payload.runtime.projectId,

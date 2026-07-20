@@ -170,14 +170,6 @@ export interface ThreadState {
 
 export type ThreadStore = StoreApi<ThreadState>;
 
-export function isMessageIncludedInRunHistory(
-  runHistory: readonly RunSnapshot[],
-  messageId: string
-): boolean {
-  return runHistory.some(run =>
-    run.thread.context?.messages?.some(message => message.id === messageId));
-}
-
 export function createThreadStore(
   initialThread: Thread,
   options: {
@@ -301,6 +293,19 @@ export function createThreadStore(
         if (get().status !== "running") {
           set({ changeHistory: recordSnapshot(get().changeHistory, next) });
         }
+      };
+
+      const patchSandboxAttachmentAuthority = (partial: Partial<Thread>) => {
+        const thread = { ...get().thread, ...partial };
+        const changeHistory = get().changeHistory;
+        set({
+          thread,
+          changeHistory: {
+            ...changeHistory,
+            snapshots: changeHistory.snapshots.map((snapshot, index) =>
+              (index === changeHistory.index ? thread : snapshot))
+          }
+        });
       };
 
       const patchContext = (partial: Partial<Thread["context"]>) => {
@@ -727,7 +732,7 @@ export function createThreadStore(
             !options.stageSandboxFiles
             || message?.role !== "user"
             || get().thread.sandboxAttachments?.[id]?.length
-            || isMessageIncludedInRunHistory(get().runHistory, id)
+            || get().thread.lockedSandboxAttachmentMessageIds?.includes(id)
             || get().status === "running"
           ) {
             return;
@@ -744,11 +749,11 @@ export function createThreadStore(
               attachments.length === 0
               || get().status === "running"
               || getMessage(id)?.role !== "user"
-              || isMessageIncludedInRunHistory(get().runHistory, id)
+              || get().thread.lockedSandboxAttachmentMessageIds?.includes(id)
             ) {
               return;
             }
-            patchThread({
+            patchSandboxAttachmentAuthority({
               sandboxAttachments: {
                 ...get().thread.sandboxAttachments,
                 [id]: [...attachments]
@@ -772,7 +777,7 @@ export function createThreadStore(
         removeMessageSandboxAttachment(id: string, attachmentId: string) {
           if (
             get().status === "running"
-            || isMessageIncludedInRunHistory(get().runHistory, id)
+            || get().thread.lockedSandboxAttachmentMessageIds?.includes(id)
           ) {
             return;
           }
@@ -789,7 +794,7 @@ export function createThreadStore(
           } else {
             Reflect.deleteProperty(next, id);
           }
-          patchThread({
+          patchSandboxAttachmentAuthority({
             sandboxAttachments: Object.keys(next).length > 0 ? next : undefined
           });
         },
@@ -1001,6 +1006,20 @@ export function createThreadStore(
                   : "Please check the system prompt variables."
             });
             return;
+          }
+
+          const attachmentMessageIds = messages
+            .map(message => message.id)
+            .filter(messageId =>
+              Boolean(get().thread.sandboxAttachments?.[messageId]?.length));
+          if (attachmentMessageIds.length > 0) {
+            const lockedSandboxAttachmentMessageIds = [...new Set([
+              ...(get().thread.lockedSandboxAttachmentMessageIds ?? []),
+              ...attachmentMessageIds
+            ])].sort();
+            patchSandboxAttachmentAuthority({
+              lockedSandboxAttachmentMessageIds
+            });
           }
 
           const executionMode = getExecutionMode();
@@ -1381,7 +1400,10 @@ export function createThreadStore(
             return;
           }
           const thread = withRunMetadata({
-            ...result.thread,
+            ..._preserveSandboxAttachmentAuthority(
+              get().thread,
+              result.thread
+            ),
             runtimeSession: get().thread.runtimeSession,
             runtimeProfile: get().thread.runtimeProfile
           }, {
@@ -1407,7 +1429,10 @@ export function createThreadStore(
             return;
           }
           const thread = withRunMetadata({
-            ...result.thread,
+            ..._preserveSandboxAttachmentAuthority(
+              get().thread,
+              result.thread
+            ),
             runtimeSession: get().thread.runtimeSession,
             runtimeProfile: get().thread.runtimeProfile
           }, {
@@ -1429,7 +1454,7 @@ export function createThreadStore(
             return;
           }
           const next = withRunMetadata({
-            ...thread,
+            ..._preserveSandboxAttachmentAuthority(get().thread, thread),
             runtimeSession: get().thread.runtimeSession,
             runtimeProfile: get().thread.runtimeProfile
           }, {
@@ -1659,6 +1684,27 @@ const selectActions = (s: ThreadState) => ({
 });
 export function useThreadStoreActions() {
   return useStore(useThreadStoreApi(), useShallow(selectActions));
+}
+
+function _preserveSandboxAttachmentAuthority(
+  current: Thread,
+  target: Thread
+): Thread {
+  const messageIds = new Set(
+    target.context?.messages?.map(message => message.id) ?? []
+  );
+  const sandboxAttachments = Object.fromEntries(
+    Object.entries(current.sandboxAttachments ?? {}).filter(([messageId]) =>
+      messageIds.has(messageId))
+  );
+  return {
+    ...target,
+    sandboxAttachments: Object.keys(sandboxAttachments).length > 0
+      ? sandboxAttachments
+      : undefined,
+    lockedSandboxAttachmentMessageIds:
+      current.lockedSandboxAttachmentMessageIds
+  };
 }
 
 function _structuredOutputFromThread(

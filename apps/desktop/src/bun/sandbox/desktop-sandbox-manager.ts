@@ -1,15 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
-import {
-  DockerSandboxProvider,
-  SandboxWorkspaceLostError
-} from "@llm-space/runtime/node";
+import { SandboxWorkspaceLostError } from "@llm-space/runtime/node";
 
 import type {
   CompiledSandboxWorkspaceFile,
   SandboxAttachmentInput,
   SandboxProvider,
+  SandboxProviderReadiness,
+  SandboxProviderSession,
   SandboxTurnEnvironment,
   StagedSandboxAttachment
 } from "@llm-space/runtime/node";
@@ -25,16 +24,16 @@ interface SandboxRegistry {
   readonly sessions: Record<string, SandboxRegistryRecord>;
 }
 
-export class DesktopSandboxManager {
+export class DesktopSandboxManager implements SandboxProvider {
   private readonly _provider: SandboxProvider;
   private readonly _registryFile: string;
   private _registry: SandboxRegistry = { schemaVersion: 1, sessions: {} };
 
   constructor(options: {
     readonly homePath: string;
-    readonly provider?: SandboxProvider;
+    readonly provider: SandboxProvider;
   }) {
-    this._provider = options.provider ?? new DockerSandboxProvider();
+    this._provider = options.provider;
     this._registryFile = path.join(
       options.homePath,
       "sandboxes",
@@ -77,10 +76,7 @@ export class DesktopSandboxManager {
     return this.readiness();
   }
 
-  async readiness(): Promise<{
-    message?: string;
-    state: "ready" | "unavailable";
-  }> {
+  async readiness(): Promise<SandboxProviderReadiness> {
     const readiness = await this._provider.readiness();
     return readiness.state === "ready"
       ? { state: "ready" }
@@ -95,6 +91,25 @@ export class DesktopSandboxManager {
   }): Promise<{
     readonly attachments: readonly StagedSandboxAttachment[];
   } & SandboxTurnEnvironment> {
+    const session = await this.acquire(input);
+    const attachments = input.attachments?.length
+      ? await session.stageTurn({
+        attachments: input.attachments,
+        turnId: input.turnId
+      })
+      : [];
+    return {
+      executionEnv: session.executionEnv,
+      workspaceManifest: await session.workspaceManifest(),
+      attachments
+    };
+  }
+
+  async acquire(input: {
+    readonly expectedExisting?: boolean;
+    readonly seed: readonly CompiledSandboxWorkspaceFile[];
+    readonly sessionId: string;
+  }): Promise<SandboxProviderSession> {
     const record = this._registry.sessions[input.sessionId];
     if (record?.state === "lost") { throw new SandboxWorkspaceLostError(); }
     if (record?.state === "cleanupPending") {
@@ -102,7 +117,8 @@ export class DesktopSandboxManager {
     }
     try {
       const session = await this._provider.acquire({
-        expectedExisting: record?.state === "active",
+        expectedExisting: input.expectedExisting === true
+          || record?.state === "active",
         seed: input.seed,
         sessionId: input.sessionId
       });
@@ -116,17 +132,7 @@ export class DesktopSandboxManager {
         };
         await this._saveRegistry();
       }
-      const attachments = input.attachments?.length
-        ? await session.stageTurn({
-          attachments: input.attachments,
-          turnId: input.turnId
-        })
-        : [];
-      return {
-        executionEnv: session.executionEnv,
-        workspaceManifest: await session.workspaceManifest(),
-        attachments
-      };
+      return session;
     } catch (error) {
       if (error instanceof SandboxWorkspaceLostError) {
         this._registry = {
@@ -157,7 +163,13 @@ export class DesktopSandboxManager {
     await this._saveRegistry();
   }
 
-  async stop(): Promise<void> {
+  async stop(sessionId?: string): Promise<void> {
+    if (sessionId !== undefined) {
+      if (this._registry.sessions[sessionId]?.state === "active") {
+        await this._provider.stop(sessionId);
+      }
+      return;
+    }
     const active = Object.entries(this._registry.sessions)
       .filter(([, record]) => record.state === "active")
       .map(([sessionId]) => sessionId);

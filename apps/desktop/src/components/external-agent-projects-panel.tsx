@@ -101,17 +101,24 @@ const _ExternalAgentProjectsPanel = function ExternalAgentProjectsPanel({
     }) => {
       const project = projects.find(candidate => candidate.id === projectId);
       if (!project) { return; }
-      const { id, record } =
-        await externalAgentProjects.createThread(
+      try {
+        const { id, record } = await externalAgentProjects.createThread(
           projectId,
           undefined,
           runtimeProfileType
         );
-      await refresh();
-      onOpenThread(project, {
-        id,
-        title: record.thread.title ?? "untitled"
-      });
+        await refresh();
+        onOpenThread(project, {
+          id,
+          title: record.thread.title ?? "untitled"
+        });
+      } catch (error) {
+        toast.error("Unable to create Thread", {
+          description: error instanceof Error
+            ? error.message
+            : "The selected Runtime Profile is unavailable."
+        });
+      }
     },
     refreshExternalAgentProject: async ({ projectId }) => {
       await externalAgentProjects.refresh(projectId);

@@ -11,6 +11,7 @@ import {
   DOCKER_SANDBOX_HELPER_SOURCE
 } from "./docker-sandbox-image";
 import { SandboxWorkspaceLostError } from "../../runtime/sandbox/sandbox-workspace-lost-error";
+import { hasControlCharacter } from "../has-control-character";
 
 import type {
   DockerCommandResult,
@@ -81,6 +82,7 @@ export class DockerSandboxProvider implements SandboxProvider {
     if (readiness.state !== "ready") { throw new Error(readiness.message); }
     await this._ensureImage();
     const names = _resourceNames(input.sessionId);
+    const seedFingerprint = _seedFingerprint(input.seed);
     const volumeExists = (await this._runner.run([
       "volume", "inspect", names.volume
     ])).exitCode === 0;
@@ -88,9 +90,28 @@ export class DockerSandboxProvider implements SandboxProvider {
       throw new SandboxWorkspaceLostError();
     }
     const newVolume = !volumeExists;
-    const seedFingerprint = _seedFingerprint(input.seed);
     if (newVolume) {
-      await this._runRequired(["volume", "create", names.volume]);
+      await this._runRequired([
+        "volume",
+        "create",
+        "--label",
+        `llm-space.sandbox-seed=${seedFingerprint}`,
+        names.volume
+      ]);
+    } else {
+      const existingFingerprint = await this._runner.run([
+        "volume",
+        "inspect",
+        "--format",
+        "{{ index .Labels \"llm-space.sandbox-seed\" }}",
+        names.volume
+      ]);
+      if (
+        existingFingerprint.exitCode !== 0
+        || existingFingerprint.stdout.trim() !== seedFingerprint
+      ) {
+        throw new SandboxWorkspaceLostError();
+      }
     }
     const containerExists = (await this._runner.run([
       "container", "inspect", names.container
@@ -121,23 +142,10 @@ export class DockerSandboxProvider implements SandboxProvider {
       }
       await this._runRequired(["start", names.container]);
       if (newVolume) {
-        await this._helper(names.container, {
+        await _invokeSandboxHelper(this._runner, names.container, {
           operation: "seed",
-          fingerprint: seedFingerprint,
           files: input.seed
         });
-      } else {
-        try {
-          const existingFingerprint = await this._helper(
-            names.container,
-            { operation: "seedFingerprint" }
-          );
-          if (existingFingerprint !== seedFingerprint) {
-            throw new Error("Sandbox seed fingerprint changed");
-          }
-        } catch {
-          throw new SandboxWorkspaceLostError();
-        }
       }
     } catch (error) {
       if (newVolume) {
@@ -203,10 +211,6 @@ export class DockerSandboxProvider implements SandboxProvider {
     }
   }
 
-  private async _helper(container: string, input: unknown): Promise<unknown> {
-    return _invokeSandboxHelper(this._runner, container, input);
-  }
-
   private async _runRequired(arguments_: readonly string[]): Promise<void> {
     const result = await this._runner.run(arguments_);
     if (result.exitCode !== 0) {
@@ -233,7 +237,7 @@ class DockerSandboxSession implements SandboxProviderSession {
     readonly turnId: string;
   }): Promise<readonly StagedSandboxAttachment[]> {
     _assertAttachments(input.attachments);
-    return this._helper({
+    return _invokeSandboxHelper(this._runner, this._container, {
       operation: "stageTurn",
       turnId: input.turnId,
       attachments: input.attachments.map(attachment => ({
@@ -247,11 +251,11 @@ class DockerSandboxSession implements SandboxProviderSession {
   }
 
   async workspaceManifest(): Promise<readonly string[]> {
-    return this._helper({ operation: "manifest" }) as Promise<readonly string[]>;
-  }
-
-  private async _helper(input: unknown): Promise<unknown> {
-    return _invokeSandboxHelper(this._runner, this._container, input);
+    return _invokeSandboxHelper(
+      this._runner,
+      this._container,
+      { operation: "manifest" }
+    ) as Promise<readonly string[]>;
   }
 }
 
@@ -321,7 +325,7 @@ function _assertAttachments(
       !attachment.name
       || attachment.name !== path.posix.basename(attachment.name)
       || attachment.name.includes("\\")
-      || _hasControlCharacter(attachment.name)
+      || hasControlCharacter(attachment.name)
       || new TextEncoder().encode(attachment.name).byteLength > 240
     ) {
       throw new TypeError(`Invalid attachment name: ${attachment.name}`);
@@ -346,20 +350,15 @@ function _assertAttachments(
   }
 }
 
-function _hasControlCharacter(value: string): boolean {
-  for (let index = 0; index < value.length; index += 1) {
-    const code = value.charCodeAt(index);
-    if (code <= 31 || code === 127) { return true; }
-  }
-  return false;
-}
-
 function _assertSeed(seed: readonly CompiledSandboxWorkspaceFile[]): void {
   if (seed.length > 1_000) {
     throw new TypeError("Sandbox workspace supports at most 1000 files");
   }
   let total = 0;
   for (const file of seed) {
+    if (file.path === "attachments" || file.path.startsWith("attachments/")) {
+      throw new TypeError("Sandbox workspace reserves /workspace/attachments");
+    }
     const content = Buffer.from(file.contentBase64, "base64");
     total += content.byteLength;
     if (content.byteLength !== file.size) {

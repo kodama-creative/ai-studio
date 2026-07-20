@@ -24,6 +24,14 @@ export type ThreadSandboxAttachments = Static<
   typeof ThreadSandboxAttachments
 >;
 
+export const LockedSandboxAttachmentMessageIds = Type.Array(
+  Type.String({ minLength: 1 }),
+  { uniqueItems: true }
+);
+export type LockedSandboxAttachmentMessageIds = Static<
+  typeof LockedSandboxAttachmentMessageIds
+>;
+
 export function formatSandboxAttachmentsForPi(
   attachments: readonly SandboxAttachmentDescriptor[]
 ): string {

@@ -121,8 +121,8 @@ const _MessageListItem = function MessageListItem({
     state => state.thread.sandboxAttachments?.[message.id]
   );
   const sandboxAttachmentsLocked = useThreadStore(state =>
-    state.runHistory.some(run =>
-      run.thread.context?.messages?.some(item => item.id === message.id)));
+    state.thread.lockedSandboxAttachmentMessageIds?.includes(message.id)
+    ?? false);
   const attachments = sandboxAttachments
     ?? liveSandboxAttachments
     ?? EMPTY_SANDBOX_ATTACHMENTS;

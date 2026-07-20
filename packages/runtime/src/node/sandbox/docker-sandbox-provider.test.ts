@@ -89,7 +89,7 @@ describe("DockerSandboxProvider", () => {
     expect(runner.createdVolume).toBe(false);
   });
 
-  test("rejects an existing Session whose seed marker is missing", async () => {
+  test("rejects an existing Session whose Host-owned seed label is missing", async () => {
     const runner = new FakeDockerRunner();
     runner.imageExists = true;
     runner.volumeExists = true;
@@ -100,7 +100,7 @@ describe("DockerSandboxProvider", () => {
       sessionId: "corrupt-session",
       seed: []
     }))).toBeInstanceOf(SandboxWorkspaceLostError);
-    expect(runner.helperOperations).toEqual(["seedFingerprint"]);
+    expect(runner.helperOperations).toEqual([]);
   });
 
   test("rejects an oversized Turn before Docker receives partial staging", async () => {
@@ -121,6 +121,25 @@ describe("DockerSandboxProvider", () => {
       }))
     }))).toMatchObject({ message: "A Turn supports at most 20 attachments" });
     expect(runner.helperOperations).toEqual(["seed"]);
+  });
+
+  test("reserves the attachment delivery namespace from source seed", async () => {
+    const runner = new FakeDockerRunner();
+    const provider = new DockerSandboxProvider({ runner });
+
+    expect(await _rejection(provider.acquire({
+      sessionId: "reserved-seed",
+      seed: [{
+        path: "attachments/source.txt",
+        size: 0,
+        fingerprint:
+          "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        contentBase64: ""
+      }]
+    }))).toMatchObject({
+      message: "Sandbox workspace reserves /workspace/attachments"
+    });
+    expect(runner.createdVolume).toBe(false);
   });
 });
 
@@ -150,11 +169,19 @@ class FakeDockerRunner implements DockerCommandRunner {
       return _result(0);
     }
     if (command === "volume" && subject === "inspect") {
-      return _result(this.volumeExists ? 0 : 1);
+      return arguments_.includes("--format")
+        ? _result(
+          this.volumeExists ? 0 : 1,
+          this.seedFingerprint ? `${this.seedFingerprint}\n` : "<no value>\n"
+        )
+        : _result(this.volumeExists ? 0 : 1);
     }
     if (command === "volume" && subject === "create") {
       this.volumeExists = true;
       this.createdVolume = true;
+      this.seedFingerprint = arguments_
+        .find(argument => argument.startsWith("llm-space.sandbox-seed="))
+        ?.slice("llm-space.sandbox-seed=".length) ?? null;
       return _result(0);
     }
     if (command === "container" && subject === "inspect") {
@@ -182,17 +209,6 @@ class FakeDockerRunner implements DockerCommandRunner {
         operation: string;
       };
       this.helperOperations.push(input.operation);
-      if (input.operation === "seed") {
-        this.seedFingerprint = (input as {
-          fingerprint: string;
-        } & typeof input).fingerprint;
-      }
-      if (input.operation === "seedFingerprint") {
-        if (!this.seedFingerprint) {
-          return _result(1, "", "Sandbox seed marker is missing");
-        }
-        return _result(0, _terminal(this.seedFingerprint));
-      }
       if (input.operation === "writeFile") {
         const file = input as { contentText?: string; path: string; } & typeof input;
         this.files.set(file.path, file.contentText ?? "");

@@ -54,7 +54,7 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
   const localServers = new EmbeddedLocalServerManager({
     externalAgentProjects,
     homePath,
-    sandboxProvider
+    sandboxProvider: sandboxes
   });
   const mcpManager = new McpManager();
   const searchSettings = new SearchSettingsManager();
