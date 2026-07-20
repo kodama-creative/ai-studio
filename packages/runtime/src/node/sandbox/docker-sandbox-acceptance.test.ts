@@ -136,7 +136,7 @@ dockerTest("real Docker isolates, retains, reconstructs, and deletes a Sandbox S
       provider.delete(secondId)
     ]);
   }
-});
+}, 120_000);
 
 function _names(sessionId: string) {
   const key = createHash("sha256").update(sessionId).digest("hex")
