@@ -233,7 +233,7 @@ const _MessageListItem = function MessageListItem({
         && "border-amber-400/30! hover:border-amber-400/40! focus-within:border-amber-400/40!",
         runValidationIssue?.level === "error"
         && "border-destructive/40! hover:border-destructive/50! focus-within:border-destructive/50!",
-        collapsed && "pb-2.5",
+        collapsed && !runValidationIssue && "pb-2.5",
         className
       )}
       ref={containerRef}
@@ -363,7 +363,7 @@ const _MessageListItem = function MessageListItem({
         ? (
           <div
             className={cn(
-              "text-foreground/75 mx-2 mb-2 flex w-[calc(100%-1rem)] items-center gap-2 rounded-md px-2.5 py-1.5 text-xs",
+              "text-foreground/75 mx-2 mb-2 flex w-[calc(100%-1rem)] items-center gap-2 rounded-md px-2.5 py-1.5 text-xs motion-safe:transition-[margin-top] motion-safe:duration-200 motion-safe:ease-in-out",
               collapsed && "mt-2",
               runValidationIssue.level === "warning"
                 ? "bg-amber-400/8"
