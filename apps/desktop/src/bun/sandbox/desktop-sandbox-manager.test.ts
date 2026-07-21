@@ -118,6 +118,39 @@ describe("DesktopSandboxManager", () => {
     });
   });
 
+  test("reports a fresh in-process Sandbox acquisition as preparing", async () => {
+    const root = await _root();
+    const provider = new FakeProvider();
+    const manager = new DesktopSandboxManager({ homePath: root, provider });
+    await manager.start();
+    let acquisitionStarted!: () => void;
+    let finishAcquisition!: () => void;
+    const started = new Promise<void>(resolve => {
+      acquisitionStarted = resolve;
+    });
+    const finish = new Promise<void>(resolve => {
+      finishAcquisition = resolve;
+    });
+    provider.onAcquire = async () => {
+      acquisitionStarted();
+      await finish;
+    };
+
+    const preparing = manager.prepareTurn({
+      sessionId: "thread-preparing",
+      turnId: "turn-one",
+      seed: []
+    });
+    await started;
+
+    expect(await manager.status("thread-preparing")).toEqual({
+      state: "preparing"
+    });
+    finishAcquisition();
+    await preparing;
+    expect(await manager.status("thread-preparing")).toEqual({ state: "ready" });
+  });
+
   test("blocks Run until staged attachments commit or compensate", async () => {
     const root = await _root();
     const provider = new FakeProvider();

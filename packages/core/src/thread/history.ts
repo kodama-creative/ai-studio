@@ -641,6 +641,7 @@ function _normalizeRuntimeCheckpoint(
   const continuationFingerprint = _trimmed(record.continuationFingerprint);
   const state = record.state;
   const checkpointOrder = record.checkpointOrder;
+  const profile = _normalizeRuntimeProfileType(record.profile);
   const server = _normalizeServerRunLineage(record.server, runId);
   const outputContract = _normalizeOutputContract(record.outputContract);
   if (
@@ -650,6 +651,7 @@ function _normalizeRuntimeCheckpoint(
     || !RUNTIME_RUN_STATES.has(state as ThreadRuntimeRunState)
     || !Number.isSafeInteger(checkpointOrder)
     || (checkpointOrder as number) < 1
+    || (record.profile !== undefined && !profile)
     || (record.server !== undefined && !server)
   ) {
     return null;
@@ -659,9 +661,20 @@ function _normalizeRuntimeCheckpoint(
     state: state as ThreadRuntimeRunState,
     checkpointOrder: checkpointOrder as number,
     continuationFingerprint,
+    ...(profile ? { profile } : {}),
     ...(server ? { server } : {}),
     ...(outputContract ? { outputContract } : {})
   };
+}
+
+function _normalizeRuntimeProfileType(
+  value: unknown
+): ThreadRuntimeCheckpoint["profile"] | null {
+  return value === "desktopDirect"
+    || value === "desktopSandbox"
+    || value === "localServer"
+    ? value
+    : null;
 }
 
 function _normalizeOutputContract(

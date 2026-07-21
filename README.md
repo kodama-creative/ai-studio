@@ -50,6 +50,7 @@ packages/
   runtime/    # Pi-native Agent Project discovery and persistent sessions
 apps/
   example-agent/ # Portable Agent Project example for desktop import
+  sandbox-example-agent/ # Docker Sandbox workspace/tool example
   desktop/    # The desktop app (Electrobun shell + React UI)
 ```
 
@@ -60,6 +61,16 @@ can also be checked without a configured model:
 
 ```bash
 bun test apps/example-agent
+```
+
+For the isolated execution path, open `apps/sandbox-example-agent`. It declares
+a required Sandbox, seeds a workspace, and uses the canonical read/write/bash
+tools. Its source contract stays Docker-free; the real provider has a separate
+acceptance command:
+
+```bash
+bun test apps/sandbox-example-agent
+bun run test:docker
 ```
 
 ## Install

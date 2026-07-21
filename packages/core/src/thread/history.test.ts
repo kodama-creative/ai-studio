@@ -188,6 +188,7 @@ describe("Local Server Run lineage", () => {
         state: "completed",
         checkpointOrder: 1,
         continuationFingerprint: "local-server:artifact:session:run",
+        profile: "localServer",
         server: {
           profile: "localServer",
           artifactFingerprint: "artifact-one",
@@ -202,6 +203,7 @@ describe("Local Server Run lineage", () => {
       sessionId: "session-one",
       runId: "run-server"
     });
+    expect(run?.runtime?.profile).toBe("localServer");
   });
 
   test("rejects a checkpoint whose duplicated Server Run ID disagrees", () => {
@@ -306,7 +308,8 @@ describe("run history persistence", () => {
           runId: "runtime-run-one",
           state: "waitingForContinue",
           checkpointOrder: 1,
-          continuationFingerprint: "fingerprint-one"
+          continuationFingerprint: "fingerprint-one",
+          profile: "desktopSandbox"
         }
       }
     );
@@ -316,6 +319,7 @@ describe("run history persistence", () => {
     );
 
     expect(next[0]?.runtime?.runId).toBe("runtime-run-one");
+    expect(next[0]?.runtime?.profile).toBe("desktopSandbox");
     expect(next[0]?.thread.agentRuntime?.snapshot).toBe("snapshot-one");
     expect(next[0]?.thread).not.toHaveProperty("runtimeSession");
     expect(thread.runtimeSession).toBe(runtimeSession);

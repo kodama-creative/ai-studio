@@ -34,6 +34,7 @@ import type { AgentSessionState } from "../state/agent-session-state";
 export interface AgentCapabilityRequest {
   readonly activeToolNames?: readonly string[];
   readonly model?: AgentModelSelector;
+  readonly modelConfigurationAuthority?: "agent" | "host";
   readonly modelOptions?: AgentModelOptionsDefinition;
   readonly reasoning?: ThinkingLevel;
 }
@@ -536,6 +537,9 @@ function _assertRequestWithinAuthoredCapabilities(
   request: AgentCapabilityRequest,
   selection: AgentDynamicModelSelection
 ): void {
+  if (request.modelConfigurationAuthority === "host") {
+    return;
+  }
   if (request.model) {
     const authoredModels = [
       definition.model,

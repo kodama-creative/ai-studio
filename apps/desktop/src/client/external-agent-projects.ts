@@ -1,4 +1,7 @@
-import type { SandboxAttachmentDescriptor } from "@llm-space/core";
+import type {
+  SandboxAttachmentDescriptor,
+  ThreadRuntimeProfileType
+} from "@llm-space/core";
 import type {
   AgentProjectMcpConnectionPreset,
   AgentProjectPreset
@@ -55,7 +58,7 @@ export const externalAgentProjects = {
   async createThread(
     projectId: string,
     title?: string,
-    runtimeProfileType?: "desktopDirect" | "desktopSandbox" | "localServer"
+    runtimeProfileType?: ThreadRuntimeProfileType
   ) {
     return _rpc().request.externalAgentProjectCreateThread({
       projectId,
@@ -85,6 +88,17 @@ export const externalAgentProjects = {
     threadId: string
   ): Promise<ExternalAgentProjectRuntimeStatus> {
     return _rpc().request.externalAgentProjectSandboxStatus({ threadId });
+  },
+  async setRuntimeProfile(
+    projectId: string,
+    threadId: string,
+    runtimeProfileType: ThreadRuntimeProfileType
+  ): Promise<ExternalAgentProjectThreadRecord> {
+    return _rpc().request.externalAgentProjectSetRuntimeProfile({
+      projectId,
+      runtimeProfileType,
+      threadId
+    });
   },
   async stageSandboxFiles(
     projectId: string,

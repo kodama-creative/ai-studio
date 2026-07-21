@@ -1,4 +1,4 @@
-import { uuid } from "@llm-space/core";
+import { getThreadRuntimeProfile, uuid } from "@llm-space/core";
 import {
   claimRuntimeRunResume,
   InMemorySessionStore,
@@ -213,6 +213,7 @@ export class ThreadRuntimeSession {
         state: run.checkpoint.state,
         checkpointOrder: run.checkpoint.order,
         continuationFingerprint: run.checkpoint.continuationFingerprint,
+        profile: getThreadRuntimeProfile(input.thread).type,
         ...(input.outputContractSnapshot
           ? { outputContract: input.outputContractSnapshot }
           : {})
@@ -271,6 +272,7 @@ export async function threadContinuationFingerprint(
     executionMode: input.executionMode,
     model: input.model,
     outputContract: input.outputContractSnapshot ?? null,
+    runtimeProfile: getThreadRuntimeProfile(input.thread).type,
     tools: input.context.tools ?? []
   });
 }

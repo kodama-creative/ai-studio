@@ -2,7 +2,7 @@
 status: accepted
 ---
 
-# Bind Studio Local Server execution to one immutable Thread authority
+# Bind Studio execution to an explicit Thread Runtime Profile
 
 ## Context
 
@@ -20,16 +20,20 @@ Trace, and Desktop sandbox execution is a later roadmap capability.
 
 ### Thread-scoped Runtime Profile authority
 
-Every Agent Project Thread has one Runtime Profile. `Desktop direct` remains
-the migration-safe default. `Local Server` binds the Thread to the compiled
-Agent artifact used when its Server Session is created. After the first Run,
-the profile is immutable. Choosing another available profile creates a new
-empty Thread; existing transcript, Run History, Session, and credentials are
-never migrated or reinterpreted.
+Every Agent Project Thread has one selected Runtime Profile. `Desktop direct`
+remains the development default. At a settled checkpoint the user may select
+`Desktop direct`, `Desktop sandbox`, or `Local Server` on the current Thread.
+Selection never creates or clears a Thread: transcript, Run History, and a
+dormant Desktop Runtime Session remain intact. Historical checkpoints freeze
+the profile that actually executed, and the profile participates in the
+continuation fingerprint so a changed waiting boundary branches rather than
+resuming under different authority. Profile selection is disabled while a Run
+is streaming.
 
-Studio lists `Desktop sandbox` so execution-location differences are visible,
-but marks it unavailable until the sandbox capability ships. It cannot be
-persisted as an executable profile and never falls back to direct execution.
+`Local Server` binds new execution to the currently selected compiled Agent
+artifact. `Desktop sandbox` is executable only when the Host provider is ready
+and never falls back to direct execution. An Agent that requires Sandbox cannot
+be downgraded to `Desktop direct`.
 
 ### Desktop principal and embedded Server lifecycle
 
@@ -63,35 +67,36 @@ detached.
 
 ### Server lineage and one Run authority
 
-Local Server Threads persist only non-secret profile lineage: profile kind,
+Local Server Threads persist only non-secret Server lineage: profile kind,
 artifact fingerprint, and Server Session ID. Each Run History checkpoint uses
 the authoritative Server Run ID as its Runtime Run ID and records the same
-artifact, Session, and Run lineage. Local Server Threads do not create or
-maintain a Desktop `runtimeSession`; the Server Session Store is the sole
-execution authority and Run History is a reduced Desktop projection of
-authorized Pi events.
+artifact, Session, and Run lineage. A Local Server Run neither creates nor
+updates Desktop `runtimeSession`; the Server Session Store is its sole execution
+authority and Run History is a reduced Desktop projection of authorized Pi
+events. A pre-existing Desktop Runtime Session may remain dormant on the Thread
+so returning to a Desktop profile does not destroy the user's debug state.
 
 The profile, lineage, artifact fingerprint, Session ID, and Run ID may cross
 renderer RPC. Bearer keys, continuation tokens, Server URLs, and ports may not.
 
 ### Artifact drift
 
-A Local Server Thread remains bound to its first-run artifact fingerprint.
-When current Agent source compiles to another fingerprint, the Thread becomes
+A Local Server profile remains bound to its selected artifact fingerprint.
+When current Agent source compiles to another fingerprint, the profile becomes
 stale. An already-created Run may finish, reconnect, or abort, but no new Turn
-may start afterward. The old Thread and Trace remain inspectable. Continuing
-with current source creates a new empty Thread bound to the latest artifact;
-no transcript or Session migration occurs.
+may start afterward. The old Run remains inspectable. Selecting the latest
+artifact detaches the old Server binding and updates the current Thread profile;
+it does not reinterpret historical checkpoints or copy state into the Server.
 
 ### Studio interaction
 
-The Agent Project Thread header exposes `Desktop direct`, unavailable
-`Desktop sandbox`, and `Local Server`, explains their capability differences,
-and reports preparing, ready, running, reconnecting, unavailable, and stale
-states. Local Server locks Agent model, prompt, tools, and projected transcript;
-only one trailing pure-text user draft may be submitted. Server terminal Runs
-open and select the corresponding snapshot in the existing Run History
-`RunTraceView`, where non-secret lineage is visible.
+The Agent Project Thread header exposes `Desktop direct`, `Desktop sandbox`, and
+`Local Server`, explains their capability differences, and reports preparing,
+ready, running, reconnecting, unavailable, and stale states. Local Server locks
+Agent model, prompt, tools, and projected transcript; only one trailing
+pure-text user draft may be submitted. Server terminal Runs open and select the
+corresponding snapshot in the existing Run History `RunTraceView`, where
+non-secret lineage is visible.
 
 The existing Run/Stop actions and Command-Enter shortcut remain the execution
 entry points. Profile selection is keyboard-operable and restores focus to its
@@ -99,10 +104,11 @@ trigger. Narrow layouts must not overflow.
 
 ## Consequences
 
-Studio can compare Desktop-direct and protected Local-Server execution without
-inventing a second protocol or Runtime Run. Restart reconnect is possible
-without putting a bearer secret in editable product data, and every Server
-Trace remains attributable to one immutable artifact and Server Session.
+Studio can compare Desktop-direct, Sandbox, and protected Local-Server execution
+in one development Thread without inventing a second protocol or Runtime Run.
+Restart reconnect is possible without putting a bearer secret in editable
+product data, and every historical Server checkpoint remains attributable to
+one immutable artifact and Server Session.
 
 Local Server Threads intentionally lose Desktop-only editing, manual settled
 tool results, execution-mode toggles, attachments, and historical rerun. V1

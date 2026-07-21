@@ -18,7 +18,8 @@ import {
   type ProjectTool,
   sameSandboxAttachmentDescriptor,
   type SandboxAttachmentDescriptor,
-  type Thread
+  type Thread,
+  type ThreadRuntimeProfileType
 } from "@llm-space/core";
 import {
   createDefaultThreadVariables,
@@ -335,7 +336,7 @@ export class ExternalAgentProjectManager {
   async createThread(
     projectId: string,
     title = "untitled",
-    runtimeProfileType?: "desktopDirect" | "desktopSandbox" | "localServer"
+    runtimeProfileType?: ThreadRuntimeProfileType
   ): Promise<{ id: string; record: ExternalAgentProjectThreadRecord; }> {
     const view = await this.inspect(projectId);
     if (view.status !== "ready") {
@@ -426,6 +427,52 @@ export class ExternalAgentProjectManager {
         }
       }
     };
+  }
+
+  async setRuntimeProfile(
+    projectId: string,
+    threadId: string,
+    type: ThreadRuntimeProfileType
+  ): Promise<ExternalAgentProjectThreadRecord> {
+    const project = await this.inspect(projectId);
+    if (project.status !== "ready" || !project.definition) {
+      throw new Error(project.error ?? "Agent Project is invalid.");
+    }
+    if (project.sandboxRequired && type === "desktopDirect") {
+      throw new Error("This Agent requires Sandbox and cannot run Desktop Direct.");
+    }
+    if (type === "desktopSandbox") {
+      await this._assertSandboxReady();
+    }
+    const existing = await this._readThreadFile(projectId, threadId);
+    const currentProfile = getThreadRuntimeProfile(existing.thread);
+    if (
+      currentProfile.type === type
+      && (
+        currentProfile.type !== "localServer"
+        || currentProfile.artifactFingerprint === project.artifactFingerprint
+      )
+    ) {
+      return this.readThread(projectId, threadId);
+    }
+    const runtimeProfile = type === "desktopDirect"
+      ? { version: 1 as const, type }
+      : type === "desktopSandbox"
+        ? { version: 1 as const, type }
+        : {
+          version: 1 as const,
+          type,
+          artifactFingerprint: project.artifactFingerprint
+        };
+    await this._writeThreadFile(projectId, threadId, {
+      ...existing,
+      thread: {
+        ...normalizeThread(existing.thread),
+        runtimeProfile
+      }
+    });
+    this._notify(projectId);
+    return this.readThread(projectId, threadId);
   }
 
   async writeThread(
@@ -564,7 +611,6 @@ export class ExternalAgentProjectManager {
       ...record,
       thread: {
         ...record.thread,
-        runtimeSession: undefined,
         runtimeProfile: {
           ...profile,
           serverSessionId: input.sessionId
@@ -607,7 +653,7 @@ export class ExternalAgentProjectManager {
     const record = await this.readThread(projectId, threadId);
     if (record.thread.runtimeProfile?.type === "localServer") {
       throw new Error(
-        "A Local Server Thread cannot adopt new Agent source. Create a Thread for the latest artifact."
+        "A Local Server Thread cannot sync source fields. Use the latest artifact from its Runtime Profile control."
       );
     }
     if (
@@ -615,7 +661,7 @@ export class ExternalAgentProjectManager {
       && getThreadRuntimeProfile(record.thread).type !== "desktopSandbox"
     ) {
       throw new Error(
-        "The latest Agent requires Sandbox. Create a new Desktop Sandbox Thread."
+        "The latest Agent requires Sandbox. Switch this Thread to Desktop Sandbox before syncing."
       );
     }
     if (!project.definition) {
@@ -1782,9 +1828,6 @@ function _reconcileSandboxThreadAuthority(
 function _assertRuntimeProfileWrite(current: Thread, next: Thread): void {
   const currentProfile = getThreadRuntimeProfile(current);
   const nextProfile = getThreadRuntimeProfile(next);
-  if (nextProfile.type === "localServer" && next.runtimeSession !== undefined) {
-    throw new Error("Local Server Threads cannot persist a Desktop Runtime Session.");
-  }
   const hasAuthority =
     current.runtimeSession !== undefined
     || Boolean(current.runHistory?.length)
@@ -1797,7 +1840,7 @@ function _assertRuntimeProfileWrite(current: Thread, next: Thread): void {
     && JSON.stringify(currentProfile) !== JSON.stringify(nextProfile)
   ) {
     throw new Error(
-      "Runtime Profile is immutable after the Thread's first Run. Create a new Thread to use another profile."
+      "Change the Runtime Profile through the Desktop profile selector."
     );
   }
   if (

@@ -50,6 +50,7 @@ packages/
   runtime/    # Pi 原生 Agent Project 发现和持久会话
 apps/
   example-agent/ # 可由桌面端直接导入的便携 Agent Project 示例
+  sandbox-example-agent/ # Docker Sandbox 工作区与工具示例
   desktop/    # 桌面应用：Electrobun shell + React UI
 ```
 
@@ -59,6 +60,15 @@ apps/
 
 ```bash
 bun test apps/example-agent
+```
+
+如需验证隔离执行路径，可打开 `apps/sandbox-example-agent`。该项目声明了
+必需的 Sandbox、提供工作区 seed，并使用标准 read/write/bash 工具。源码
+契约测试不依赖 Docker；真实 provider 使用独立验收命令：
+
+```bash
+bun test apps/sandbox-example-agent
+bun run test:docker
 ```
 
 ## 安装

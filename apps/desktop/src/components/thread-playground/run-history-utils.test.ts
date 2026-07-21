@@ -2,7 +2,10 @@ import { describe, expect, test } from "bun:test";
 
 import type { RunSnapshot } from "@llm-space/core/thread";
 
-import { groupRuntimeRunCheckpoints } from "./run-history-utils";
+import {
+  groupRuntimeRunCheckpoints,
+  runRuntimeProfileLabel
+} from "./run-history-utils";
 
 describe("groupRuntimeRunCheckpoints", () => {
   test("groups newest-first checkpoints by stable Runtime Run and keeps legacy rows", () => {
@@ -31,6 +34,32 @@ describe("groupRuntimeRunCheckpoints", () => {
       },
       { id: null, state: null, checkpoints: ["legacy"] }
     ]);
+  });
+});
+
+describe("runRuntimeProfileLabel", () => {
+  test("labels every persisted Runtime Profile", () => {
+    expect(runRuntimeProfileLabel({
+      runId: "run-direct",
+      state: "completed",
+      checkpointOrder: 1,
+      continuationFingerprint: "direct",
+      profile: "desktopDirect"
+    })).toBe("Desktop Direct");
+    expect(runRuntimeProfileLabel({
+      runId: "run-sandbox",
+      state: "completed",
+      checkpointOrder: 1,
+      continuationFingerprint: "sandbox",
+      profile: "desktopSandbox"
+    })).toBe("Desktop Sandbox");
+    expect(runRuntimeProfileLabel({
+      runId: "run-server",
+      state: "completed",
+      checkpointOrder: 1,
+      continuationFingerprint: "server",
+      profile: "localServer"
+    })).toBe("Local Server");
   });
 });
 

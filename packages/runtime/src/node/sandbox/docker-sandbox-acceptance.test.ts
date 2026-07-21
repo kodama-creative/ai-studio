@@ -149,7 +149,7 @@ dockerTest("real Docker isolates, retains, reconstructs, and deletes a Sandbox S
       .update(racingContent)
       .digest("hex");
     const collisionRace = first.executionEnv.exec(
-      `while [ ! -d '${racingTemporary}' ]; do sleep 0.01; done; mkdir '${racingDestination}'`
+      `timeout 30 sh -c "while [ ! -d '${racingTemporary}' ]; do :; done; mkdir '${racingDestination}'"`
     );
     expect(await _rejection(first.stageTurn({
       stagingId: racingStagingId,

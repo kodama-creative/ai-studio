@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { constants, mkdirSync } from "node:fs";
 import { open, readFile, stat, writeFile } from "node:fs/promises";
 import nodePath from "node:path";
+import { getThreadRuntimeProfile } from "@llm-space/core";
 import { BrowserView, type BrowserWindow, Utils } from "electrobun/bun";
 
 import type { ModelProviderGroup } from "@llm-space/core";
@@ -317,6 +318,40 @@ export function createMainWindowRPC({
         },
         externalAgentProjectSandboxStatus: async ({ threadId }) =>
           sandboxes.status(threadId),
+        externalAgentProjectSetRuntimeProfile: async ({
+          projectId,
+          runtimeProfileType,
+          threadId
+        }) => {
+          const current = await externalAgentProjects.readThread(
+            projectId,
+            threadId
+          );
+          const currentProfile = getThreadRuntimeProfile(current.thread);
+          if (
+            currentProfile.type === "desktopSandbox"
+            && runtimeProfileType !== "desktopSandbox"
+          ) {
+            await sandboxes.stop(threadId);
+          }
+          if (
+            currentProfile.type === "localServer"
+            && runtimeProfileType === "localServer"
+          ) {
+            const project = await externalAgentProjects.inspect(projectId);
+            if (
+              currentProfile.artifactFingerprint
+              !== project.artifactFingerprint
+            ) {
+              await localServers.detachThread(projectId, threadId);
+            }
+          }
+          return externalAgentProjects.setRuntimeProfile(
+            projectId,
+            threadId,
+            runtimeProfileType
+          );
+        },
         externalAgentProjectStageSandboxFiles: async ({
           projectId,
           threadId,

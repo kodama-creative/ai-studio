@@ -267,7 +267,7 @@ describe("ExternalAgentProjectManager", () => {
     expect(await Bun.file(path.join(home, "projects")).exists()).toBe(false);
   });
 
-  test("keeps Local Server authority immutable and duplicates it as a fresh Thread", async () => {
+  test("keeps Local Server session binding Bun-owned when duplicating", async () => {
     const { manager, project } = await _fixture();
     const opened = await manager.trustAndOpen(project);
     const created = await manager.createThread(
@@ -314,7 +314,7 @@ describe("ExternalAgentProjectManager", () => {
         ...bound.thread,
         runtimeProfile: { version: 1, type: "desktopDirect" }
       }
-    })).rejects.toThrow("immutable");
+    })).rejects.toThrow("profile selector");
     await expect(
       manager.syncThreadFromAgent(opened.id, created.id)
     ).rejects.toThrow("latest artifact");
@@ -327,6 +327,100 @@ describe("ExternalAgentProjectManager", () => {
       type: "localServer",
       artifactFingerprint: opened.artifactFingerprint
     });
+  });
+
+  test("switches Runtime Profiles in one Thread without clearing debug state", async () => {
+    const { manager, project } = await _fixture();
+    const opened = await manager.trustAndOpen(project);
+    const threadId = opened.threads[0]!.id;
+    const initial = await manager.readThread(opened.id, threadId);
+    const runtimeSession = { retained: "runtime-session" };
+    const runHistory = [{
+      id: "run-history-one",
+      thread: {
+        title: "Earlier checkpoint",
+        context: { messages: [] }
+      },
+      timestamp: 1
+    }];
+    await manager.writeThread(opened.id, threadId, {
+      ...initial,
+      thread: {
+        ...initial.thread,
+        context: {
+          ...initial.thread.context,
+          messages: [{
+            id: "message-one",
+            role: "user",
+            content: [{ type: "text", text: "Keep this message" }]
+          }]
+        },
+        runHistory,
+        runtimeSession
+      }
+    });
+
+    const sandbox = await manager.setRuntimeProfile(
+      opened.id,
+      threadId,
+      "desktopSandbox"
+    );
+    expect(sandbox.thread.runtimeProfile).toEqual({
+      version: 1,
+      type: "desktopSandbox"
+    });
+    expect(sandbox.thread.context?.messages).toEqual([
+      expect.objectContaining({ id: "message-one" })
+    ]);
+    expect(sandbox.thread.runHistory).toEqual(runHistory);
+    expect(sandbox.thread.runtimeSession).toEqual(runtimeSession);
+
+    const server = await manager.setRuntimeProfile(
+      opened.id,
+      threadId,
+      "localServer"
+    );
+    expect(server.thread.runtimeProfile).toEqual({
+      version: 1,
+      type: "localServer",
+      artifactFingerprint: opened.artifactFingerprint
+    });
+    expect(server.thread.context?.messages).toEqual(
+      sandbox.thread.context?.messages
+    );
+    expect(server.thread.runHistory).toEqual(runHistory);
+    expect(server.thread.runtimeSession).toEqual(runtimeSession);
+
+    const boundServer = await manager.bindLocalServerSession(
+      opened.id,
+      threadId,
+      {
+        artifactFingerprint: opened.artifactFingerprint,
+        sessionId: "server-session-one"
+      }
+    );
+    expect(boundServer.thread.runtimeSession).toEqual(runtimeSession);
+    expect(boundServer.thread.runtimeProfile).toMatchObject({
+      type: "localServer",
+      serverSessionId: "server-session-one"
+    });
+
+    const direct = await manager.setRuntimeProfile(
+      opened.id,
+      threadId,
+      "desktopDirect"
+    );
+    expect(direct.thread.runtimeProfile).toEqual({
+      version: 1,
+      type: "desktopDirect"
+    });
+    expect(direct.thread.context?.messages).toEqual(
+      sandbox.thread.context?.messages
+    );
+    expect(direct.thread.runHistory).toEqual(runHistory);
+    expect(direct.thread.runtimeSession).toEqual(runtimeSession);
+    expect((await manager.list())[0]?.threads.map(thread => thread.id))
+      .toEqual([threadId]);
   });
 
   test("does not import tools before trust, then creates desktop-owned Threads", async () => {

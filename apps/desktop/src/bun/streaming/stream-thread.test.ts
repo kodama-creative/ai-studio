@@ -715,6 +715,53 @@ describe("StreamThreadController Agent Project runtime", () => {
     expect(persisted.thread.context?.messages ?? []).toEqual([]);
   });
 
+  test("runs a Desktop Thread model override within Host policy", async () => {
+    const { models, manager, opened, threadId } = await _fixture({
+      instructions: "Use echo.\n",
+      projectTool: true
+    });
+    await _beginProjectRun(manager, opened.id, threadId);
+    const responses: string[] = [];
+    const controller = new StreamThreadController(
+      _modelManager(models),
+      { capture: () => undefined } as never,
+      manager
+    );
+
+    await controller.run({
+      streamId: "stream-model-override",
+      runtime: {
+        type: "agentProject",
+        sandboxAttachmentMessageIds: [],
+        projectId: opened.id,
+        threadId,
+        executionMode: "react",
+        modelSource: "threadOverride"
+      },
+      request: {
+        model: { provider: "fake", id: "debug-model" },
+        config: { model: { reasoning: "medium", temperature: 0.25 } },
+        context: {
+          systemPrompt: opened.instructions,
+          messages: [{
+            role: "user",
+            content: [{ type: "text", text: "hello" }],
+            timestamp: Date.now()
+          }],
+          tools: opened.tools,
+          sourceTools: opened.tools
+        }
+      }
+    }, message => {
+      responses.push(message.type === "error" ? message.message : message.type);
+    });
+
+    expect(responses).not.toContain(
+      "Agent source denies model request: fake/debug-model"
+    );
+    expect(responses.at(-1)).toBe("done");
+  });
+
   test("leaves a dangerous bash call pending in the runtime ReAct loop", async () => {
     const { models, manager, opened, threadId } = await _fixture({
       instructions: "Be careful.\n",
@@ -1156,6 +1203,11 @@ function _models(
     contextWindow: 128_000,
     maxTokens: 4_096
   };
+  const debugModel: Model<"fake"> = {
+    ...model,
+    id: "debug-model",
+    name: "Debug Model"
+  };
   const api = {
     stream: (_model: Model<Api>, context: Context) =>
       _stream(context, toolCall),
@@ -1170,7 +1222,7 @@ function _models(
         resolve: async () => Promise.resolve({ auth: {} })
       }
     },
-    models: [model],
+    models: [model, debugModel],
     api
   });
   const models = createModels();

@@ -142,6 +142,13 @@ export const ThreadRuntimeProfile = Type.Union([
 ]);
 export type ThreadRuntimeProfile = Static<typeof ThreadRuntimeProfile>;
 
+export const ThreadRuntimeProfileType = Type.Union([
+  Type.Literal("desktopDirect"),
+  Type.Literal("desktopSandbox"),
+  Type.Literal("localServer")
+]);
+export type ThreadRuntimeProfileType = Static<typeof ThreadRuntimeProfileType>;
+
 export const ThreadServerRunLineage = Type.Object({
   profile: Type.Literal("localServer"),
   artifactFingerprint: Type.String(),
@@ -238,6 +245,7 @@ export const ThreadRuntimeCheckpoint = Type.Object({
   state: ThreadRuntimeRunState,
   checkpointOrder: Type.Integer({ minimum: 1 }),
   continuationFingerprint: Type.String(),
+  profile: Type.Optional(ThreadRuntimeProfileType),
 
   /** Non-secret Local Server authority attached to a projected checkpoint. */
   server: Type.Optional(ThreadServerRunLineage),

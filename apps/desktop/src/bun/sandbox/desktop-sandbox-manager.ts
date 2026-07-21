@@ -34,6 +34,7 @@ interface SandboxRegistry {
 }
 
 export class DesktopSandboxManager implements SandboxProvider {
+  private readonly _acquiring = new Set<string>();
   private readonly _provider: SandboxProvider;
   private readonly _registryFile: string;
   private _registry: SandboxRegistry = { schemaVersion: 1, sessions: {} };
@@ -73,13 +74,16 @@ export class DesktopSandboxManager implements SandboxProvider {
     if (record?.state === "lost") {
       return {
         state: "unavailable",
-        message: "The Sandbox workspace is missing. Create a new Thread."
+        message: "The Sandbox workspace is missing. Choose another Runtime Profile or delete this Thread."
       };
     }
     if (record?.state === "cleanupPending") {
+      if (this._acquiring.has(sessionId)) {
+        return { state: "preparing" };
+      }
       return {
         state: "unavailable",
-        message: "Sandbox cleanup is pending. Create a new Thread."
+        message: "Sandbox cleanup is pending. Restart LLM Space to retry cleanup or delete this Thread."
       };
     }
     return this.readiness();
@@ -236,6 +240,9 @@ export class DesktopSandboxManager implements SandboxProvider {
     }
     const fresh = !record && input.expectedExisting !== true;
     if (!record) {
+      if (fresh) {
+        this._acquiring.add(input.sessionId);
+      }
       this._registry = {
         ...this._registry,
         sessions: {
@@ -245,7 +252,12 @@ export class DesktopSandboxManager implements SandboxProvider {
           }
         }
       };
-      await this._saveRegistry();
+      try {
+        await this._saveRegistry();
+      } catch (error) {
+        this._acquiring.delete(input.sessionId);
+        throw error;
+      }
     }
     try {
       const session = await this._provider.acquire({
@@ -277,6 +289,10 @@ export class DesktopSandboxManager implements SandboxProvider {
         await this._saveRegistry();
       }
       throw error;
+    } finally {
+      if (fresh) {
+        this._acquiring.delete(input.sessionId);
+      }
     }
   }
 

@@ -46,6 +46,7 @@ export interface CreateAgentSessionOptions {
   context: AgentSessionContext;
   capabilityPolicy: AgentCapabilityPolicy;
   model?: AgentModelSelector;
+  modelConfigurationAuthority?: "agent" | "host";
   modelOptions?: AgentModelOptionsDefinition;
   reasoning?: ThinkingLevel;
   initialMessages?: AgentMessage[];
@@ -121,6 +122,13 @@ export class AgentRuntime {
       throw new Error("Agent runtime definition is unavailable");
     }
     const selector = options.model ?? definition.model;
+    if (
+      options.modelConfigurationAuthority !== undefined
+      && options.modelConfigurationAuthority !== "agent"
+      && options.modelConfigurationAuthority !== "host"
+    ) {
+      throw new TypeError("Invalid model configuration authority");
+    }
     if (this._project.sandbox && !options.sandbox) {
       throw new SandboxUnavailableError();
     }
@@ -169,6 +177,12 @@ export class AgentRuntime {
       capabilityPolicy: options.capabilityPolicy,
       capabilityRequest: {
         ...(options.model ? { model: options.model } : {}),
+        ...(options.modelConfigurationAuthority
+          ? {
+            modelConfigurationAuthority:
+              options.modelConfigurationAuthority
+          }
+          : {}),
         ...(Object.hasOwn(options, "reasoning")
           ? { reasoning: options.reasoning }
           : {}),

@@ -10,6 +10,7 @@ import { StructuredOutputCard } from "./output/structured-output-card";
 import {
   runMessageCountLabel,
   runModelLabel,
+  runRuntimeProfileLabel,
   summarizeRun
 } from "./run-history-utils";
 
@@ -33,6 +34,7 @@ const _RunTraceView = function RunTraceView({
   const systemPrompt =
     run.thread.context?.systemPrompt?.trim() || "No system prompt";
   const server = run.runtime?.server;
+  const runtimeProfileLabel = runRuntimeProfileLabel(run.runtime);
 
   return (
     <div className={cn("flex min-h-0 flex-col", className)}>
@@ -47,6 +49,7 @@ const _RunTraceView = function RunTraceView({
         </div>
         <div className="text-muted-foreground mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[0.625rem]">
           <span>{runModelLabel(run.thread)}</span>
+          {runtimeProfileLabel ? <span>{runtimeProfileLabel}</span> : null}
           {run.thread.agentRuntime
             ? (
               <span>

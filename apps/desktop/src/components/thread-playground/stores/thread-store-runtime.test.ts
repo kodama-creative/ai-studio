@@ -15,10 +15,22 @@ globalThis.cancelAnimationFrame = handle => {
 };
 
 describe("Thread store Runtime Harness integration", () => {
-  test("projects a transport-owned Server Run without creating Desktop authority", async () => {
+  test("projects a transport-owned Server Run while retaining dormant Desktop state", async () => {
     const { createThreadStore } = await import("./thread-store");
+    const desktopRuntimeSession: StoredRuntimeSession = {
+      version: 0,
+      snapshot: {
+        schemaVersion: 1,
+        id: "desktop-session",
+        activeRunId: null,
+        runs: []
+      },
+      configurations: [],
+      journal: []
+    };
     let persisted: Thread = {
       ..._initialThread(),
+      runtimeSession: desktopRuntimeSession,
       runtimeProfile: {
         version: 1,
         type: "localServer",
@@ -35,6 +47,7 @@ describe("Thread store Runtime Harness integration", () => {
         runId: "run-server",
         state: "completed",
         checkpointOrder: 1,
+        profile: "localServer",
         continuationFingerprint:
           "local-server:artifact-one:session-server:run-server",
         server: {
@@ -51,7 +64,7 @@ describe("Thread store Runtime Harness integration", () => {
 
     await store.getState().run();
 
-    expect(persisted.runtimeSession).toBeUndefined();
+    expect(persisted.runtimeSession).toEqual(desktopRuntimeSession);
     expect(persisted.runtimeProfile).toMatchObject({
       type: "localServer",
       serverSessionId: "session-server"
@@ -60,6 +73,7 @@ describe("Thread store Runtime Harness integration", () => {
     expect(persisted.runHistory?.[0]?.runtime).toMatchObject({
       runId: "run-server",
       state: "completed",
+      profile: "localServer",
       server: {
         artifactFingerprint: "artifact-one",
         sessionId: "session-server",

@@ -40,12 +40,16 @@ snapshot. Advanced discovery refresh and schema-drift handling remain item 23.
 Every Host must provide an immutable, serializable
 `AgentCapabilityPolicy`; there is no implicit allow-all policy. Policy grants
 compiled contribution identities, model/reasoning choices, and safe option
-bounds. Desktop Thread edits are Turn requests, not policy: they may override
-resolver choices only within the compiled source authority and Host policy.
-Policy or request violations fail before Pi runs. A selected unavailable model
-or connection discovery failure also fails before Pi. Pi's existing context
-normalization is the only allowed `maxTokens` adjustment; all other invalid or
-unsupported values fail rather than clamp.
+bounds. By default, Turn requests may override resolver choices only within the
+compiled source authority and Host policy. Desktop Direct and Desktop Sandbox
+may mark an explicit Project Thread model override as Host-authoritative: this
+permits its model, reasoning, and safe model options to differ from Agent source
+while still requiring the same Host-policy and intrinsic-value validation.
+Local Server and ordinary Runtime callers retain the authored-authority
+intersection. Policy or request violations fail before Pi runs. A selected
+unavailable model or connection discovery failure also fails before Pi. Pi's
+existing context normalization is the only allowed `maxTokens` adjustment; all
+other invalid or unsupported values fail rather than clamp.
 
 The snapshot's `modelOptions.maxTokens` is the effective Turn-level configured
 cap after authored values, resolver output, an explicit Thread override, and
@@ -69,9 +73,11 @@ new Turn or branch is required.
 
 ## Consequences
 
-Compiled authored resolver/contribution identity is the source authority; no
-separate `maximum` authoring API is introduced. Host policy is the hard runtime
-maximum and can only remove authority. Dynamic code discovery, runtime plugin
+Compiled authored resolver/contribution identity is the default source
+authority; no separate `maximum` authoring API is introduced. An explicit
+Desktop Thread override transfers model-configuration choice to the Host but
+does not weaken Host policy or grant tool authority. Dynamic code discovery,
+runtime plugin
 installation, arbitrary path loading, permission escalation, dynamic
 connections, approval, Sandbox, advanced MCP lifecycle, Trace UI, and
 automatic provider/tool retry remain out of scope.

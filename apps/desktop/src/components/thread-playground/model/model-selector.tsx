@@ -170,7 +170,7 @@ export function ModelSelector({
         disabled={readonly}
         placeholder="(No model selected)"
         ref={inputRef}
-        triggerClassName="opacity-0! group-hover/model-select:opacity-100"
+        triggerClassName={readonly ? "invisible" : "opacity-100!"}
       />
       <ComboboxContent className="w-96">
         <ComboboxEmpty>No models found.</ComboboxEmpty>

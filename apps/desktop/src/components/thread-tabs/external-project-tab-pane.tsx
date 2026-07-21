@@ -21,6 +21,7 @@ import type {
   ProjectTool,
   Thread,
   ThreadAgentRuntimeProvenance,
+  ThreadRuntimeProfileType,
   ThreadServerRunLineage
 } from "@llm-space/core";
 import type { StoredRuntimeSession } from "@llm-space/runtime/harness";
@@ -57,6 +58,7 @@ import {
   consumeExternalProjectSource,
   subscribeExternalProjectSource
 } from "./external-project-source-navigation";
+import { reconcileExternalProjectThreadModel } from "./external-project-thread-model";
 import { registerTabCloseGuard, setTabDirty } from "./tab-close-guards";
 
 const _ExternalProjectTabPane = function ExternalProjectTabPane({
@@ -228,7 +230,7 @@ const _ProjectThreadPane = function ProjectThreadPane({
         : nextProject.sandboxRequired
           ? {
             state: "stale" as const,
-            message: "The latest Agent requires Sandbox. Create a new Desktop Sandbox Thread."
+            message: "The latest Agent requires Sandbox. Switch this Thread to Desktop Sandbox."
           }
           : { state: "ready" as const };
       setConnectionActivation(nextActivation);
@@ -296,25 +298,18 @@ const _ProjectThreadPane = function ProjectThreadPane({
     (thread: Thread) => {
       const current = recordRef.current;
       if (!current) { return; }
-      const modelChanged = !_sameRuntimeModel(
-        current.thread.model,
-        thread.model
-      );
-      const nextThread = modelChanged
-        ? {
-          ...thread,
-          agentRuntime: {
-            projectId,
-            snapshot:
-                thread.agentRuntime?.snapshot ?? project?.snapshot ?? "",
-            definitionFingerprint:
-                thread.agentRuntime?.definitionFingerprint
-                ?? project?.definitionFingerprint
-                ?? "",
-            modelSource: "threadOverride" as const
-          }
-        }
-        : thread;
+      const nextThread = reconcileExternalProjectThreadModel({
+        current: current.thread,
+        next: thread,
+        projectId,
+        snapshot: project?.snapshot ?? "",
+        definitionFingerprint: project?.definitionFingerprint ?? "",
+        modelMatchesDefinition: agentModelMatchesDefinition({
+          model: thread.model,
+          reasoning: thread.model?.params?.reasoning,
+          definition: current.syncedDefinition
+        })
+      });
       const next = { ...current, thread: nextThread };
       setRecord(next);
       pending.current = next;
@@ -346,21 +341,50 @@ const _ProjectThreadPane = function ProjectThreadPane({
   );
 
   const selectRuntimeProfile = useCallback(
-    (type: "desktopDirect" | "desktopSandbox" | "localServer") => {
+    (type: ThreadRuntimeProfileType) => {
       const current = recordRef.current;
       if (!current) {
         return;
       }
       const currentProfile = getThreadRuntimeProfile(current.thread);
-      if (currentProfile.type === type) {
+      if (
+        currentProfile.type === type
+        && (
+          currentProfile.type !== "localServer"
+          || currentProfile.artifactFingerprint === project?.artifactFingerprint
+        )
+      ) {
         return;
       }
+      void (async () => {
+        try {
+          await flush();
+          setRuntimeStatus({ state: "preparing" });
+          const next = await externalAgentProjects.setRuntimeProfile(
+            projectId,
+            threadId,
+            type
+          );
+          setRecord(next);
+          await load();
+        } catch (error) {
+          toast.error("Unable to change Runtime Profile", {
+            description: error instanceof Error ? error.message : String(error)
+          });
+          await load();
+        }
+      })();
+    },
+    [flush, load, project?.artifactFingerprint, projectId, threadId]
+  );
+  const requestRuntimeProfileSelection = useCallback(
+    (runtimeProfileType: ThreadRuntimeProfileType) => {
       executeCommand({
-        type: "createExternalAgentProjectThread",
-        args: { projectId, runtimeProfileType: type }
+        type: "setExternalAgentProjectRuntimeProfile",
+        args: { projectId, runtimeProfileType, threadId }
       });
     },
-    [executeCommand, projectId]
+    [executeCommand, projectId, threadId]
   );
 
   const syncFromAgent = useCallback(async () => {
@@ -428,6 +452,19 @@ const _ProjectThreadPane = function ProjectThreadPane({
             await externalAgentProjects.runtimeStatus(projectId, threadId)
           );
         }
+      },
+      setExternalAgentProjectRuntimeProfile: ({
+        projectId: commandProjectId,
+        runtimeProfileType,
+        threadId: commandThreadId
+      }) => {
+        if (
+          commandProjectId === projectId
+          && commandThreadId === threadId
+          && !running
+        ) {
+          selectRuntimeProfile(runtimeProfileType);
+        }
       }
     },
     active
@@ -471,10 +508,8 @@ const _ProjectThreadPane = function ProjectThreadPane({
         : [];
       if (profile.type === "localServer") {
         const serverRun = activeServerRun.current;
-        const { runtimeSession: _runtimeSession, ...withoutRuntimeSession } =
-          thread;
         return {
-          ...withoutRuntimeSession,
+          ...thread,
           runtimeProfile: {
             ...profile,
             ...(serverRun
@@ -584,6 +619,7 @@ const _ProjectThreadPane = function ProjectThreadPane({
         runId: serverRun.lineage.runId,
         state,
         checkpointOrder: 1,
+        profile: "localServer" as const,
         continuationFingerprint: [
           "local-server",
           serverRun.lineage.artifactFingerprint,
@@ -723,7 +759,7 @@ const _ProjectThreadPane = function ProjectThreadPane({
             </span>
             <RuntimeProfileControl
               disabled={running}
-              onSelect={selectRuntimeProfile}
+              onSelect={requestRuntimeProfileSelection}
               profile={runtimeProfile}
               sandboxRequired={project.sandboxRequired}
               sandboxStatus={sandboxStatus}
@@ -780,24 +816,20 @@ const _ProjectThreadPane = function ProjectThreadPane({
                 <Button
                   className="h-5 px-1.5 text-[10px]"
                   onClick={() => {
-                    executeCommand({
-                      type: "createExternalAgentProjectThread",
-                      args: {
-                        projectId,
-                        runtimeProfileType: localServer
-                          ? "localServer"
-                          : "desktopSandbox"
-                      }
-                    });
+                    requestRuntimeProfileSelection(
+                      localServer ? "localServer" : "desktopSandbox"
+                    );
                   }}
                   size="sm"
                   variant="outline"
                 >
                   <RefreshCwIcon className="size-3" />
                   <span className="hidden min-[1100px]:inline">
-                    Create thread for latest artifact
+                    {localServer ? "Use latest artifact" : "Switch to Sandbox"}
                   </span>
-                  <span className="min-[1100px]:hidden">New thread</span>
+                  <span className="min-[1100px]:hidden">
+                    {localServer ? "Use latest" : "Use Sandbox"}
+                  </span>
                 </Button>
               )
               : (localServer || desktopSandbox)
@@ -1458,17 +1490,6 @@ function _sourceLanguage(path: string): CodeEditorLanguage {
   if (path.endsWith(".ts")) { return "typescript"; }
   if (path.endsWith(".js")) { return "javascript"; }
   return "markdown";
-}
-
-function _sameRuntimeModel(
-  left: Thread["model"],
-  right: Thread["model"]
-): boolean {
-  return (
-    left?.provider === right?.provider
-    && left?.id === right?.id
-    && left?.params?.reasoning === right?.params?.reasoning
-  );
 }
 
 function _isLocalServerDraftReady(thread: Thread): boolean {

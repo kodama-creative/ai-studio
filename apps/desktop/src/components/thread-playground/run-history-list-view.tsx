@@ -39,6 +39,7 @@ import {
   groupRuntimeRunCheckpoints,
   runMessageCountLabel,
   runModelLabel,
+  runRuntimeProfileLabel,
   summarizeRun
 } from "./run-history-utils";
 import { RunTraceView } from "./run-trace-view";
@@ -442,6 +443,7 @@ const _RunHistoryItem = function RunHistoryItem({
   const summary = summarizeRun(run.thread);
   const modelLabel = runModelLabel(run.thread);
   const messageCountLabel = runMessageCountLabel(run.thread);
+  const runtimeProfileLabel = runRuntimeProfileLabel(run.runtime);
   const time = format(run.timestamp);
   const handleInspect = useCallback(() => {
     onInspectRun(run);
@@ -502,6 +504,7 @@ const _RunHistoryItem = function RunHistoryItem({
         <div className="text-muted-foreground min-w-0 flex-1 text-[0.625rem]">
           <div className="truncate">
             {time} · {modelLabel}
+            {runtimeProfileLabel ? ` · ${runtimeProfileLabel}` : null}
           </div>
           <div className="mt-0.5 flex min-w-0 flex-wrap gap-x-2 gap-y-0.5">
             <span className="shrink-0 tabular-nums">{messageCountLabel}</span>
@@ -542,7 +545,7 @@ const _RunHistoryItem = function RunHistoryItem({
           </Tooltip>
           <Tooltip content="Inspect run">
             <Button
-              aria-label={`Inspect run from ${time}: ${summary}. ${modelLabel}. ${messageCountLabel}`}
+              aria-label={`Inspect run from ${time}: ${summary}. ${modelLabel}. ${runtimeProfileLabel ? `${runtimeProfileLabel}. ` : ""}${messageCountLabel}`}
               onClick={() => { onInspectRun(run); }}
               size="icon-sm"
               variant="ghost"
@@ -552,7 +555,7 @@ const _RunHistoryItem = function RunHistoryItem({
           </Tooltip>
           <Tooltip content="Restore run">
             <Button
-              aria-label={`Restore run from ${time}: ${summary}. ${modelLabel}. ${messageCountLabel}`}
+              aria-label={`Restore run from ${time}: ${summary}. ${modelLabel}. ${runtimeProfileLabel ? `${runtimeProfileLabel}. ` : ""}${messageCountLabel}`}
               onClick={() => { onRestore(run.thread); }}
               size="icon-sm"
               variant="ghost"

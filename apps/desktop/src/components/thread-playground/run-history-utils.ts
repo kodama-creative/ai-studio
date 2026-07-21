@@ -2,6 +2,7 @@ import {
   type AssistantMessage,
   getMessageText,
   type Message,
+  type ThreadRuntimeCheckpoint,
   type ThreadRuntimeRunState,
   type ThreadSnapshot
 } from "@llm-space/core";
@@ -87,6 +88,20 @@ export function runModelLabel(thread: ThreadSnapshot): string {
   }
   const reasoning = thread.model.params?.reasoning;
   return `${thread.model.provider}/${thread.model.id}${reasoning ? ` · reasoning: ${reasoning}` : ""}`;
+}
+
+export function runRuntimeProfileLabel(
+  runtime: ThreadRuntimeCheckpoint | undefined
+): string | null {
+  const profile = runtime?.profile
+    ?? (runtime?.server ? "localServer" : undefined);
+  return profile === "desktopDirect"
+    ? "Desktop Direct"
+    : profile === "desktopSandbox"
+      ? "Desktop Sandbox"
+      : profile === "localServer"
+        ? "Local Server"
+        : null;
 }
 
 /** The message count label for a run snapshot, kept visible in narrow panels. */

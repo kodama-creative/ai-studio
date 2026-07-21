@@ -1288,17 +1288,15 @@ export function createThreadStore(
               if (options.transportOwnsRuntimeRun) {
                 const checkpoint =
                   options.resolveTransportRuntimeCheckpoint?.(outcome) ?? null;
-                const { runtimeSession: _runtimeSession, ...withoutRuntimeSession } =
-                  threadWithSnapshot;
                 const runUsage = aggregateMessageUsage(
-                  (withoutRuntimeSession.context?.messages ?? []).slice(
+                  (threadWithSnapshot.context?.messages ?? []).slice(
                     runStartMessageCount
                   )
                 );
                 const runHistory = checkpoint
                   ? recordRun(
                     get().runHistory,
-                    withoutRuntimeSession,
+                    threadWithSnapshot,
                     Date.now(),
                     {
                       runtime: checkpoint,
@@ -1314,7 +1312,7 @@ export function createThreadStore(
                   get().evaluations,
                   runHistory
                 );
-                const thread = withRunMetadata(withoutRuntimeSession, {
+                const thread = withRunMetadata(threadWithSnapshot, {
                   runHistory,
                   evaluations,
                   evaluationRubrics: get().evaluationRubrics

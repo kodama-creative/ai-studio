@@ -103,6 +103,31 @@ describe("ThreadRuntimeSession", () => {
     ]);
   });
 
+  test("branches a waiting Run when its Runtime Profile changes", async () => {
+    const coordinator = new ThreadRuntimeSession(undefined);
+    const directThread = _threadWithUser();
+    directThread.runtimeProfile = { version: 1, type: "desktopDirect" };
+    const begun = await coordinator.begin(_input(directThread, "manual"));
+    const waitingThread = _threadWithToolCall();
+    waitingThread.runtimeProfile = { version: 1, type: "desktopDirect" };
+    await coordinator.settle({
+      ..._input(waitingThread, "manual"),
+      runId: begun.runId,
+      sawEvent: true,
+      outcome: "completed"
+    });
+
+    const sandboxThread = structuredClone(waitingThread);
+    sandboxThread.runtimeProfile = { version: 1, type: "desktopSandbox" };
+    const branched = await coordinator.begin(_input(sandboxThread, "manual"));
+
+    expect(branched.runId).not.toBe(begun.runId);
+    expect(branched.session.snapshot.runs).toMatchObject([
+      { id: begun.runId, state: "superseded" },
+      { id: branched.runId, state: "runningModel" }
+    ]);
+  });
+
   test("branches from an earlier boundary without completing superseded tool results", async () => {
     const coordinator = new ThreadRuntimeSession(undefined);
     const begun = await coordinator.begin(_input(_threadWithUser(), "manual"));
@@ -265,6 +290,31 @@ describe("ThreadRuntimeSession", () => {
     expect((error as Error).message).toContain(
       "Runtime Session metadata is invalid"
     );
+  });
+
+  test("records the effective Runtime Profile on every checkpoint", async () => {
+    const coordinator = new ThreadRuntimeSession(undefined);
+    const directThread = _threadWithUser();
+    directThread.runtimeProfile = { version: 1, type: "desktopDirect" };
+    const directRun = await coordinator.begin(_input(directThread, "react"));
+    const directSettled = await coordinator.settle({
+      ..._input(directThread, "react"),
+      runId: directRun.runId,
+      sawEvent: true,
+      outcome: "completed"
+    });
+    expect(directSettled.checkpoint?.profile).toBe("desktopDirect");
+
+    const sandboxThread = structuredClone(directThread);
+    sandboxThread.runtimeProfile = { version: 1, type: "desktopSandbox" };
+    const sandboxRun = await coordinator.begin(_input(sandboxThread, "react"));
+    const sandboxSettled = await coordinator.settle({
+      ..._input(sandboxThread, "react"),
+      runId: sandboxRun.runId,
+      sawEvent: true,
+      outcome: "completed"
+    });
+    expect(sandboxSettled.checkpoint?.profile).toBe("desktopSandbox");
   });
 });
 

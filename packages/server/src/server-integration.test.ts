@@ -1866,14 +1866,19 @@ function _stream(context: Context, signal?: AbortSignal) {
     queueMicrotask(() => {
       stream.push({ type: "start", partial: _partial("") });
     });
-    signal?.addEventListener("abort", () => {
+    const publishAbort = () => {
       const error = {
         ..._partial(""),
         stopReason: "aborted" as const,
         errorMessage: "aborted"
       };
       stream.push({ type: "error", reason: "aborted", error });
-    }, { once: true });
+    };
+    if (signal?.aborted) {
+      queueMicrotask(publishAbort);
+    } else {
+      signal?.addEventListener("abort", publishAbort, { once: true });
+    }
     return stream;
   }
   if (prompt === "invalid-json") {

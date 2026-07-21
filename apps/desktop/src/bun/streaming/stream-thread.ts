@@ -469,7 +469,10 @@ export class StreamThreadController {
           }
           : {}),
         ...(payload.runtime.modelSource === "threadOverride"
-          ? { model: payload.request.model }
+          ? {
+            model: payload.request.model,
+            modelConfigurationAuthority: "host" as const
+          }
           : {}),
         ...(payload.runtime.modelSource === "threadOverride"
           ? {

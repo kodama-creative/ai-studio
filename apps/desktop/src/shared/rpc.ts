@@ -9,6 +9,7 @@ import type {
   SandboxAttachmentDescriptor,
   Thread,
   ThreadAgentRuntimeProvenance,
+  ThreadRuntimeProfileType,
   ThreadServerRunLineage
 } from "@llm-space/core";
 import type {
@@ -219,7 +220,7 @@ export interface DesktopRPCType {
       externalAgentProjectCreateThread: {
         params: {
           projectId: string;
-          runtimeProfileType?: "desktopDirect" | "desktopSandbox" | "localServer";
+          runtimeProfileType?: ThreadRuntimeProfileType;
           title?: string;
         };
         response: { id: string; record: ExternalAgentProjectThreadRecord; };
@@ -267,6 +268,14 @@ export interface DesktopRPCType {
       externalAgentProjectSandboxStatus: {
         params: { threadId: string; };
         response: ExternalAgentProjectRuntimeStatus;
+      };
+      externalAgentProjectSetRuntimeProfile: {
+        params: {
+          projectId: string;
+          runtimeProfileType: ThreadRuntimeProfileType;
+          threadId: string;
+        };
+        response: ExternalAgentProjectThreadRecord;
       };
       externalAgentProjectStageSandboxFiles: {
         params: { messageId: string; projectId: string; threadId: string; };

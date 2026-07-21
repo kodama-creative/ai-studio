@@ -1,7 +1,7 @@
 # LLM Space Capability Map
 
-- Last updated: 2026-07-20
-- Map status: refreshed through roadmap item 17 implementation. Items 12 through 16 are shipped under ADRs 0006-0009 where applicable; item 17 awaits a passing real-Docker acceptance rerun before shipment, so item 10 remains dependency-blocked.
+- Last updated: 2026-07-21
+- Map status: refreshed through roadmap item 17 implementation, deterministic local Docker verification, and current Agent debugging parity acceptance. Items 12 through 16 are shipped under ADRs 0006-0009 where applicable; item 17 passes its local real-Docker gate but existing shipment policy still awaits a current-head CI pass, which the owner deferred for this loop, so item 10 remains dependency-blocked.
 - Evidence rule: entries marked `confirmed` cite current rendered-product or current-code evidence. Entries marked `stale` rely on previous logs or code paths not fully re-inspected in this loop. Entries marked `unknown` need a future product-surface check before they can drive a recommendation.
 
 ## First-Run Model Setup
@@ -279,19 +279,20 @@
 
 - Status: shipped V1
 - Freshness: confirmed
-- Last checked: 2026-07-17
+- Last checked: 2026-07-21
 - Evidence:
-  - ADR 0003 fixes Thread-scoped immutable Runtime Profile authority, Bun-only continuation-secret custody, stable Desktop principal identity, per-artifact embedded Server lifecycle, Server-owned Run identity, non-secret lineage, and artifact-drift rules.
+  - ADR 0003 established Bun-only continuation-secret custody, stable Desktop principal identity, per-artifact embedded Server lifecycle, Server-owned Run identity, non-secret lineage, and artifact-drift rules. The owner revised only its development-time per-Thread profile immutability on 2026-07-21: settled Project Threads now select profiles in place without migrating or clearing debug data.
   - Core Thread and Run History schemas default legacy Threads to Desktop Direct, persist only artifact/Server Session/Run lineage, and reject inconsistent duplicated Server Run IDs.
   - The Desktop Bun composition lazily owns one protected loopback Server per artifact through `DesktopHost`; `LocalServerCredentialStore` persists raw continuation credentials separately under `LLM_SPACE_HOME/credentials/` with private permissions and atomic writes. Deletion revokes through the active Server or an exclusive Server-owned offline repository command, including full restart plus artifact drift, before deleting the Desktop credential.
   - Local Server execution remains on the existing typed RPC stream and version-pinned Pi event projection. The transport supplies authoritative Server Run identity, so the Desktop store creates no second `runtimeSession` or Runtime Run.
-  - Agent Project Threads expose Desktop Direct, unavailable Desktop Sandbox, and Local Server with explicit differences and lifecycle state. Local Server locks Agent configuration/history, permits one trailing pure-text user draft, makes stale Threads transcript-read-only, and creates a new empty Thread for a new authority or latest artifact.
+  - Agent Project Threads expose Desktop Direct, Desktop Sandbox, and Local Server with explicit differences and lifecycle state. Local Server locks Agent configuration, uses Server-owned transcript/Run identity, and permits one trailing pure-text user draft. Profile or latest-artifact selection updates the current Thread; historical Run provenance remains frozen and a changed continuation boundary branches.
   - Terminal Server Runs open in existing Run History and `RunTraceView`, which displays non-secret artifact/Session/Run lineage. The experimental Langfuse Trace sidebar remains separate; canonical cross-host instrumentation remains roadmap item 32.
   - Focused parity/authority/restart/credential/schema fixtures pass 60 tests with 213 assertions. Full validation passes 204 repository tests with 778 assertions, six TypeScript projects, repository lint, browser and Bun Server bundles, renderer-only Vite, and diff checks.
   - Current real Electrobun CEF evidence under `audits/2026-07-17-060917-studio-server-runtime-profile/` covers Ready, profile explanation, disabled Sandbox, pure-text draft, stale recovery, Run History, Server lineage, keyboard/focus, 1280×800 and 900×700 overflow, and a clean application console.
-- Boundary: users may bind one Agent Project Thread to Desktop Direct or one protected Local Server artifact/Session authority, understand the unavailable Sandbox boundary, submit Server-owned text Turns, recover from artifact drift through a new Thread, and inspect projected Server Runs in existing Run History.
-- Explicit non-goals: remote Server URL/token management, production fleet lifecycle, cloud control plane, sandbox implementation, raw provider payload retention, caller-supplied Server history/configuration, or copying secrets into Agent source, Thread JSON, Run snapshots, Trace data, or analytics.
-- Visible gaps: actual Desktop Sandbox execution, remote/fleet Server management, Keychain-backed credentials, transcript migration, raw event inspection, canonical item-32 Trace, and cloud lifecycle remain later roadmap capabilities.
+  - Current 2026-07-21 CEF evidence under `audits/2026-07-20-180358-agent-debugging-parity/` confirms Sandbox → Local Server → Sandbox keeps one Thread and its messages/Runtime Session, while Run History freezes the effective `Desktop Sandbox` profile and current model override.
+- Boundary: users may choose Desktop Direct, Desktop Sandbox, or one protected Local Server artifact/Session authority in the current Project Thread at settled checkpoints. Historical Runs retain their authority, incompatible waits branch, required Sandbox cannot downgrade to Direct, and projected Server Runs remain inspectable in existing Run History.
+- Explicit non-goals: production migration for old Threads, profile switching during active execution, remote Server URL/token management, production fleet lifecycle, cloud control plane, raw provider payload retention, caller-supplied Server history/configuration, or copying secrets into Agent source, Thread JSON, Run snapshots, Trace data, or analytics.
+- Visible gaps: remote/fleet Server management, Keychain-backed credentials, transcript migration, raw event inspection, canonical item-32 Trace, and cloud lifecycle remain later roadmap capabilities.
 
 ## OCI Agent Deployment
 
@@ -343,30 +344,33 @@
   - Desktop Direct and protected Server fixtures both propagate stable `executionEnvUnavailable` terminals before Pi without constructing a host fallback. Fifty-two focused checks, seven TypeScript configurations, lint, Runtime/Server bundles, renderer-only Vite, and 307/308 full tests pass; the sole failure is the unchanged Server teardown timeout debt.
 - Boundary: a project can explicitly author portable read/write/bash capability whose final effective Turn snapshot borrows exactly one Host-supplied Session-scoped Pi `ExecutionEnv`. Manual mode defers the helpers; automatic modes execute through Pi. Runtime neither translates paths nor owns environment lifecycle.
 - Explicit non-goals: Sandbox/container provider implementation, workspace or attachment delivery, implicit NodeExecutionEnv construction, direct Desktop/Server filesystem access, generic permission system, approval policy, or cleanup/retention policy inside the tool definitions themselves.
-- Visible gaps: the implemented Sandbox capability supplies the production Docker reference environment where the Host enables it, but item 17 still awaits its real-provider acceptance gate; approvals remain item 19, while additional providers and numeric resource quotas remain later Sandbox work.
+- Visible gaps: the implemented Sandbox capability supplies the production Docker reference environment where the Host enables it and now passes its deterministic local real-provider gate; current-head CI is deferred by the owner. Approvals remain item 19, while additional providers and numeric resource quotas remain later Sandbox work.
 
 ## Sandbox Workspace And Attachment Delivery
 
-- Status: implemented V1; shipment blocked on real-Docker acceptance
+- Status: implemented V1; local real-Docker gate passed, shipment CI deferred
 - Freshness: confirmed
-- Last checked: 2026-07-20
+- Last checked: 2026-07-21
 - Evidence:
   - `defineSandbox({})`, discovery, compiler, artifact, and bundle fixtures preserve only an abstract source minimum plus a bounded immutable `agent/sandbox/workspace/**` seed. Host policy may tighten but never weaken it; unavailable required-Sandbox projects open Build without silently creating or downgrading a Thread.
   - `SandboxProvider` and `DockerSandboxProvider` supply one Thread/Session-scoped Pi `ExecutionEnv`, one LLM Space-owned named volume mounted at `/workspace`, a fixed non-root/read-only/no-capabilities/no-network container, a deterministic bounded manifest, stop/reconnect/reconstruct/delete lifecycle, and no Host bind, login environment, provider secret, or dynamic connection surface.
   - Host-owned Docker labels identify the seed, while a fresh acquire that finds an existing volume fails lost instead of adopting a crash-partial seed. Missing or mismatched volumes never reseed the same identity; Desktop persists active/lost/cleanup tombstones and retries partial deletion.
   - Attachment bytes travel from Bun's native file picker directly into an exclusive Host-random staging directory and publish by rename. Its durable staging identity and ownership marker let recovery remove only Host-owned partial/final directories; collisions fail without merging or deleting Session data. The Host transaction compensates descriptor-write failure, blocks Run when compensation is incomplete, reconciles a crash after descriptor persistence, and locks exact renderer-selected message identities included in the Pi Turn. Source may still own ordinary `attachments/**` paths because delivery uses a dedicated per-Turn top-level directory rather than a reserved source namespace.
   - Focused coverage proves source/Host policy, unavailable/lost states, seed limits and identity, same-handle no-follow workspace and Host attachment reads, attachment bounds/atomicity/locking, manual/automatic binding, isolation, Pi read/write/bash/abort/timeout behavior, cleanup tombstones, and Desktop/Server fail-closed composition.
-  - GitHub Actions Sandbox acceptance runs [29722764006](https://github.com/kodama-creative/ai-studio/actions/runs/29722764006) and [29723052932](https://github.com/kodama-creative/ai-studio/actions/runs/29723052932) failed because the collision-race fixture supplied an invalid fingerprint for its 8 MiB payload. The local fix computes the real fingerprint; a new run must still pass the complete Docker matrix before shipment.
+  - The current macOS arm64 host runs Docker 29.4.0 through OrbStack. The concurrent final-destination collision trigger now uses a bounded immediate watcher instead of 10 ms polling while preserving the real `renameat2(RENAME_NOREPLACE)` path. The complete real-Docker acceptance passes 10/10 sequentially with 42 assertions each and no residual containers or volumes, covering create/seed/stage/collision preservation/tool/abort/timeout/network denial/isolation/stop/reconnect/reconstruct/loss/delete behavior.
+  - Prior current-head GitHub Actions run [29726512966](https://github.com/kodama-creative/ai-studio/actions/runs/29726512966) exposed the old 10 ms polling race. The local trigger correction has not been rerun in Actions because the owner explicitly deferred Actions for this loop; it is no longer a local acceptance blocker but remains an existing shipment-policy gate.
   - Current real Electrobun CEF evidence under `audits/2026-07-20-125359-sandbox-delivery-v1/` shows Build without an auto-created Thread, explicit new-Thread failure when Docker is absent, an inspectable unavailable existing Thread, the `From Files` menu, clean application console, and no page overflow at 1280×800 or 900×700.
+  - Current real Electrobun CEF evidence under `audits/2026-07-20-180358-agent-debugging-parity/` shows a required-Sandbox source making an existing Direct Thread stale, fresh `Desktop Sandbox · Ready` creation, canonical bash/read/write tools, and `From Files`/`From Clipboard` attachment entry with no application console errors.
+  - Current 2026-07-21 CEF acceptance in the same audit shows a fresh in-process acquire as `Preparing` rather than cleanup-pending, retained Session workspace across profile changes, GPT-5.5 Thread override provenance in Run History, no application console errors, and no document overflow at 1280×800 or 900×700. The real Docker acceptance passes 42 assertions including seed, canonical read/write/bash, attachment staging, stop/reconnect, isolation, and cleanup.
 - Boundary: an Agent may require abstract Sandbox execution, while the Host exclusively selects and owns the provider, isolation arguments, Session identity, workspace, approved attachment bytes/descriptors, retention, and cleanup. Canonical tools continue to use Pi `ExecutionEnv`, and attachments remain Pi-native user text/image content plus workspace paths rather than a new message protocol.
 - Explicit non-goals: Vercel Sandbox, Firecracker fleet, Apple-container V1 adapter, arbitrary host paths, project source write-back, silent Desktop Direct/Node fallback, approval policy, numeric CPU/memory/PID/disk quotas, workspace explorer/export, dynamic provider connections, generic container orchestration, cloud control plane, or source-owned engine credentials.
-- Visible gaps: the development host still lacks Docker, so the corrected acceptance case requires a new GitHub Actions run. Until it passes, item 17 remains unchecked and item 10 remains dependency-blocked. Numeric quotas, export/adoption, additional providers, approvals, and fleet operations remain later capabilities.
+- Visible gaps: run the corrected trigger once on current-head GitHub Actions when CI work resumes, then close item 17 under the existing shipment policy. Until then item 10 remains dependency-blocked. Numeric quotas, export/adoption, additional providers, approvals, and fleet operations remain later capabilities.
 
 ## Agent Project Activation
 
 - Status: shipped One Agent Project Model and Creation V1
 - Freshness: confirmed
-- Last checked: 2026-07-17
+- Last checked: 2026-07-21
 - Evidence:
   - `packages/cli` exposes mandatory-destination `llm-space init <directory>` over the shared Runtime Node scaffolder, with repeatable `--preset`, empty-preset `--blank` compatibility, and explicit MCP URL/tool inputs.
   - Desktop exposes New Agent Project through Welcome, the Agents sidebar, and Command Palette. It asks for a parent folder, creates only an absent kebab-case child, then auto-trusts it, creates the existing default Project Thread under `LLM_SPACE_HOME`, switches to Agents, and opens Build.
@@ -387,15 +391,19 @@
   - Current CEF audit `audits/2026-07-14-005810-agent-navigation-editor/` shows a manifestless workspace Agent auto-discovered into the same inventory and Build/Threads flow as explicitly opened projects, with no provenance badge or separate Builder/Target path.
   - `packages/runtime/src/node/project-manifest.ts` defaults a missing manifest to schema version 1 and `agent: "agent"`; focused tests preserve explicit-manifest confinement and symlink rejection.
   - Desktop now has one Agent Project manager/typed path. It recursively discovers canonical workspace paths, merges and deduplicates registered paths, auto-trusts only the canonical workspace boundary, and keeps every project Thread under desktop-owned `LLM_SPACE_HOME/projects` data.
+  - Current CEF audit `audits/2026-07-20-180358-agent-debugging-parity/` confirms Project Threads reuse `ThreadPlayground`, `ModelConfigEditor`, and `ModelParamsPopover`; Desktop Direct/Sandbox model and reasoning overrides are editable, selecting GPT-5.5 changes provenance from `From Agent` to `Thread override`, and `Sync from Agent` resets the local override. Only Local Server sets configuration read-only.
+  - Current 2026-07-21 acceptance makes the shared selector and parameter actions visible at rest, persists repeated model-change events as one Thread override, and grants only Desktop `threadOverride` runs explicit Host model-configuration authority. The real Run History records `openai-codex/gpt-5.5 · Desktop Sandbox`; Local Server remains Agent-owned and read-only.
+  - Runtime Profile selection now mutates the current Project Thread in place. Direct/Sandbox/Local Server transitions preserve messages, Run History, and Desktop Runtime Session data; profile changes branch a waiting Runtime Run through the continuation fingerprint instead of resuming under the wrong authority. Leaving Sandbox stops its container without deleting the named volume.
+  - `apps/sandbox-example-agent` is a separate checked-in learning path with `defineSandbox({})`, an immutable workspace README seed, canonical read/write/bash declarations, README walkthrough, and a source contract test. It is intentionally not added to the Desktop template picker.
 - Boundary: users can create or open one portable Agent Project contract in the default workspace or an explicit user-owned directory; a manifest is optional when the Agent lives under `agent/`. Every Agent uses one Build + nested Project Threads workflow, while source remains user-owned and trust, Threads, tool execution, and persistence remain path-safe and Desktop-owned where appropriate.
 - Explicit non-goals: no external source copy, Git/cloud/deployment workflow, Builder Agent or AI source mutation, sandbox or per-call approval system, public plugin SDK, multiple Agents per manifest, graphs/subagents/schedules, breakpoint debugger, directory merge/overwrite, directory-move migration, or destructive deletion of desktop-owned project data.
-- Visible gaps: native-picker completion remains a manual supplementary check because available CEF/macOS automation could open but not choose the folder. Thread-to-project promotion remains item 10; live provider connectivity, sandboxing, richer missing-skill diagnostics, source moves, and automated CEF regression coverage remain future work.
+- Visible gaps: the unavailable-model badge still does not include a dedicated adjacent action, although the model selector is now persistently visible in the same row. Native-picker completion remains a manual supplementary check; Thread-to-project promotion remains item 10, while source moves and automated CEF regression coverage remain future work.
 
 ## Canonical Agent Project Scaffolding
 
 - Status: shipped V1
 - Freshness: confirmed
-- Last checked: 2026-07-17
+- Last checked: 2026-07-20
 - Evidence:
   - ADR 0005 fixes user-owned portable source, Desktop-owned registry/trust/Threads, absent-target collision semantics, canonical base content, the three shipped presets and defaults, CLI compatibility, MCP constraints, and repository-owned conformance.
   - `@llm-space/runtime/node` exports the sole `scaffoldAgentProject()` implementation; browser-safe Runtime exports share preset/config validation with the renderer without importing Node execution code.
@@ -404,9 +412,10 @@
   - Repository-owned tests exhaust all eight preset combinations and prove Runtime load, local-tool execution, MCP/skill shape, and deterministic OCI context creation without source repair. Focused final acceptance passes 32 tests with 187 assertions.
   - CLI parsing tests prove mandatory destination, default local-tool + skill, `--blank`, repeated explicit presets, MCP inputs, and invalid combinations. Desktop manager tests prove successful source/trust/default-Thread ownership and source cleanup when Desktop activation cannot commit.
   - Real Electrobun evidence under `audits/2026-07-17-175010-canonical-agent-project/` verifies the three creation entry points, dialog states and accessibility, conditional MCP fields, real RPC generation, and Build landing at both target sizes.
+  - Current source inspection confirms V1 still exposes only `local-tool`, `skill`, and `mcp-connection`; neither the scaffolder nor `apps/example-agent` teaches `defineSandbox({})`, `agent/sandbox/workspace/**`, canonical read/write/bash helpers, or Sandbox attachments.
 - Boundary: CLI and Studio create the same canonical portable source into a wholly absent user-owned directory. V1 composes only `local-tool`, `skill`, and `mcp-connection`; defaults are local tool plus skill, and MCP requires an HTTP(S) URL plus one or more exact allowlisted names. Generated projects intentionally carry no repository-specific test/Eval protocol.
 - Explicit non-goals: no marketplace, remote/community templates, duplicated full templates, unshipped capability presets, dependency installer, Git setup, auth/OAuth/stdio MCP, secret values, network validation, source mutation after creation, or silent overwrite/merge.
-- Visible gaps: portable generated Eval suites remain item 29, Thread promotion remains item 10, and native folder selection is not automated in the CEF audit. Remote templates, dependency management, and source merge/adoption require separate future product decisions.
+- Visible gaps: a Sandbox example/preset is absent. Portable generated Eval suites remain item 29, Thread promotion remains item 10, and native folder selection is not automated in the CEF audit. Remote templates, dependency management, and source merge/adoption require separate future product decisions.
 
 ## Thread-To-Agent Project Promotion
 
@@ -424,7 +433,7 @@
   - ADR 0006 and the Eve state research fix the future contract: promotion is preview-first and atomic; Agent Variables, Turn context, Session State, transcript, and external memory remain distinct; local tool and stdio MCP authority is Sandbox-only; exact literals require visible confirmation; evaluation intent is non-executable; and conversation examples defer to item 29.
 - Boundary: today a standalone Thread and an Agent Project remain independent product objects. The accepted implementation will classify every field, resolve all blockers in a temporary preview tab, publish only into an absent user-owned target, and create a fresh independent Project Thread with no transcript, Run, evaluation, state, or Session identity inheritance.
 - Explicit non-goals: no hidden promotion metadata, live Thread/source synchronization, secret-store or Session-state copying, implicit Desktop built-in authority, generated fake tool implementations, Host fallback for Sandbox requirements, source overwrite/merge, transcript migration, Eve compatibility promise, conversation-example format before item 29, or premature executable Eval protocol.
-- Visible gaps: items 12, 13, and 16 are shipped, while item 17 awaits a passing real-Docker acceptance run. Product code still lacks the planner, variable/evaluation-intent source slots, preview interaction, atomic coordinator, acceptance matrix, and real CEF audit evidence defined by ADR 0006.
+- Visible gaps: items 12, 13, and 16 are shipped, while item 17 passes local deterministic real-Docker acceptance but awaits the deferred current-head CI gate under existing shipment policy. Product code still lacks the planner, variable/evaluation-intent source slots, preview interaction, atomic coordinator, acceptance matrix, and real CEF audit evidence defined by ADR 0006.
 
 ## Agent And Thread Workbench Navigation
 

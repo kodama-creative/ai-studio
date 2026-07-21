@@ -7,6 +7,8 @@
  * one-RPC-method-per-action sprawl.
  */
 
+import type { ThreadRuntimeProfileType } from "@llm-space/core";
+
 import type { TraceConnectedProjectInput, TraceImportFile } from "./traces";
 
 /** Base shape for every command: a string `type` and typed `args`. */
@@ -65,7 +67,17 @@ export interface CreateExternalAgentProjectThreadCommand extends GenericCommand<
   "createExternalAgentProjectThread",
   {
     projectId: string;
-    runtimeProfileType?: "desktopDirect" | "desktopSandbox" | "localServer";
+    runtimeProfileType?: ThreadRuntimeProfileType;
+  }
+> {}
+
+/** Change the selected Runtime Profile on the current Agent Project Thread. */
+export interface SetExternalAgentProjectRuntimeProfileCommand extends GenericCommand<
+  "setExternalAgentProjectRuntimeProfile",
+  {
+    projectId: string;
+    runtimeProfileType: ThreadRuntimeProfileType;
+    threadId: string;
   }
 > {}
 
@@ -417,6 +429,7 @@ export type Command =
   | SaveExternalAgentProjectSourceCommand
   | SelectNextTabCommand
   | SelectPreviousTabCommand
+  | SetExternalAgentProjectRuntimeProfileCommand
   | StageSandboxAttachmentsCommand
   | SyncExternalAgentProjectThreadFromAgentCommand
   | SyncLangfuseTraceIdsCommand
@@ -464,6 +477,10 @@ export const COMMAND_META = {
   },
   createExternalAgentProjectThread: {
     label: "New Agent Project Thread",
+    target: "webview"
+  },
+  setExternalAgentProjectRuntimeProfile: {
+    label: "Change Runtime Profile",
     target: "webview"
   },
   refreshExternalAgentProject: {

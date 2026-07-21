@@ -104,6 +104,13 @@
         "typebox": "catalog:",
       },
     },
+    "apps/sandbox-example-agent": {
+      "name": "@llm-space/sandbox-example-agent",
+      "version": "0.1.0",
+      "devDependencies": {
+        "@llm-space/runtime": "workspace:*",
+      },
+    },
     "packages/cli": {
       "name": "@llm-space/cli",
       "version": "0.1.0",
@@ -601,6 +608,8 @@
     "@llm-space/example-agent": ["@llm-space/example-agent@workspace:apps/example-agent"],
 
     "@llm-space/runtime": ["@llm-space/runtime@workspace:packages/runtime"],
+
+    "@llm-space/sandbox-example-agent": ["@llm-space/sandbox-example-agent@workspace:apps/sandbox-example-agent"],
 
     "@llm-space/server": ["@llm-space/server@workspace:packages/server"],
 
