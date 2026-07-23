@@ -6,7 +6,7 @@ import {
   type ProjectTool,
   type Tool
 } from "@llm-space/core";
-import { streamAgent } from "@llm-space/core/server";
+import { type LocalFileSystem, streamAgent } from "@llm-space/core/server";
 import { agentModelMatchesDefinition } from "@llm-space/runtime";
 import {
   AgentHostPolicyChangedError,
@@ -15,6 +15,7 @@ import {
   type AgentSession,
   AgentStateCommitUnknownError,
   createHostCapabilityPolicy,
+  DurableOperationOutcomeUnknownError,
   ExecutionEnvUnavailableError,
   type PreparedAgentTool,
   SandboxUnavailableError,
@@ -28,6 +29,7 @@ import type {
 } from "@earendil-works/pi-agent-core";
 import type { StoredRuntimeSession } from "@llm-space/runtime/harness";
 
+import { createDesktopThreadRuntimeAuthority } from "./desktop-thread-runtime-authority";
 import { agentDefinitionFingerprint } from "../external-projects/agent-definition-fingerprint";
 
 import type {
@@ -54,7 +56,8 @@ export class StreamThreadController {
     private readonly _mcpManager?: McpManager,
     private readonly _tools?: ToolRegistry,
     private readonly _localServers?: EmbeddedLocalServerManager,
-    private readonly _sandboxes?: DesktopSandboxManager
+    private readonly _sandboxes?: DesktopSandboxManager,
+    private readonly _localFs?: LocalFileSystem
   ) {}
 
   /** Run an agent stream and push each event back through the caller's sender. */
@@ -102,28 +105,36 @@ export class StreamThreadController {
       outcome = "completed";
       send({ streamId, type: "done" });
     } catch (error) {
-      if (aborted || abortController.signal.aborted) {
+      if (error instanceof DurableOperationOutcomeUnknownError) {
+        send({
+          streamId,
+          type: "error",
+          message: error.message,
+          code: "outcomeUnknown"
+        });
+      } else if (aborted || abortController.signal.aborted) {
         outcome = "aborted";
         return;
+      } else {
+        send({
+          streamId,
+          type: "error",
+          message: error instanceof Error ? error.message : "Internal error",
+          ...(error instanceof AgentStateCommitUnknownError
+            ? { code: "outcomeUnknown" as const }
+            : error instanceof AgentHostPolicyChangedError
+              ? { code: "hostPolicyChanged" as const }
+              : error instanceof ExecutionEnvUnavailableError
+                ? { code: "executionEnvUnavailable" as const }
+                : error instanceof SandboxWorkspaceLostError
+                  ? { code: "sandboxWorkspaceLost" as const }
+                  : error instanceof SandboxUnavailableError
+                    ? { code: "sandboxUnavailable" as const }
+                    : error instanceof StructuredOutputError
+                      ? { code: error.code }
+                      : {})
+        });
       }
-      send({
-        streamId,
-        type: "error",
-        message: error instanceof Error ? error.message : "Internal error",
-        ...(error instanceof AgentStateCommitUnknownError
-          ? { code: "outcomeUnknown" as const }
-          : error instanceof AgentHostPolicyChangedError
-            ? { code: "hostPolicyChanged" as const }
-            : error instanceof ExecutionEnvUnavailableError
-              ? { code: "executionEnvUnavailable" as const }
-              : error instanceof SandboxWorkspaceLostError
-                ? { code: "sandboxWorkspaceLost" as const }
-                : error instanceof SandboxUnavailableError
-                  ? { code: "sandboxUnavailable" as const }
-                  : error instanceof StructuredOutputError
-                    ? { code: error.code }
-                    : {})
-      });
     } finally {
       this._activeStreams.delete(streamId);
       this._analytics.capture("thread_run", {
@@ -233,6 +244,7 @@ export class StreamThreadController {
     if (payload.runtime?.type !== "desktopThread") {
       throw new Error("Desktop Thread runtime is unavailable.");
     }
+    const threadPath = payload.runtime.threadPath;
     const sourceTools = payload.request.context.sourceTools ?? [];
     const extraTools = sourceTools
       .filter(tool => tool.type !== "project")
@@ -279,6 +291,22 @@ export class StreamThreadController {
       fingerprint: "desktop-thread-runtime-v1"
     };
     const models = await this._modelManager.getAvailableModels();
+    const runtimeState = threadPath && this._localFs
+      ? await createDesktopThreadRuntimeAuthority({
+        read: async () => this._localFs!.read(threadPath),
+        write: async thread => this._localFs!.write(
+          threadPath,
+          thread
+        )
+      })
+      : null;
+    const activeRunId = runtimeState?.session.snapshot.activeRunId;
+    const turnSequence = runtimeState?.session.snapshot.runs.findIndex(
+      run => run.id === activeRunId
+    ) ?? -1;
+    if (runtimeState && (!activeRunId || turnSequence < 0)) {
+      throw new Error("Desktop Thread has no active Runtime Run.");
+    }
     const runtime = new AgentRuntime({
       models,
       project
@@ -294,15 +322,18 @@ export class StreamThreadController {
         models,
         project
       }),
-      id: payload.streamId,
+      id: runtimeState?.session.snapshot.id ?? payload.streamId,
       context: {
-        id: payload.streamId,
+        id: runtimeState?.session.snapshot.id ?? payload.streamId,
         auth: {
           initiator: desktopPrincipal,
           current: desktopPrincipal
         },
         channel: { kind: "desktop" },
-        turn: { id: payload.streamId, sequence: 1 }
+        turn: {
+          id: activeRunId ?? payload.streamId,
+          sequence: turnSequence >= 0 ? turnSequence + 1 : 1
+        }
       },
       model: payload.request.model,
       modelOptions: {
@@ -314,12 +345,29 @@ export class StreamThreadController {
           : { temperature: payload.request.config.model.temperature })
       },
       reasoning: payload.request.config?.model?.reasoning,
-      initialMessages: payload.request.context.messages as AgentMessage[],
+      initialMessages: runtimeState
+        ? runtimeState.reconcileInitialMessages(
+          payload.request.context.messages as AgentMessage[]
+        )
+        : payload.request.context.messages as AgentMessage[],
       extraTools,
       activeToolNames: sourceTools.map(tool => tool.name),
       systemPrompt: payload.request.context.systemPrompt,
       executionMode: payload.runtime.executionMode,
-      streamFn: this._streamFn(payload)
+      streamFn: this._streamFn(payload),
+      ...(runtimeState && activeRunId
+        ? {
+          sessionStore: runtimeState.sessionStore,
+          persistence: runtimeState.persistence,
+          onSessionCommitted: (runtimeSession: StoredRuntimeSession) => {
+            send({
+              streamId: payload.streamId,
+              type: "runtimeSession",
+              runtimeSession
+            });
+          }
+        }
+        : {})
     });
     await this._streamSession(payload.streamId, session, send, onAbort);
   }
@@ -389,12 +437,10 @@ export class StreamThreadController {
           }
         }))
     );
-    const runtimeState = await this._externalAgentProjects
-      .requiresRuntimeSessionStore(
-        payload.runtime.projectId,
-        payload.runtime.threadId
-      )
-      ? await this._externalAgentProjects.createRuntimeSessionStore(
+    const createRuntimeSessionStore = this._externalAgentProjects
+      .createRuntimeSessionStore?.bind(this._externalAgentProjects);
+    const runtimeState = createRuntimeSessionStore
+      ? await createRuntimeSessionStore(
         payload.runtime.projectId,
         payload.runtime.threadId
       )
@@ -464,7 +510,8 @@ export class StreamThreadController {
         },
         ...(runtimeState && activeRunId
           ? {
-            sessionStore: runtimeState.store,
+            sessionStore: runtimeState.sessionStore,
+            persistence: runtimeState.persistence,
             onSessionCommitted: publishRuntimeSession
           }
           : {}),
@@ -489,7 +536,11 @@ export class StreamThreadController {
               : { reasoning: payload.request.config.model.reasoning })
           }
           : {}),
-        initialMessages: payload.request.context.messages as AgentMessage[],
+        initialMessages: runtimeState
+          ? runtimeState.reconcileInitialMessages(
+            payload.request.context.messages as AgentMessage[]
+          )
+          : payload.request.context.messages as AgentMessage[],
         ...(payload.request.outputContract
           ? { outputContract: payload.request.outputContract }
           : {}),

@@ -765,6 +765,26 @@ export class ServerSessionRepository implements SessionStore {
     return [...this._sessions.keys()];
   }
 
+  recoverableRun(sessionId: string, runId: string): CreatedServerRun {
+    const current = this._required(sessionId);
+    const run = current.runs.find(item => item.id === runId);
+    if (run?.terminal !== null) {
+      throw new Error(
+        `Server Run ${runId} is not recoverable in Session ${sessionId}`
+      );
+    }
+    return {
+      created: true,
+      initiator: _principal(current.owner),
+      owner: _principal(current.owner),
+      sessionId,
+      runId,
+      transcript: _snapshot(_recoverableTranscript(current, runId)),
+      turnSequence: current.runs.findIndex(item => item.id === runId) + 1,
+      ...(run.outputContract ? { outputContract: run.outputContract } : {})
+    };
+  }
+
   notifyShutdown(retryAfterSeconds: number): void {
     const event: TransientServerEvent = {
       sequence: null,
@@ -1421,6 +1441,24 @@ function _runInputHash(text: string, outputContract?: string): string {
 
 function _equalHash(left: string, right: string): boolean {
   return timingSafeEqual(Buffer.from(left, "hex"), Buffer.from(right, "hex"));
+}
+
+function _recoverableTranscript(
+  session: ServerSessionEnvelope,
+  runId: string
+): readonly AgentMessage[] {
+  const activeStep = session.runtime?.snapshot.operationLedger?.steps.find(
+    step => step.runId === runId && step.state === "active"
+  );
+  if (!activeStep) {
+    return session.transcript;
+  }
+  if (activeStep.transcriptMessageCount > session.transcript.length) {
+    throw new Error(
+      `Server Session transcript is shorter than durable Step ${activeStep.id}`
+    );
+  }
+  return session.transcript.slice(0, activeStep.transcriptMessageCount);
 }
 
 function _snapshot<T>(value: T): T {

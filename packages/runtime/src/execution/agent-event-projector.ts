@@ -79,6 +79,9 @@ export class AgentEventProjector {
       return;
     }
     if (event.type === "turn_end") {
+      // The Host transcript must reach its durable boundary before Runtime can
+      // checkpoint the operation Step in prepareNextTurnWithContext.
+      await this._persist();
       await this._emit({
         ...event,
         toolResults: event.toolResults.filter(

@@ -11,7 +11,22 @@ export type RuntimeSessionRecoveryResult =
   | {
     readonly run: RuntimeRunSnapshot;
     readonly session: StoredRuntimeSession;
+    readonly status: "cancelled";
+  }
+  | {
+    readonly run: RuntimeRunSnapshot;
+    readonly session: StoredRuntimeSession;
+    readonly status: "operationReplay";
+  }
+  | {
+    readonly run: RuntimeRunSnapshot;
+    readonly session: StoredRuntimeSession;
     readonly status: "outcomeUnknown";
+  }
+  | {
+    readonly run: RuntimeRunSnapshot;
+    readonly session: StoredRuntimeSession;
+    readonly status: "parked";
   }
   | {
     readonly run: RuntimeRunSnapshot;
@@ -26,8 +41,8 @@ export type RuntimeSessionRecoveryResult =
 
 /**
  * Reconstruct one Session after process loss without replaying external work.
- * Safe waits remain resumable. Persisted in-flight model/tool work is
- * atomically terminalized because its external outcome cannot be inferred.
+ * Safe waits remain resumable. Durable operation completions may be replayed;
+ * a pre-call without a terminal is atomically elevated to outcome unknown.
  */
 export async function recoverRuntimeSession(
   store: SessionStore,
@@ -52,10 +67,50 @@ export async function recoverRuntimeSession(
       `Runtime Run ${run.id} cannot be recovered from ${run.state}`
     );
   }
+  const activeStep = current.snapshot.operationLedger?.steps.find(
+    step => step.runId === run.id && step.state === "active"
+  );
+  const operations = activeStep?.operations ?? [];
+  if (operations.some(operation => operation.state === "parked")) {
+    return { status: "parked", run, session: current };
+  }
+  if (
+    operations.length > 0
+    && operations.every(operation => operation.state === "cancelled")
+  ) {
+    const cancelled = await store.commit({
+      sessionId,
+      expectedVersion: current.version,
+      mutations: [{ type: "transitionRun", runId: run.id, to: "cancelled" }]
+    });
+    const cancelledRun = cancelled.snapshot.runs.find(item => item.id === run.id);
+    if (!cancelledRun) {
+      throw new SessionStoreInvariantError(
+        `Recovered Session ${sessionId} lost Runtime Run ${run.id}`
+      );
+    }
+    return { status: "cancelled", run: cancelledRun, session: cancelled };
+  }
+  const ambiguous = operations.filter(operation =>
+    operation.state === "preCall" || operation.state === "outcomeUnknown");
+  if (ambiguous.length === 0) {
+    return { status: "operationReplay", run, session: current };
+  }
   const recovered = await store.commit({
     sessionId,
     expectedVersion: current.version,
-    mutations: [{ type: "transitionRun", runId: run.id, to: "outcomeUnknown" }]
+    mutations: [
+      ...ambiguous
+        .filter(operation => operation.state === "preCall")
+        .map(operation => ({
+          type: "settleOperation" as const,
+          runId: run.id,
+          operationId: operation.id,
+          requestFingerprint: operation.requestFingerprint,
+          state: "outcomeUnknown" as const
+        })),
+      { type: "transitionRun", runId: run.id, to: "outcomeUnknown" }
+    ]
   });
   const unknownRun = recovered.snapshot.runs.find(item => item.id === run.id);
   if (!unknownRun) {

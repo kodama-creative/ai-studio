@@ -102,7 +102,7 @@ describe("Runtime Session recovery", () => {
     });
   });
 
-  test("terminalizes interrupted model and tool work as outcome unknown", async () => {
+  test("recovers model and tool control state when no durable intent exists", async () => {
     for (const state of ["runningModel", "runningTools"] as const) {
       const source = new InMemorySessionStore();
       const started = await _start(
@@ -124,31 +124,15 @@ describe("Runtime Session recovery", () => {
       );
 
       expect(recovered).toMatchObject({
-        status: "outcomeUnknown",
-        run: { id: `run-unknown-${state}`, state: "outcomeUnknown" },
-        session: { snapshot: { activeRunId: null } }
+        status: "operationReplay",
+        run: { id: `run-unknown-${state}`, state },
+        session: {
+          version: interrupted.version,
+          snapshot: { activeRunId: `run-unknown-${state}` }
+        }
       });
-      if (recovered.status !== "outcomeUnknown") {
-        throw new Error("Expected an outcome-unknown Runtime Run");
-      }
-      const unknownResumeError = await _rejection(claimRuntimeRunResume(recoveredStore, {
-        sessionId: recovered.session.snapshot.id,
-        runId: recovered.run.id,
-        expectedVersion: recovered.session.version
-      }));
-      expect(unknownResumeError).toBeInstanceOf(SessionStoreInvariantError);
-      expect(recovered.session.journal.at(-1)).toMatchObject({
-        type: "runStateChanged",
-        from: state,
-        to: "outcomeUnknown"
-      });
-      expect(replayRuntimeRunEvents(recovered.session, {
-        sessionId: recovered.session.snapshot.id,
-        runId: recovered.run.id
-      }).at(-1)?.entry).toMatchObject({
-        type: "runStateChanged",
-        to: "outcomeUnknown"
-      });
+      expect(await recoveredStore.load(`session-unknown-${state}`))
+        .toEqual(interrupted);
     }
   });
 

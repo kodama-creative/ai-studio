@@ -80,7 +80,8 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
     mcpManager,
     host.tools,
     localServers,
-    sandboxes
+    sandboxes,
+    localFs
   );
 
   let mainWindow: BrowserWindow | null = null;

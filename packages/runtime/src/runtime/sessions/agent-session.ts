@@ -25,7 +25,10 @@ import {
   AgentSessionCapabilities
 } from "../capabilities/agent-session-capabilities";
 import { ExecutionEnvUnavailableError } from "../execution-env/execution-env-unavailable-error";
+import { DurableOperationOutcomeUnknownError } from "../harness/durable-operation-outcome-unknown-error";
 import { AgentSessionInstructions } from "../instructions/agent-session-instructions";
+import { DurableOperationCoordinator } from "../operations/durable-operation-coordinator";
+import { createDurableProviderStream } from "../operations/durable-provider-stream";
 import {
   createStructuredOutputTool
 } from "../outputs/create-structured-output-tool";
@@ -106,6 +109,7 @@ export class AgentSession {
   private readonly _outputTool?: PreparedAgentTool;
   private readonly _outputValidator?: ReturnType<typeof Compile>;
   private readonly _executionEnv?: ExecutionEnv;
+  private readonly _durableOperations: DurableOperationCoordinator;
   private _structuredOutput: RuntimeStructuredOutputResult | null = null;
 
   constructor(options: AgentSessionOptions) {
@@ -132,6 +136,12 @@ export class AgentSession {
     this._sessionState = new AgentSessionState({
       context: options.context,
       definitions: options.project.stateDefinitions ?? [],
+      sessionStore: options.sessionStore,
+      onCommitted: options.onSessionCommitted
+    });
+    this._durableOperations = new DurableOperationCoordinator({
+      sessionId: options.context.id,
+      runId: options.context.turn.id,
       sessionStore: options.sessionStore,
       onCommitted: options.onSessionCommitted
     });
@@ -166,6 +176,25 @@ export class AgentSession {
       tools: stateScopedTools,
       activeToolNames: undefined
     });
+    const providerStream: StreamFn = async (
+      model,
+      context,
+      streamOptions
+    ) => {
+      const resolvedOptions = {
+        ...streamOptions,
+        ...this._modelOptions
+      } as SimpleStreamOptions;
+      return options.streamFn
+        ? options.streamFn(model, context, resolvedOptions)
+        : options.models.streamSimple(model, context, resolvedOptions);
+    };
+    const durableProviderStream = createDurableProviderStream({
+      coordinator: this._durableOperations,
+      stream: providerStream,
+      transcriptMessageCount: () => this.messages.length,
+      onTerminalError: error => { this._terminalError = error; }
+    });
     this._agent = new Agent({
       sessionId: options.id,
       initialState: {
@@ -178,18 +207,16 @@ export class AgentSession {
         ),
         tools: this._toolPolicy.toolsForMode(options.executionMode)
       },
-      streamFn: async (model, context, streamOptions) => {
-        const resolvedOptions = {
-          ...streamOptions,
-          ...this._modelOptions
-        } as SimpleStreamOptions;
-        return options.streamFn
-          ? options.streamFn(model, context, resolvedOptions)
-          : options.models.streamSimple(model, context, resolvedOptions);
+      streamFn: durableProviderStream,
+      beforeToolCall: async (context, signal) =>
+        this._beforeToolCall(context, signal),
+      afterToolCall: async ({ toolCall }) => {
+        const isError = this._toolPolicy.consumeResultError(toolCall.id);
+        return isError === undefined ? undefined : { isError };
       },
-      beforeToolCall: async context => this._beforeToolCall(context),
       prepareNextTurnWithContext: async ({ toolResults }) => {
         try {
+          let outputError: Error | null = null;
           if (
             this._outputTool
             && toolResults.some(result =>
@@ -202,12 +229,28 @@ export class AgentSession {
                 "The selected structured output was invalid"
               );
             }
-            throw this._terminalError;
+            outputError = this._terminalError;
           }
+          const deferred = toolResults.some(result =>
+            this._toolPolicy.isDeferredToolResult(result));
+          const checkpoint = this._executionMode === "react"
+            && toolResults.length > 0
+            && !deferred
+            && !toolResults.some(result =>
+              result.toolName === STRUCTURED_OUTPUT_TOOL_NAME);
+          const durableMutations = this._durableOperations
+            .toolBatchMutations({ checkpoint });
           await this._sessionState.completeStep(toolResults, {
-            deferred: toolResults.some(result =>
-              this._toolPolicy.isDeferredToolResult(result))
+            deferred,
+            durableMutations
           });
+          const unknownOperationId = this._durableOperations
+            .unknownToolOperationId();
+          this._durableOperations.markToolBatchCommitted({ checkpoint });
+          if (unknownOperationId) {
+            throw new DurableOperationOutcomeUnknownError(unknownOperationId);
+          }
+          if (outputError) { throw outputError; }
           return undefined;
         } catch (error) {
           this._terminalError = error instanceof Error
@@ -333,7 +376,8 @@ export class AgentSession {
   }
 
   private async _beforeToolCall(
-    context: BeforeToolCallContext
+    context: BeforeToolCallContext,
+    signal?: AbortSignal
   ): Promise<{ block: true; reason: string; } | undefined> {
     const calls = context.assistantMessage.content.filter(
       content => content.type === "toolCall"
@@ -341,8 +385,7 @@ export class AgentSession {
     const finalCalls = calls.filter(
       call => call.name === STRUCTURED_OUTPUT_TOOL_NAME
     );
-    if (finalCalls.length === 0) { return undefined; }
-    if (finalCalls.length !== 1 || calls.length !== 1) {
+    if (finalCalls.length > 0 && (finalCalls.length !== 1 || calls.length !== 1)) {
       const error = new StructuredOutputError(
         "structured_output_invalid",
         "final_output must be called exactly once and without sibling tools"
@@ -350,13 +393,38 @@ export class AgentSession {
       this._terminalError = error;
       return { block: true, reason: error.message };
     }
-    if (!this._outputValidator?.Check(finalCalls[0]?.arguments)) {
+    if (
+      finalCalls.length > 0
+      && !this._outputValidator?.Check(finalCalls[0]?.arguments)
+    ) {
       const error = new StructuredOutputError(
         "structured_output_invalid",
         "final_output arguments do not match the selected contract"
       );
       this._terminalError = error;
       return { block: true, reason: error.message };
+    }
+    if (
+      this._toolPolicy.executesAutomatically(
+        context.toolCall.name,
+        this._executionMode
+      )
+      && this._durableOperations.active
+      && !signal?.aborted
+    ) {
+      try {
+        await this._durableOperations.prepareToolCall({
+          name: context.toolCall.name,
+          toolCallId: context.toolCall.id,
+          arguments: context.args
+        });
+      } catch (error) {
+        const terminal = error instanceof Error
+          ? error
+          : new Error(String(error));
+        this._terminalError = terminal;
+        return { block: true, reason: terminal.message };
+      }
     }
     return undefined;
   }
@@ -435,10 +503,11 @@ export class AgentSession {
         `Runtime tool name "${STRUCTURED_OUTPUT_TOOL_NAME}" is reserved for structured output`
       );
     }
+    const resolvedTools = this._outputTool
+      ? [...capabilities.tools, this._outputTool]
+      : capabilities.tools;
     this._toolPolicy.configure({
-      tools: this._outputTool
-        ? [...capabilities.tools, this._outputTool]
-        : capabilities.tools
+      tools: resolvedTools.map(tool => this._durableOperations.wrapTool(tool))
     });
     this._agent.state.model = resolveAgentRuntimeModel(
       this._models,

@@ -100,10 +100,22 @@ export class ThreadRuntimeSession {
         recovery.session
       );
     }
+    if (recovery.status === "parked") {
+      throw new SessionStoreInvariantError(
+        `Runtime Run ${recovery.run.id} is parked and requires Host resume`
+      );
+    }
+    if (recovery.status === "cancelled") {
+      // A fresh user action begins a new Run after the recovered cancellation.
+    }
     const current = recovery.status === "missing" ? null : recovery.session;
     const continuationFingerprint = await threadContinuationFingerprint(input);
     const configuration = await _configuration(input);
     const activeRunId = current?.snapshot.activeRunId ?? null;
+
+    if (recovery.status === "operationReplay") {
+      return { runId: recovery.run.id, session: recovery.session };
+    }
 
     if (current && activeRunId) {
       const active = current.snapshot.runs.find(run => run.id === activeRunId);

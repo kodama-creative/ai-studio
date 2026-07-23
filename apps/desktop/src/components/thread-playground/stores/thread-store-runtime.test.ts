@@ -20,7 +20,7 @@ describe("Thread store Runtime Harness integration", () => {
     const desktopRuntimeSession: StoredRuntimeSession = {
       version: 0,
       snapshot: {
-        schemaVersion: 1,
+        schemaVersion: 2,
         id: "desktop-session",
         activeRunId: null,
         runs: []
@@ -258,7 +258,10 @@ describe("Thread store Runtime Harness integration", () => {
       executionMode: "react",
       model: persisted.model!
     });
-    persisted = { ...persisted, runtimeSession: begun.session };
+    persisted = {
+      ...persisted,
+      runtimeSession: await _withPreCall(begun.session, begun.runId)
+    };
     let transportCalls = 0;
     const interruptedTransport = _transport();
     const store = createThreadStore(persisted, {
@@ -461,4 +464,26 @@ function _assistant(
     stopReason,
     timestamp: Date.now()
   };
+}
+
+async function _withPreCall(
+  session: StoredRuntimeSession,
+  runId: string
+): Promise<StoredRuntimeSession> {
+  const store = new InMemorySessionStore([session]);
+  return store.commit({
+    sessionId: session.snapshot.id,
+    expectedVersion: session.version,
+    mutations: [{
+      type: "startOperation",
+      runId,
+      stepId: `${runId}:step:1`,
+      stepSequence: 1,
+      transcriptMessageCount: 0,
+      operationId: `${runId}:step:1:provider:fake`,
+      kind: "provider",
+      provider: "fake",
+      requestFingerprint: "a".repeat(64)
+    }]
+  });
 }

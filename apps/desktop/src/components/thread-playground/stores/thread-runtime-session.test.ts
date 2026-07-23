@@ -1,3 +1,7 @@
+import {
+  InMemorySessionStore,
+  type StoredRuntimeSession
+} from "@llm-space/runtime/harness";
 import { describe, expect, test } from "bun:test";
 
 import type { Thread } from "@llm-space/core";
@@ -258,7 +262,9 @@ describe("ThreadRuntimeSession", () => {
     const started = await interrupted.begin(
       _input(_threadWithUser(), "react")
     );
-    const freshProcess = new ThreadRuntimeSession(started.session);
+    const freshProcess = new ThreadRuntimeSession(
+      await _withPreCall(started.session, started.runId)
+    );
     let error: unknown;
     try {
       await freshProcess.begin(_input(_threadWithUser(), "react"));
@@ -398,4 +404,26 @@ function _tool() {
       properties: { city: { type: "string" } }
     }
   };
+}
+
+async function _withPreCall(
+  session: StoredRuntimeSession,
+  runId: string
+): Promise<StoredRuntimeSession> {
+  const store = new InMemorySessionStore([session]);
+  return store.commit({
+    sessionId: session.snapshot.id,
+    expectedVersion: session.version,
+    mutations: [{
+      type: "startOperation",
+      runId,
+      stepId: `${runId}:step:1`,
+      stepSequence: 1,
+      transcriptMessageCount: 0,
+      operationId: `${runId}:step:1:provider:fake`,
+      kind: "provider",
+      provider: "fake",
+      requestFingerprint: "a".repeat(64)
+    }]
+  });
 }

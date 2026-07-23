@@ -1,25 +1,17 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import type { Thread } from "@llm-space/core";
+import type { StoredRuntimeSession } from "@llm-space/runtime/harness";
 
 import { createRpcTransport, localFs } from "@/client";
 import { ThreadPlayground } from "@/components/thread-playground";
 import { getRuntimeExecutionMode } from "@/components/thread-playground/stores";
 import { parentOf, threadPathForTitle } from "@/lib/thread-file";
 import { cn } from "@/lib/utils";
-
-// One transport for the app: stream agent runs over Electrobun RPC to the bun
-// process (there is no HTTP server in the desktop app).
-const RPC_TRANSPORT = createRpcTransport({
-  runtime: () => ({
-    type: "desktopThread",
-    executionMode: getRuntimeExecutionMode()
-  })
-});
 
 interface ThreadTabPaneProps {
   readonly path: string;
@@ -34,6 +26,26 @@ interface ThreadTabPaneProps {
 
   /** Close this pane's tab, e.g. after its thread fails to load. */
   readonly onClose?: (path: string) => void;
+}
+
+function _createRuntimeBridge(path: string) {
+  let activeRuntimeSession: StoredRuntimeSession | undefined;
+  return {
+    resolveCommittedRuntimeSession: () => activeRuntimeSession,
+    transport: createRpcTransport({
+      runtime: () => {
+        activeRuntimeSession = undefined;
+        return {
+          type: "desktopThread" as const,
+          executionMode: getRuntimeExecutionMode(),
+          threadPath: path
+        };
+      },
+      onRuntimeSessionCommitted: session => {
+        activeRuntimeSession = session;
+      }
+    })
+  };
 }
 
 /**
@@ -85,6 +97,8 @@ export function ThreadTabPane({
   useEffect(() => {
     pathRef.current = path;
   }, [path]);
+
+  const runtimeBridge = useMemo(() => _createRuntimeBridge(path), [path]);
 
   const flushPending = useCallback(async () => {
     if (writeTimer.current) {
@@ -192,8 +206,11 @@ export function ThreadTabPane({
         onRenameTitle={handleRenameTitle}
         path={path}
         persistSettledThread={persistSettledThread}
+        resolveCommittedRuntimeSession={
+          runtimeBridge.resolveCommittedRuntimeSession
+        }
         runtimeOwnsToolLoop
-        transport={RPC_TRANSPORT}
+        transport={runtimeBridge.transport}
       />
     </div>
   );

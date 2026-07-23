@@ -1,0 +1,62 @@
+# Durable Execution V1 alignment with Vercel Eve
+
+- Date: 2026-07-22
+- Question: Does roadmap item 18's proposed operation-ledger V1 align with Eve?
+- Eve default branch fixed point: [`vercel/eve@a75496cf5072e44ecbbce5585fe50957281eecd1`](https://github.com/vercel/eve/commit/a75496cf5072e44ecbbce5585fe50957281eecd1), the `main`/`HEAD` returned by `git ls-remote --symref` on 2026-07-22.
+- Historical comparison: [`vercel/eve@c61f8cae0c51c5ca285c7386460481aa3c0a82ae`](https://github.com/vercel/eve/commit/c61f8cae0c51c5ca285c7386460481aa3c0a82ae).
+- Sources: first-party Eve docs, source, and tests at those commits, plus the local accepted ADRs and prior primary-source research listed below.
+
+## Verdict
+
+**Directionally aligned, but not behaviorally equivalent.** Both designs make execution durable, replay known completed work, preserve explicit waits, and avoid an exactly-once claim. The important semantic difference is the recovery unit:
+
+- Eve checkpoints a coarse **step**: one model call plus the tool calls it makes. It replays a completed step's recorded result, but automatically **re-runs an interrupted step**. Eve therefore tells authors to make side effects idempotent or gate them with approval.
+- Item 18 proposes a finer **provider/tool operation** boundary with a durable `preCall` record. If completion is not proven, it records `outcomeUnknown` and does not automatically repeat the operation.
+
+The proposal is best described as **Eve-inspired but deliberately stricter about ambiguous effects**, not as Eve parity. The same Eve crash/replay wording and relevant source structure are present at both inspected commits; between `c61f8ca` and `a75496c`, the durability guide changed only an unrelated deployment link.
+
+Primary evidence: Eve defines the step and checkpoint boundary in its [execution guide](https://github.com/vercel/eve/blob/a75496cf5072e44ecbbce5585fe50957281eecd1/docs/concepts/execution-model-and-durability.md#L8-L18), explicitly states completed-result replay and interrupted-step re-execution in its [crash contract](https://github.com/vercel/eve/blob/a75496cf5072e44ecbbce5585fe50957281eecd1/docs/concepts/execution-model-and-durability.md#L41-L47), and gives the [same contract at the historical commit](https://github.com/vercel/eve/blob/c61f8cae0c51c5ca285c7386460481aa3c0a82ae/docs/concepts/execution-model-and-durability.md#L41-L47).
+
+## Decision matrix
+
+| Proposed choice | Classification | Eve evidence and consequence |
+| --- | --- | --- |
+| Stable operation identity | **Compatible extension** | Eve has Session/Turn identity and exposes a model tool-call `ctx.callId` ([tool context](https://github.com/vercel/eve/blob/a75496cf5072e44ecbbce5585fe50957281eecd1/docs/tools/overview.mdx#L35-L48)), but its durable replay identity is the Workflow step, not a first-party per-provider/per-tool ledger key. Item 18's Session/Run/Turn/logical-operation/attempt identity is finer-grained. |
+| Durable `preCall` boundary | **Compatible extension** | Eve wraps the entire harness action in one atomic [`"use step"` `turnStep`](https://github.com/vercel/eve/blob/a75496cf5072e44ecbbce5585fe50957281eecd1/packages/eve/src/execution/workflow-steps.ts#L115-L121), runs model/tools inside it ([source](https://github.com/vercel/eve/blob/a75496cf5072e44ecbbce5585fe50957281eecd1/packages/eve/src/execution/workflow-steps.ts#L307-L367)), and embeds the Session snapshot only in the returned step result ([source](https://github.com/vercel/eve/blob/a75496cf5072e44ecbbce5585fe50957281eecd1/packages/eve/src/execution/durable-session-store.ts#L186-L201)). No separate per-effect pre-call record was found. |
+| `preCall` state | **Compatible extension** | Eve has an in-flight Workflow step, but no inspected public or internal operation state with this meaning. |
+| `completed` state | **Aligned** | Eve durably records completed Workflow step results and replays them; item 18 applies the same principle to individual provider/tool results. |
+| `failed` state | **Compatible extension** | Eve emits step/turn/session failures, but does not expose the proposed unified operation record. |
+| `cancelled` state | **Compatible extension** | Eve converts turn cancellation to a returned result specifically so Workflow does not treat it as a retryable step failure ([source](https://github.com/vercel/eve/blob/a75496cf5072e44ecbbce5585fe50957281eecd1/packages/eve/src/execution/workflow-steps.ts#L70-L105)). Item 18 applies that principle at the finer operation scope. |
+| `parked` state | **Aligned** | Eve durably parks approvals, OAuth, questions, and subagents with no compute, then resumes where it stopped ([guide](https://github.com/vercel/eve/blob/a75496cf5072e44ecbbce5585fe50957281eecd1/docs/concepts/execution-model-and-durability.md#L49-L51)). Item 18 should reserve `parked` for an explicit no-effect wait, not use it for an ambiguous in-flight call. |
+| `outcomeUnknown` state | **Intentional divergence** | Eve exposes no matching settlement. An interrupted step re-runs, even if an external effect may already have happened; item 18 stops and records uncertainty instead. |
+| Completed-result memoization/replay | **Compatible extension** | Eve's Session snapshot is part of the Workflow step result, its atomic persistence boundary ([source](https://github.com/vercel/eve/blob/a75496cf5072e44ecbbce5585fe50957281eecd1/packages/eve/src/execution/durable-session-store.ts#L1-L16)). Item 18 memoizes a bounded normalized operation result and injects it back into Pi, rather than replaying the whole step. |
+| Idempotency classification/metadata | **Compatible extension** | Eve supplies Session/Turn/call identity but leaves effect idempotency to application code. Its first-party example sends an application key derived from Session and Turn and explicitly says approval and replay safety are different concerns ([guide](https://github.com/vercel/eve/blob/a75496cf5072e44ecbbce5585fe50957281eecd1/docs/patterns/multi-tenant-approvals.md#L86-L106)). No generic framework-provided per-effect idempotency contract was found. |
+| Default retry behavior | **Intentional divergence** | Eve automatically re-runs interrupted steps. Its test deliberately fails attempt 1 and proves attempt 2 commits ([fixture](https://github.com/vercel/eve/blob/a75496cf5072e44ecbbce5585fe50957281eecd1/packages/eve/src/internal/testing/durable-session-workflow.ts#L62-L89), [assertion](https://github.com/vercel/eve/blob/a75496cf5072e44ecbbce5585fe50957281eecd1/packages/eve/src/execution/durable-session-store.integration.test.ts#L67-L84)). Item 18 defaults ambiguous effects to no automatic retry. |
+| Crash recovery | **Intentional divergence** | Eve resumes from the last completed step and re-executes the incomplete one. Item 18 reuses proven completed operations, resumes explicit parked work, and otherwise terminates honestly as unknown. |
+| Provider calls | **Intentional divergence** | Eve keeps model invocation inside the retryable step and current source also performs up to three in-process attempts for classified transient model failures ([source](https://github.com/vercel/eve/blob/a75496cf5072e44ecbbce5585fe50957281eecd1/packages/eve/src/harness/tool-loop.ts#L225-L239), [retry loop](https://github.com/vercel/eve/blob/a75496cf5072e44ecbbce5585fe50957281eecd1/packages/eve/src/harness/tool-loop.ts#L2483-L2515)). Item 18 proposes no automatic provider retry in V1. |
+| Tool calls | **Intentional divergence** | Eve executes tool calls inside the step; a crash before step completion can repeat them. Eve documents that authored tools may re-run and requires idempotency or approval ([tools guide](https://github.com/vercel/eve/blob/a75496cf5072e44ecbbce5585fe50957281eecd1/docs/tools/overview.mdx#L46-L48)). Item 18 adds an individual tool boundary and refuses to repeat ambiguous calls. |
+| Durable pause/resume | **Aligned** | Eve parks at `session.waiting` and resumes from durable hooks ([HITL guide](https://github.com/vercel/eve/blob/a75496cf5072e44ecbbce5585fe50957281eecd1/docs/tools/human-in-the-loop.md#L96-L107)); its workflow branches on `cancelled`, `done`, `park`, and runtime-action waits ([source](https://github.com/vercel/eve/blob/a75496cf5072e44ecbbce5585fe50957281eecd1/packages/eve/src/execution/turn-workflow.ts#L64-L211)). Item 18's reuse of existing durable waits matches this model. |
+| Session owns durable execution state | **Aligned** | Eve carries the durable Session snapshot through Workflow step results; item 18 extends LLM Space's Host-provided, CAS-versioned Session Store. Both reject the in-memory agent loop as durable authority. |
+| Pi `Agent` remains loop owner | **Compatible extension** | Eve owns its own loop and hides Workflow primitives from authored code ([guide](https://github.com/vercel/eve/blob/a75496cf5072e44ecbbce5585fe50957281eecd1/docs/concepts/execution-model-and-durability.md#L45-L47)). LLM Space cannot copy that implementation because accepted [ADR 0001](../../docs/adr/0001-runtime-harness-over-pi-agent.md) assigns model/tool iteration to Pi while the Runtime Harness owns durability. Keeping Pi as loop owner preserves the analogous separation without claiming Eve compatibility. |
+| No workflow DSL | **Aligned** | Eve explicitly says authored code does not write Workflow primitives; its runtime layer owns them ([guide](https://github.com/vercel/eve/blob/a75496cf5072e44ecbbce5585fe50957281eecd1/docs/concepts/execution-model-and-durability.md#L45-L47)). Item 18 likewise adds an internal coordinator rather than an authored workflow language. |
+| No exactly-once claim | **Aligned** | Eve's documented interrupted-step re-execution is at-least-once behavior for effects, and its docs require application idempotency/approval. Item 18 is correct not to claim exactly-once. |
+| Claim that Eve already has a per-operation ledger or exactly-once effects | **Unsupported** | No first-party Eve source, test, or documentation inspected at either fixed point defines the proposed operation state machine or makes an exactly-once guarantee; the explicit interrupted-step rerun contract says the opposite. |
+
+## Changes needed before approval
+
+The main recommendation remains sound, but its wording and requirements should change in four places:
+
+1. **Call it a stricter divergence, not Eve parity.** State explicitly that Eve automatically re-runs an incomplete step, whereas V1 stops ambiguous provider/tool work as `outcomeUnknown`.
+2. **Separate three retry classes.** Requirements must distinguish (a) an in-process provider retry proven to have produced no accepted response/event, (b) durable restart after an uncommitted provider call, and (c) external tool-effect retry. V1 may keep all three disabled, but they must not be discussed as one policy; Eve currently enables (a) for transient model errors and re-executes the coarse step for (b)/(c).
+3. **Define `parked` narrowly.** It should mean an explicit, durably committed no-effect wait with a resume handle. A process disappearing after `preCall` is not parked; without a Host idempotency receipt it is `outcomeUnknown`.
+4. **Plan the idempotency handoff.** Internal classification alone cannot make external effects safely repeatable. A later safe-retry capability needs a stable key/receipt exposed to the executing provider/tool adapter. Eve's own guidance treats approval and application idempotency as separate safeguards. For V1's no-retry scope, record this as a deferred contract rather than implying metadata alone enables recovery.
+
+With those corrections, item 18 is a coherent LLM Space design: it borrows Eve's durable replay and wait model, retains the [ADR 0001](../../docs/adr/0001-runtime-harness-over-pi-agent.md) Pi/Runtime ownership split, and strengthens the existing Server rule that interrupted `runningModel`/`runningTools` work is unknown and never retried ([ADR 0002](../../docs/adr/0002-protected-local-server-protocol.md)).
+
+## Local evidence reviewed
+
+- [Item 18 discovery](../kaizen-loop/logs/2026-07-22-104048-durable-execution-v1-discovery.md)
+- [ADR 0001: Runtime Harness over Pi Agent](../../docs/adr/0001-runtime-harness-over-pi-agent.md)
+- [ADR 0002: protected local Server protocol](../../docs/adr/0002-protected-local-server-protocol.md)
+- [Prior Eve state and commit-failure research](./2026-07-17-eve-state-concurrency-and-commit-failure.md)
+- [Prior Eve state integration research](./2026-07-17-eve-state-integration.md)

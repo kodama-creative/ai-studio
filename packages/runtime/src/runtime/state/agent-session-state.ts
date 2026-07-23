@@ -12,6 +12,7 @@ import { assertRuntimeSessionStateValues } from "../harness/in-memory-session-st
 import type { AgentSessionContext } from "../../shared/agent-session-context";
 import type { CompiledAgentStateDefinition } from "../agent/agent-project-snapshot";
 import type {
+  RuntimeSessionMutation,
   RuntimeSessionStateEntry,
   RuntimeSessionStateValue,
   SessionStore,
@@ -123,31 +124,41 @@ export class AgentSessionState {
 
   async completeStep(
     toolResults: readonly ToolResultMessage[],
-    options: { deferred?: boolean; } = {}
+    options: {
+      deferred?: boolean;
+      durableMutations?: readonly RuntimeSessionMutation[];
+    } = {}
   ): Promise<void> {
     const transactionPromise = this._transaction;
     this._transaction = null;
-    if (!transactionPromise) { return; }
-    const transaction = await transactionPromise;
+    const transaction = transactionPromise ? await transactionPromise : null;
+    const mutations: RuntimeSessionMutation[] = [
+      ...(options.durableMutations ?? [])
+    ];
     if (
-      transaction.failed
-      || options.deferred
-      || toolResults.some(result => result.isError)
+      transaction
+      && !transaction.failed
+      && !options.deferred
+      && !toolResults.some(result => result.isError)
+      && this._definitions.size > 0
     ) {
-      return;
+      const values = this._stateEntries(transaction.values);
+      assertRuntimeSessionStateValues(values);
+      mutations.push({ type: "replaceState", values });
     }
-    if (this._definitions.size === 0) { return; }
-    const values = this._stateEntries(transaction.values);
-    assertRuntimeSessionStateValues(values);
+    if (mutations.length === 0) { return; }
     const store = this._sessionStore;
     if (!store) {
       throw new Error("Session State Store is unavailable");
     }
     try {
+      const expectedVersion = transaction?.expectedVersion
+        ?? (await store.load(this._context.id))?.version
+        ?? null;
       const session = await store.commit({
         sessionId: this._context.id,
-        expectedVersion: transaction.expectedVersion,
-        mutations: [{ type: "replaceState", values }]
+        expectedVersion,
+        mutations
       });
       await this._onCommitted?.(session);
     } catch (error) {

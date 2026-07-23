@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
@@ -90,11 +91,18 @@ export class LocalFileSystem implements FileSystem, ThreadStorage {
   async write(p: string, thread: Thread): Promise<void> {
     const real = this._resolve(p);
     await fs.mkdir(path.dirname(real), { recursive: true });
-    await fs.writeFile(
-      real,
-      JSON.stringify(normalizeThread(thread), null, 2),
-      "utf8"
-    );
+    const temporary = `${real}.${randomUUID()}.tmp`;
+    try {
+      await fs.writeFile(
+        temporary,
+        JSON.stringify(normalizeThread(thread), null, 2),
+        "utf8"
+      );
+      await fs.rename(temporary, real);
+    } catch (error) {
+      await fs.rm(temporary, { force: true });
+      throw error;
+    }
   }
 
   /**

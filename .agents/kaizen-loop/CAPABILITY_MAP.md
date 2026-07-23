@@ -1,7 +1,7 @@
 # LLM Space Capability Map
 
-- Last updated: 2026-07-21
-- Map status: refreshed through roadmap item 17 implementation, deterministic local Docker verification, and current Agent debugging parity acceptance. Items 12 through 16 are shipped under ADRs 0006-0009 where applicable; item 17 passes its local real-Docker gate but existing shipment policy still awaits a current-head CI pass, which the owner deferred for this loop, so item 10 remains dependency-blocked.
+- Last updated: 2026-07-22
+- Map status: refreshed through shipped roadmap item 18. Items 12 through 16 and 18 are shipped under ADRs 0006-0009 and 0011 where applicable; item 17 passes its local real-Docker gate but existing shipment policy still awaits a current-head CI pass, which the owner deferred, so item 10 remains dependency-blocked. Item 19 is now dependency-ready.
 - Evidence rule: entries marked `confirmed` cite current rendered-product or current-code evidence. Entries marked `stale` rely on previous logs or code paths not fully re-inspected in this loop. Entries marked `unknown` need a future product-surface check before they can drive a recommendation.
 
 ## First-Run Model Setup
@@ -120,12 +120,13 @@
 
 - Status: shipped core loop on the Desktop Runtime Harness
 - Freshness: confirmed
-- Last checked: 2026-07-16
+- Last checked: 2026-07-22
 - Evidence:
   - Current screenshots `03-example-thread-opened.png` and `06-restored-run-message-view.png` show `Run` enabled once a fallback model exists.
   - Current discovery screenshot `audits/2026-07-04-110944-core-capability-discovery/03-general-agent-open.png` shows the General Agent example ready to run with model, messages, and tool definitions.
   - `apps/desktop/src/components/thread-playground/stores/thread-store.ts` streams through `streamThread()`, folds reducer events into messages, and records completed runs.
   - `apps/desktop/src/components/thread-tabs/thread-tab-pane.tsx` wires a single Electrobun RPC transport into the active thread.
+  - A fresh real Electrobun CEF inspection on 2026-07-22 opened a blank Thread and its existing Run History surface through real Bun RPC. The page had no horizontal overflow or application console error; no model call was made. Run History remains the current terminal-state surface rather than a background-work dashboard.
 - Roadmap item 03 focused fixtures prove standalone and Agent Project manual, auto-once, and ReAct execution through Pi `AgentSession`; full validation passed 158 tests, all five TypeScript projects, repository lint, the browser-safe harness bundle, and renderer-only Vite build.
 - Boundary: one thread can run against its selected or fallback model, stream assistant/tool output, abort, and durably persist Runtime Run starts plus settled checkpoints through its Thread-owned Session Store record.
 - Explicit non-goals: batch runs, scheduled runs, provider health validation.
@@ -133,19 +134,25 @@
 
 ## Runtime Recovery And Replay
 
-- Status: shipped safe-boundary control-plane V1
+- Status: shipped crash-aware operation replay V1
 - Freshness: confirmed
-- Last checked: 2026-07-16
+- Last checked: 2026-07-23
 - Evidence:
   - `@llm-space/runtime/harness` exposes `recoverRuntimeSession()`, `claimRuntimeRunResume()`, and `replayRuntimeRunEvents()` over the existing Host-provided Session Store and ordered Run Journal.
   - Fresh-process fixtures reconstruct missing/idle Sessions and both `waitingForToolResults`/`waitingForContinue` waits without changing Run identity. Concurrent claims at one recovered version produce exactly one CAS winner.
   - Persisted `runningModel` and `runningTools` fixtures atomically transition to terminal `outcomeUnknown`; subsequent resume claims fail, while the terminal transition remains replayable as an ordered Host-facing control-plane event.
   - Replay fixtures confirm stable global journal sequence, exclusive cursor semantics, no duplicate delivery, immutable output, and rejection of cross-session, cross-Run, non-entry, future, and unsupported-version cursors.
   - Desktop coordinator/store fixtures persist recovered `outcomeUnknown` before returning and prove the Pi/transport path is never invoked for interrupted work. Existing settled manual reload/continuation remains green.
-  - Item-04 validation passed 168 repository tests, all five TypeScript projects, focused/repository lint, a 22.48 KB browser-safe harness bundle, and renderer-only Vite build. Standards and Spec re-reviews report zero findings.
-- Boundary: a Host can inspect one durable Session after process loss, keep safe waits resumable under the same Runtime Run, claim one resume via Session Store CAS, terminalize unsafe in-flight control state honestly, and replay one Run's existing journal after a validated Session/Run-scoped cursor. Principal/transport authorization happens before the Host supplies that scope.
-- Explicit non-goals: provider/tool retry, effect idempotency or exactly-once, distributed leases/heartbeats, Server or reconnect transport, identity/permission policy, arbitrary event payload storage, canonical observability Trace, compaction, branch UI, or background execution.
-- Visible gaps: the Local Server now persists and authorizes its own Pi/control event cursor, but no item-18 idempotency/pre-call/completion protocol can recover external effects beyond terminal `outcomeUnknown`; harness replay still exposes control-plane journal entries rather than token/tool payload traces.
+  - Runtime Session schema v2 adds one Run → Step → operation ledger around Pi's existing provider and executable-tool seams. Operations have stable identity, request/result fingerprints, bounded normalized replay material, retained size/timestamps, and `preCall`, `completed`, `failed`, `cancelled`, `parked`, or `outcomeUnknown` settlement; Pi `Agent` remains the sole ReAct-loop owner.
+  - A Step records its exact pre-provider Pi transcript message count. Hosts persist the public transcript before checkpoint, and Desktop/Server recovery trims only to that durable count before injecting a proven completion. It never scans for equal message content or truncates repeated historical responses heuristically.
+  - Desktop Direct/Sandbox and stateless/stateful Agent Project execution serialize Runtime Session plus transcript field updates through the existing owning Thread file. Server queues recoverable Runs from its atomic repository on startup. Fresh-controller/fresh-repository tests prove completed provider replay without adapter redispatch; ambiguous pre-calls become terminal `outcomeUnknown`.
+  - Tool terminals commit in one transaction with the existing shared Session-state replacement. Known thrown failures and normal results explicitly flagged `isError: true` are recorded as `failed`, replay the same error flag through Pi, and still let ReAct choose its next action; an unknown sibling prevents Pi from receiving a partial batch.
+  - Parked operations retain stable park/schema identity. Host-authenticated expected-version CAS admits one winner, while request fingerprints are checked both before the CAS transition and immediately before dispatch. Wrong input does not consume the park; post-resume drift is cancelled before side effects.
+  - Replay is limited to 1 MiB per operation and 4 MiB per active Step, drops payload bytes after checkpoint while retaining metadata, and rejects old Session schema, non-JSON, oversize, mismatch, or completion-write uncertainty without reset or automatic retry.
+  - Item-18 verification passed Runtime 167 tests with one opt-in Docker acceptance skip, Server 27, Desktop 107, Core/CLI/examples 64, all TypeScript configurations, repository lint, diff checks, renderer-only Vite, and a fresh real CEF 1280×800 Blank Thread/model-selector/Run-History guardrail. Standards review found no hard violation; large ledger/store modules and repeated canonical JSON remain explicit refactoring candidates.
+- Boundary: a Host can recover safe waits, replay only durably completed provider/tool results, resume one exact parked operation through CAS, or stop ambiguous effects as `outcomeUnknown`, while preserving one Runtime Run and one Host-owned Session/transcript authority. Principal/transport authorization remains outside Runtime.
+- Explicit non-goals: automatic retry of ambiguous provider/tool effects, authored idempotency declarations, exactly-once, distributed leases/heartbeats, workflow DSL, approval policy/UI, raw stream retention, generic operation inspector, canonical Trace, compaction, or background scheduling.
+- Visible gaps: V1 deliberately has no trusted adapter idempotency evidence, distributed retry policy, approval policy, generic operation inspector, migration/reset flow for schema v1 Sessions, or live paid-provider crash injection. Imported Trace workbenches are explicitly outside item 18 and continue to use their trace-owned persistence path until canonical Trace integration in item 32.
 
 ## Trusted Session Context And Structured State
 
@@ -257,7 +264,7 @@
   - Final item-05 acceptance passed 18 focused tests, 171 repository tests, all five TypeScript projects, touched and repository lint, browser-safe runtime/harness bundles, renderer-only Vite build, `git diff --check`, and Standards/Spec re-review with no remaining findings.
 - Boundary: a filesystem-authored Agent must define static model/reasoning defaults in `agent.ts`, plus instructions, TypeScript/JavaScript tools, and skills. Trusted compilation returns an immutable executable snapshot with an inspectable artifact identity; sessions may persistently override model/reasoning, and Desktop standalone plus Project Threads execute/debug through the same Runtime Harness while retaining editable messages and grouped checkpoint history. Each Desktop Thread is its Session Store and sole durable transcript owner; recovery/replay operates only on existing control-plane state.
 - Explicit non-goals: serialized artifact files/registries, SBOM/signing/attestation, dynamic model resolvers, automatic compaction/session budgets, Server Session Store migration, filesystem/database/cloud persistence adapters, external-effect retry or exactly-once claims, distributed workflow durability, channels, schedules, sandbox provisioning, subagents, public plugin SDK, dynamic third-party loading, or separate Desktop Builder/Target Agent model.
-- Visible gaps: Studio Server profiles, artifact/source migrations after a real schema evolution, source-declared environment variables, external-operation idempotency/recovery, compaction, and canonical Trace remain later roadmap capabilities. Isolated CEF did not execute a paid live provider; deterministic Pi/Session Store fixtures cover runtime behavior. Trusted project tools remain unsandboxed. Pi has no native durable pause-before-tool state, so settled manual mode remains an LLM Space-owned deferred-result policy over Pi `Agent`.
+- Visible gaps: Studio Server profiles, artifact/source migrations after a real schema evolution, source-declared environment variables, trusted adapter idempotency evidence, compaction, and canonical Trace remain later roadmap capabilities. Isolated CEF did not execute a paid live provider; deterministic Pi/Session Store fixtures cover runtime behavior. Trusted project tools remain unsandboxed. Pi has no native durable pause-before-tool state, so settled manual mode remains an LLM Space-owned deferred-result policy over Pi `Agent`.
 
 ## Independent Agent Serving
 
@@ -316,7 +323,7 @@
 
 - Status: shipped Portable Agent Actions V1
 - Freshness: confirmed
-- Last checked: 2026-07-15
+- Last checked: 2026-07-22
 - Evidence:
   - `packages/runtime/src/public/tools` exposes branded `defineTool()` definitions with path-owned identity, typed input, optional output validation, a bounded execution context, and JSON-compatible results; raw Pi `AgentTool` exports are rejected.
   - `packages/runtime/src/public/connections` exposes branded `defineMcpClientConnection()` definitions with Streamable HTTP transport, Bun-only auth/header callbacks, and required exact allowlists. Discovery remains offline and the trusted compiler owns callbacks and fingerprints.
@@ -326,6 +333,7 @@
   - Fresh CEF screenshots `03-unavailable-900x700.png`, `04-schema-drift-900x700.png`, and `05-schema-synced-900x700.png` show connection-local retry, retained descriptors, explicit drift blocking, and Sync recovery at narrow size with no document overflow.
   - Fresh restart screenshot `06-outcome-unknown-900x700.png` shows a persisted remote pre-call attempt without output rendering `Outcome unknown` with an explicit Retry; `07-retry-warning-900x700.png` shows the guarded retry warning that the previous remote call may have completed and retry can repeat side effects.
   - The same audit found only Vite/React development console information, no application errors, and native button semantics/focusability for source chips, Retry, and Sync.
+  - Current code inspection on 2026-07-22 confirms this manual remote-action path persists only a per-call `started` marker before MCP dispatch. It is a useful guarded-retry precedent, not a general Runtime operation ledger: automatic Agent tools, provider calls, result memoization, and crash-point recovery remain separate.
   - Final closure validation passes 131 Bun tests, runtime/core/CLI/example/Desktop TypeScript, Vite production build, and `git diff --check`. Canary packaging reaches code signing and stops only because `ELECTROBUN_DEVELOPER_ID` is unavailable. The final parallel Standards and Spec reviews report zero findings.
 - Boundary: a trusted Agent Project can package path-owned local TypeScript tools and flat source-declared Streamable HTTP MCP connections. Opening a Project Thread activates allowlisted remote descriptors without Settings or per-Thread selection; all Project actions are source-owned/read-only, remote names are qualified exactly, remote calls remain visibly manual, safe provenance/attempts persist, outcome-unknown retry is explicit and warns about duplicate side effects, and schema/connection drift blocks new runs until Sync.
 - Explicit non-goals: no project stdio, OAuth browser/refresh/account lifecycle, dynamic connection search, blocklists, `tools/listChanged`, automatic project-MCP calls, authored approval policy, OpenAPI connections, MCP resources/prompts, sandbox, or public plugin SDK.
@@ -497,7 +505,7 @@
 - Roadmap item 03 confirms incomplete results block only same-Run continuation; execution-affecting edits may atomically supersede and branch from an earlier boundary without fabricating results for the old Run.
 - Roadmap item 04 confirms safe waits resume only through a one-winner CAS claim; an interrupted model/tool operation is terminalized as `outcomeUnknown` and never enters Pi/transport automatically.
 - Boundary: ordinary Threads and Agent Project Threads can receive model tool calls, run visible executable tools manually, edit/mark tool results, continue after all results are ready, or opt into automatic one-step/ReAct behavior. Pi `AgentSession` owns the loop and deferred state for both surfaces; the Desktop Thread remains the sole durable transcript and Session Store authority.
-- Explicit non-goals: no per-tool permission policy, durable approve/deny state, sandbox, background tool queue, crash-safe side-effect replay, or multi-agent orchestration.
+- Explicit non-goals: no per-tool permission policy, durable approve/deny state, background tool queue, automatic retry of ambiguous side effects, or multi-agent orchestration.
 - Visible gaps: tool safety is a global/manual-vs-auto execution choice rather than authored per-tool policy; trusted project tools remain unsandboxed; error marking is a compact result toggle rather than a dedicated denial record; live paid-provider continuation remains unaudited.
 
 ## MCP Server Integration

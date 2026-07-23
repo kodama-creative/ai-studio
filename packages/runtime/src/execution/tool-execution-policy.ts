@@ -17,6 +17,7 @@ export class ToolExecutionPolicy {
   private _toolNames = new Set<string>();
   private _staticallyDeferredToolNames = new Set<string>();
   private readonly _deferredCalls = new Map<string, DeferredToolCall>();
+  private readonly _resultErrors = new Set<string>();
 
   constructor({
     tools,
@@ -60,6 +61,19 @@ export class ToolExecutionPolicy {
     return this._staticallyDeferredToolNames.has(name);
   }
 
+  executesAutomatically(name: string, mode: RuntimeExecutionMode): boolean {
+    const tool = this._tools.find(item => item.definition.name === name);
+    return Boolean(
+      tool?.kind === "executable"
+      && (mode !== "manual" || tool.manualAutomatic)
+    );
+  }
+
+  consumeResultError(toolCallId: string): boolean | undefined {
+    if (!this._resultErrors.delete(toolCallId)) { return undefined; }
+    return true;
+  }
+
   toolsForMode(mode: RuntimeExecutionMode): AgentTool[] {
     return this._tools.map(tool => ({
       ...tool.definition,
@@ -81,11 +95,15 @@ export class ToolExecutionPolicy {
           this._defer(toolCallId, tool.definition.name, input);
           return _deferredResult();
         }
+        const { isError, ...result } = outcome.result;
+        if (isError === true) {
+          this._resultErrors.add(toolCallId);
+        }
         return mode === "autoOnce"
-          ? ({ ...outcome.result, terminate: true } as Awaited<
+          ? ({ ...result, terminate: true } as Awaited<
             ReturnType<AgentTool["execute"]>
           >)
-          : outcome.result;
+          : result as Awaited<ReturnType<AgentTool["execute"]>>;
       }
     })) as AgentTool[];
   }

@@ -10,6 +10,7 @@ import {
   createProvider,
   type Model
 } from "@earendil-works/pi-ai";
+import { LocalFileSystem } from "@llm-space/core/server";
 import {
   InMemorySessionStore,
   type RuntimeRunConfigurationSnapshot,
@@ -26,6 +27,7 @@ import type {
   BuiltinTool,
   McpTool,
   ProjectTool,
+  Thread,
   ThreadAgentRuntimeProvenance,
   ThreadServerRunLineage
 } from "@llm-space/core";
@@ -384,7 +386,8 @@ describe("StreamThreadController Agent Project runtime", () => {
     );
 
     const persisted = await manager.readThread(opened.id, threadId);
-    expect(committed?.version).toBe(begun.version + 2);
+    expect(committed?.version).toBeGreaterThan(begun.version + 2);
+    expect(committed?.snapshot.operationLedger?.steps).toHaveLength(2);
     expect((persisted.thread.runtimeSession as StoredRuntimeSession)
       .snapshot.state?.values["desktop.counter"]?.value).toEqual({
       count: 1,
@@ -651,7 +654,7 @@ describe("StreamThreadController Agent Project runtime", () => {
     expect(responses.at(-1)).toEqual({ type: "error", message });
   });
 
-  test("streams a complete Pi Agent ReAct run without Bun-side transcript persistence", async () => {
+  test("persists a complete Pi Agent ReAct transcript before checkpoint", async () => {
     const { models, manager, opened, threadId } = await _fixture({
       instructions: "Use echo.\n",
       projectTool: true
@@ -712,7 +715,10 @@ describe("StreamThreadController Agent Project runtime", () => {
     expect(events).toContain("tool_execution_end");
     expect(events.at(-1)).toBe("done");
     const persisted = await manager.readThread(opened.id, threadId);
-    expect(persisted.thread.context?.messages ?? []).toEqual([]);
+    expect(persisted.thread.context?.messages?.map(message => message.role))
+      .toEqual(["user", "assistant", "assistant"]);
+    expect((persisted.thread.runtimeSession as StoredRuntimeSession)
+      .snapshot.operationLedger?.steps.length).toBeGreaterThan(0);
   });
 
   test("runs a Desktop Thread model override within Host policy", async () => {
@@ -913,9 +919,33 @@ describe("StreamThreadController standalone Runtime Harness", () => {
   ] as const)(
     "uses Pi Agent ownership for %s execution",
     async (executionMode, expectedExecutions, expectedAssistantStarts) => {
-      const models = _models();
+      let providerDispatches = 0;
+      const models = _models(undefined, () => { providerDispatches += 1; });
       let executions = 0;
       let assistantStarts = 0;
+      let completedSession: StoredRuntimeSession | undefined;
+      const root = await mkdtemp(path.join(
+        tmpdir(),
+        "llm-space-standalone-runtime-"
+      ));
+      roots.push(root);
+      const localFs = new LocalFileSystem(root);
+      const threadPath = `${executionMode}.json`;
+      const runtimeSession = await _startedDesktopRun(executionMode);
+      const durableThread: Thread = {
+        model: { provider: "fake", id: "fake-model" },
+        context: {
+          systemPrompt: "Use echo.",
+          messages: [{
+            id: "user-one",
+            role: "user",
+            content: [{ type: "text", text: "hello" }]
+          }],
+          tools: []
+        },
+        runtimeSession
+      };
+      await localFs.write(threadPath, durableThread);
       const controller = new StreamThreadController(
         _modelManager(models),
         { capture: () => undefined } as never,
@@ -926,7 +956,10 @@ describe("StreamThreadController standalone Runtime Harness", () => {
             executions += 1;
             return Promise.resolve({ contentText: "hello", isError: false });
           }
-        } as never
+        } as never,
+        undefined,
+        undefined,
+        localFs
       );
       const tool: BuiltinTool = {
         type: "builtin",
@@ -939,25 +972,26 @@ describe("StreamThreadController standalone Runtime Harness", () => {
         }
       };
 
+      const request = {
+        model: { provider: "fake", id: "fake-model" },
+        context: {
+          systemPrompt: "Use echo.",
+          messages: [
+            {
+              role: "user" as const,
+              content: [{ type: "text" as const, text: "hello" }],
+              timestamp: Date.now()
+            }
+          ],
+          tools: [tool],
+          sourceTools: [tool]
+        }
+      };
       await controller.run(
         {
           streamId: `standalone-${executionMode}`,
-          runtime: { type: "desktopThread", executionMode },
-          request: {
-            model: { provider: "fake", id: "fake-model" },
-            context: {
-              systemPrompt: "Use echo.",
-              messages: [
-                {
-                  role: "user",
-                  content: [{ type: "text", text: "hello" }],
-                  timestamp: Date.now()
-                }
-              ],
-              tools: [tool],
-              sourceTools: [tool]
-            }
-          }
+          runtime: { type: "desktopThread", executionMode, threadPath },
+          request
         },
         message => {
           if (
@@ -967,14 +1001,80 @@ describe("StreamThreadController standalone Runtime Harness", () => {
           ) {
             assistantStarts += 1;
           }
+          if (
+            message.type === "runtimeSession"
+            && message.runtimeSession.snapshot.operationLedger?.steps.some(
+              step => step.state === "active"
+                && step.operations.some(operation =>
+                  operation.kind === "provider"
+                  && operation.state === "completed"
+                  && operation.replay)
+            )
+          ) {
+            completedSession = message.runtimeSession;
+          }
         }
       );
 
       expect(executions).toBe(expectedExecutions);
       expect(assistantStarts).toBe(expectedAssistantStarts);
+      const persisted = await localFs.read(threadPath);
+      expect((persisted.runtimeSession as StoredRuntimeSession)
+        .snapshot.operationLedger?.steps.length).toBeGreaterThan(0);
+      expect(persisted.context?.messages?.at(-1)?.role).toBe("assistant");
+      if (executionMode === "manual") {
+        expect(completedSession).toBeDefined();
+        await localFs.write(threadPath, {
+          ...durableThread,
+          runtimeSession: completedSession
+        });
+        const restarted = new StreamThreadController(
+          _modelManager(models),
+          { capture: () => undefined } as never,
+          undefined,
+          undefined,
+          {
+            call: async () => {
+              executions += 1;
+              return Promise.resolve({ contentText: "hello", isError: false });
+            }
+          } as never,
+          undefined,
+          undefined,
+          localFs
+        );
+        await restarted.run({
+          streamId: "standalone-manual-restart",
+          runtime: { type: "desktopThread", executionMode, threadPath },
+          request
+        }, () => undefined);
+        expect(providerDispatches).toBe(1);
+      }
     }
   );
 });
+
+async function _startedDesktopRun(
+  executionMode: "autoOnce" | "manual" | "react"
+): Promise<StoredRuntimeSession> {
+  const store = new InMemorySessionStore();
+  return store.commit({
+    sessionId: `session-${executionMode}`,
+    expectedVersion: null,
+    mutations: [{
+      type: "startRun",
+      runId: `run-${executionMode}`,
+      configuration: {
+        id: `configuration-${executionMode}`,
+        agentSnapshotFingerprint: "desktop-thread-runtime-v1",
+        contextFingerprint: "desktop-test-context",
+        executionMode,
+        model: { provider: "fake", id: "fake-model" },
+        toolConfigurationFingerprint: "desktop-test-tools"
+      }
+    }]
+  });
+}
 
 async function _fixture({
   dynamicInstructions = false,
@@ -1189,7 +1289,8 @@ function _models(
   toolCall: { arguments: Record<string, unknown>; name: string; } = {
     name: "echo",
     arguments: { text: "hello" }
-  }
+  },
+  onStream: () => void = () => undefined
 ) {
   const model: Model<"fake"> = {
     id: "fake-model",
@@ -1209,10 +1310,14 @@ function _models(
     name: "Debug Model"
   };
   const api = {
-    stream: (_model: Model<Api>, context: Context) =>
-      _stream(context, toolCall),
-    streamSimple: (_model: Model<Api>, context: Context) =>
-      _stream(context, toolCall)
+    stream: (_model: Model<Api>, context: Context) => {
+      onStream();
+      return _stream(context, toolCall);
+    },
+    streamSimple: (_model: Model<Api>, context: Context) => {
+      onStream();
+      return _stream(context, toolCall);
+    }
   };
   const provider = createProvider({
     id: "fake",

@@ -429,7 +429,7 @@ describe("InMemorySessionStore", () => {
     expect(completed).toMatchObject({
       version: 4,
       snapshot: {
-        schemaVersion: 1,
+        schemaVersion: RUNTIME_SESSION_SCHEMA_VERSION,
         id: "session-one",
         activeRunId: null,
         runs: [

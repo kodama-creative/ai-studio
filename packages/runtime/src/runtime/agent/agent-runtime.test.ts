@@ -372,6 +372,31 @@ describe("AgentRuntime", () => {
     expect(session.messages[2]).toMatchObject({ isError: true });
     expect((await store.load("recoverable-tool-error"))?.snapshot.state)
       .toBeUndefined();
+
+    const returnedErrorStore = new InMemorySessionStore();
+    const returnedErrorRuntime = new AgentRuntime({
+      models: _reactModels(),
+      project: {
+        ..._project(),
+        tools: [{
+          ..._tool("echo"),
+          async execute() {
+            return {
+              content: [{ type: "text" as const, text: "known error" }],
+              details: {},
+              isError: true
+            };
+          }
+        }]
+      }
+    });
+    const returnedErrorSession = await returnedErrorRuntime.createSession({
+      capabilityPolicy: _policy(),
+      context: _context("returned-tool-error"),
+      sessionStore: returnedErrorStore
+    });
+    await returnedErrorSession.prompt("hello");
+    expect(returnedErrorSession.messages[2]).toMatchObject({ isError: true });
   });
 
   test("keeps manual placeholders internal and continues from resolved results", async () => {

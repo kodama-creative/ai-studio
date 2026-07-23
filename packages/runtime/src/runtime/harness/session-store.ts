@@ -1,6 +1,11 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 
 import type {
+  RuntimeDurableOperationLedgerSnapshot,
+  RuntimeDurableOperationPark,
+  RuntimeDurableOperationReplayEnvelope
+} from "./durable-operation";
+import type {
   RuntimeRunSnapshot,
   RuntimeRunState,
   RuntimeStructuredOutputResult
@@ -12,7 +17,7 @@ import type {
 } from "../../shared/agent-definition";
 import type { RuntimeExecutionMode } from "../../shared/runtime-execution-mode";
 
-export const RUNTIME_SESSION_SCHEMA_VERSION = 1 as const;
+export const RUNTIME_SESSION_SCHEMA_VERSION = 2 as const;
 export const RUNTIME_SESSION_STATE_SCHEMA_VERSION = 1 as const;
 export const MAX_SESSION_STATE_SLOTS = 64;
 export const MAX_SESSION_STATE_SLOT_BYTES = 64 * 1024;
@@ -107,6 +112,7 @@ export interface RuntimeSessionSnapshot {
     Record<string, RuntimeTurnCapabilitySnapshot>
   >;
   readonly state?: RuntimeSessionStateSnapshot;
+  readonly operationLedger?: RuntimeDurableOperationLedgerSnapshot;
 }
 
 export type RuntimeRunJournalEntry =
@@ -155,6 +161,42 @@ export type RuntimeRunJournalEntry =
     readonly sequence: number;
     readonly sessionVersion: number;
     readonly type: "sessionStateReplaced";
+  }
+  | {
+    readonly operationId: string;
+    readonly parkId: string;
+    readonly runId: string;
+    readonly sequence: number;
+    readonly sessionVersion: number;
+    readonly stepId: string;
+    readonly type: "operationResumed";
+  }
+  | {
+    readonly operationId: string;
+    readonly requestFingerprint: string;
+    readonly runId: string;
+    readonly sequence: number;
+    readonly sessionVersion: number;
+    readonly state: "cancelled" | "completed" | "failed" | "outcomeUnknown";
+    readonly stepId: string;
+    readonly type: "operationSettled";
+  }
+  | {
+    readonly operationId: string;
+    readonly requestFingerprint: string;
+    readonly runId: string;
+    readonly sequence: number;
+    readonly sessionVersion: number;
+    readonly state: "parked" | "preCall";
+    readonly stepId: string;
+    readonly type: "operationStarted";
+  }
+  | {
+    readonly runId: string;
+    readonly sequence: number;
+    readonly sessionVersion: number;
+    readonly stepId: string;
+    readonly type: "operationStepCheckpointed";
   };
 
 export interface StoredRuntimeSession {
@@ -174,6 +216,40 @@ export type RuntimeSessionMutation =
     readonly continuationFingerprint: string;
     readonly runId: string;
     readonly type: "recordCheckpoint";
+  }
+  | {
+    readonly kind: "provider" | "tool";
+    readonly operationId: string;
+    readonly park?: Omit<RuntimeDurableOperationPark, "parkedSessionVersion">;
+    readonly provider?: string;
+    readonly requestFingerprint: string;
+    readonly runId: string;
+    readonly stepId: string;
+    readonly stepSequence: number;
+    readonly toolCallId?: string;
+    readonly transcriptMessageCount: number;
+    readonly type: "startOperation";
+  }
+  | {
+    readonly operationId: string;
+    readonly parkId: string;
+    readonly requestFingerprint: string;
+    readonly resumeSchemaFingerprint: string;
+    readonly runId: string;
+    readonly type: "resumeOperation";
+  }
+  | {
+    readonly operationId: string;
+    readonly replay?: RuntimeDurableOperationReplayEnvelope;
+    readonly requestFingerprint: string;
+    readonly runId: string;
+    readonly state: "cancelled" | "completed" | "failed" | "outcomeUnknown";
+    readonly type: "settleOperation";
+  }
+  | {
+    readonly runId: string;
+    readonly stepId: string;
+    readonly type: "checkpointOperationStep";
   }
   | {
     readonly runId: string;

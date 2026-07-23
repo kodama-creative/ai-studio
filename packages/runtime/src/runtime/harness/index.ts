@@ -1,3 +1,26 @@
+export {
+  MAX_DURABLE_OPERATION_REPLAY_BYTES,
+  MAX_DURABLE_STEP_REPLAY_BYTES,
+  RUNTIME_DURABLE_OPERATION_STATES,
+  RUNTIME_OPERATION_LEDGER_SCHEMA_VERSION,
+  type RuntimeDurableOperationLedgerSnapshot,
+  type RuntimeDurableOperationPark,
+  type RuntimeDurableOperationReplayEnvelope,
+  type RuntimeDurableOperationSnapshot,
+  type RuntimeDurableOperationState,
+  type RuntimeDurableStepSnapshot
+} from "./durable-operation";
+export {
+  DurableOperationFingerprintMismatchError
+} from "./durable-operation-fingerprint-mismatch-error";
+export {
+  DurableOperationOutcomeUnknownError
+} from "./durable-operation-outcome-unknown-error";
+export { DurableOperationParkedError } from "./durable-operation-parked-error";
+export {
+  type DurableOperationResumeClaim,
+  resumeDurableOperation
+} from "./durable-operation-resume";
 export { InMemorySessionStore } from "./in-memory-session-store";
 export {
   isTerminalRuntimeRunState,
@@ -46,3 +69,6 @@ export {
   SessionStoreInvariantError,
   type StoredRuntimeSession
 } from "./session-store";
+export {
+  UnsupportedRuntimeSessionSchemaError
+} from "./unsupported-runtime-session-schema-error";

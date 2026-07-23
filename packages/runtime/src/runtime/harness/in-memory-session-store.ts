@@ -1,5 +1,13 @@
 import { deriveCapabilitySnapshotFingerprint } from "./derive-capability-snapshot-fingerprint";
 import { deriveInstructionSnapshotContent } from "./derive-instruction-snapshot-content";
+import {
+  MAX_DURABLE_OPERATION_REPLAY_BYTES,
+  MAX_DURABLE_STEP_REPLAY_BYTES,
+  RUNTIME_DURABLE_OPERATION_STATES,
+  RUNTIME_OPERATION_LEDGER_SCHEMA_VERSION,
+  type RuntimeDurableOperationSnapshot,
+  type RuntimeDurableStepSnapshot
+} from "./durable-operation";
 import { immutableSnapshot } from "./immutable-snapshot";
 import {
   isTerminalRuntimeRunState,
@@ -25,6 +33,8 @@ import {
   SessionStoreInvariantError,
   type StoredRuntimeSession
 } from "./session-store";
+import { sha256 } from "./sha256";
+import { UnsupportedRuntimeSessionSchemaError } from "./unsupported-runtime-session-schema-error";
 
 const CHECKPOINT_STATES = new Set([
   "waitingForToolResults",
@@ -36,6 +46,7 @@ const CHECKPOINT_STATES = new Set([
   "outcomeUnknown"
 ]);
 const RUN_STATES = new Set<string>(RUNTIME_RUN_STATES);
+const OPERATION_STATES = new Set<string>(RUNTIME_DURABLE_OPERATION_STATES);
 
 export class InMemorySessionStore implements SessionStore {
   private readonly _sessions = new Map<string, StoredRuntimeSession>();
@@ -58,6 +69,7 @@ export class InMemorySessionStore implements SessionStore {
     if (stored) {
       await _assertInstructionSnapshotIntegrity(stored.snapshot);
       await _assertCapabilitySnapshotIntegrity(stored.snapshot);
+      await _assertOperationReplayIntegrity(stored.snapshot);
     }
     return Promise.resolve(stored ? immutableSnapshot(stored) : null);
   }
@@ -83,12 +95,16 @@ export class InMemorySessionStore implements SessionStore {
           }
         });
       }
+      if (mutation.type === "settleOperation" && mutation.replay) {
+        await _assertReplayEnvelopeIntegrity(mutation.replay);
+      }
     }
 
     let current = this._sessions.get(input.sessionId);
     if (current) {
       await _assertInstructionSnapshotIntegrity(current.snapshot);
       await _assertCapabilitySnapshotIntegrity(current.snapshot);
+      await _assertOperationReplayIntegrity(current.snapshot);
       current = this._sessions.get(input.sessionId);
     }
     const actualVersion = current?.version ?? null;
@@ -180,7 +196,370 @@ function _applyMutation({
     _recordTurnCapabilities({ journal, mutation, sessionVersion, snapshot });
     return;
   }
+  if (mutation.type === "startOperation") {
+    _startOperation({ journal, mutation, sessionVersion, snapshot });
+    return;
+  }
+  if (mutation.type === "settleOperation") {
+    _settleOperation({ journal, mutation, sessionVersion, snapshot });
+    return;
+  }
+  if (mutation.type === "checkpointOperationStep") {
+    _checkpointOperationStep({ journal, mutation, sessionVersion, snapshot });
+    return;
+  }
+  if (mutation.type === "resumeOperation") {
+    _resumeOperation({ journal, mutation, sessionVersion, snapshot });
+    return;
+  }
   _recordCheckpoint({ journal, mutation, sessionVersion, snapshot });
+}
+
+function _resumeOperation({
+  journal,
+  mutation,
+  sessionVersion,
+  snapshot
+}: {
+  journal: RuntimeRunJournalEntry[];
+  mutation: Extract<RuntimeSessionMutation, { type: "resumeOperation"; }>;
+  sessionVersion: number;
+  snapshot: RuntimeSessionSnapshot;
+}): void {
+  const ledger = snapshot.operationLedger;
+  const stepIndex = ledger?.steps.findIndex(step =>
+    step.operations.some(operation => operation.id === mutation.operationId))
+  ?? -1;
+  const step = ledger?.steps[stepIndex];
+  const operationIndex = step?.operations.findIndex(
+    operation => operation.id === mutation.operationId
+  ) ?? -1;
+  const operation = step?.operations[operationIndex];
+  if (
+    !ledger
+    || !step
+    || operation?.runId !== mutation.runId
+    || operation.state !== "parked"
+    || !operation.park
+  ) {
+    throw new SessionStoreInvariantError(
+      `Durable operation ${mutation.operationId} is not parked in Runtime Run ${mutation.runId}`
+    );
+  }
+  if (
+    operation.park.parkId !== mutation.parkId
+    || operation.park.resumeSchemaFingerprint
+    !== mutation.resumeSchemaFingerprint
+  ) {
+    throw new SessionStoreInvariantError(
+      `Durable operation ${mutation.operationId} park identity changed`
+    );
+  }
+  if (operation.requestFingerprint !== mutation.requestFingerprint) {
+    throw new SessionStoreInvariantError(
+      `Durable operation ${mutation.operationId} request fingerprint changed`
+    );
+  }
+  const operations = [...step.operations];
+  const { park: _park, ...resumed } = operation;
+  operations[operationIndex] = { ...resumed, state: "preCall" };
+  const steps = [...ledger.steps];
+  steps[stepIndex] = { ...step, operations };
+  (snapshot as { operationLedger?: RuntimeSessionSnapshot["operationLedger"]; })
+    .operationLedger = { ...ledger, steps };
+  journal.push({
+    type: "operationResumed",
+    sequence: journal.length + 1,
+    sessionVersion,
+    runId: mutation.runId,
+    stepId: step.id,
+    operationId: mutation.operationId,
+    parkId: mutation.parkId
+  });
+}
+
+function _startOperation({
+  journal,
+  mutation,
+  sessionVersion,
+  snapshot
+}: {
+  journal: RuntimeRunJournalEntry[];
+  mutation: Extract<RuntimeSessionMutation, { type: "startOperation"; }>;
+  sessionVersion: number;
+  snapshot: RuntimeSessionSnapshot;
+}): void {
+  _assertId("Runtime Run", mutation.runId);
+  _assertId("Durable Step", mutation.stepId);
+  _assertId("Durable operation", mutation.operationId);
+  _assertSha256("Operation request fingerprint", mutation.requestFingerprint);
+  const run = snapshot.runs.find(item => item.id === mutation.runId);
+  if (!run || snapshot.activeRunId !== mutation.runId) {
+    throw new SessionStoreInvariantError(
+      `Runtime Run ${mutation.runId} is not active for durable operation ${mutation.operationId}`
+    );
+  }
+  if (
+    !Number.isSafeInteger(mutation.stepSequence)
+    || mutation.stepSequence < 1
+  ) {
+    throw new SessionStoreInvariantError(
+      "Durable Step sequence must be a positive safe integer"
+    );
+  }
+  if (
+    !Number.isSafeInteger(mutation.transcriptMessageCount)
+    || mutation.transcriptMessageCount < 0
+  ) {
+    throw new SessionStoreInvariantError(
+      "Durable Step transcript boundary must be a non-negative safe integer"
+    );
+  }
+  if (mutation.kind === "provider") {
+    _assertId("Operation provider", mutation.provider ?? "");
+    if (mutation.toolCallId !== undefined) {
+      throw new SessionStoreInvariantError(
+        "Provider operation cannot contain a tool-call identity"
+      );
+    }
+  } else {
+    _assertId("Operation tool call", mutation.toolCallId ?? "");
+    if (mutation.provider !== undefined) {
+      throw new SessionStoreInvariantError(
+        "Tool operation cannot contain a provider identity"
+      );
+    }
+  }
+  if (mutation.park) {
+    _assertId("Operation park", mutation.park.parkId);
+    if (typeof mutation.park.reason !== "string") {
+      throw new SessionStoreInvariantError("Operation park reason must be text");
+    }
+    _assertSha256(
+      "Operation resume schema fingerprint",
+      mutation.park.resumeSchemaFingerprint
+    );
+  }
+  const ledger = snapshot.operationLedger ?? {
+    schemaVersion: RUNTIME_OPERATION_LEDGER_SCHEMA_VERSION,
+    steps: []
+  };
+  const steps = [...ledger.steps];
+  if (steps.some(step => step.operations.some(
+    operation => operation.id === mutation.operationId
+  ))) {
+    throw new SessionStoreInvariantError(
+      `Durable operation ${mutation.operationId} already exists`
+    );
+  }
+  let stepIndex = steps.findIndex(step => step.id === mutation.stepId);
+  let step = steps[stepIndex];
+  if (!step) {
+    const runSteps = steps.filter(item => item.runId === mutation.runId);
+    if (runSteps.some(item => item.state === "active")) {
+      throw new SessionStoreInvariantError(
+        `Runtime Run ${mutation.runId} already has an active durable Step`
+      );
+    }
+    const expectedSequence = Math.max(0, ...runSteps.map(item => item.sequence)) + 1;
+    if (mutation.stepSequence !== expectedSequence) {
+      throw new SessionStoreInvariantError(
+        `Durable Step ${mutation.stepId} expected sequence ${expectedSequence}, found ${mutation.stepSequence}`
+      );
+    }
+    step = {
+      id: mutation.stepId,
+      runId: mutation.runId,
+      sequence: mutation.stepSequence,
+      state: "active",
+      transcriptMessageCount: mutation.transcriptMessageCount,
+      operations: []
+    };
+    stepIndex = steps.length;
+    steps.push(step);
+  } else if (
+    step.runId !== mutation.runId
+    || step.sequence !== mutation.stepSequence
+    || step.state !== "active"
+    || step.transcriptMessageCount !== mutation.transcriptMessageCount
+  ) {
+    throw new SessionStoreInvariantError(
+      `Durable Step ${mutation.stepId} is not the requested active Step`
+    );
+  }
+  const operation: RuntimeDurableOperationSnapshot = {
+    attempt: 1,
+    id: mutation.operationId,
+    idempotency: { mode: "none" },
+    kind: mutation.kind,
+    requestFingerprint: mutation.requestFingerprint,
+    runId: mutation.runId,
+    startedAt: Date.now(),
+    state: mutation.park ? "parked" : "preCall",
+    stepId: mutation.stepId,
+    ...(mutation.provider ? { provider: mutation.provider } : {}),
+    ...(mutation.toolCallId ? { toolCallId: mutation.toolCallId } : {}),
+    ...(mutation.park
+      ? {
+        park: {
+          ...mutation.park,
+          parkedSessionVersion: sessionVersion
+        }
+      }
+      : {})
+  };
+  steps[stepIndex] = {
+    ...step,
+    operations: [...step.operations, operation]
+  };
+  (snapshot as { operationLedger?: RuntimeSessionSnapshot["operationLedger"]; })
+    .operationLedger = { ...ledger, steps };
+  journal.push({
+    type: "operationStarted",
+    sequence: journal.length + 1,
+    sessionVersion,
+    runId: mutation.runId,
+    stepId: mutation.stepId,
+    operationId: mutation.operationId,
+    requestFingerprint: mutation.requestFingerprint,
+    state: mutation.park ? "parked" : "preCall"
+  });
+}
+
+function _settleOperation({
+  journal,
+  mutation,
+  sessionVersion,
+  snapshot
+}: {
+  journal: RuntimeRunJournalEntry[];
+  mutation: Extract<RuntimeSessionMutation, { type: "settleOperation"; }>;
+  sessionVersion: number;
+  snapshot: RuntimeSessionSnapshot;
+}): void {
+  const ledger = snapshot.operationLedger;
+  const stepIndex = ledger?.steps.findIndex(step =>
+    step.operations.some(operation => operation.id === mutation.operationId))
+  ?? -1;
+  const step = ledger?.steps[stepIndex];
+  const operationIndex = step?.operations.findIndex(
+    operation => operation.id === mutation.operationId
+  ) ?? -1;
+  const operation = step?.operations[operationIndex];
+  if (!ledger || !step || !operation) {
+    throw new SessionStoreInvariantError(
+      `Durable operation ${mutation.operationId} does not exist`
+    );
+  }
+  if (
+    step.state !== "active"
+    || operation.runId !== mutation.runId
+    || operation.state !== "preCall"
+  ) {
+    throw new SessionStoreInvariantError(
+      `Durable operation ${mutation.operationId} cannot settle from ${operation.state}`
+    );
+  }
+  if (operation.requestFingerprint !== mutation.requestFingerprint) {
+    throw new SessionStoreInvariantError(
+      `Durable operation ${mutation.operationId} request fingerprint changed`
+    );
+  }
+  const replayRequired = mutation.state === "completed"
+    || mutation.state === "failed";
+  if (replayRequired !== Boolean(mutation.replay)) {
+    throw new SessionStoreInvariantError(
+      `Durable operation ${mutation.operationId} has invalid replay material for ${mutation.state}`
+    );
+  }
+  if (mutation.replay) {
+    _assertReplayEnvelope(mutation.replay);
+    const existingBytes = step.operations.reduce(
+      (total, item) => total + (item.replay?.byteLength ?? 0),
+      0
+    );
+    if (existingBytes + mutation.replay.byteLength > MAX_DURABLE_STEP_REPLAY_BYTES) {
+      throw new SessionStoreInvariantError(
+        `Durable Step ${step.id} replay material exceeds ${MAX_DURABLE_STEP_REPLAY_BYTES} bytes`
+      );
+    }
+  }
+  const operations = [...step.operations];
+  operations[operationIndex] = {
+    ...operation,
+    state: mutation.state,
+    settledAt: Date.now(),
+    ...(mutation.replay
+      ? {
+        replayByteLength: mutation.replay.byteLength,
+        resultFingerprint: mutation.replay.resultFingerprint
+      }
+      : {}),
+    ...(mutation.replay ? { replay: structuredClone(mutation.replay) } : {})
+  };
+  const steps = [...ledger.steps];
+  steps[stepIndex] = { ...step, operations };
+  (snapshot as { operationLedger?: RuntimeSessionSnapshot["operationLedger"]; })
+    .operationLedger = { ...ledger, steps };
+  journal.push({
+    type: "operationSettled",
+    sequence: journal.length + 1,
+    sessionVersion,
+    runId: mutation.runId,
+    stepId: step.id,
+    operationId: mutation.operationId,
+    requestFingerprint: mutation.requestFingerprint,
+    state: mutation.state
+  });
+}
+
+function _checkpointOperationStep({
+  journal,
+  mutation,
+  sessionVersion,
+  snapshot
+}: {
+  journal: RuntimeRunJournalEntry[];
+  mutation: Extract<RuntimeSessionMutation, { type: "checkpointOperationStep"; }>;
+  sessionVersion: number;
+  snapshot: RuntimeSessionSnapshot;
+}): void {
+  const ledger = snapshot.operationLedger;
+  const stepIndex = ledger?.steps.findIndex(step => step.id === mutation.stepId)
+    ?? -1;
+  const step = ledger?.steps[stepIndex];
+  if (!ledger || step?.runId !== mutation.runId) {
+    throw new SessionStoreInvariantError(
+      `Durable Step ${mutation.stepId} does not exist in Runtime Run ${mutation.runId}`
+    );
+  }
+  if (step.state !== "active") {
+    throw new SessionStoreInvariantError(
+      `Durable Step ${step.id} is already checkpointed`
+    );
+  }
+  if (step.operations.some(operation =>
+    operation.state === "preCall" || operation.state === "parked")) {
+    throw new SessionStoreInvariantError(
+      `Durable Step ${step.id} cannot checkpoint with unsettled operations`
+    );
+  }
+  const steps = [...ledger.steps];
+  steps[stepIndex] = {
+    ...step,
+    state: "checkpointed",
+    operations: step.operations.map(({ replay: _replay, ...operation }) =>
+      operation)
+  };
+  (snapshot as { operationLedger?: RuntimeSessionSnapshot["operationLedger"]; })
+    .operationLedger = { ...ledger, steps };
+  journal.push({
+    type: "operationStepCheckpointed",
+    sequence: journal.length + 1,
+    sessionVersion,
+    runId: mutation.runId,
+    stepId: mutation.stepId
+  });
 }
 
 function _recordTurnCapabilities({
@@ -374,6 +753,19 @@ function _transitionRun({
     ? { ...next, structuredOutput: structuredClone(mutation.structuredOutput) }
     : next;
   if (isTerminalRuntimeRunState(next.state)) {
+    _settleInterruptedOperationsForTerminal({
+      journal,
+      runId: run.id,
+      sessionVersion,
+      snapshot,
+      terminal: next.state
+    });
+    _checkpointActiveOperationSteps({
+      journal,
+      runId: run.id,
+      sessionVersion,
+      snapshot
+    });
     (snapshot as { activeRunId: string | null; }).activeRunId = null;
   }
   journal.push({
@@ -425,6 +817,12 @@ function _recordCheckpoint({
     ...run,
     checkpoint
   };
+  _checkpointActiveOperationSteps({
+    journal,
+    runId: run.id,
+    sessionVersion,
+    snapshot
+  });
   journal.push({
     type: "runCheckpointRecorded",
     sequence: journal.length + 1,
@@ -432,6 +830,89 @@ function _recordCheckpoint({
     runId: run.id,
     ...checkpoint
   });
+}
+
+function _settleInterruptedOperationsForTerminal({
+  journal,
+  runId,
+  sessionVersion,
+  snapshot,
+  terminal
+}: {
+  journal: RuntimeRunJournalEntry[];
+  runId: string;
+  sessionVersion: number;
+  snapshot: RuntimeSessionSnapshot;
+  terminal: RuntimeRunState;
+}): void {
+  const ledger = snapshot.operationLedger;
+  if (!ledger) { return; }
+  const steps = [...ledger.steps];
+  let changed = false;
+  for (const [stepIndex, step] of steps.entries()) {
+    if (step.runId !== runId || step.state !== "active") { continue; }
+    const operations: RuntimeDurableOperationSnapshot[] = [];
+    for (const operation of step.operations) {
+      if (operation.state !== "preCall") {
+        operations.push(operation);
+        continue;
+      }
+      if (terminal !== "outcomeUnknown") {
+        throw new SessionStoreInvariantError(
+          `Runtime Run ${runId} cannot become ${terminal} with pre-call operation ${operation.id}`
+        );
+      }
+      changed = true;
+      journal.push({
+        type: "operationSettled",
+        sequence: journal.length + 1,
+        sessionVersion,
+        runId,
+        stepId: step.id,
+        operationId: operation.id,
+        requestFingerprint: operation.requestFingerprint,
+        state: "outcomeUnknown"
+      });
+      operations.push({
+        ...operation,
+        state: "outcomeUnknown",
+        settledAt: Date.now()
+      });
+    }
+    steps[stepIndex] = { ...step, operations };
+  }
+  if (changed) {
+    (snapshot as { operationLedger?: RuntimeSessionSnapshot["operationLedger"]; })
+      .operationLedger = { ...ledger, steps };
+  }
+}
+
+function _checkpointActiveOperationSteps({
+  journal,
+  runId,
+  sessionVersion,
+  snapshot
+}: {
+  journal: RuntimeRunJournalEntry[];
+  runId: string;
+  sessionVersion: number;
+  snapshot: RuntimeSessionSnapshot;
+}): void {
+  const active = snapshot.operationLedger?.steps.filter(
+    step => step.runId === runId && step.state === "active"
+  ) ?? [];
+  for (const step of active) {
+    _checkpointOperationStep({
+      journal,
+      mutation: {
+        type: "checkpointOperationStep",
+        runId,
+        stepId: step.id
+      },
+      sessionVersion,
+      snapshot
+    });
+  }
 }
 
 function _assertConfiguration(
@@ -499,6 +980,235 @@ function _isJsonValue(value: unknown, ancestors: WeakSet<object>): boolean {
   return valid;
 }
 
+function _assertOperationLedger(snapshot: RuntimeSessionSnapshot): void {
+  const ledger = snapshot.operationLedger;
+  if (!ledger) { return; }
+  if (ledger.schemaVersion !== RUNTIME_OPERATION_LEDGER_SCHEMA_VERSION) {
+    throw new SessionStoreInvariantError(
+      `Unsupported durable operation ledger schema: ${String(ledger.schemaVersion)}`
+    );
+  }
+  const stepIds = new Set<string>();
+  const operationIds = new Set<string>();
+  const sequences = new Map<string, number>();
+  const activeRuns = new Set<string>();
+  for (const step of ledger.steps) {
+    _assertId("Durable Step", step.id);
+    _assertId("Runtime Run", step.runId);
+    if (stepIds.has(step.id)) {
+      throw new SessionStoreInvariantError(
+        `Durable Step ${step.id} is duplicated`
+      );
+    }
+    stepIds.add(step.id);
+    const expectedSequence = (sequences.get(step.runId) ?? 0) + 1;
+    if (step.sequence !== expectedSequence) {
+      throw new SessionStoreInvariantError(
+        `Runtime Run ${step.runId} durable Step sequence is not contiguous at ${expectedSequence}`
+      );
+    }
+    sequences.set(step.runId, step.sequence);
+    if (step.state !== "active" && step.state !== "checkpointed") {
+      throw new SessionStoreInvariantError(
+        `Durable Step ${step.id} has invalid state ${String(step.state)}`
+      );
+    }
+    if (
+      !Number.isSafeInteger(step.transcriptMessageCount)
+      || step.transcriptMessageCount < 0
+    ) {
+      throw new SessionStoreInvariantError(
+        `Durable Step ${step.id} has an invalid transcript boundary`
+      );
+    }
+    if (step.state === "active") {
+      if (activeRuns.has(step.runId)) {
+        throw new SessionStoreInvariantError(
+          `Runtime Run ${step.runId} has more than one active durable Step`
+        );
+      }
+      activeRuns.add(step.runId);
+    }
+    let replayBytes = 0;
+    for (const operation of step.operations) {
+      _assertOperationSnapshot(operation, step);
+      if (operationIds.has(operation.id)) {
+        throw new SessionStoreInvariantError(
+          `Durable operation ${operation.id} is duplicated`
+        );
+      }
+      operationIds.add(operation.id);
+      replayBytes += operation.replay?.byteLength ?? 0;
+    }
+    if (replayBytes > MAX_DURABLE_STEP_REPLAY_BYTES) {
+      throw new SessionStoreInvariantError(
+        `Durable Step ${step.id} replay material exceeds ${MAX_DURABLE_STEP_REPLAY_BYTES} bytes`
+      );
+    }
+  }
+}
+
+function _assertOperationSnapshot(
+  operation: RuntimeDurableOperationSnapshot,
+  step: RuntimeDurableStepSnapshot
+): void {
+  _assertId("Durable operation", operation.id);
+  _assertSha256("Operation request fingerprint", operation.requestFingerprint);
+  if (
+    operation.runId !== step.runId
+    || operation.stepId !== step.id
+    || operation.attempt !== 1
+    || operation.idempotency.mode !== "none"
+    || !OPERATION_STATES.has(operation.state)
+  ) {
+    throw new SessionStoreInvariantError(
+      `Durable operation ${operation.id} has invalid identity or state`
+    );
+  }
+  if (
+    !Number.isSafeInteger(operation.startedAt)
+    || operation.startedAt < 0
+  ) {
+    throw new SessionStoreInvariantError(
+      `Durable operation ${operation.id} has an invalid start timestamp`
+    );
+  }
+  if (operation.kind === "provider") {
+    _assertId("Operation provider", operation.provider ?? "");
+    if (operation.toolCallId !== undefined) {
+      throw new SessionStoreInvariantError(
+        `Provider operation ${operation.id} has a tool-call identity`
+      );
+    }
+  } else if (operation.kind === "tool") {
+    _assertId("Operation tool call", operation.toolCallId ?? "");
+    if (operation.provider !== undefined) {
+      throw new SessionStoreInvariantError(
+        `Tool operation ${operation.id} has a provider identity`
+      );
+    }
+  } else {
+    throw new SessionStoreInvariantError(
+      `Durable operation ${operation.id} has invalid kind`
+    );
+  }
+  if (operation.park) {
+    if (operation.state !== "parked") {
+      throw new SessionStoreInvariantError(
+        `Durable operation ${operation.id} retains park metadata after ${operation.state}`
+      );
+    }
+    _assertId("Operation park", operation.park.parkId);
+    _assertSha256(
+      "Operation resume schema fingerprint",
+      operation.park.resumeSchemaFingerprint
+    );
+    if (
+      typeof operation.park.reason !== "string"
+      || !Number.isSafeInteger(operation.park.parkedSessionVersion)
+      || operation.park.parkedSessionVersion < 1
+    ) {
+      throw new SessionStoreInvariantError(
+        `Durable operation ${operation.id} has invalid park metadata`
+      );
+    }
+  } else if (operation.state === "parked") {
+    throw new SessionStoreInvariantError(
+      `Durable operation ${operation.id} is parked without park metadata`
+    );
+  }
+  const replayRequired = step.state === "active"
+    && (operation.state === "completed" || operation.state === "failed");
+  if (replayRequired !== Boolean(operation.replay)) {
+    throw new SessionStoreInvariantError(
+      `Durable operation ${operation.id} has invalid replay retention`
+    );
+  }
+  if (operation.replay) {
+    _assertReplayEnvelope(operation.replay);
+  }
+  const settled = operation.state === "cancelled"
+    || operation.state === "completed"
+    || operation.state === "failed"
+    || operation.state === "outcomeUnknown";
+  if (
+    settled !== Number.isSafeInteger(operation.settledAt)
+    || (operation.settledAt !== undefined && operation.settledAt < 0)
+  ) {
+    throw new SessionStoreInvariantError(
+      `Durable operation ${operation.id} has invalid settlement metadata`
+    );
+  }
+  const hasResult = operation.state === "completed"
+    || operation.state === "failed";
+  if (
+    hasResult !== Boolean(operation.resultFingerprint)
+    || hasResult !== Number.isSafeInteger(operation.replayByteLength)
+    || (operation.resultFingerprint !== undefined
+      && !/^[0-9a-f]{64}$/.test(operation.resultFingerprint))
+    || (operation.replayByteLength !== undefined
+      && (
+        operation.replayByteLength < 0
+        || operation.replayByteLength > MAX_DURABLE_OPERATION_REPLAY_BYTES
+      ))
+      || (operation.replay
+        && (
+          operation.resultFingerprint !== operation.replay.resultFingerprint
+          || operation.replayByteLength !== operation.replay.byteLength
+        ))
+  ) {
+    throw new SessionStoreInvariantError(
+      `Durable operation ${operation.id} has invalid retained result metadata`
+    );
+  }
+}
+
+function _assertReplayEnvelope(
+  replay: NonNullable<RuntimeDurableOperationSnapshot["replay"]>
+): void {
+  if (!_isJsonValue(replay.value, new WeakSet())) {
+    throw new SessionStoreInvariantError(
+      "Durable operation replay material must be JSON data"
+    );
+  }
+  const actualBytes = new TextEncoder().encode(
+    _canonicalJson(replay.value)
+  ).byteLength;
+  if (
+    !Number.isSafeInteger(replay.byteLength)
+    || replay.byteLength !== actualBytes
+    || replay.byteLength > MAX_DURABLE_OPERATION_REPLAY_BYTES
+  ) {
+    throw new SessionStoreInvariantError(
+      `Durable operation replay material has invalid byte length ${String(replay.byteLength)}`
+    );
+  }
+  _assertSha256("Operation result fingerprint", replay.resultFingerprint);
+}
+
+async function _assertReplayEnvelopeIntegrity(
+  replay: NonNullable<RuntimeDurableOperationSnapshot["replay"]>
+): Promise<void> {
+  _assertReplayEnvelope(replay);
+  if (replay.resultFingerprint !== await sha256(_canonicalJson(replay.value))) {
+    throw new SessionStoreInvariantError(
+      "Durable operation result fingerprint does not match replay material"
+    );
+  }
+}
+
+async function _assertOperationReplayIntegrity(
+  snapshot: RuntimeSessionSnapshot
+): Promise<void> {
+  for (const step of snapshot.operationLedger?.steps ?? []) {
+    for (const operation of step.operations) {
+      if (operation.replay) {
+        await _assertReplayEnvelopeIntegrity(operation.replay);
+      }
+    }
+  }
+}
+
 function _assertExpectedVersion(version: number | null): void {
   if (
     version !== null
@@ -513,6 +1223,12 @@ function _assertExpectedVersion(version: number | null): void {
 function _assertId(label: string, value: string): void {
   if (value.trim().length === 0) {
     throw new SessionStoreInvariantError(`${label} must not be empty`);
+  }
+}
+
+function _assertSha256(label: string, value: string): void {
+  if (!/^[0-9a-f]{64}$/.test(value)) {
+    throw new SessionStoreInvariantError(`${label} must be lowercase SHA-256`);
   }
 }
 
@@ -776,8 +1492,8 @@ function _assertStoredSession(session: StoredRuntimeSession): void {
     );
   }
   if (session.snapshot.schemaVersion !== RUNTIME_SESSION_SCHEMA_VERSION) {
-    throw new SessionStoreInvariantError(
-      `Unsupported Runtime Session schema version: ${String(session.snapshot.schemaVersion)}`
+    throw new UnsupportedRuntimeSessionSchemaError(
+      session.snapshot.schemaVersion
     );
   }
   _assertId("Session", session.snapshot.id);
@@ -804,6 +1520,7 @@ function _assertStoredSession(session: StoredRuntimeSession): void {
       );
     }
   }
+  _assertOperationLedger(session.snapshot);
   for (const [turnId, snapshot] of Object.entries(
     session.snapshot.capabilitySnapshots ?? {}
   )) {
@@ -1078,6 +1795,12 @@ function _assertJournalReconstructsSnapshot(
       entry.type === "sessionStateReplaced"
       || entry.type === "turnInstructionsRecorded"
       || entry.type === "turnCapabilitiesRecorded"
+    ) { continue; }
+    if (
+      entry.type === "operationStarted"
+      || entry.type === "operationSettled"
+      || entry.type === "operationStepCheckpointed"
+      || entry.type === "operationResumed"
     ) { continue; }
     if (entry.type === "runStarted") {
       const startedState = (entry as { readonly state: unknown; }).state;

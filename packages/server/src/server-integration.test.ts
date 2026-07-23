@@ -801,14 +801,46 @@ describe("Agent Server HTTP protocol", () => {
     );
     const run = await runResponse.json() as { runId: string; };
     const sessionPath = join(root, `${session.sessionId}.json`);
-    const persistedCrashState = await readFile(sessionPath, "utf8");
+    let persistedCrashState = "";
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      persistedCrashState = await readFile(sessionPath, "utf8");
+      const candidate = JSON.parse(persistedCrashState) as {
+        runtime?: {
+          snapshot?: {
+            operationLedger?: {
+              steps?: Array<{
+                operations?: Array<{ state?: string; }>;
+              }>;
+            };
+          };
+        };
+      };
+      if (
+        candidate.runtime?.snapshot?.operationLedger?.steps?.[0]
+          ?.operations?.[0]?.state === "preCall"
+      ) {
+        break;
+      }
+      await Bun.sleep(5);
+    }
     const persisted = JSON.parse(persistedCrashState) as {
+      runtime?: {
+        snapshot?: {
+          operationLedger?: {
+            steps?: Array<{ operations?: Array<{ state?: string; }>; }>;
+          };
+        };
+      };
       transcript: Array<{ content: Array<{ text?: string; }>; role: string; }>;
     };
     expect(persisted.transcript.at(-1)).toMatchObject({
       role: "user",
       content: [{ type: "text", text: "slow" }]
     });
+    expect(
+      persisted.runtime?.snapshot?.operationLedger?.steps?.[0]
+        ?.operations?.[0]?.state
+    ).toBe("preCall");
     const live = await fetch(
       `${first.url}/v1/sessions/${session.sessionId}/runs/${run.runId}/events`,
       { headers: _observationHeaders(continuation) }
@@ -1375,8 +1407,8 @@ describe("Agent Server HTTP protocol", () => {
       authorization: "auth-token-with-at-least-thirty-two-bytes"
     });
     for (const [text, code] of [
-      ["large-event", "event_too_large"],
-      ["invalid-json", "event_not_serializable"]
+      ["large-event", "durableOperationOutcomeUnknown"],
+      ["invalid-json", "durableOperationOutcomeUnknown"]
     ] as const) {
       const run = await client.createRun({
         sessionId: session.sessionId,
@@ -1393,7 +1425,7 @@ describe("Agent Server HTTP protocol", () => {
         events.push(event);
       }
       expect(events.at(-1)).toMatchObject({
-        data: { type: "runTerminal", outcome: "failed", code }
+        data: { type: "runTerminal", outcome: "outcomeUnknown", code }
       });
     }
   });
@@ -1471,7 +1503,11 @@ describe("Agent Server HTTP protocol", () => {
       data: { type: "serverShutdown", retryAfterSeconds: 1 }
     });
     expect(events.at(-1)).toMatchObject({
-      data: { type: "runTerminal", outcome: "cancelled" }
+      data: {
+        type: "runTerminal",
+        outcome: "outcomeUnknown",
+        code: "durableOperationOutcomeUnknown"
+      }
     });
   });
 

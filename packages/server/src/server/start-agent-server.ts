@@ -133,6 +133,7 @@ export async function startAgentServer(
     continuationTtlSeconds: options.continuationTtlSeconds
   });
   try {
+    const recoverableRuns = [];
     for (const sessionId of repository.sessionIds()) {
       const recovery = await recoverRuntimeSession(repository, sessionId);
       if (recovery.status === "outcomeUnknown") {
@@ -142,6 +143,17 @@ export async function startAgentServer(
           outcome: "outcomeUnknown",
           code: "process_interrupted"
         });
+      } else if (recovery.status === "cancelled") {
+        await repository.completeRun({
+          sessionId,
+          runId: recovery.run.id,
+          outcome: "cancelled"
+        });
+      } else if (recovery.status === "operationReplay") {
+        recoverableRuns.push(repository.recoverableRun(
+          sessionId,
+          recovery.run.id
+        ));
       }
     }
     const runs = new ServerRunController({
@@ -154,6 +166,9 @@ export async function startAgentServer(
         ? { sandboxProvider: options.sandboxProvider }
         : {})
     });
+    for (const run of recoverableRuns) {
+      runs.resumeRun(run);
+    }
     const context: RequestContext = {
       accepting: true,
       allowedHosts,

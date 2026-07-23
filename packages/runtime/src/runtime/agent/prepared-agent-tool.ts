@@ -4,9 +4,13 @@ import type { ExecutionEnvToolKind } from "../../public/definitions/execution-en
 
 type PreparedAgentToolDefinition = Omit<AgentTool, "execute">;
 
+type PreparedAgentToolResult = {
+  readonly isError?: boolean;
+} & Awaited<ReturnType<AgentTool["execute"]>>;
+
 type PreparedAgentToolOutcome =
   | {
-    readonly result: Awaited<ReturnType<AgentTool["execute"]>>;
+    readonly result: PreparedAgentToolResult;
     readonly type: "completed";
   }
   | { readonly type: "deferred"; };

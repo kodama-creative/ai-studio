@@ -69,6 +69,7 @@ export interface StreamThreadRequestPayload {
     }
     | {
       executionMode: RuntimeExecutionMode;
+      threadPath?: string;
       type: "desktopThread";
     }
     | {

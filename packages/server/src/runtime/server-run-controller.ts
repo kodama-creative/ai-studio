@@ -5,6 +5,7 @@ import {
   AgentStateCommitUnknownError,
   type CompiledAgentProjectSnapshot,
   createHostCapabilityPolicy,
+  DurableOperationOutcomeUnknownError,
   ExecutionEnvUnavailableError,
   type SandboxProvider,
   SandboxUnavailableError,
@@ -46,6 +47,7 @@ export class ServerRunController {
   private readonly _abortedRuns = new Set<string>();
   private readonly _pendingRuns = new Set<string>();
   private readonly _executions = new Set<Promise<void>>();
+  private readonly _recoveryQueue: CreatedServerRun[] = [];
   private _creationTail: Promise<void> = Promise.resolve();
   private _detached = false;
   private _inFlight = 0;
@@ -92,6 +94,12 @@ export class ServerRunController {
     const result = this._creationTail.then(async () => this._createRun(input));
     this._creationTail = result.then(() => {}, () => {});
     return result;
+  }
+
+  resumeRun(run: CreatedServerRun): void {
+    if (this._detached) { return; }
+    this._recoveryQueue.push(run);
+    this._drainRecoveryQueue();
   }
 
   private async _createRun(input: {
@@ -175,13 +183,7 @@ export class ServerRunController {
         ...(input.outputContract ? { outputContract: input.outputContract } : {})
       });
       if (created.created) {
-        this._pendingRuns.add(created.runId);
-        const execution = this._execute(created);
-        this._executions.add(execution);
-        void execution.then(
-          () => { this._executions.delete(execution); },
-          () => { this._executions.delete(execution); }
-        );
+        this._startExecution(created);
       } else {
         this._inFlight -= 1;
       }
@@ -212,6 +214,7 @@ export class ServerRunController {
     this._detached = true;
     this._active.clear();
     this._pendingRuns.clear();
+    this._recoveryQueue.length = 0;
   }
 
   async waitForIdle(): Promise<void> {
@@ -315,7 +318,10 @@ export class ServerRunController {
         }
       }
     } catch (error) {
-      if (this._abortedRuns.has(run.runId)) {
+      if (error instanceof DurableOperationOutcomeUnknownError) {
+        outcome = "outcomeUnknown";
+        code = error.code;
+      } else if (this._abortedRuns.has(run.runId)) {
         outcome = "cancelled";
       } else if (error instanceof AgentStateCommitUnknownError) {
         outcome = "outcomeUnknown";
@@ -359,8 +365,32 @@ export class ServerRunController {
         this._abortedRuns.delete(run.runId);
         this._pendingRuns.delete(run.runId);
         this._inFlight -= 1;
+        this._drainRecoveryQueue();
       }
     }
+  }
+
+  private _drainRecoveryQueue(): void {
+    while (
+      !this._detached
+      && this._inFlight < this._maxActiveRuns
+      && this._recoveryQueue.length > 0
+    ) {
+      const run = this._recoveryQueue.shift();
+      if (!run) { return; }
+      this._inFlight += 1;
+      this._startExecution(run);
+    }
+  }
+
+  private _startExecution(run: CreatedServerRun): void {
+    this._pendingRuns.add(run.runId);
+    const execution = this._execute(run);
+    this._executions.add(execution);
+    void execution.then(
+      () => { this._executions.delete(execution); },
+      () => { this._executions.delete(execution); }
+    );
   }
 }
 

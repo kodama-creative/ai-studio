@@ -33,11 +33,6 @@ import {
   isAgentProjectName
 } from "@llm-space/runtime";
 import {
-  InMemorySessionStore,
-  type SessionStore,
-  type StoredRuntimeSession
-} from "@llm-space/runtime/harness";
-import {
   type AgentProjectSnapshot,
   AgentRuntime,
   type AgentSession,
@@ -58,6 +53,7 @@ import {
 import type { Models } from "@earendil-works/pi-ai";
 
 import { agentDefinitionFingerprint } from "./agent-definition-fingerprint";
+import { createDesktopThreadRuntimeAuthority } from "../streaming/desktop-thread-runtime-authority";
 
 import type {
   ExternalAgentProjectConnectionActivation,
@@ -1005,73 +1001,19 @@ export class ExternalAgentProjectManager {
   async createRuntimeSessionStore(
     projectId: string,
     threadId: string
-  ): Promise<{
-    session: StoredRuntimeSession;
-    store: SessionStore;
-  }> {
+  ) {
     this._entry(projectId);
-    const initial = await this._readThreadFile(projectId, threadId);
-    const persisted = initial.thread.runtimeSession;
-    if (!persisted) {
-      throw new Error("Project Thread Runtime Session is unavailable.");
-    }
-    const validated = await new InMemorySessionStore([
-      persisted as StoredRuntimeSession
-    ]).load((persisted as StoredRuntimeSession).snapshot.id);
-    if (!validated) {
-      throw new Error("Project Thread Runtime Session is unavailable.");
-    }
-    const sessionId = validated.snapshot.id;
-    const store: SessionStore = {
-      load: async requestedId => {
-        if (requestedId !== sessionId) { return null; }
+    return createDesktopThreadRuntimeAuthority({
+      read: async () => (await this._readThreadFile(projectId, threadId)).thread,
+      write: async thread => {
         const current = await this._readThreadFile(projectId, threadId);
-        const runtime = current.thread.runtimeSession;
-        if (!runtime) { return null; }
-        return new InMemorySessionStore([
-          runtime as StoredRuntimeSession
-        ]).load(requestedId);
-      },
-      commit: async input => {
-        if (input.sessionId !== sessionId) {
-          throw new Error("Project Thread Runtime Session identity changed.");
-        }
-        const current = await this._readThreadFile(projectId, threadId);
-        const runtime = current.thread.runtimeSession;
-        const memory = new InMemorySessionStore(
-          runtime ? [runtime as StoredRuntimeSession] : []
-        );
-        const committed = await memory.commit(input);
         await this._writeThreadFile(projectId, threadId, {
           ...current,
-          thread: normalizeThread({
-            ...current.thread,
-            runtimeSession: committed
-          })
+          thread
         });
         this._notify(projectId);
-        return committed;
       }
-    };
-    return { session: validated, store };
-  }
-
-  async requiresRuntimeSessionStore(
-    projectId: string,
-    threadId: string
-  ): Promise<boolean> {
-    await this._ensureProject(projectId);
-    const snapshot = this._state(projectId).snapshot;
-    if (
-      (snapshot?.stateDefinitions?.length ?? 0) > 0
-      || (snapshot?.instructionEntries?.length ?? 0) > 0
-    ) {
-      return true;
-    }
-    const record = await this._readThreadFile(projectId, threadId);
-    const runtime = record.thread.runtimeSession as
-      StoredRuntimeSession | undefined;
-    return Object.keys(runtime?.snapshot.state?.values ?? {}).length > 0;
+    });
   }
 
   async refresh(projectId: string): Promise<ExternalAgentProjectView> {
