@@ -9,6 +9,10 @@ import {
 import { type LocalFileSystem, streamAgent } from "@llm-space/core/server";
 import { agentModelMatchesDefinition } from "@llm-space/runtime";
 import {
+  decideRuntimeToolApproval,
+  runtimeRunHasParkedToolApprovals
+} from "@llm-space/runtime/harness";
+import {
   AgentHostPolicyChangedError,
   type AgentProjectSnapshot,
   AgentRuntime,
@@ -18,6 +22,7 @@ import {
   DurableOperationOutcomeUnknownError,
   ExecutionEnvUnavailableError,
   type PreparedAgentTool,
+  RuntimeToolApprovalStaleError,
   SandboxUnavailableError,
   SandboxWorkspaceLostError,
   StructuredOutputError
@@ -27,7 +32,10 @@ import type {
   AgentMessage,
   StreamFn
 } from "@earendil-works/pi-agent-core";
-import type { StoredRuntimeSession } from "@llm-space/runtime/harness";
+import type {
+  SessionStore,
+  StoredRuntimeSession
+} from "@llm-space/runtime/harness";
 
 import { createDesktopThreadRuntimeAuthority } from "./desktop-thread-runtime-authority";
 import { agentDefinitionFingerprint } from "../external-projects/agent-definition-fingerprint";
@@ -48,6 +56,15 @@ import type { ToolRegistry } from "../tools/tool-registry";
 /** Process-scoped agent streaming and model-connection controller. */
 export class StreamThreadController {
   private readonly _activeStreams = new Map<string, { abort(): void; }>();
+  private readonly _approvalAuthorities = new Map<string, {
+    readonly key: string;
+    readonly resolve: () => Promise<{
+      readonly session: StoredRuntimeSession;
+      readonly store: SessionStore;
+    }>;
+    readonly runId: string;
+    readonly sessionId: string;
+  }>();
 
   constructor(
     private readonly _modelManager: ModelManager,
@@ -59,6 +76,109 @@ export class StreamThreadController {
     private readonly _sandboxes?: DesktopSandboxManager,
     private readonly _localFs?: LocalFileSystem
   ) {}
+
+  registerDesktopThreadApprovals(
+    path: string,
+    thread: { readonly runtimeSession?: unknown; }
+  ): void {
+    const session = thread.runtimeSession as StoredRuntimeSession | undefined;
+    if (!session) { return; }
+    this._registerApprovalAuthorities(
+      `desktop:${path}`,
+      session,
+      async () => {
+        if (!this._localFs) {
+          throw new Error("Desktop Thread filesystem is unavailable");
+        }
+        const authority = await createDesktopThreadRuntimeAuthority({
+          read: async () => this._localFs!.read(path),
+          write: async next => this._localFs!.write(path, next)
+        });
+        return { session: authority.session, store: authority.sessionStore };
+      }
+    );
+  }
+
+  registerAgentProjectThreadApprovals(
+    projectId: string,
+    threadId: string,
+    thread: { readonly runtimeSession?: unknown; }
+  ): void {
+    const session = thread.runtimeSession as StoredRuntimeSession | undefined;
+    if (!session || !this._externalAgentProjects?.createRuntimeSessionStore) {
+      return;
+    }
+    this._registerApprovalAuthorities(
+      `project:${projectId}:${threadId}`,
+      session,
+      async () => {
+        const authority = await this._externalAgentProjects!
+          .createRuntimeSessionStore(projectId, threadId);
+        if (!authority) {
+          throw new Error("Agent Project Thread Runtime Session is unavailable");
+        }
+        return { session: authority.session, store: authority.sessionStore };
+      }
+    );
+  }
+
+  async decideToolApproval(input: {
+    readonly decision: "approved" | "denied";
+    readonly requestId: string;
+  }): Promise<StoredRuntimeSession> {
+    const authority = this._approvalAuthorities.get(input.requestId);
+    if (!authority) {
+      throw new Error(`Tool approval ${input.requestId} is not registered`);
+    }
+    const resolved = await authority.resolve();
+    const current = await resolved.store.load(authority.sessionId);
+    if (!current) {
+      throw new Error(`Runtime Session ${authority.sessionId} is unavailable`);
+    }
+    const principal = {
+      issuer: "llm-space-desktop",
+      principalId: "local-user",
+      principalType: "user" as const
+    };
+    const committed = await decideRuntimeToolApproval(resolved.store, {
+      actor: { current: principal, initiator: principal },
+      decision: input.decision,
+      expectedVersion: current.version,
+      requestId: input.requestId,
+      runId: authority.runId,
+      sessionId: authority.sessionId
+    });
+    this._registerApprovalAuthorities(
+      authority.key,
+      committed,
+      authority.resolve
+    );
+    return committed;
+  }
+
+  private _registerApprovalAuthorities(
+    key: string,
+    session: StoredRuntimeSession,
+    resolve: () => Promise<{
+      readonly session: StoredRuntimeSession;
+      readonly store: SessionStore;
+    }>
+  ): void {
+    for (const [requestId, authority] of this._approvalAuthorities) {
+      if (authority.key === key) {
+        this._approvalAuthorities.delete(requestId);
+      }
+    }
+    for (const request of session.snapshot.approvalLedger?.requests ?? []) {
+      if (request.state !== "pending") { continue; }
+      this._approvalAuthorities.set(request.id, {
+        key,
+        resolve,
+        runId: request.runId,
+        sessionId: session.snapshot.id
+      });
+    }
+  }
 
   /** Run an agent stream and push each event back through the caller's sender. */
   async run(
@@ -122,17 +242,19 @@ export class StreamThreadController {
           message: error instanceof Error ? error.message : "Internal error",
           ...(error instanceof AgentStateCommitUnknownError
             ? { code: "outcomeUnknown" as const }
-            : error instanceof AgentHostPolicyChangedError
-              ? { code: "hostPolicyChanged" as const }
-              : error instanceof ExecutionEnvUnavailableError
-                ? { code: "executionEnvUnavailable" as const }
-                : error instanceof SandboxWorkspaceLostError
-                  ? { code: "sandboxWorkspaceLost" as const }
-                  : error instanceof SandboxUnavailableError
-                    ? { code: "sandboxUnavailable" as const }
-                    : error instanceof StructuredOutputError
-                      ? { code: error.code }
-                      : {})
+            : error instanceof RuntimeToolApprovalStaleError
+              ? { code: error.code }
+              : error instanceof AgentHostPolicyChangedError
+                ? { code: "hostPolicyChanged" as const }
+                : error instanceof ExecutionEnvUnavailableError
+                  ? { code: "executionEnvUnavailable" as const }
+                  : error instanceof SandboxWorkspaceLostError
+                    ? { code: "sandboxWorkspaceLost" as const }
+                    : error instanceof SandboxUnavailableError
+                      ? { code: "sandboxUnavailable" as const }
+                      : error instanceof StructuredOutputError
+                        ? { code: error.code }
+                        : {})
         });
       }
     } finally {
@@ -360,6 +482,11 @@ export class StreamThreadController {
           sessionStore: runtimeState.sessionStore,
           persistence: runtimeState.persistence,
           onSessionCommitted: (runtimeSession: StoredRuntimeSession) => {
+            if (threadPath) {
+              this.registerDesktopThreadApprovals(threadPath, {
+                runtimeSession
+              });
+            }
             send({
               streamId: payload.streamId,
               type: "runtimeSession",
@@ -369,7 +496,18 @@ export class StreamThreadController {
         }
         : {})
     });
-    await this._streamSession(payload.streamId, session, send, onAbort);
+    const resumesApproval = runtimeState && activeRunId
+      ? runtimeRunHasParkedToolApprovals(runtimeState.session, activeRunId)
+      : false;
+    await this._streamSession(
+      payload.streamId,
+      session,
+      send,
+      onAbort,
+      resumesApproval
+        ? async () => session.resumeApprovedTools()
+        : async () => session.continue()
+    );
   }
 
   private async _runAgentProject(
@@ -383,6 +521,7 @@ export class StreamThreadController {
     ) {
       throw new Error("Agent Project runtime is unavailable.");
     }
+    const runtimePayload = payload.runtime;
     const sourceTools = payload.request.context.sourceTools ?? [];
     const projectSnapshot = sourceTools.find(
       (tool): tool is ProjectTool => tool.type === "project"
@@ -486,6 +625,11 @@ export class StreamThreadController {
       })
       : undefined;
     const publishRuntimeSession = (runtimeSession: StoredRuntimeSession) => {
+      this.registerAgentProjectThreadApprovals(
+        runtimePayload.projectId,
+        runtimePayload.threadId,
+        { runtimeSession }
+      );
       send({
         streamId: payload.streamId,
         type: "runtimeSession",
@@ -572,7 +716,18 @@ export class StreamThreadController {
             : "agent"
       }
     });
-    await this._streamSession(payload.streamId, session, send, onAbort);
+    const resumesApproval = runtimeState && activeRunId
+      ? runtimeRunHasParkedToolApprovals(runtimeState.session, activeRunId)
+      : false;
+    await this._streamSession(
+      payload.streamId,
+      session,
+      send,
+      onAbort,
+      resumesApproval
+        ? async () => session.resumeApprovedTools()
+        : async () => session.continue()
+    );
   }
 
   private async _prepareSandboxTurn(input: {
@@ -600,7 +755,8 @@ export class StreamThreadController {
     streamId: string,
     session: AgentSession,
     send: (message: StreamThreadResponsePayload) => void,
-    onAbort: () => void
+    onAbort: () => void,
+    execute: () => Promise<void> = async () => session.continue()
   ): Promise<void> {
     this._activeStreams.set(streamId, {
       abort() {
@@ -614,7 +770,7 @@ export class StreamThreadController {
       }
     });
     try {
-      await session.continue();
+      await execute();
     } finally {
       unsubscribe();
     }

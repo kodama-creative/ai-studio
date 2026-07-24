@@ -21,6 +21,7 @@ import {
 import { toast } from "sonner";
 
 import type { DraggableProvidedDragHandleProps } from "@hello-pangea/dnd";
+import type { RuntimeToolApprovalView } from "@llm-space/runtime/harness";
 
 import { structuredOutputFromToolCall } from "@/client/structured-output-from-tool-call";
 import { openFirecrawlLimitDialog } from "@/components/firecrawl-limit-dialog";
@@ -49,6 +50,7 @@ import {
 import { usePromptVariableExtensionForContext } from "../variable/use-prompt-variable-extension";
 
 const EMPTY_SANDBOX_ATTACHMENTS: readonly SandboxAttachmentDescriptor[] = [];
+const EMPTY_TOOL_APPROVALS: readonly RuntimeToolApprovalView[] = [];
 
 const _MessageListItem = function MessageListItem({
   className,
@@ -59,6 +61,7 @@ const _MessageListItem = function MessageListItem({
   runDisabled = false,
   runValidationIssue = null,
   sandboxAttachments,
+  toolApprovals = EMPTY_TOOL_APPROVALS,
   streaming,
   collapsed,
   hideStructuredOutputs = false,
@@ -78,12 +81,16 @@ const _MessageListItem = function MessageListItem({
   readonly sandboxAttachments?: readonly SandboxAttachmentDescriptor[];
   readonly streaming?: boolean;
   readonly textOnlyDraft?: boolean;
+  readonly toolApprovals?: readonly RuntimeToolApprovalView[];
 
   /** Focus this message's editor on mount. Set only for a freshly-added message. */
   readonly autoFocus?: boolean;
   readonly dragHandleProps?: DraggableProvidedDragHandleProps | null;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const runtimeProfileType = useThreadStore(
+    state => state.thread.runtimeProfile?.type ?? "desktopDirect"
+  );
   const { fidelity } = useRenderingFidelity();
   const variableExtension = usePromptVariableExtensionForContext(
     createMessagePromptVariablePlaceKey(message.id),
@@ -114,6 +121,10 @@ const _MessageListItem = function MessageListItem({
       : []),
     [message]
   );
+  const messageToolApprovals = toolApprovals;
+  const firstPendingApprovalId = messageToolApprovals.find(
+    approval => approval.state === "pending"
+  )?.id;
   const structuredOutputs = useMemo(
     () => (message.role === "assistant" && !hideStructuredOutputs
       ? (message.toolCalls ?? []).flatMap(toolCall => {
@@ -333,14 +344,21 @@ const _MessageListItem = function MessageListItem({
                 ))}
                 {ordinaryToolCalls.map(toolCall => (
                   <ToolCallListItem
+                    approval={messageToolApprovals.findLast(
+                      approval => approval.toolCallId === toolCall.id
+                    )}
                     canContinue={
                       !runDisabled && (toolCallSummary?.canContinue ?? false)
                     }
                     context={context}
+                    focusApproval={messageToolApprovals.findLast(
+                      approval => approval.toolCallId === toolCall.id
+                    )?.id === firstPendingApprovalId}
                     key={toolCall.id}
                     messageId={message.id}
                     onContinue={handleContinue}
                     readonly={readonly}
+                    runtimeProfileType={runtimeProfileType}
                     toolCall={toolCall}
                   />
                 ))}
@@ -350,6 +368,7 @@ const _MessageListItem = function MessageListItem({
                       messageId={message.id}
                       readonly={readonly}
                       runDisabled={runDisabled}
+                      toolApprovals={messageToolApprovals}
                       toolCalls={ordinaryToolCalls}
                     />
                   )
@@ -386,16 +405,22 @@ const _MessageListItem = function MessageListItem({
 const _ToolStepContinuation = function ToolStepContinuation({
   messageId,
   toolCalls,
+  toolApprovals,
   readonly,
   runDisabled
 }: {
   readonly messageId: string;
   readonly readonly?: boolean;
   readonly runDisabled?: boolean;
+  readonly toolApprovals: readonly RuntimeToolApprovalView[];
   readonly toolCalls: ToolCall[];
 }) {
   const status = useThreadStore(state => state.status);
+  const runtimeSessionId = useThreadStore(state => (
+    state.thread.runtimeSession as { snapshot?: { id?: string; }; } | undefined
+  )?.snapshot?.id);
   const { run } = useThreadStoreActions();
+  const approvalBatchRef = useRef<HTMLDivElement>(null);
   const { resolveTool, runToolCall } = useToolCallRunner(messageId);
   const callableToolCalls = useMemo(
     () =>
@@ -411,7 +436,8 @@ const _ToolStepContinuation = function ToolStepContinuation({
     !readonly
     && status !== "running"
     && !callingTools
-    && callableToolCalls.length > 0;
+    && callableToolCalls.length > 0
+    && toolApprovals.length === 0;
   // "Continue" runs the thread from this message (continuing past the tool
   // results), mirroring the header's run action — enabled only once every tool
   // call has a response.
@@ -420,7 +446,35 @@ const _ToolStepContinuation = function ToolStepContinuation({
     && !runDisabled
     && status !== "running"
     && !callingTools
-    && summarizeToolCalls(toolCalls).canContinue;
+    && summarizeToolCalls(toolCalls).canContinue
+    && toolApprovals.length === 0;
+  const pendingApprovalCount = toolApprovals.filter(
+    approval => approval.state === "pending"
+  ).length;
+  const approvedApprovalCount = toolApprovals.filter(
+    approval => approval.state === "approved"
+  ).length;
+  const deniedApprovalCount = toolApprovals.filter(
+    approval => approval.state === "denied"
+  ).length;
+  const approvalBatchReady = toolApprovals.length > 0
+    && pendingApprovalCount === 0
+    && toolApprovals.every(approval =>
+      approval.state === "approved" || approval.state === "denied");
+  const readyApprovalLabel = approvedApprovalCount === toolApprovals.length
+    ? "Approved · ready to resume"
+    : deniedApprovalCount === toolApprovals.length
+      ? "Denied · ready to resume"
+      : "Decisions recorded · ready to resume";
+  const resumeApprovalLabel = approvedApprovalCount === toolApprovals.length
+    ? "Resume approved run"
+    : "Resume decided run";
+  useEffect(() => {
+    if (approvalBatchReady && status === "running") {
+      approvalBatchRef.current?.scrollIntoView({ block: "nearest" });
+      approvalBatchRef.current?.focus({ preventScroll: true });
+    }
+  }, [approvalBatchReady, status]);
   const handleContinue = useCallback(async () => {
     if (!canContinue) {
       return;
@@ -465,15 +519,46 @@ const _ToolStepContinuation = function ToolStepContinuation({
     canCallTools,
     runToolCall
   ]);
+  const handleResumeApproved = useCallback(async () => {
+    if (
+      readonly
+      || runDisabled
+      || status === "running"
+      || !approvalBatchReady
+    ) {
+      return;
+    }
+    await run(messageId);
+  }, [approvalBatchReady, messageId, readonly, run, runDisabled, status]);
 
   return (
-    <div className="bg-foreground/4 flex min-w-0 items-center justify-between gap-3 rounded-md px-3 py-1">
-      <Marker className="min-w-0" role="status">
-        <MarkerContent className="truncate text-xs">
-          {toolCalls.length} tool call{toolCalls.length === 1 ? "" : "s"}
+    <div
+      className={cn(
+        "bg-foreground/4 flex min-w-0 items-center justify-between gap-3 rounded-md px-3 py-1",
+        approvalBatchReady && "flex-col items-stretch gap-2 py-2"
+      )}
+      data-runtime-session-id={runtimeSessionId}
+      data-tool-approval-batch={approvalBatchReady ? "ready" : undefined}
+      ref={approvalBatchRef}
+      tabIndex={-1}
+    >
+      <Marker className="min-w-0 grow" role="status">
+        <MarkerContent
+          className={cn("text-xs", !approvalBatchReady && "truncate")}
+        >
+          {pendingApprovalCount > 0
+            ? `Waiting for approval · ${pendingApprovalCount} pending`
+            : approvalBatchReady
+              ? readyApprovalLabel
+              : `${toolCalls.length} tool call${toolCalls.length === 1 ? "" : "s"}`}
         </MarkerContent>
       </Marker>
-      <div className="flex shrink-0 items-center gap-2">
+      <div
+        className={cn(
+          "flex shrink-0 items-center gap-2",
+          approvalBatchReady && "justify-end"
+        )}
+      >
         {callableToolCalls.length > 0
           ? (
             <Button
@@ -485,6 +570,18 @@ const _ToolStepContinuation = function ToolStepContinuation({
               variant="outline"
             >
               Call tools
+            </Button>
+          )
+          : null}
+        {approvalBatchReady
+          ? (
+            <Button
+              disabled={readonly || runDisabled || status === "running"}
+              onClick={() => void handleResumeApproved()}
+              size="sm"
+              variant="outline"
+            >
+              {resumeApprovalLabel}
             </Button>
           )
           : null}

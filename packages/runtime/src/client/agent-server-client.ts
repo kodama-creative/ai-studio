@@ -42,6 +42,19 @@ export interface AgentServerClient<TValue extends JsonValue = JsonValue> {
     }
     | { readonly status: "aborting"; }
   >;
+  decideToolApproval(options: {
+    readonly continuationToken: string;
+    readonly decision: "approved" | "denied";
+    readonly requestId: string;
+    readonly runId: string;
+    readonly sessionId: string;
+    readonly signal?: AbortSignal;
+  }): Promise<{
+    readonly decision: "approved" | "denied";
+    readonly requestId: string;
+    readonly schemaVersion: typeof AGENT_SERVER_PROTOCOL_SCHEMA_VERSION;
+    readonly status: "resuming" | "waitingForApproval";
+  }>;
   createSession(options?: {
     readonly continuationToken?: string;
     readonly idempotencyKey?: string;
@@ -85,6 +98,9 @@ type CreateSessionInput = NonNullable<
 type CreateRunInput = Parameters<AgentServerClient["createRun"]>[0];
 type StreamRunInput = Parameters<AgentServerClient["streamRun"]>[0];
 type AbortRunInput = Parameters<AgentServerClient["abortRun"]>[0];
+type DecideToolApprovalInput = Parameters<
+  AgentServerClient["decideToolApproval"]
+>[0];
 type RevokeContinuationInput = Parameters<
   AgentServerClient["revokeContinuation"]
 >[0];
@@ -136,6 +152,26 @@ export function createAgentServerClient<TValue extends JsonValue = JsonValue>(
         response,
         false
       );
+    },
+    async decideToolApproval(input: DecideToolApprovalInput) {
+      const response = await fetchImplementation(
+        `${baseUrl}/v1/sessions/${encodeURIComponent(input.sessionId)}/runs/${encodeURIComponent(input.runId)}/approvals/${encodeURIComponent(input.requestId)}`,
+        {
+          method: "POST",
+          headers: await _headers(options.authorization, {
+            "content-type": "application/json",
+            "llm-space-continuation": input.continuationToken
+          }),
+          body: JSON.stringify({ decision: input.decision }),
+          signal: input.signal
+        }
+      );
+      return _jsonResponse<{
+        readonly decision: "approved" | "denied";
+        readonly requestId: string;
+        readonly schemaVersion: 1;
+        readonly status: "resuming" | "waitingForApproval";
+      }>(response, false);
     },
     async createSession(
       input: CreateSessionInput = {}
@@ -459,7 +495,10 @@ function _parseSseFrame(frame: string): AgentServerStreamEvent | null {
     });
   }
   if (
-    (eventName === "control" && !_validRunTerminal(parsedData))
+    (eventName === "control" && !(
+      _validRunTerminal(parsedData)
+      || _validToolApprovalRequired(parsedData)
+    ))
     || (eventName === "pi" && !_validPiEvent(parsedData))
   ) {
     throw new AgentServerClientError("Agent Server returned invalid event data", {
@@ -597,6 +636,20 @@ function _validRunTerminal(
       value.structuredOutput === undefined
       || _validStructuredOutput(value.structuredOutput)
     );
+}
+
+function _validToolApprovalRequired(value: unknown): boolean {
+  return _record(value)
+    && value.type === "toolApprovalRequired"
+    && Array.isArray(value.approvals)
+    && value.approvals.length > 0
+    && value.approvals.every(approval =>
+      _record(approval)
+      && typeof approval.id === "string"
+      && typeof approval.toolCallId === "string"
+      && typeof approval.toolName === "string"
+      && (approval.scope === "call" || approval.scope === "session")
+      && (approval.reason === undefined || typeof approval.reason === "string"));
 }
 
 function _validStructuredOutput(value: unknown): boolean {

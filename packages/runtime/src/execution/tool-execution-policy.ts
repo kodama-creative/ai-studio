@@ -17,6 +17,7 @@ export class ToolExecutionPolicy {
   private _toolNames = new Set<string>();
   private _staticallyDeferredToolNames = new Set<string>();
   private readonly _deferredCalls = new Map<string, DeferredToolCall>();
+  private readonly _deniedCalls = new Map<string, string>();
   private readonly _resultErrors = new Set<string>();
 
   constructor({
@@ -57,6 +58,10 @@ export class ToolExecutionPolicy {
     return this._toolNames.has(name);
   }
 
+  preparedTool(name: string): PreparedAgentTool | undefined {
+    return this._tools.find(tool => tool.definition.name === name);
+  }
+
   isStaticallyDeferred(name: string): boolean {
     return this._staticallyDeferredToolNames.has(name);
   }
@@ -74,6 +79,10 @@ export class ToolExecutionPolicy {
     return true;
   }
 
+  denyCall(toolCallId: string, reason: string): void {
+    this._deniedCalls.set(toolCallId, reason);
+  }
+
   toolsForMode(mode: RuntimeExecutionMode): AgentTool[] {
     return this._tools.map(tool => ({
       ...tool.definition,
@@ -81,6 +90,16 @@ export class ToolExecutionPolicy {
         ...args: Parameters<AgentTool["execute"]>
       ): Promise<Awaited<ReturnType<AgentTool["execute"]>>> => {
         const [toolCallId, input] = args;
+        const denial = this._deniedCalls.get(toolCallId);
+        if (denial !== undefined) {
+          this._deniedCalls.delete(toolCallId);
+          this._resultErrors.add(toolCallId);
+          return {
+            content: [{ type: "text", text: denial }],
+            details: { approval: "denied", notRun: true },
+            ...(mode === "autoOnce" ? { terminate: true } : {})
+          } as Awaited<ReturnType<AgentTool["execute"]>>;
+        }
         if (
           (mode === "manual" && !(
             tool.kind === "executable" && tool.manualAutomatic
@@ -114,9 +133,10 @@ export class ToolExecutionPolicy {
 
   restoreDeferredPlaceholders(
     messages: AgentMessage[],
-    mode: RuntimeExecutionMode
+    mode: RuntimeExecutionMode,
+    force = false
   ): AgentMessage[] {
-    if (mode !== "manual") {
+    if (mode !== "manual" && !force) {
       return messages;
     }
     const last = messages.at(-1);

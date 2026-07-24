@@ -25,6 +25,7 @@ import type {
   AgentProjectSnapshot
 } from "./agent-project-snapshot";
 import type { PreparedAgentTool } from "./prepared-agent-tool";
+import type { AgentHostApprovalPolicy } from "../../shared/agent-approval-policy";
 import type { AgentCapabilityPolicy } from "../../shared/agent-capability-policy";
 import type {
   AgentModelOptionsDefinition,
@@ -52,6 +53,7 @@ export interface CreateAgentSessionOptions {
   initialMessages?: AgentMessage[];
   extraTools?: PreparedAgentTool[];
   activeToolNames?: string[];
+  approvalPolicy?: AgentHostApprovalPolicy;
   instructionsPrefix?: string;
   systemPrompt?: string;
   executionMode?: RuntimeExecutionMode;
@@ -174,6 +176,7 @@ export class AgentRuntime {
       initialMessages: options.initialMessages ?? [],
       tools: allTools,
       activeToolNames: options.activeToolNames,
+      approvalPolicy: options.approvalPolicy,
       capabilityPolicy: options.capabilityPolicy,
       capabilityRequest: {
         ...(options.model ? { model: options.model } : {}),

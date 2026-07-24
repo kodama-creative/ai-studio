@@ -6,10 +6,14 @@ import type {
   RuntimeDurableOperationReplayEnvelope
 } from "./durable-operation";
 import type {
+  RuntimeToolApprovalLedgerSnapshot
+} from "./durable-tool-approval";
+import type {
   RuntimeRunSnapshot,
   RuntimeRunState,
   RuntimeStructuredOutputResult
 } from "./runtime-run";
+import type { ApprovalRequirement } from "../../public/definitions/approval";
 import type { ExecutionEnvToolKind } from "../../public/definitions/execution-env-tool";
 import type {
   AgentModelOptionsDefinition,
@@ -17,7 +21,7 @@ import type {
 } from "../../shared/agent-definition";
 import type { RuntimeExecutionMode } from "../../shared/runtime-execution-mode";
 
-export const RUNTIME_SESSION_SCHEMA_VERSION = 2 as const;
+export const RUNTIME_SESSION_SCHEMA_VERSION = 3 as const;
 export const RUNTIME_SESSION_STATE_SCHEMA_VERSION = 1 as const;
 export const MAX_SESSION_STATE_SLOTS = 64;
 export const MAX_SESSION_STATE_SLOT_BYTES = 64 * 1024;
@@ -70,6 +74,7 @@ export interface RuntimeTurnCapabilitySnapshot {
   readonly reasoning?: ThinkingLevel;
   readonly requestFingerprint: string;
   readonly tools: ReadonlyArray<{
+    readonly approval?: ApprovalRequirement;
     readonly closureVariables?: RuntimeSessionStateValue;
     readonly contributionId: string;
     readonly description: string;
@@ -113,6 +118,7 @@ export interface RuntimeSessionSnapshot {
   >;
   readonly state?: RuntimeSessionStateSnapshot;
   readonly operationLedger?: RuntimeDurableOperationLedgerSnapshot;
+  readonly approvalLedger?: RuntimeToolApprovalLedgerSnapshot;
 }
 
 export type RuntimeRunJournalEntry =
@@ -132,6 +138,14 @@ export type RuntimeRunJournalEntry =
     readonly sessionVersion: number;
     readonly state: Exclude<RuntimeRunState, "runningModel" | "runningTools">;
     readonly type: "runCheckpointRecorded";
+  }
+  | {
+    readonly decision: "approved" | "denied";
+    readonly requestId: string;
+    readonly runId: string;
+    readonly sequence: number;
+    readonly sessionVersion: number;
+    readonly type: "toolApprovalDecided";
   }
   | {
     readonly fingerprint: string;
@@ -192,6 +206,22 @@ export type RuntimeRunJournalEntry =
     readonly type: "operationStarted";
   }
   | {
+    readonly requestId: string;
+    readonly runId: string;
+    readonly sequence: number;
+    readonly sessionVersion: number;
+    readonly state: "pending";
+    readonly toolCallId: string;
+    readonly type: "toolApprovalRequested";
+  }
+  | {
+    readonly requestId: string;
+    readonly runId: string;
+    readonly sequence: number;
+    readonly sessionVersion: number;
+    readonly type: "toolApprovalStaled";
+  }
+  | {
     readonly runId: string;
     readonly sequence: number;
     readonly sessionVersion: number;
@@ -208,6 +238,26 @@ export interface StoredRuntimeSession {
 
 export type RuntimeSessionMutation =
   | {
+    readonly agentSnapshotFingerprint: string;
+    readonly contributionId: string;
+    readonly currentPrincipalFingerprint: string;
+    readonly hostPolicyFingerprint: string;
+    readonly hostRequirement: "always" | "deny" | "never" | "once";
+    readonly initiatorPrincipalFingerprint: string;
+    readonly operationId: string;
+    readonly reason?: string;
+    readonly requestFingerprint: string;
+    readonly requestId: string;
+    readonly runId: string;
+    readonly scope: "call" | "session";
+    readonly sourcePolicyFingerprint: string;
+    readonly sourceRequirement: "always" | "deny" | "never" | "once";
+    readonly stepId: string;
+    readonly toolCallId: string;
+    readonly toolName: string;
+    readonly type: "requestToolApproval";
+  }
+  | {
     readonly configuration: RuntimeRunConfigurationSnapshot;
     readonly runId: string;
     readonly type: "startRun";
@@ -216,6 +266,14 @@ export type RuntimeSessionMutation =
     readonly continuationFingerprint: string;
     readonly runId: string;
     readonly type: "recordCheckpoint";
+  }
+  | {
+    readonly currentPrincipalFingerprint: string;
+    readonly decision: "approved" | "denied";
+    readonly initiatorPrincipalFingerprint: string;
+    readonly requestId: string;
+    readonly runId: string;
+    readonly type: "decideToolApproval";
   }
   | {
     readonly kind: "provider" | "tool";
@@ -245,6 +303,11 @@ export type RuntimeSessionMutation =
     readonly runId: string;
     readonly state: "cancelled" | "completed" | "failed" | "outcomeUnknown";
     readonly type: "settleOperation";
+  }
+  | {
+    readonly requestId: string;
+    readonly runId: string;
+    readonly type: "staleToolApproval";
   }
   | {
     readonly runId: string;

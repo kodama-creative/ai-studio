@@ -21,7 +21,21 @@ export {
   type DurableOperationResumeClaim,
   resumeDurableOperation
 } from "./durable-operation-resume";
+export {
+  RUNTIME_TOOL_APPROVAL_LEDGER_SCHEMA_VERSION,
+  RUNTIME_TOOL_APPROVAL_REQUEST_STATES,
+  type RuntimeToolApprovalGrantSnapshot,
+  type RuntimeToolApprovalLedgerSnapshot,
+  type RuntimeToolApprovalRequestSnapshot,
+  type RuntimeToolApprovalRequestState
+} from "./durable-tool-approval";
 export { InMemorySessionStore } from "./in-memory-session-store";
+export {
+  RuntimeApprovalAuthorizationError
+} from "./runtime-approval-authorization-error";
+export {
+  fingerprintRuntimeApprovalPrincipal
+} from "./runtime-approval-principal";
 export {
   isTerminalRuntimeRunState,
   RUNTIME_RUN_STATES,
@@ -48,6 +62,14 @@ export {
   recoverRuntimeSession,
   type RuntimeSessionRecoveryResult
 } from "./runtime-session-recovery";
+export { claimRuntimeToolApproval } from "./runtime-tool-approval-claim";
+export { decideRuntimeToolApproval } from "./runtime-tool-approval-decision";
+export { RuntimeToolApprovalStaleError } from "./runtime-tool-approval-stale-error";
+export {
+  runtimeRunHasParkedToolApprovals,
+  type RuntimeToolApprovalView,
+  runtimeToolApprovalViews
+} from "./runtime-tool-approval-view";
 export {
   MAX_SESSION_STATE_BYTES,
   MAX_SESSION_STATE_SLOT_BYTES,

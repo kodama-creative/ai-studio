@@ -1,3 +1,4 @@
+export type { AgentHostApprovalPolicy } from "../shared/agent-approval-policy";
 export type { StructuredOutputFailureCode } from "../shared/structured-output";
 export type { AgentProjectArtifact } from "./agent/agent-project-artifact";
 export type {
@@ -20,6 +21,7 @@ export { AgentHostPolicyChangedError } from "./capabilities/agent-session-capabi
 export { createHostCapabilityPolicy } from "./capabilities/create-host-capability-policy";
 export { ExecutionEnvUnavailableError } from "./execution-env/execution-env-unavailable-error";
 export { DurableOperationOutcomeUnknownError } from "./harness/durable-operation-outcome-unknown-error";
+export { RuntimeToolApprovalStaleError } from "./harness/runtime-tool-approval-stale-error";
 export { StructuredOutputError } from "./outputs/structured-output-error";
 export {
   DEFAULT_MAX_STRUCTURED_OUTPUT_BYTES,

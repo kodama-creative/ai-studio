@@ -1,5 +1,10 @@
 import { createHash } from "node:crypto";
 import {
+  runtimeRunHasParkedToolApprovals,
+  type RuntimeStructuredOutputResult
+} from "@llm-space/runtime/harness";
+import {
+  type AgentHostApprovalPolicy,
   AgentHostPolicyChangedError,
   AgentRuntime,
   AgentStateCommitUnknownError,
@@ -7,6 +12,7 @@ import {
   createHostCapabilityPolicy,
   DurableOperationOutcomeUnknownError,
   ExecutionEnvUnavailableError,
+  RuntimeToolApprovalStaleError,
   type SandboxProvider,
   SandboxUnavailableError,
   SandboxWorkspaceLostError,
@@ -16,7 +22,6 @@ import {
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Models, UserMessage } from "@earendil-works/pi-ai";
 import type { AgentCapabilityPolicy } from "@llm-space/runtime";
-import type { RuntimeStructuredOutputResult } from "@llm-space/runtime/harness";
 
 import { ServerCapacityError } from "./server-capacity-error";
 import { serializePiAgentEvent } from "../protocol/pi-event-serializer";
@@ -30,6 +35,7 @@ import type {
 } from "../repository/server-session-repository";
 
 export interface ServerRunControllerOptions {
+  readonly approvalPolicy?: AgentHostApprovalPolicy;
   readonly maxActiveRuns?: number;
   readonly maxStructuredOutputBytes?: number;
   readonly models: Models;
@@ -41,6 +47,7 @@ export interface ServerRunControllerOptions {
 export class ServerRunController {
   private readonly _runtime: AgentRuntime;
   private readonly _capabilityPolicy: AgentCapabilityPolicy;
+  private readonly _approvalPolicy?: AgentHostApprovalPolicy;
   private readonly _repository: ServerSessionRepository;
   private readonly _sandboxProvider?: SandboxProvider;
   private readonly _active = new Map<string, { abort(): void; }>();
@@ -63,6 +70,16 @@ export class ServerRunController {
       models: options.models,
       project: options.project
     });
+    this._approvalPolicy = options.approvalPolicy;
+    if (
+      this._approvalPolicy
+      && (
+        this._approvalPolicy.id.trim().length === 0
+        || this._approvalPolicy.id.length > 256
+      )
+    ) {
+      throw new TypeError("Server approval policy id must contain 1-256 characters");
+    }
     this._sandboxProvider = options.sandboxProvider;
     if (this._runtime.project.sandbox && !this._sandboxProvider) {
       throw new SandboxUnavailableError(
@@ -227,10 +244,9 @@ export class ServerRunController {
     let outcome: ServerRunTerminalOutcome = "completed";
     let code: string | undefined;
     let structuredOutput: RuntimeStructuredOutputResult | undefined;
+    let parkedForApproval = false;
     try {
-      const persistedRuntime = this._runtime.project.sandbox
-        ? await this._repository.load(run.sessionId)
-        : null;
+      const persistedRuntime = await this._repository.load(run.sessionId);
       const sandboxSession = this._runtime.project.sandbox
         && this._sandboxProvider
         ? await this._sandboxProvider.acquire({
@@ -248,6 +264,9 @@ export class ServerRunController {
         }
         : undefined;
       const session = await this._runtime.createSession({
+        ...(this._approvalPolicy
+          ? { approvalPolicy: this._approvalPolicy }
+          : {}),
         capabilityPolicy: this._capabilityPolicy,
         id: run.sessionId,
         context: {
@@ -284,7 +303,16 @@ export class ServerRunController {
         }
         try {
           if (event.type === "tool_calls_deferred") {
-            throw new Error("Server ReAct mode cannot defer tool calls");
+            const current = await this._repository.load(run.sessionId);
+            const pending = current?.snapshot.approvalLedger?.requests.some(
+              request => request.runId === run.runId
+                && request.state === "pending"
+            ) ?? false;
+            if (!pending) {
+              throw new Error("Server ReAct mode cannot defer tool calls");
+            }
+            parkedForApproval = true;
+            return;
           }
           const serialized = serializePiAgentEvent(event);
           await this._repository.appendEvent(run.sessionId, run.runId, {
@@ -301,7 +329,14 @@ export class ServerRunController {
       if (this._abortedRuns.has(run.runId)) {
         outcome = "cancelled";
       } else {
-        await session.continue();
+        const resumesApproval = persistedRuntime
+          ? runtimeRunHasParkedToolApprovals(persistedRuntime, run.runId)
+          : false;
+        if (resumesApproval) {
+          await session.resumeApprovedTools();
+        } else {
+          await session.continue();
+        }
         structuredOutput = session.structuredOutput ?? undefined;
       }
       _throwEventFailure(eventFailure);
@@ -329,6 +364,9 @@ export class ServerRunController {
       } else if (error instanceof AgentHostPolicyChangedError) {
         outcome = "failed";
         code = "hostPolicyChanged";
+      } else if (error instanceof RuntimeToolApprovalStaleError) {
+        outcome = "failed";
+        code = error.code;
       } else if (error instanceof ExecutionEnvUnavailableError) {
         outcome = "failed";
         code = "executionEnvUnavailable";
@@ -351,7 +389,9 @@ export class ServerRunController {
       }
     } finally {
       try {
-        if (!this._detached) {
+        if (!this._detached && parkedForApproval) {
+          await this._parkRunForApproval(run);
+        } else if (!this._detached) {
           await this._repository.completeRun({
             sessionId: run.sessionId,
             runId: run.runId,
@@ -368,6 +408,51 @@ export class ServerRunController {
         this._drainRecoveryQueue();
       }
     }
+  }
+
+  private async _parkRunForApproval(run: CreatedServerRun): Promise<void> {
+    const current = await this._repository.load(run.sessionId);
+    const runtimeRun = current?.snapshot.runs.find(item => item.id === run.runId);
+    if (!current || !runtimeRun) {
+      throw new Error("Runtime Run disappeared while parking approval");
+    }
+    const mutations = runtimeRun.state === "runningModel"
+      ? [
+        { type: "transitionRun" as const, runId: run.runId, to: "runningTools" as const },
+        {
+          type: "transitionRun" as const,
+          runId: run.runId,
+          to: "waitingForApproval" as const
+        }
+      ]
+      : runtimeRun.state === "runningTools"
+        ? [{
+          type: "transitionRun" as const,
+          runId: run.runId,
+          to: "waitingForApproval" as const
+        }]
+        : [];
+    if (mutations.length > 0) {
+      await this._repository.commit({
+        sessionId: run.sessionId,
+        expectedVersion: current.version,
+        mutations
+      });
+    }
+    const parked = await this._repository.load(run.sessionId);
+    const approvals = parked?.snapshot.approvalLedger?.requests
+      .filter(request => request.runId === run.runId && request.state === "pending")
+      .map(request => ({
+        id: request.id,
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        scope: request.scope,
+        ...(request.reason ? { reason: request.reason } : {})
+      })) ?? [];
+    await this._repository.appendEvent(run.sessionId, run.runId, {
+      event: "control",
+      data: { type: "toolApprovalRequired", approvals }
+    });
   }
 
   private _drainRecoveryQueue(): void {

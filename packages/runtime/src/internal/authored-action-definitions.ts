@@ -15,12 +15,13 @@ export function defineToolRuntime<TDefinition extends object>(
 
 export function defineExecutionEnvToolRuntime<
   TKind extends "bash" | "read" | "write"
->(kind: TKind): {
+>(kind: TKind, options: { readonly approval?: Approval; } = {}): {
+  readonly approval?: Approval;
   readonly kind: TKind;
   readonly [key: symbol]: true;
 } {
   return Object.defineProperty(
-    { kind },
+    { kind, ...options },
     Symbol.for("llm-space.execution-env-tool-definition"),
     {
       value: true,
@@ -58,3 +59,4 @@ export function createAuthoredDefinitionVirtualModule(
 ): string {
   return `export const ${exportName} = ${definition.toString()};`;
 }
+import type { Approval } from "../public/definitions/approval";

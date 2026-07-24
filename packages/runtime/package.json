@@ -15,6 +15,7 @@
     "./server": "./src/runtime/server.ts",
     "./state": "./src/public/state/index.ts",
     "./tools": "./src/public/tools/index.ts",
+    "./tools/approval": "./src/public/tools/approval/index.ts",
     "./package.json": "./package.json"
   },
   "dependencies": {

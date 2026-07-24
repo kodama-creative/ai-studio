@@ -31,6 +31,7 @@ const LEGAL_TRANSITIONS: Readonly<
   ],
   runningTools: [
     "runningModel",
+    "waitingForApproval",
     "waitingForToolResults",
     "waitingForContinue",
     "completed",
@@ -38,6 +39,11 @@ const LEGAL_TRANSITIONS: Readonly<
     "cancelled",
     "superseded",
     "outcomeUnknown"
+  ],
+  waitingForApproval: [
+    "runningTools",
+    "cancelled",
+    "superseded"
   ],
   waitingForToolResults: [
     "waitingForContinue",

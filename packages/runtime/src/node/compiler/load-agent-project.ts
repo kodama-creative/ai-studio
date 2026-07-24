@@ -606,7 +606,8 @@ async function _compileTools(
         names.set(name, sourceRef.absolutePath);
         tools.push(createCompiledExecutionEnvTool(
           definition.kind,
-          sourceRef.logicalPath
+          sourceRef.logicalPath,
+          definition.approval
         ));
         continue;
       }

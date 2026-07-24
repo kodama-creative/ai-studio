@@ -1,4 +1,8 @@
 import {
+  runtimeToolApprovalViews,
+  type StoredRuntimeSession
+} from "@llm-space/runtime/harness";
+import {
   ArrowLeftIcon,
   CheckIcon,
   ChevronLeftIcon,
@@ -65,6 +69,7 @@ const VERDICT_LABELS: Record<EvaluationRecord["verdict"], string> = {
 const RUNTIME_STATE_LABELS: Record<ThreadRuntimeRunState, string> = {
   runningModel: "Running model",
   runningTools: "Running tools",
+  waitingForApproval: "Waiting for approval",
   waitingForToolResults: "Waiting for tool results",
   waitingForContinue: "Waiting to continue",
   completed: "Completed",
@@ -106,6 +111,29 @@ const _RunHistoryListView = function RunHistoryListView({
     () => runtimeRunStates(persistedRuntimeSession),
     [persistedRuntimeSession]
   );
+  const pendingApprovalCounts = useMemo(() => {
+    const session = persistedRuntimeSession as StoredRuntimeSession | undefined;
+    const counts = new Map<string, number>();
+    if (!session?.snapshot) { return counts; }
+    for (const approval of runtimeToolApprovalViews(session)) {
+      if (approval.state !== "pending") { continue; }
+      counts.set(approval.runId, (counts.get(approval.runId) ?? 0) + 1);
+    }
+    return counts;
+  }, [persistedRuntimeSession]);
+  const reviewApprovals = useCallback(() => {
+    onClose();
+    queueMicrotask(() => {
+      const session = persistedRuntimeSession as StoredRuntimeSession | undefined;
+      if (!session?.snapshot.id) { return; }
+      const target = document.querySelector<HTMLElement>(
+        `[data-runtime-session-id="${CSS.escape(session.snapshot.id)}"]`
+        + '[data-tool-approval-state="pending"]'
+      );
+      target?.focus({ preventScroll: false });
+      target?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  }, [onClose, persistedRuntimeSession]);
   const runGroups = useMemo(
     () => groupRuntimeRunCheckpoints(runs, currentRuntimeRunStates),
     [currentRuntimeRunStates, runs]
@@ -332,8 +360,22 @@ const _RunHistoryListView = function RunHistoryListView({
                         </span>
                         <span aria-hidden>·</span>
                         <span className="truncate">
-                          {RUNTIME_STATE_LABELS[group.state]}
+                          {group.state === "waitingForApproval"
+                            ? `Waiting for approval · ${pendingApprovalCounts.get(group.runtimeRunId) ?? 0} pending`
+                            : RUNTIME_STATE_LABELS[group.state]}
                         </span>
+                        {group.state === "waitingForApproval"
+                          ? (
+                            <Button
+                              className="ml-auto h-5 px-1.5 text-[10px]"
+                              onClick={reviewApprovals}
+                              size="sm"
+                              variant="ghost"
+                            >
+                              Review
+                            </Button>
+                          )
+                          : null}
                         <span className="ml-auto shrink-0 tabular-nums">
                           {group.runs.length} {group.runs.length === 1
                             ? "checkpoint"

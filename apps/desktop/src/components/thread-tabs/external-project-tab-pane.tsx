@@ -26,7 +26,11 @@ import type {
 } from "@llm-space/core";
 import type { StoredRuntimeSession } from "@llm-space/runtime/harness";
 
-import { createRpcTransport, externalAgentProjects } from "@/client";
+import {
+  createRpcTransport,
+  decideToolApproval,
+  externalAgentProjects
+} from "@/client";
 import {
   executeTool,
   type ToolExecutor
@@ -748,6 +752,7 @@ const _ProjectThreadPane = function ProjectThreadPane({
         active={active}
         className="bg-background size-full"
         configurationReadonly={localServer}
+        decideToolApproval={decideToolApproval}
         externalUpdate={externalUpdate}
         headerDetails={
           <div className="flex min-w-0 items-center gap-2 text-[10px]">

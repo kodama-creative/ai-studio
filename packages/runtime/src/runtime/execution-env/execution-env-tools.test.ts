@@ -22,6 +22,7 @@ import { createExecutionEnvTool } from "./create-execution-env-tool";
 import { ExecutionEnvUnavailableError } from "./execution-env-unavailable-error";
 import { AgentRuntime } from "../agent/agent-runtime";
 import { createCompiledExecutionEnvTool } from "../agent/create-compiled-execution-env-tool";
+import { prepareProjectTool } from "../agent/prepare-project-tool";
 import { InMemorySessionStore } from "../harness/in-memory-session-store";
 
 import type { AgentProjectSnapshot } from "../agent/agent-project-snapshot";
@@ -37,6 +38,18 @@ afterEach(async () => {
 });
 
 describe("ExecutionEnv-backed authored tools", () => {
+  test("keeps approval outside the Pi-visible canonical helper definition", () => {
+    const fake = _fakeExecutionEnv();
+    const prepared = prepareProjectTool(
+      createCompiledExecutionEnvTool("read", "tools/read.ts", "once"),
+      undefined,
+      fake.env
+    );
+
+    expect(prepared).toMatchObject({ kind: "executable", approval: "once" });
+    expect(prepared.definition).not.toHaveProperty("approval");
+  });
+
   test("runs the same read, write, and bash contracts against Node and fake envs", async () => {
     const root = await mkdtemp(join(tmpdir(), "llm-space-execution-env-"));
     ROOTS.push(root);

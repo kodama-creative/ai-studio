@@ -1,7 +1,11 @@
-import { recoverRuntimeSession } from "@llm-space/runtime/harness";
+import {
+  decideRuntimeToolApproval,
+  recoverRuntimeSession
+} from "@llm-space/runtime/harness";
 
 import type { Models } from "@earendil-works/pi-ai";
 import type {
+  AgentHostApprovalPolicy,
   CompiledAgentProjectSnapshot,
   SandboxProvider
 } from "@llm-space/runtime/server";
@@ -32,6 +36,7 @@ const MAX_JSON_BODY_BYTES = 64 * 1024;
 const MAX_TEXT_INPUT_BYTES = 32 * 1024;
 
 export interface StartAgentServerOptions {
+  readonly approvalPolicy?: AgentHostApprovalPolicy;
   readonly artifactFingerprint: string;
   readonly allowedHosts?: readonly string[];
   readonly allowedOrigins?: readonly string[];
@@ -160,6 +165,9 @@ export async function startAgentServer(
       repository,
       models: options.models,
       project: options.project,
+      ...(options.approvalPolicy
+        ? { approvalPolicy: options.approvalPolicy }
+        : {}),
       maxActiveRuns: options.maxActiveRuns,
       maxStructuredOutputBytes: options.maxStructuredOutputBytes,
       ...(options.sandboxProvider
@@ -416,6 +424,18 @@ async function _routeRequest(
       context,
       decodeURIComponent(_capture(runAbort, 1)),
       decodeURIComponent(_capture(runAbort, 2))
+    );
+  }
+  const toolApproval = url.pathname.match(
+    /^\/v1\/sessions\/([^/]+)\/runs\/([^/]+)\/approvals\/([^/]+)$/
+  );
+  if (request.method === "POST" && toolApproval) {
+    return _decideToolApproval(
+      request,
+      context,
+      decodeURIComponent(_capture(toolApproval, 1)),
+      decodeURIComponent(_capture(toolApproval, 2)),
+      decodeURIComponent(_capture(toolApproval, 3))
     );
   }
   const continuation = url.pathname.match(
@@ -696,6 +716,82 @@ async function _abortRun(
     }
     context.runs.abort(runId);
     return _json({ status: "aborting" }, 202);
+  } catch (error) {
+    return _mappedError(error);
+  }
+}
+
+async function _decideToolApproval(
+  request: Request,
+  context: RequestContext,
+  sessionId: string,
+  runId: string,
+  requestId: string
+): Promise<Response> {
+  const principal = await _authenticate(request, context.authenticator);
+  if (!principal) { return _unauthorized(); }
+  const continuationToken = request.headers.get("llm-space-continuation");
+  if (!continuationToken) { return _error(404, "not_found"); }
+  try {
+    await context.repository.authorizeRun({
+      sessionId,
+      runId,
+      owner: principal,
+      continuationToken
+    });
+  } catch (error) {
+    return _mappedError(error);
+  }
+  const bytes = await _bodyBytes(request);
+  if (!bytes) { return _error(413, "request_too_large"); }
+  let decision: "approved" | "denied";
+  try {
+    const value = JSON.parse(
+      new TextDecoder("utf-8", { fatal: true }).decode(bytes)
+    ) as unknown;
+    if (
+      !value
+      || typeof value !== "object"
+      || Array.isArray(value)
+      || Object.keys(value).length !== 1
+      || !("decision" in value)
+      || (value.decision !== "approved" && value.decision !== "denied")
+    ) {
+      return _error(400, "invalid_request");
+    }
+    decision = value.decision;
+  } catch {
+    return _error(400, "invalid_json");
+  }
+  try {
+    const current = await context.repository.load(sessionId);
+    if (!current) { return _error(404, "not_found"); }
+    const decided = await decideRuntimeToolApproval(context.repository, {
+      actor: { current: principal, initiator: principal },
+      decision,
+      expectedVersion: current.version,
+      requestId,
+      runId,
+      sessionId
+    });
+    const pending = decided.snapshot.approvalLedger?.requests.some(
+      approval => approval.runId === runId && approval.state === "pending"
+    ) ?? false;
+    if (!pending) {
+      const resumed = await context.repository.commit({
+        sessionId,
+        expectedVersion: decided.version,
+        mutations: [{ type: "transitionRun", runId, to: "runningTools" }]
+      });
+      void resumed;
+      context.runs.resumeRun(context.repository.recoverableRun(sessionId, runId));
+    }
+    return _json({
+      schemaVersion: 1,
+      requestId,
+      decision,
+      status: pending ? "waitingForApproval" : "resuming"
+    }, 202);
   } catch (error) {
     return _mappedError(error);
   }

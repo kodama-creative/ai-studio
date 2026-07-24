@@ -604,7 +604,7 @@ describe("Durable operation crash matrix", () => {
     const old = {
       version: 1,
       snapshot: {
-        schemaVersion: 1,
+        schemaVersion: 2,
         id: "session-old",
         activeRunId: null,
         runs: []
@@ -617,7 +617,7 @@ describe("Durable operation crash matrix", () => {
       old as unknown as StoredRuntimeSession
     ])).toThrow(UnsupportedRuntimeSessionSchemaError);
     expect(old).toEqual(before);
-    expect(RUNTIME_SESSION_SCHEMA_VERSION).toBe(2);
+    expect(RUNTIME_SESSION_SCHEMA_VERSION).toBe(3);
   });
 });
 

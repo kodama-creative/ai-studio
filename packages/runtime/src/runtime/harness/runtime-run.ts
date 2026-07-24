@@ -1,6 +1,7 @@
 export const RUNTIME_RUN_STATES = [
   "runningModel",
   "runningTools",
+  "waitingForApproval",
   "waitingForToolResults",
   "waitingForContinue",
   "completed",
@@ -56,6 +57,7 @@ const LEGAL_TRANSITIONS: Readonly<
   ]),
   runningTools: new Set([
     "runningModel",
+    "waitingForApproval",
     "waitingForToolResults",
     "waitingForContinue",
     "completed",
@@ -63,6 +65,11 @@ const LEGAL_TRANSITIONS: Readonly<
     "cancelled",
     "superseded",
     "outcomeUnknown"
+  ]),
+  waitingForApproval: new Set([
+    "runningTools",
+    "cancelled",
+    "superseded"
   ]),
   waitingForToolResults: new Set([
     "waitingForContinue",

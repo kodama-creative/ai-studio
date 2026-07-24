@@ -27,6 +27,7 @@ export { AgentHostPolicyChangedError } from "../runtime/capabilities/agent-sessi
 export { createHostCapabilityPolicy } from "../runtime/capabilities/create-host-capability-policy";
 export { ExecutionEnvUnavailableError } from "../runtime/execution-env/execution-env-unavailable-error";
 export { DurableOperationOutcomeUnknownError } from "../runtime/harness/durable-operation-outcome-unknown-error";
+export { RuntimeToolApprovalStaleError } from "../runtime/harness/runtime-tool-approval-stale-error";
 export {
   StructuredOutputError
 } from "../runtime/outputs/structured-output-error";

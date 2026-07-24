@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { Type } from "typebox";
 
+import { isApprovalRequirement } from "./approval";
 import { defineTool, isToolDefinition } from "./tool";
+import { always, deny, never, once } from "../tools/approval";
 import { defineDynamic } from "../tools/define-dynamic";
 
 describe("defineTool", () => {
@@ -82,6 +84,58 @@ describe("defineTool", () => {
     );
 
     expect(result).toMatchObject({ echo: expect.any(Object) });
+  });
+
+  test("preserves bounded approval requirements and input-aware policy", async () => {
+    expect([never(), always(), once(), deny("disabled")]).toEqual([
+      "never",
+      "always",
+      "once",
+      { type: "deny", reason: "disabled" }
+    ]);
+
+    const definition = defineTool({
+      description: "Transfer funds.",
+      inputSchema: Type.Object({ amount: Type.Number() }),
+      approval: async ({ session, toolInput }) =>
+        (session.auth.current.principalId === "owner"
+          ? (toolInput.amount > 1_000 ? always() : never())
+          : deny("Only the owner may transfer funds")),
+      execute: ({ amount }) => ({ amount })
+    });
+
+    expect(typeof definition.approval).toBe("function");
+    if (typeof definition.approval !== "function") {
+      throw new Error("Expected conditional approval policy");
+    }
+    expect(await definition.approval({
+      callId: "call-approval",
+      toolInput: { amount: 1_001 },
+      toolName: "transfer_funds",
+      session: {
+        id: "session-approval",
+        auth: {
+          current: {
+            issuer: "test",
+            principalId: "owner",
+            principalType: "user"
+          },
+          initiator: {
+            issuer: "test",
+            principalId: "owner",
+            principalType: "user"
+          }
+        },
+        channel: { kind: "test" },
+        turn: { id: "turn-approval", sequence: 1 }
+      }
+    })).toBe("always");
+
+    expect(isApprovalRequirement({
+      type: "deny",
+      reason: "looks valid",
+      execute: () => undefined
+    })).toBe(false);
   });
 
   test("rejects author-owned identity at typecheck", () => {

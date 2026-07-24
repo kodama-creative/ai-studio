@@ -463,6 +463,109 @@ describe("Agent Server HTTP protocol", () => {
       event.event === "control" && event.data.type === "runTerminal")).toHaveLength(1);
   });
 
+  test("parks and resumes a tool approval through the protected Server command", async () => {
+    const root = await mkdtemp(join(tmpdir(), "llm-space-server-approval-"));
+    roots.push(root);
+    const fingerprint = "8".repeat(64);
+    let executions = 0;
+    const server = await startAgentServer({
+      artifactFingerprint: fingerprint,
+      approvalPolicy: {
+        id: "server-approval-policy-v1",
+        evaluate: () => "always"
+      },
+      authenticator: createStaticBearerAuthenticator([
+        {
+          issuer: "test",
+          principalId: "principal-one",
+          principalType: "user",
+          token: "auth-token-with-at-least-thirty-two-bytes"
+        },
+        {
+          issuer: "test",
+          principalId: "principal-two",
+          principalType: "user",
+          token: "second-auth-token-with-at-least-thirty-two"
+        }
+      ]),
+      hostname: "127.0.0.1",
+      localDev: true,
+      models: _models(),
+      port: 0,
+      project: _approvalProject(fingerprint, () => { executions += 1; }),
+      repositoryRoot: root
+    });
+    servers.push(server);
+    const client = createAgentServerClient({
+      baseUrl: server.url,
+      authorization: "auth-token-with-at-least-thirty-two-bytes"
+    });
+    const session = await client.createSession({
+      continuationToken: _continuationToken(50),
+      idempotencyKey: "approval-session"
+    });
+    const run = await client.createRun({
+      sessionId: session.sessionId,
+      continuationToken: session.continuationToken,
+      idempotencyKey: "approval-run",
+      text: "invalid-json"
+    });
+    let releaseApproval: (requestId: string) => void = () => {};
+    const approvalSeen = new Promise<string>(resolve => {
+      releaseApproval = resolve;
+    });
+    const events: AgentServerStreamEvent[] = [];
+    const observation = (async () => {
+      for await (const event of client.streamRun({
+        sessionId: session.sessionId,
+        runId: run.runId,
+        continuationToken: session.continuationToken
+      })) {
+        events.push(event);
+        if (
+          event.event === "control"
+          && event.data.type === "toolApprovalRequired"
+        ) {
+          releaseApproval(event.data.approvals[0]!.id);
+        }
+      }
+    })();
+    const requestId = await approvalSeen;
+    expect(executions).toBe(0);
+
+    const hidden = await fetch(
+      `${server.url}/v1/sessions/${session.sessionId}/runs/${run.runId}/approvals/${encodeURIComponent(requestId)}`,
+      {
+        method: "POST",
+        headers: {
+          authorization: "Bearer second-auth-token-with-at-least-thirty-two",
+          "content-type": "application/json",
+          "llm-space-continuation": session.continuationToken
+        },
+        body: JSON.stringify({ decision: "approved" })
+      }
+    );
+    expect(hidden.status).toBe(404);
+    expect(await client.decideToolApproval({
+      continuationToken: session.continuationToken,
+      sessionId: session.sessionId,
+      runId: run.runId,
+      requestId,
+      decision: "approved"
+    })).toMatchObject({
+      requestId,
+      decision: "approved",
+      status: "resuming"
+    });
+    await observation;
+
+    expect(executions).toBe(1);
+    expect(events.at(-1)).toMatchObject({
+      event: "control",
+      data: { type: "runTerminal", outcome: "completed" }
+    });
+  }, 15_000);
+
   test("selects, validates, persists, and replays a named structured output", async () => {
     const root = await mkdtemp(join(tmpdir(), "llm-space-server-output-"));
     roots.push(root);
@@ -1654,6 +1757,27 @@ function _project(fingerprint: string): CompiledAgentProjectSnapshot {
     resources: { skills: [] },
     diagnostics: [],
     fingerprint
+  };
+}
+
+function _approvalProject(
+  fingerprint: string,
+  onExecute: () => void
+): CompiledAgentProjectSnapshot {
+  const project = _project(fingerprint);
+  return {
+    ...project,
+    tools: [{
+      ...project.tools[0]!,
+      approval: "never",
+      async execute() {
+        onExecute();
+        return {
+          content: [{ type: "text" as const, text: "approved" }],
+          details: { approved: true }
+        };
+      }
+    }]
   };
 }
 

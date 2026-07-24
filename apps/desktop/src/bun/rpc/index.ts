@@ -105,6 +105,7 @@ export function createMainWindowRPC({
     maxRequestTime: MAX_REQUEST_TIME_MS,
     handlers: {
       requests: {
+        decideToolApproval: async input => streaming.decideToolApproval(input),
         availableModels: async () => getModelProviderGroups(),
         removeProvider: async ({ providerId }) => {
           modelManager.removeProvider(providerId);
@@ -213,7 +214,11 @@ export function createMainWindowRPC({
           await moveToTrash(abs);
           return null;
         },
-        fsRead: async ({ path }) => localFs.read(path),
+        fsRead: async ({ path }) => {
+          const thread = await localFs.read(path);
+          streaming.registerDesktopThreadApprovals(path, thread);
+          return thread;
+        },
         fsWrite: async ({ path, thread }) => {
           await localFs.write(path, thread);
           return null;
@@ -299,8 +304,18 @@ export function createMainWindowRPC({
             title,
             runtimeProfileType
           ),
-        externalAgentProjectReadThread: async ({ projectId, threadId }) =>
-          externalAgentProjects.readThread(projectId, threadId),
+        externalAgentProjectReadThread: async ({ projectId, threadId }) => {
+          const record = await externalAgentProjects.readThread(
+            projectId,
+            threadId
+          );
+          streaming.registerAgentProjectThreadApprovals(
+            projectId,
+            threadId,
+            record.thread
+          );
+          return record;
+        },
         externalAgentProjectRuntimeStatus: async ({ projectId, threadId }) => {
           const record = await externalAgentProjects.readThread(
             projectId,

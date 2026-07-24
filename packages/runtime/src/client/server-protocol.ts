@@ -24,6 +24,16 @@ export type ServerRunTerminalOutcome =
 
 export type ServerControlEvent<TValue extends JsonValue = JsonValue> =
   | {
+    readonly approvals: ReadonlyArray<{
+      readonly id: string;
+      readonly reason?: string;
+      readonly scope: "call" | "session";
+      readonly toolCallId: string;
+      readonly toolName: string;
+    }>;
+    readonly type: "toolApprovalRequired";
+  }
+  | {
     readonly code?: string;
     readonly outcome: ServerRunTerminalOutcome;
     readonly structuredOutput?: ServerStructuredOutput<TValue>;
@@ -38,14 +48,17 @@ export type AgentServerStreamEvent<TValue extends JsonValue = JsonValue> =
     readonly sequence: number;
   }
   | {
+    readonly data: Exclude<
+      ServerControlEvent<TValue>,
+      { type: "serverShutdown"; }
+    >;
+    readonly event: "control";
+    readonly sequence: number;
+  }
+  | {
     readonly data: Extract<ServerControlEvent, { type: "serverShutdown"; }>;
     readonly event: "control";
     readonly sequence: null;
-  }
-  | {
-    readonly data: Extract<ServerControlEvent<TValue>, { type: "runTerminal"; }>;
-    readonly event: "control";
-    readonly sequence: number;
   };
 
 export interface AgentServerSession {

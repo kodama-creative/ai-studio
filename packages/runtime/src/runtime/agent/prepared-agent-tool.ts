@@ -1,5 +1,6 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 
+import type { Approval } from "../../public/definitions/approval";
 import type { ExecutionEnvToolKind } from "../../public/definitions/execution-env-tool";
 
 type PreparedAgentToolDefinition = Omit<AgentTool, "execute">;
@@ -10,6 +11,7 @@ type PreparedAgentToolResult = {
 
 type PreparedAgentToolOutcome =
   | {
+    readonly approval?: Approval;
     readonly result: PreparedAgentToolResult;
     readonly type: "completed";
   }
@@ -24,6 +26,7 @@ export interface PreparedAgentToolProvenance {
 
 export type PreparedAgentTool =
   | {
+    readonly approval?: Approval;
     readonly definition: PreparedAgentToolDefinition;
     readonly execute: (
       ...args: Parameters<AgentTool["execute"]>

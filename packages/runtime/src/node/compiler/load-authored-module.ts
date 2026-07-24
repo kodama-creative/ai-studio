@@ -235,9 +235,19 @@ function _authoredSdkPlugin(): Bun.BunPlugin {
           const runtimeSource = defineExecutionEnvToolRuntime.toString();
           const defineExecutionEnvToolsSource = `
             const defineExecutionEnvToolRuntime = ${runtimeSource};
-            export const defineBashTool = () => defineExecutionEnvToolRuntime("bash");
-            export const defineReadTool = () => defineExecutionEnvToolRuntime("read");
-            export const defineWriteTool = () => defineExecutionEnvToolRuntime("write");
+            export const always = () => "always";
+            export const never = () => "never";
+            export const once = () => "once";
+            export const deny = reason => {
+              const normalized = reason.trim();
+              if (normalized.length === 0 || normalized.length > 1024) {
+                throw new TypeError("Approval denial reason must contain 1-1024 characters");
+              }
+              return { type: "deny", reason: normalized };
+            };
+            export const defineBashTool = (options = {}) => defineExecutionEnvToolRuntime("bash", options);
+            export const defineReadTool = (options = {}) => defineExecutionEnvToolRuntime("read", options);
+            export const defineWriteTool = (options = {}) => defineExecutionEnvToolRuntime("write", options);
           `;
           const defineToolSource = createAuthoredDefinitionVirtualModule(
             "defineTool",

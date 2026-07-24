@@ -5,6 +5,11 @@ import {
   type DroppableProvided,
   type DropResult
 } from "@hello-pangea/dnd";
+import {
+  type RuntimeToolApprovalView,
+  runtimeToolApprovalViews,
+  type StoredRuntimeSession
+} from "@llm-space/runtime/harness";
 import { PlusIcon } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -48,10 +53,36 @@ export function MessageListView({
   const autoFocusMessageId = useThreadStore(s => s.autoFocusMessageId);
   const runValidationIssue = useThreadStore(s => s.runValidationIssue);
   const storeMessages = useThreadStore(s => s.thread.context?.messages);
+  const persistedRuntimeSession = useThreadStore(state => (
+    isSnapshotView ? undefined : state.thread.runtimeSession
+  ));
   const { appendMessage, moveMessage, resolveRunValidationIssue } =
     useThreadStoreActions();
   const [dragging, setDragging] = useState(false);
-  const messages = messagesFromProps ?? storeMessages ?? [];
+  const messages = useMemo(
+    () => messagesFromProps ?? storeMessages ?? [],
+    [messagesFromProps, storeMessages]
+  );
+  const toolApprovalsByMessageId = useMemo(() => {
+    const result = new Map<string, RuntimeToolApprovalView[]>();
+    const session = persistedRuntimeSession as StoredRuntimeSession | undefined;
+    if (!session?.snapshot) { return result; }
+    const messageIdByToolCallId = new Map<string, string>();
+    for (const message of messages) {
+      if (message.role !== "assistant") { continue; }
+      for (const toolCall of message.toolCalls ?? []) {
+        messageIdByToolCallId.set(toolCall.id, message.id);
+      }
+    }
+    for (const approval of runtimeToolApprovalViews(session)) {
+      const messageId = messageIdByToolCallId.get(approval.toolCallId);
+      if (!messageId) { continue; }
+      const approvals = result.get(messageId) ?? [];
+      approvals.push(approval);
+      result.set(messageId, approvals);
+    }
+    return result;
+  }, [messages, persistedRuntimeSession]);
   const readonly = useMemo(() => {
     return readonlyFromProps || dragging || isSnapshotView;
   }, [dragging, isSnapshotView, readonlyFromProps]);
@@ -113,6 +144,7 @@ export function MessageListView({
                     readonly={readonly}
                     runDisabled={runDisabled}
                     runValidationIssue={runValidationIssue}
+                    toolApprovalsByMessageId={toolApprovalsByMessageId}
                   />
                 )}
               </Droppable>
@@ -251,7 +283,8 @@ function DroppableMessageList({
   runDisabled,
   autoFocusMessageId,
   collapsedMessageIds,
-  runValidationIssue
+  runValidationIssue,
+  toolApprovalsByMessageId
 }: {
   readonly autoFocusMessageId: string | null;
   readonly collapsedMessageIds: string[];
@@ -261,6 +294,10 @@ function DroppableMessageList({
   readonly readonly: boolean;
   readonly runDisabled: boolean;
   readonly runValidationIssue: RunValidationIssue | null;
+  readonly toolApprovalsByMessageId: ReadonlyMap<
+    string,
+    readonly RuntimeToolApprovalView[]
+  >;
 }) {
   return (
     <div
@@ -291,6 +328,7 @@ function DroppableMessageList({
                 : null
             }
             textOnlyDraft={textOnlyDraft}
+            toolApprovals={toolApprovalsByMessageId.get(message.id)}
           />
         );
       })}
@@ -316,7 +354,8 @@ const _DraggableMessageRow = function DraggableMessageRow({
   autoFocus,
   collapsed,
   textOnlyDraft,
-  runValidationIssue
+  runValidationIssue,
+  toolApprovals
 }: {
   readonly autoFocus: boolean;
   readonly collapsed: boolean;
@@ -326,6 +365,7 @@ const _DraggableMessageRow = function DraggableMessageRow({
   readonly runDisabled: boolean;
   readonly runValidationIssue: RunValidationIssue | null;
   readonly textOnlyDraft: boolean;
+  readonly toolApprovals?: readonly RuntimeToolApprovalView[];
 }) {
   return (
     <Draggable draggableId={message.id} index={index} isDragDisabled={readonly}>
@@ -351,6 +391,7 @@ const _DraggableMessageRow = function DraggableMessageRow({
               runDisabled={runDisabled}
               runValidationIssue={runValidationIssue}
               textOnlyDraft={textOnlyDraft}
+              toolApprovals={toolApprovals}
             />
           </div>
         );

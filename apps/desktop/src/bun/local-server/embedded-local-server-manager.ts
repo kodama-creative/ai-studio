@@ -271,6 +271,11 @@ export class EmbeddedLocalServerManager {
           callbacks.onEvent(event.data);
         } else if (event.data.type === "serverShutdown") {
           callbacks.onStatus({ state: "reconnecting" });
+        } else if (event.data.type === "toolApprovalRequired") {
+          callbacks.onStatus({
+            state: "ready",
+            message: `${event.data.approvals.length} tool approval${event.data.approvals.length === 1 ? "" : "s"} required`
+          });
         } else {
           terminalOutcome = event.data.outcome;
           callbacks.onTerminal(lineage, terminalOutcome, event.data.code);

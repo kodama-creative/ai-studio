@@ -62,6 +62,7 @@ import type {
   Message
 } from "@llm-space/core";
 import type { RuntimeExecutionMode } from "@llm-space/runtime";
+import type { StoredRuntimeSession } from "@llm-space/runtime/harness";
 
 import { structuredOutputFromToolCall } from "@/client/structured-output-from-tool-call";
 import { createFrameThrottle } from "@/lib/frame-throttle";
@@ -163,6 +164,11 @@ export interface ThreadState {
   ): void;
   markToolCallAttempt(messageId: string, toolCallId: string, at: string): void;
   continueAfterProjectToolResult(messageId: string): Promise<boolean>;
+  decideToolApproval(
+    messageId: string,
+    requestId: string,
+    decision: "approved" | "denied"
+  ): Promise<void>;
   addTool(tool: Tool): boolean;
   updateTool(name: string, tool: Tool): boolean;
   removeTool(name: string): void;
@@ -190,6 +196,11 @@ export function createThreadStore(
      * Read fresh at run time. Defaults to `false`.
      */
     getReactLoop?: () => boolean;
+
+    decideToolApproval?: (
+      requestId: string,
+      decision: "approved" | "denied"
+    ) => Promise<Thread["runtimeSession"]>;
 
     /** Skills available to prompt-variable rendering for this Thread. */
     loadPromptSkills?: typeof listEnabledPromptVariableSkills;
@@ -906,6 +917,26 @@ export function createThreadStore(
           }
           await get().run(messageId);
           return true;
+        },
+        async decideToolApproval(messageId, requestId, decision) {
+          if (!options.decideToolApproval || get().status === "running") {
+            return;
+          }
+          const committed = await options.decideToolApproval(
+            requestId,
+            decision
+          );
+          runtimeSession = new ThreadRuntimeSession(committed);
+          await persistRuntimeSession(committed);
+          const session = committed as StoredRuntimeSession;
+          const activeRunId = session.snapshot.activeRunId;
+          const stillPending = session.snapshot.approvalLedger?.requests.some(
+            request => request.runId === activeRunId
+              && request.state === "pending"
+          ) ?? false;
+          if (!stillPending) {
+            await get().run(messageId);
+          }
         },
         updateToolCallOutputTextContent(messageId, toolCallId, text, isError) {
           const context = get().thread.context ?? {};
@@ -1709,6 +1740,7 @@ const selectActions = (s: ThreadState) => ({
   updateToolCallOutputText: s.updateToolCallOutputTextContent,
   markToolCallAttempt: s.markToolCallAttempt,
   continueAfterProjectToolResult: s.continueAfterProjectToolResult,
+  decideToolApproval: s.decideToolApproval,
   addTool: s.addTool,
   updateTool: s.updateTool,
   removeTool: s.removeTool,

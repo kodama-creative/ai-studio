@@ -1,6 +1,7 @@
 import { Type } from "typebox";
 
 import type { CompiledProjectTool } from "./agent-project-snapshot";
+import type { Approval } from "../../public/definitions/approval";
 import type { ExecutionEnvToolKind } from "../../public/definitions/execution-env-tool";
 
 const DEFINITIONS = {
@@ -43,7 +44,8 @@ const DEFINITIONS = {
 
 export function createCompiledExecutionEnvTool(
   kind: ExecutionEnvToolKind,
-  sourcePath: string
+  sourcePath: string,
+  approval?: Approval
 ): CompiledProjectTool {
   const definition = DEFINITIONS[kind];
   return {
@@ -51,6 +53,7 @@ export function createCompiledExecutionEnvTool(
     label: kind,
     description: definition.description,
     parameters: definition.parameters,
+    ...(approval ? { approval } : {}),
     executionEnvToolKind: kind,
     requiresExecutionEnv: true,
     sourcePath,

@@ -219,7 +219,8 @@ function _compileTools(
       }
       tools.push(createCompiledExecutionEnvTool(
         input.definition.kind,
-        input.sourcePath
+        input.sourcePath,
+        input.definition.approval
       ));
       continue;
     }

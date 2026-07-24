@@ -102,6 +102,9 @@ export async function createDesktopThreadRuntimeAuthority(
         step => step.runId === activeRunId && step.state === "active"
       );
       if (!activeStep) { return messages; }
+      if (activeStep.operations.some(operation => operation.state === "parked")) {
+        return messages;
+      }
       if (activeStep.transcriptMessageCount > messages.length) {
         throw new Error(
           `Desktop Thread transcript is shorter than durable Step ${activeStep.id}`

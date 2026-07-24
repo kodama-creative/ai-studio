@@ -1,6 +1,7 @@
 import {
   isExecutableTool,
   type ThreadContext,
+  type ThreadRuntimeProfileType,
   type ToolCall,
   type ToolCallInput
 } from "@llm-space/core";
@@ -14,8 +15,10 @@ import {
   PlayIcon,
   RotateCcwIcon
 } from "lucide-react";
-import { memo, useCallback, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+
+import type { RuntimeToolApprovalView } from "@llm-space/runtime/harness";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { openFirecrawlLimitDialog } from "@/components/firecrawl-limit-dialog";
@@ -37,26 +40,37 @@ import {
 import { CodeEditor, type CodeEditorProps } from "../../code-editor";
 import { Button } from "../../ui/button";
 import { Input } from "../../ui/input";
-import { useThreadStoreActions } from "../stores";
+import { useThreadStore, useThreadStoreActions } from "../stores";
+import { getRuntimeExecutionMode } from "../stores/run-mode";
 import { usePromptVariableExtensionForContext } from "../variable/use-prompt-variable-extension";
 
 const _ToolCallListItem = function ToolCallListItem({
   context,
   messageId,
   toolCall,
+  approval,
+  runtimeProfileType,
+  focusApproval,
   canContinue,
   onContinue,
   readonly = false
 }: {
+  readonly approval?: RuntimeToolApprovalView;
   readonly canContinue: boolean;
   readonly context?: ThreadContext;
+  readonly focusApproval?: boolean;
   readonly messageId: string;
   readonly onContinue: () => void;
   readonly readonly?: boolean;
+  readonly runtimeProfileType: ThreadRuntimeProfileType;
   readonly toolCall: ToolCall;
 }) {
   const { fidelity } = useRenderingFidelity();
-  const { updateToolCallOutputText } = useThreadStoreActions();
+  const status = useThreadStore(state => state.status);
+  const runtimeSessionId = useThreadStore(state => (
+    state.thread.runtimeSession as { snapshot?: { id?: string; }; } | undefined
+  )?.snapshot?.id);
+  const { decideToolApproval, updateToolCallOutputText } = useThreadStoreActions();
   const { resolveTool, runToolCall } = useToolCallRunner(messageId);
   const variableExtension = usePromptVariableExtensionForContext(
     createToolResultPromptVariablePlaceKey(messageId, toolCall.id),
@@ -67,20 +81,37 @@ const _ToolCallListItem = function ToolCallListItem({
   const [calling, setCalling] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [retryOpen, setRetryOpen] = useState(false);
+  const approvalRef = useRef<HTMLDivElement>(null);
+  const [deciding, setDeciding] = useState(false);
+  const [approvalConfirmation, setApprovalConfirmation] = useState<
+    "approved" | "denied" | null
+  >(null);
   const outputText = useMemo(() => getToolCallOutputText(toolCall), [toolCall]);
   const isError = toolCall.output?.isError ?? false;
   const outcomeUnknown = isToolCallOutcomeUnknown(toolCall) && !calling;
+  const approvalManaged = approval !== undefined;
+  const managedReadonly = readonly || approvalManaged;
+  useEffect(() => {
+    if (
+      approval?.state === "pending"
+      && focusApproval
+      && status === "running"
+    ) {
+      approvalRef.current?.scrollIntoView({ block: "nearest" });
+      approvalRef.current?.focus({ preventScroll: true });
+    }
+  }, [approval?.state, focusApproval, status]);
   const handleOutputChange = useCallback(
     (value: string) => {
-      if (readonly) {
+      if (managedReadonly) {
         return;
       }
       updateToolCallOutputText(messageId, toolCall.id, value);
     },
-    [messageId, readonly, toolCall.id, updateToolCallOutputText]
+    [managedReadonly, messageId, toolCall.id, updateToolCallOutputText]
   );
   const toggleError = useCallback(() => {
-    if (readonly) {
+    if (managedReadonly) {
       return;
     }
     updateToolCallOutputText(messageId, toolCall.id, outputText, !isError);
@@ -88,7 +119,7 @@ const _ToolCallListItem = function ToolCallListItem({
     isError,
     messageId,
     outputText,
-    readonly,
+    managedReadonly,
     toolCall.id,
     updateToolCallOutputText
   ]);
@@ -107,7 +138,7 @@ const _ToolCallListItem = function ToolCallListItem({
     [canContinue, onContinue]
   );
   const handleCall = useCallback(async () => {
-    if (readonly || !executable) {
+    if (managedReadonly || !executable) {
       return;
     }
     setCalling(true);
@@ -123,7 +154,38 @@ const _ToolCallListItem = function ToolCallListItem({
     } finally {
       setCalling(false);
     }
-  }, [executable, readonly, runToolCall, toolCall]);
+  }, [executable, managedReadonly, runToolCall, toolCall]);
+  const handleApproval = useCallback(async (
+    decision: "approved" | "denied"
+  ) => {
+    if (!approval || deciding || approval.state !== "pending") { return; }
+    setDeciding(true);
+    try {
+      await decideToolApproval(messageId, approval.id, decision);
+      if (runtimeSessionId) {
+        requestAnimationFrame(() => {
+          const next = document.querySelector<HTMLElement>(
+            `[data-runtime-session-id="${CSS.escape(runtimeSessionId)}"]`
+            + '[data-tool-approval-state="pending"]'
+          );
+          next?.scrollIntoView({ block: "nearest" });
+          next?.focus({ preventScroll: true });
+        });
+      }
+    } catch (error) {
+      toast.error("Unable to decide tool approval", {
+        description: error instanceof Error ? error.message : "Approval failed"
+      });
+    } finally {
+      setDeciding(false);
+    }
+  }, [
+    approval,
+    decideToolApproval,
+    deciding,
+    messageId,
+    runtimeSessionId
+  ]);
   const handleCopyArguments = useCallback(async () => {
     const text = formatJson(toolCall.input.arguments);
     try {
@@ -152,12 +214,12 @@ const _ToolCallListItem = function ToolCallListItem({
               <CopyIcon className="size-3" />
             </Button>
           </Tooltip>
-          {executable && !outcomeUnknown
+          {executable && !outcomeUnknown && !approvalManaged
             ? (
               <Tooltip content="Call this tool">
                 <Button
                   className="invisible shrink-0 group-hover/message:visible"
-                  disabled={readonly || calling}
+                  disabled={managedReadonly || calling}
                   onClick={() => void handleCall()}
                   size="icon"
                   variant="secondary"
@@ -176,66 +238,163 @@ const _ToolCallListItem = function ToolCallListItem({
         </div>
       </div>
       <hr />
-      <div className="flex w-full flex-col gap-1">
-        <div className="text-muted-foreground flex min-w-0 items-center justify-between gap-2 text-xs">
-          <Marker className="gap-1" role="status">
-            <MarkerContent className="flex items-center text-xs">
-              {outcomeUnknown ? "Outcome unknown" : "Response"}
-              <Tooltip content="Preview response">
+      {approval && !toolCall.output
+        ? (
+          <div
+            className="flex flex-col gap-2 outline-none"
+            data-runtime-session-id={runtimeSessionId}
+            data-tool-approval-state={approval.state}
+            ref={approvalRef}
+            role="status"
+            tabIndex={-1}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-xs font-medium">
+                  {_approvalLabel(approval)}
+                </div>
+                <div className="text-muted-foreground text-[11px]">
+                  {approval.reason ?? "Agent policy requires human approval"}
+                </div>
+              </div>
+              {approval.state === "pending"
+                ? (
+                  <div className="flex shrink-0 items-center gap-2">
+                    <Button
+                      disabled={deciding}
+                      onClick={() => { setApprovalConfirmation("approved"); }}
+                      size="sm"
+                    >
+                      {getRuntimeExecutionMode() === "manual"
+                        ? "Approve & run"
+                        : "Approve"}
+                    </Button>
+                    <Button
+                      disabled={deciding}
+                      onClick={() => { setApprovalConfirmation("denied"); }}
+                      size="sm"
+                      variant="outline"
+                    >
+                      Deny
+                    </Button>
+                  </div>
+                )
+                : null}
+            </div>
+            <div className="text-muted-foreground flex flex-wrap gap-x-4 gap-y-1 text-[10px]">
+              <span>
+                Policy: Source {_approvalRequirementLabel(
+                  approval.sourceRequirement
+                )} · Host {_approvalRequirementLabel(
+                  approval.hostRequirement
+                )}
+              </span>
+              <span>
+                Scope: {approval.scope === "session"
+                  ? "Once per session"
+                  : "This call"}
+              </span>
+              <span>
+                Execution: {runtimeProfileType === "desktopSandbox"
+                  ? "Sandbox"
+                  : runtimeProfileType === "localServer"
+                    ? "Local Server"
+                    : "Direct"}
+              </span>
+            </div>
+          </div>
+        )
+        : (
+          <div className="flex w-full flex-col gap-1">
+            <div className="text-muted-foreground flex min-w-0 items-center justify-between gap-2 text-xs">
+              <Marker className="gap-1" role="status">
+                <MarkerContent className="flex items-center text-xs">
+                  {outcomeUnknown
+                    ? "Outcome unknown"
+                    : approval?.state === "denied"
+                      ? "Denied · not run"
+                      : "Response"}
+                  <Tooltip content="Preview response">
+                    <Button
+                      className="invisible shrink-0 group-hover/message:visible"
+                      disabled={outputText === ""}
+                      onClick={() => { setPreviewOpen(true); }}
+                      size="xs"
+                      variant="ghost"
+                    >
+                      <EyeIcon className="size-3" />
+                    </Button>
+                  </Tooltip>
+                </MarkerContent>
+              </Marker>
+              <div className="flex items-center">
+                {outcomeUnknown && executable
+                  ? (
+                    <Button
+                      disabled={managedReadonly || calling}
+                      onClick={() => { setRetryOpen(true); }}
+                      size="xs"
+                      variant="outline"
+                    >
+                      <RotateCcwIcon />
+                      Retry
+                    </Button>
+                  )
+                  : null}
                 <Button
                   className="invisible shrink-0 group-hover/message:visible"
-                  disabled={outputText === ""}
-                  onClick={() => { setPreviewOpen(true); }}
+                  disabled={managedReadonly}
+                  onClick={toggleError}
                   size="xs"
-                  variant="ghost"
+                  variant={isError ? "destructive" : "ghost"}
                 >
-                  <EyeIcon className="size-3" />
+                  <AlertCircleIcon />
+                  {isError ? "Clear error" : "Mark as error"}
                 </Button>
-              </Tooltip>
-            </MarkerContent>
-          </Marker>
-          <div className="flex items-center">
-            {outcomeUnknown && executable
-              ? (
-                <Button
-                  disabled={readonly || calling}
-                  onClick={() => { setRetryOpen(true); }}
-                  size="xs"
-                  variant="outline"
-                >
-                  <RotateCcwIcon />
-                  Retry
-                </Button>
-              )
-              : null}
-            <Button
-              className="invisible shrink-0 group-hover/message:visible"
-              disabled={readonly}
-              onClick={toggleError}
-              size="xs"
-              variant={isError ? "destructive" : "ghost"}
-            >
-              <AlertCircleIcon />
-              {isError ? "Clear error" : "Mark as error"}
-            </Button>
+              </div>
+            </div>
+            <PreviewDialog
+              onOpenChange={setPreviewOpen}
+              open={previewOpen}
+              title={`Response of ${toolCall.input.name}()`}
+              value={outputText}
+            />
+            <ToolCallResponseEditor
+              extraExtensions={variableExtension}
+              input={toolCall.input}
+              onChange={handleOutputChange}
+              onKeyDown={handleKeyDown}
+              plain={fidelity === "lite"}
+              readonly={managedReadonly}
+              value={outputText}
+            />
           </div>
-        </div>
-        <PreviewDialog
-          onOpenChange={setPreviewOpen}
-          open={previewOpen}
-          title={`Response of ${toolCall.input.name}()`}
-          value={outputText}
-        />
-        <ToolCallResponseEditor
-          extraExtensions={variableExtension}
-          input={toolCall.input}
-          onChange={handleOutputChange}
-          onKeyDown={handleKeyDown}
-          plain={fidelity === "lite"}
-          readonly={readonly}
-          value={outputText}
-        />
-      </div>
+        )}
+      <ConfirmDialog
+        confirmLabel={approvalConfirmation === "approved"
+          ? getRuntimeExecutionMode() === "manual"
+            ? "Approve & run"
+            : "Approve"
+          : "Deny"}
+        confirmVariant={approvalConfirmation === "approved"
+          ? "default"
+          : "destructive"}
+        description={approvalConfirmation === "approved"
+          ? `This approval may run ${toolCall.input.name}() with the arguments shown above and cause external side effects.`
+          : `This records ${toolCall.input.name}() as not run for this Runtime Run.`}
+        onConfirm={() => {
+          const decision = approvalConfirmation;
+          setApprovalConfirmation(null);
+          if (decision) { void handleApproval(decision); }
+        }}
+        onOpenChange={open => {
+          if (!open) { setApprovalConfirmation(null); }
+        }}
+        open={approvalConfirmation !== null}
+        title={approvalConfirmation === "approved"
+          ? "Approve this tool call?"
+          : "Deny this tool call?"}
+      />
       <ConfirmDialog
         confirmLabel="Retry tool"
         confirmVariant="default"
@@ -252,6 +411,27 @@ export const ToolCallListItem = memo(_ToolCallListItem);
 
 function formatJson(value: unknown): string {
   return JSON.stringify(value, null, 2) ?? String(value);
+}
+
+function _approvalLabel(approval: RuntimeToolApprovalView): string {
+  if (approval.state === "pending") { return "Approval required"; }
+  if (approval.state === "approved") { return "Approved — ready to resume"; }
+  if (approval.state === "denied") {
+    return approval.sourceRequirement === "deny"
+      || approval.hostRequirement === "deny"
+      ? "Blocked by policy"
+      : "Denied — not run";
+  }
+  return "Approval expired";
+}
+
+function _approvalRequirementLabel(
+  requirement: RuntimeToolApprovalView["sourceRequirement"]
+): string {
+  if (requirement === "always") { return "every call"; }
+  if (requirement === "once") { return "once per session"; }
+  if (requirement === "deny") { return "deny"; }
+  return "neutral";
 }
 
 // -- tool-call response editors -----------------------------------------------

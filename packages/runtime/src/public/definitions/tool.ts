@@ -2,6 +2,7 @@ import type { Static, TSchema } from "typebox";
 
 import { defineToolRuntime } from "../../internal/authored-action-definitions";
 
+import type { Approval } from "./approval";
 import type { AgentSessionContext } from "../../shared/agent-session-context";
 
 const TOOL_DEFINITION_BRAND = Symbol.for("llm-space.tool-definition");
@@ -25,6 +26,7 @@ export interface ToolDefinition<
   TInputSchema extends TSchema = TSchema,
   TOutput extends JsonValue = JsonValue
 > {
+  readonly approval?: Approval<Static<TInputSchema>>;
   readonly description: string;
   readonly inputSchema: TInputSchema;
   readonly outputSchema?: TSchema;

@@ -189,8 +189,8 @@ describe("loadAgentProject", () => {
     for (const kind of ["bash", "read", "write"] as const) {
       await writeFile(
         join(root, "tools", `${kind}.ts`),
-        `import { define${kind[0]?.toUpperCase()}${kind.slice(1)}Tool } from "@llm-space/runtime/tools";
-        export default define${kind[0]?.toUpperCase()}${kind.slice(1)}Tool();`
+        `import { define${kind[0]?.toUpperCase()}${kind.slice(1)}Tool, once } from "@llm-space/runtime/tools";
+        export default define${kind[0]?.toUpperCase()}${kind.slice(1)}Tool({ approval: once() });`
       );
     }
 
@@ -199,12 +199,13 @@ describe("loadAgentProject", () => {
     expect(snapshot.diagnostics).toEqual([]);
     expect(snapshot.tools.map(tool => ({
       name: tool.name,
+      approval: tool.approval,
       kind: tool.executionEnvToolKind,
       required: tool.requiresExecutionEnv
     }))).toEqual([
-      { name: "bash", kind: "bash", required: true },
-      { name: "read", kind: "read", required: true },
-      { name: "write", kind: "write", required: true }
+      { name: "bash", approval: "once", kind: "bash", required: true },
+      { name: "read", approval: "once", kind: "read", required: true },
+      { name: "write", approval: "once", kind: "write", required: true }
     ]);
     expect(snapshot.artifact.fingerprints.capabilities.entries
       .filter(entry => entry.id.startsWith("tool:"))

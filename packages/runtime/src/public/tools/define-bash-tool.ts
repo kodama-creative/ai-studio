@@ -1,7 +1,12 @@
 import { defineExecutionEnvToolRuntime } from "../../internal/authored-action-definitions";
 
-import type { ExecutionEnvToolDefinition } from "../definitions/execution-env-tool";
+import type {
+  ExecutionEnvToolDefinition,
+  ExecutionEnvToolOptions
+} from "../definitions/execution-env-tool";
 
-export function defineBashTool(): ExecutionEnvToolDefinition<"bash"> {
-  return defineExecutionEnvToolRuntime("bash");
+export function defineBashTool(
+  options: ExecutionEnvToolOptions = {}
+): ExecutionEnvToolDefinition<"bash"> {
+  return defineExecutionEnvToolRuntime("bash", options);
 }

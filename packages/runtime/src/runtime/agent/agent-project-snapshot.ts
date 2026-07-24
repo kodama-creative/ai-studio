@@ -5,6 +5,7 @@ import type { AgentProjectArtifact } from "./agent-project-artifact";
 import type { RuntimeDynamicToolsDefinition } from "../../internal/authored-dynamic-tools-definition";
 import type { RuntimeDynamicInstructionsDefinition } from "../../internal/authored-instruction-definitions";
 import type { DynamicToolSteps } from "../../internal/dynamic-tool-step";
+import type { Approval } from "../../public/definitions/approval";
 import type { McpClientConnectionDefinition } from "../../public/definitions/connections/mcp";
 import type { ExecutionEnvToolKind } from "../../public/definitions/execution-env-tool";
 import type { JsonValue } from "../../public/definitions/tool";
@@ -18,6 +19,7 @@ export interface CompiledMcpConnection {
 }
 
 export interface CompiledProjectTool extends AgentTool {
+  readonly approval?: Approval;
   readonly executionEnvToolKind?: ExecutionEnvToolKind;
   readonly outputSchema?: AgentTool["parameters"];
   readonly requiresExecutionEnv?: true;

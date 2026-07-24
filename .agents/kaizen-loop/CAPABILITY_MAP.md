@@ -1,7 +1,7 @@
 # LLM Space Capability Map
 
-- Last updated: 2026-07-22
-- Map status: refreshed through shipped roadmap item 18. Items 12 through 16 and 18 are shipped under ADRs 0006-0009 and 0011 where applicable; item 17 passes its local real-Docker gate but existing shipment policy still awaits a current-head CI pass, which the owner deferred, so item 10 remains dependency-blocked. Item 19 is now dependency-ready.
+- Last updated: 2026-07-24
+- Map status: refreshed through shipped roadmap item 19. Items 12 through 16, 18, and 19 are shipped under ADRs 0006-0009, 0011, and 0012 where applicable; item 17 again passes its local real-Docker gate but existing shipment policy still awaits a current-head CI pass, which the owner deferred, so item 10 remains dependency-blocked.
 - Evidence rule: entries marked `confirmed` cite current rendered-product or current-code evidence. Entries marked `stale` rely on previous logs or code paths not fully re-inspected in this loop. Entries marked `unknown` need a future product-surface check before they can drive a recommendation.
 
 ## First-Run Model Setup
@@ -191,7 +191,7 @@
 
 - Status: shipped V1
 - Freshness: confirmed
-- Last checked: 2026-07-18
+- Last checked: 2026-07-23
 - Evidence:
   - ADR 0007 fixes Eve-shaped `defineDynamic({ events: { "turn.started": ... } })` for model and tool authoring only. Dynamic models require a fallback; resolver failure/null uses it. Dynamic tool resolvers may generate schemas and override static names, skip only their own failure, and fail the Turn on dynamic/dynamic name collision.
   - The compiler assigns inline dynamic tool callbacks stable artifact-owned step IDs and captures JSON closure values. Artifact and closed-bundle tests preserve resolver/step identity; Session reload reconstructs the callback from the persisted snapshot and compiled registry without re-running the resolver or prior tool call. Dynamic capability Projects require a Session Store.
@@ -199,10 +199,11 @@
   - `AgentSession` resolves instructions and capabilities from one frozen Turn view and commits both in one Session Store CAS. The integrity-checked capability snapshot records Agent/policy/request fingerprints, effective model/reasoning and safe Turn-level model options, tool definitions/provenance, dynamic step closures, and static connection tool fingerprints; its journal entry stays outside transcript, Pi events, and Run replay.
   - Manual mode still records capabilities but exposes no state scope and keeps tools deferred. Continuation reuses the persisted snapshot; changed requests are rejected, artifact drift fails closed, and changed Host policy produces explicit Desktop/Server `hostPolicyChanged` termination without mutation or re-resolution.
   - Static MCP connections remain compiled and Host-owned. Snapshots include only the remote tool surface exposed to the model—logical connection/contribution names plus schema fingerprints—never URL, auth, headers, environment, callbacks, or connection runtime objects.
+  - Item 19 adds static approval requirements to immutable tool capability snapshots and rehydrates them without replaying the resolver. Dynamically generated tools may use a static requirement, while conditional callbacks are rejected explicitly because the existing dynamic-step closure cannot safely persist new executable policy behavior.
   - Focused acceptance passes 59 tests across compiler/Runtime/Session Store/Desktop/Server. Full verification passes 283/284 tests and 1116 assertions with only the independently reproduced fixed-point Server shutdown timeout; six package TypeScript projects plus root TypeScript, root lint, five non-packaging bundles, renderer-only Vite, and diff checks pass.
 - Boundary: each external Turn resolves one authored capability set from verified context and automatic read-only state, intersects it with explicit Host policy and safe Host requests, records it immutably beside instructions, and uses that same selection throughout Pi iteration and restart continuation. Pi remains the provider/tool loop and performs its own context-dependent `maxTokens` reduction per provider call.
-- Explicit non-goals: no dynamic connections, session/step capability mutation, runtime code/plugin discovery, arbitrary path loading, approval, Sandbox, advanced MCP lifecycle, policy UI, Trace UI, provider-specific secret options, automatic resolver/tool retry, or permission escalation.
-- Visible gaps: item 23 owns remote tool-list refresh and schema drift; item 19 owns approval; item 17 owns hostile-code isolation and Sandbox authority; item 26 owns lifecycle hooks. V1 exposes no dedicated capability snapshot UI and does not attempt semantic secret-taint detection inside trusted authored JSON closure values.
+- Explicit non-goals: no dynamic connections, session/step capability mutation, runtime code/plugin discovery, arbitrary path loading, dynamically generated conditional approval callbacks, Sandbox, advanced MCP lifecycle, policy UI, Trace UI, provider-specific secret options, automatic resolver/tool retry, or permission escalation.
+- Visible gaps: item 23 owns remote tool-list refresh and schema drift; item 17 owns hostile-code isolation and Sandbox authority; item 26 owns lifecycle hooks. V1 exposes no dedicated capability snapshot UI and does not attempt semantic secret-taint detection inside trusted authored JSON closure values.
 
 ## Named Structured Output Contracts
 
@@ -323,7 +324,7 @@
 
 - Status: shipped Portable Agent Actions V1
 - Freshness: confirmed
-- Last checked: 2026-07-22
+- Last checked: 2026-07-23
 - Evidence:
   - `packages/runtime/src/public/tools` exposes branded `defineTool()` definitions with path-owned identity, typed input, optional output validation, a bounded execution context, and JSON-compatible results; raw Pi `AgentTool` exports are rejected.
   - `packages/runtime/src/public/connections` exposes branded `defineMcpClientConnection()` definitions with Streamable HTTP transport, Bun-only auth/header callbacks, and required exact allowlists. Discovery remains offline and the trusted compiler owns callbacks and fingerprints.
@@ -334,10 +335,11 @@
   - Fresh restart screenshot `06-outcome-unknown-900x700.png` shows a persisted remote pre-call attempt without output rendering `Outcome unknown` with an explicit Retry; `07-retry-warning-900x700.png` shows the guarded retry warning that the previous remote call may have completed and retry can repeat side effects.
   - The same audit found only Vite/React development console information, no application errors, and native button semantics/focusability for source chips, Retry, and Sync.
   - Current code inspection on 2026-07-22 confirms this manual remote-action path persists only a per-call `started` marker before MCP dispatch. It is a useful guarded-retry precedent, not a general Runtime operation ledger: automatic Agent tools, provider calls, result memoization, and crash-point recovery remain separate.
+  - ADR 0012 adds `defineTool({ approval })` plus canonical ExecutionEnv helper approval options. Prepared tools retain approval outside Pi-visible definitions; static requirements survive immutable capability-snapshot rehydration, and conditional source policies remain trusted compiled callbacks.
   - Final closure validation passes 131 Bun tests, runtime/core/CLI/example/Desktop TypeScript, Vite production build, and `git diff --check`. Canary packaging reaches code signing and stops only because `ELECTROBUN_DEVELOPER_ID` is unavailable. The final parallel Standards and Spec reviews report zero findings.
 - Boundary: a trusted Agent Project can package path-owned local TypeScript tools and flat source-declared Streamable HTTP MCP connections. Opening a Project Thread activates allowlisted remote descriptors without Settings or per-Thread selection; all Project actions are source-owned/read-only, remote names are qualified exactly, remote calls remain visibly manual, safe provenance/attempts persist, outcome-unknown retry is explicit and warns about duplicate side effects, and schema/connection drift blocks new runs until Sync.
-- Explicit non-goals: no project stdio, OAuth browser/refresh/account lifecycle, dynamic connection search, blocklists, `tools/listChanged`, automatic project-MCP calls, authored approval policy, OpenAPI connections, MCP resources/prompts, sandbox, or public plugin SDK.
-- Visible gaps: no durable approve/deny policy beyond manual V1 execution, no live third-party authenticated service audit, no dynamic remote tool-list subscription, and no automatic test harness for the CEF workflow yet.
+- Explicit non-goals: no project stdio, OAuth browser/refresh/account lifecycle, dynamic connection search, blocklists, `tools/listChanged`, automatic project-MCP calls, OpenAPI connections, MCP resources/prompts, sandbox, or public plugin SDK.
+- Visible gaps: no live third-party authenticated service audit, no dynamic remote tool-list subscription, and no automatic test harness for the CEF workflow yet.
 
 ## Portable Execution Tools
 
@@ -358,7 +360,7 @@
 
 - Status: implemented V1; local real-Docker gate passed, shipment CI deferred
 - Freshness: confirmed
-- Last checked: 2026-07-21
+- Last checked: 2026-07-23
 - Evidence:
   - `defineSandbox({})`, discovery, compiler, artifact, and bundle fixtures preserve only an abstract source minimum plus a bounded immutable `agent/sandbox/workspace/**` seed. Host policy may tighten but never weaken it; unavailable required-Sandbox projects open Build without silently creating or downgrading a Thread.
   - `SandboxProvider` and `DockerSandboxProvider` supply one Thread/Session-scoped Pi `ExecutionEnv`, one LLM Space-owned named volume mounted at `/workspace`, a fixed non-root/read-only/no-capabilities/no-network container, a deterministic bounded manifest, stop/reconnect/reconstruct/delete lifecycle, and no Host bind, login environment, provider secret, or dynamic connection surface.
@@ -370,6 +372,7 @@
   - Current real Electrobun CEF evidence under `audits/2026-07-20-125359-sandbox-delivery-v1/` shows Build without an auto-created Thread, explicit new-Thread failure when Docker is absent, an inspectable unavailable existing Thread, the `From Files` menu, clean application console, and no page overflow at 1280×800 or 900×700.
   - Current real Electrobun CEF evidence under `audits/2026-07-20-180358-agent-debugging-parity/` shows a required-Sandbox source making an existing Direct Thread stale, fresh `Desktop Sandbox · Ready` creation, canonical bash/read/write tools, and `From Files`/`From Clipboard` attachment entry with no application console errors.
   - Current 2026-07-21 CEF acceptance in the same audit shows a fresh in-process acquire as `Preparing` rather than cleanup-pending, retained Session workspace across profile changes, GPT-5.5 Thread override provenance in Run History, no application console errors, and no document overflow at 1280×800 or 900×700. The real Docker acceptance passes 42 assertions including seed, canonical read/write/bash, attachment staging, stop/reconnect, isolation, and cleanup.
+  - Current ADR/runtime inspection for item 19 reconfirms the separation: Sandbox and `ExecutionEnv` decide where an already-authorized call can run, while no Sandbox declaration, provider readiness state, attachment descriptor, or environment handle is an approval decision.
 - Boundary: an Agent may require abstract Sandbox execution, while the Host exclusively selects and owns the provider, isolation arguments, Session identity, workspace, approved attachment bytes/descriptors, retention, and cleanup. Canonical tools continue to use Pi `ExecutionEnv`, and attachments remain Pi-native user text/image content plus workspace paths rather than a new message protocol.
 - Explicit non-goals: Vercel Sandbox, Firecracker fleet, Apple-container V1 adapter, arbitrary host paths, project source write-back, silent Desktop Direct/Node fallback, approval policy, numeric CPU/memory/PID/disk quotas, workspace explorer/export, dynamic provider connections, generic container orchestration, cloud control plane, or source-owned engine credentials.
 - Visible gaps: run the corrected trigger once on current-head GitHub Actions when CI work resumes, then close item 17 under the existing shipment policy. Until then item 10 remains dependency-blocked. Numeric quotas, export/adoption, additional providers, approvals, and fleet operations remain later capabilities.
@@ -484,9 +487,9 @@
 
 ## Tool Step Orchestration
 
-- Status: shipped manual, auto-once, and ReAct execution paths
+- Status: shipped manual, auto-once, ReAct, and durable approval paths
 - Freshness: confirmed
-- Last checked: 2026-07-16
+- Last checked: 2026-07-23
 - Evidence:
   - Current discovery screenshot `audits/2026-07-04-110944-core-capability-discovery/03-general-agent-open.png` shows the General Agent example ships with tool definitions such as `web_search`, `web_fetch`, `bash`, `read`, `write`, and `edit`.
   - Current fixture screenshot `audits/2026-07-04-110944-core-capability-discovery/04-tool-step-fixture-after-run.png` shows a thread with an assistant tool call and editable `Response` field, but no product-level pending-tool state or explicit `Continue` action tied to completed tool outputs.
@@ -502,11 +505,29 @@
   - Current `apps/desktop/src/components/thread-playground/stores/run-mode.ts` preserves explicit user preferences for manual calls, one-step auto-run, and the full ReAct loop. `tool-call-list-item.tsx` still provides the visible per-call play action and editable/error result path.
   - Fresh CEF Thread inspection on 2026-07-14 showed the current Tools row and run controls render without document overflow; no live provider tool turn was attempted in this discovery loop.
   - Fresh non-UI Runtime Harness verification on 2026-07-16 passed settled manual reload and exact-result continuation without a synthetic user message, auto-once, complete ReAct tool execution, dangerous/deferred tool boundaries, persistence-before-terminal-event ordering, abort settlement, and Desktop Agent Project streaming fixtures.
+  - Fresh real CEF item-19 acceptance at `audits/2026-07-24-205445-durable-approvals-v1/` shows exact arguments, policy reason, Source/Host requirement, call scope, Direct provenance, `Approve & run`, `Deny`, pending batch state, and a real persisted denied result at 1280×800 and 900×700. Both sizes have zero document overflow and no application console errors.
 - Roadmap item 03 confirms incomplete results block only same-Run continuation; execution-affecting edits may atomically supersede and branch from an earlier boundary without fabricating results for the old Run.
 - Roadmap item 04 confirms safe waits resume only through a one-winner CAS claim; an interrupted model/tool operation is terminalized as `outcomeUnknown` and never enters Pi/transport automatically.
-- Boundary: ordinary Threads and Agent Project Threads can receive model tool calls, run visible executable tools manually, edit/mark tool results, continue after all results are ready, or opt into automatic one-step/ReAct behavior. Pi `AgentSession` owns the loop and deferred state for both surfaces; the Desktop Thread remains the sole durable transcript and Session Store authority.
-- Explicit non-goals: no per-tool permission policy, durable approve/deny state, background tool queue, automatic retry of ambiguous side effects, or multi-agent orchestration.
-- Visible gaps: tool safety is a global/manual-vs-auto execution choice rather than authored per-tool policy; trusted project tools remain unsandboxed; error marking is a compact result toggle rather than a dedicated denial record; live paid-provider continuation remains unaudited.
+- Boundary: ordinary Threads and Agent Project Threads can receive model tool calls, run visible executable tools manually, edit/mark ordinary tool results, continue after all results are ready, or opt into automatic one-step/ReAct behavior. Approval-managed results are read-only and use durable same-Run park/decision/resume. Pi `AgentSession` owns the loop and deferred state for both surfaces; the Desktop Thread remains the sole durable transcript and Session Store authority.
+- Explicit non-goals: no background tool queue, automatic retry of ambiguous side effects, global approval inbox, or multi-agent orchestration.
+- Visible gaps: live paid-provider approval continuation remains unaudited; keyboard semantics are covered by native button/status structure and focused logic inspection but not a full screen-reader matrix.
+
+## Durable Human Approval
+
+- Status: shipped V1
+- Freshness: confirmed
+- Last checked: 2026-07-24
+- Evidence:
+  - ADR 0012 fixes the source-minimum × Host-tightenable lattice `deny > always > once > never`, exact conditional failure-closed behavior, and the separation that approval decides whether while Sandbox decides where.
+  - Runtime Session schema V3 persists pending/approved/denied/stale requests and principal-bound Session grants beside exact item-18 operation identity. Approve leaves the operation parked; a separate authorized CAS claim crosses into `preCall`, so pre-claim restart is resumable while post-claim loss remains `outcomeUnknown`.
+  - Runtime tests cover source/Host policy merge, async/invalid/denial behavior, once grants with conditional re-evaluation, principal isolation, fresh-session resume, denied not-run Pi results, parallel batch barriers in both call orders, and Agent/Host/principal drift expiring and cancelling parked work without dispatch.
+  - Desktop Bun binds request IDs to authoritative standalone or Agent Project Thread stores and accepts only request ID plus decision from the renderer. Inline cards, message continuation, and Run History expose safe pending/approved/denied/stale state without principal, policy fingerprint, Host path, or resume-claim data.
+  - Protected Server exposes an owner- and continuation-authorized approval endpoint, browser client helper, safe SSE pending event, code-configured Host approval policy, same-Run resume, cross-principal hiding, and exactly-one execution/terminal integration evidence.
+  - Fresh real CEF screenshots in `audits/2026-07-24-205445-durable-approvals-v1/` verify pending and real Deny states at 1280×800 and 900×700, corrected decision-specific resume copy, no document overflow, and a console containing only development information.
+  - Final local acceptance passes 384 Bun tests including the real-Docker Sandbox guardrail, all eight TypeScript projects, root lint, renderer Vite production build, and `git diff --check`; Actions and packaging/release remain intentionally omitted by owner direction.
+- Boundary: an effective approval decides whether one exact tool call may dispatch, remains bound to the authenticated principal, Agent/tool/policy identity, Session, operation, and request fingerprint, and resumes the same Thread/Runtime Run after restart. Static dynamically generated requirements persist; dynamically generated conditional callbacks are an explicit V1 rejection. Sandbox independently decides the execution environment.
+- Explicit non-goals: model self-approval, treating a manual result or tool failure as approval, cross-principal or cross-Session grants, edited-argument approval reuse, exactly-once side effects, generic workflow DSL, organization administration UI, or a generic operation inspector.
+- Visible gaps: no organization/four-eyes approval, external notification channel, global inbox, Host policy settings UI, dynamic generated conditional callback rehydration, live paid-provider end-to-end audit, or screenshot coverage of every durable recovery/stale/unknown state; those non-rendered state transitions are covered by deterministic Runtime/Desktop/Server fixtures.
 
 ## MCP Server Integration
 

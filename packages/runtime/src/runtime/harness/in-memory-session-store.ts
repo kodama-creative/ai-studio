@@ -8,6 +8,12 @@ import {
   type RuntimeDurableOperationSnapshot,
   type RuntimeDurableStepSnapshot
 } from "./durable-operation";
+import {
+  RUNTIME_TOOL_APPROVAL_LEDGER_SCHEMA_VERSION,
+  RUNTIME_TOOL_APPROVAL_REQUEST_STATES,
+  type RuntimeToolApprovalGrantSnapshot,
+  type RuntimeToolApprovalRequestSnapshot
+} from "./durable-tool-approval";
 import { immutableSnapshot } from "./immutable-snapshot";
 import {
   isTerminalRuntimeRunState,
@@ -35,8 +41,10 @@ import {
 } from "./session-store";
 import { sha256 } from "./sha256";
 import { UnsupportedRuntimeSessionSchemaError } from "./unsupported-runtime-session-schema-error";
+import { isApprovalRequirement } from "../../public/definitions/approval";
 
 const CHECKPOINT_STATES = new Set([
+  "waitingForApproval",
   "waitingForToolResults",
   "waitingForContinue",
   "completed",
@@ -47,6 +55,9 @@ const CHECKPOINT_STATES = new Set([
 ]);
 const RUN_STATES = new Set<string>(RUNTIME_RUN_STATES);
 const OPERATION_STATES = new Set<string>(RUNTIME_DURABLE_OPERATION_STATES);
+const APPROVAL_REQUEST_STATES = new Set<string>(
+  RUNTIME_TOOL_APPROVAL_REQUEST_STATES
+);
 
 export class InMemorySessionStore implements SessionStore {
   private readonly _sessions = new Map<string, StoredRuntimeSession>();
@@ -212,7 +223,263 @@ function _applyMutation({
     _resumeOperation({ journal, mutation, sessionVersion, snapshot });
     return;
   }
+  if (mutation.type === "requestToolApproval") {
+    _requestToolApproval({ journal, mutation, sessionVersion, snapshot });
+    return;
+  }
+  if (mutation.type === "decideToolApproval") {
+    _decideToolApproval({ journal, mutation, sessionVersion, snapshot });
+    return;
+  }
+  if (mutation.type === "staleToolApproval") {
+    _staleToolApproval({ journal, mutation, sessionVersion, snapshot });
+    return;
+  }
   _recordCheckpoint({ journal, mutation, sessionVersion, snapshot });
+}
+
+function _requestToolApproval({
+  journal,
+  mutation,
+  sessionVersion,
+  snapshot
+}: {
+  journal: RuntimeRunJournalEntry[];
+  mutation: Extract<RuntimeSessionMutation, { type: "requestToolApproval"; }>;
+  sessionVersion: number;
+  snapshot: RuntimeSessionSnapshot;
+}): void {
+  for (const [label, value] of [
+    ["Tool approval", mutation.requestId],
+    ["Runtime Run", mutation.runId],
+    ["Durable Step", mutation.stepId],
+    ["Durable operation", mutation.operationId],
+    ["Operation tool call", mutation.toolCallId],
+    ["Approval tool name", mutation.toolName],
+    ["Approval contribution", mutation.contributionId],
+    ["Agent snapshot fingerprint", mutation.agentSnapshotFingerprint]
+  ] as const) {
+    _assertId(label, value);
+  }
+  _assertSha256("Approval request fingerprint", mutation.requestFingerprint);
+  _assertSha256(
+    "Approval source-policy fingerprint",
+    mutation.sourcePolicyFingerprint
+  );
+  _assertSha256(
+    "Approval Host-policy fingerprint",
+    mutation.hostPolicyFingerprint
+  );
+  _assertSha256(
+    "Approval current-principal fingerprint",
+    mutation.currentPrincipalFingerprint
+  );
+  _assertSha256(
+    "Approval initiator-principal fingerprint",
+    mutation.initiatorPrincipalFingerprint
+  );
+  if (
+    mutation.reason !== undefined
+    && (mutation.reason.trim().length === 0 || mutation.reason.length > 1_024)
+  ) {
+    throw new SessionStoreInvariantError(
+      "Tool approval reason must contain 1-1024 characters"
+    );
+  }
+  if (snapshot.activeRunId !== mutation.runId) {
+    throw new SessionStoreInvariantError(
+      `Runtime Run ${mutation.runId} is not active for tool approval ${mutation.requestId}`
+    );
+  }
+  const operation = snapshot.operationLedger?.steps
+    .find(step => step.id === mutation.stepId)
+    ?.operations.find(item => item.id === mutation.operationId);
+  if (
+    operation?.runId !== mutation.runId
+    || operation.state !== "parked"
+    || operation.toolCallId !== mutation.toolCallId
+    || operation.requestFingerprint !== mutation.requestFingerprint
+    || operation.park?.parkId !== mutation.requestId
+  ) {
+    throw new SessionStoreInvariantError(
+      `Tool approval ${mutation.requestId} does not match its parked operation`
+    );
+  }
+  const ledger = snapshot.approvalLedger ?? {
+    schemaVersion: RUNTIME_TOOL_APPROVAL_LEDGER_SCHEMA_VERSION,
+    requests: [],
+    grants: []
+  };
+  if (ledger.requests.some(request => request.id === mutation.requestId)) {
+    throw new SessionStoreInvariantError(
+      `Tool approval ${mutation.requestId} already exists`
+    );
+  }
+  const request: RuntimeToolApprovalRequestSnapshot = {
+    id: mutation.requestId,
+    runId: mutation.runId,
+    stepId: mutation.stepId,
+    operationId: mutation.operationId,
+    toolCallId: mutation.toolCallId,
+    toolName: mutation.toolName,
+    contributionId: mutation.contributionId,
+    requestFingerprint: mutation.requestFingerprint,
+    agentSnapshotFingerprint: mutation.agentSnapshotFingerprint,
+    sourcePolicyFingerprint: mutation.sourcePolicyFingerprint,
+    sourceRequirement: mutation.sourceRequirement,
+    hostRequirement: mutation.hostRequirement,
+    hostPolicyFingerprint: mutation.hostPolicyFingerprint,
+    currentPrincipalFingerprint: mutation.currentPrincipalFingerprint,
+    initiatorPrincipalFingerprint: mutation.initiatorPrincipalFingerprint,
+    scope: mutation.scope,
+    state: "pending",
+    requestedAt: Date.now(),
+    ...(mutation.reason ? { reason: mutation.reason } : {})
+  };
+  (snapshot as { approvalLedger?: RuntimeSessionSnapshot["approvalLedger"]; })
+    .approvalLedger = {
+      ...ledger,
+      requests: [...ledger.requests, request]
+    };
+  journal.push({
+    type: "toolApprovalRequested",
+    sequence: journal.length + 1,
+    sessionVersion,
+    requestId: mutation.requestId,
+    runId: mutation.runId,
+    toolCallId: mutation.toolCallId,
+    state: "pending"
+  });
+}
+
+function _decideToolApproval({
+  journal,
+  mutation,
+  sessionVersion,
+  snapshot
+}: {
+  journal: RuntimeRunJournalEntry[];
+  mutation: Extract<RuntimeSessionMutation, { type: "decideToolApproval"; }>;
+  sessionVersion: number;
+  snapshot: RuntimeSessionSnapshot;
+}): void {
+  const ledger = snapshot.approvalLedger;
+  const requestIndex = ledger?.requests.findIndex(
+    request => request.id === mutation.requestId
+  ) ?? -1;
+  const request = ledger?.requests[requestIndex];
+  if (
+    !ledger
+    || request?.runId !== mutation.runId
+    || request.state !== "pending"
+    || snapshot.activeRunId !== mutation.runId
+  ) {
+    throw new SessionStoreInvariantError(
+      `Tool approval ${mutation.requestId} is not pending in Runtime Run ${mutation.runId}`
+    );
+  }
+  if (
+    request.currentPrincipalFingerprint
+    !== mutation.currentPrincipalFingerprint
+    || request.initiatorPrincipalFingerprint
+    !== mutation.initiatorPrincipalFingerprint
+  ) {
+    throw new SessionStoreInvariantError(
+      `Tool approval ${mutation.requestId} principal identity changed`
+    );
+  }
+  const decidedAt = Date.now();
+  const requests = [...ledger.requests];
+  requests[requestIndex] = {
+    ...request,
+    state: mutation.decision,
+    decidedAt
+  };
+  const grants = [...ledger.grants];
+  if (mutation.decision === "approved" && request.scope === "session") {
+    const duplicate = grants.some(grant =>
+      grant.agentSnapshotFingerprint === request.agentSnapshotFingerprint
+      && grant.contributionId === request.contributionId
+      && grant.toolName === request.toolName
+      && grant.sourcePolicyFingerprint === request.sourcePolicyFingerprint
+      && grant.hostPolicyFingerprint === request.hostPolicyFingerprint
+      && grant.currentPrincipalFingerprint
+      === request.currentPrincipalFingerprint
+      && grant.initiatorPrincipalFingerprint
+      === request.initiatorPrincipalFingerprint);
+    if (!duplicate) {
+      const grant: RuntimeToolApprovalGrantSnapshot = {
+        id: `approval-grant:${request.id}`,
+        requestId: request.id,
+        toolName: request.toolName,
+        contributionId: request.contributionId,
+        agentSnapshotFingerprint: request.agentSnapshotFingerprint,
+        sourcePolicyFingerprint: request.sourcePolicyFingerprint,
+        hostPolicyFingerprint: request.hostPolicyFingerprint,
+        currentPrincipalFingerprint: request.currentPrincipalFingerprint,
+        initiatorPrincipalFingerprint: request.initiatorPrincipalFingerprint,
+        grantedAt: decidedAt
+      };
+      grants.push(grant);
+    }
+  }
+  (snapshot as { approvalLedger?: RuntimeSessionSnapshot["approvalLedger"]; })
+    .approvalLedger = { ...ledger, requests, grants };
+  journal.push({
+    type: "toolApprovalDecided",
+    sequence: journal.length + 1,
+    sessionVersion,
+    requestId: request.id,
+    runId: request.runId,
+    decision: mutation.decision
+  });
+}
+
+function _staleToolApproval({
+  journal,
+  mutation,
+  sessionVersion,
+  snapshot
+}: {
+  journal: RuntimeRunJournalEntry[];
+  mutation: Extract<RuntimeSessionMutation, { type: "staleToolApproval"; }>;
+  sessionVersion: number;
+  snapshot: RuntimeSessionSnapshot;
+}): void {
+  const ledger = snapshot.approvalLedger;
+  const requestIndex = ledger?.requests.findIndex(
+    request => request.id === mutation.requestId
+  ) ?? -1;
+  const request = ledger?.requests[requestIndex];
+  if (
+    !ledger
+    || request?.runId !== mutation.runId
+    || (request.state !== "pending" && request.state !== "approved")
+    || snapshot.activeRunId !== mutation.runId
+  ) {
+    throw new SessionStoreInvariantError(
+      `Tool approval ${mutation.requestId} cannot become stale in Runtime Run ${mutation.runId}`
+    );
+  }
+  const requests = [...ledger.requests];
+  requests[requestIndex] = {
+    ...request,
+    state: "stale",
+    decidedAt: Date.now()
+  };
+  (snapshot as { approvalLedger?: RuntimeSessionSnapshot["approvalLedger"]; })
+    .approvalLedger = {
+      ...ledger,
+      requests,
+      grants: ledger.grants.filter(grant => grant.requestId !== request.id)
+    };
+  journal.push({
+    type: "toolApprovalStaled",
+    sequence: journal.length + 1,
+    sessionVersion,
+    requestId: request.id,
+    runId: request.runId
+  });
 }
 
 function _resumeOperation({
@@ -817,12 +1084,14 @@ function _recordCheckpoint({
     ...run,
     checkpoint
   };
-  _checkpointActiveOperationSteps({
-    journal,
-    runId: run.id,
-    sessionVersion,
-    snapshot
-  });
+  if (run.state !== "waitingForApproval") {
+    _checkpointActiveOperationSteps({
+      journal,
+      runId: run.id,
+      sessionVersion,
+      snapshot
+    });
+  }
   journal.push({
     type: "runCheckpointRecorded",
     sequence: journal.length + 1,
@@ -1163,6 +1432,139 @@ function _assertOperationSnapshot(
   }
 }
 
+function _assertApprovalLedger(snapshot: RuntimeSessionSnapshot): void {
+  const ledger = snapshot.approvalLedger;
+  if (!ledger) { return; }
+  if (ledger.schemaVersion !== RUNTIME_TOOL_APPROVAL_LEDGER_SCHEMA_VERSION) {
+    throw new SessionStoreInvariantError(
+      `Unsupported tool approval ledger schema: ${String(ledger.schemaVersion)}`
+    );
+  }
+  const requestIds = new Set<string>();
+  const grantIdentities = new Set<string>();
+  const operations = new Map(
+    (snapshot.operationLedger?.steps ?? []).flatMap(step =>
+      step.operations.map(operation => [operation.id, operation] as const))
+  );
+  for (const request of ledger.requests) {
+    _assertId("Tool approval", request.id);
+    _assertId("Runtime Run", request.runId);
+    _assertId("Durable Step", request.stepId);
+    _assertId("Durable operation", request.operationId);
+    _assertId("Approval tool call", request.toolCallId);
+    _assertId("Approval tool name", request.toolName);
+    _assertId("Approval contribution", request.contributionId);
+    _assertId("Agent snapshot fingerprint", request.agentSnapshotFingerprint);
+    for (const [label, value] of [
+      ["Approval request fingerprint", request.requestFingerprint],
+      ["Approval source-policy fingerprint", request.sourcePolicyFingerprint],
+      ["Approval Host-policy fingerprint", request.hostPolicyFingerprint],
+      ["Approval current-principal fingerprint", request.currentPrincipalFingerprint],
+      ["Approval initiator-principal fingerprint", request.initiatorPrincipalFingerprint]
+    ] as const) {
+      _assertSha256(label, value);
+    }
+    if (requestIds.has(request.id)) {
+      throw new SessionStoreInvariantError(
+        `Tool approval ${request.id} is duplicated`
+      );
+    }
+    requestIds.add(request.id);
+    if (
+      !APPROVAL_REQUEST_STATES.has(request.state)
+      || !["always", "deny", "never", "once"].includes(
+        request.sourceRequirement
+      )
+      || !["always", "deny", "never", "once"].includes(
+        request.hostRequirement
+      )
+      || (request.scope !== "call" && request.scope !== "session")
+      || !Number.isSafeInteger(request.requestedAt)
+      || request.requestedAt < 0
+      || (request.reason !== undefined
+        && (request.reason.trim().length === 0 || request.reason.length > 1_024))
+    ) {
+      throw new SessionStoreInvariantError(
+        `Tool approval ${request.id} has invalid state or metadata`
+      );
+    }
+    const decided = request.state !== "pending";
+    if (
+      decided !== Number.isSafeInteger(request.decidedAt)
+      || (request.decidedAt !== undefined
+        && request.decidedAt < request.requestedAt)
+    ) {
+      throw new SessionStoreInvariantError(
+        `Tool approval ${request.id} has invalid decision metadata`
+      );
+    }
+    const operation = operations.get(request.operationId);
+    if (
+      operation?.runId !== request.runId
+      || operation.stepId !== request.stepId
+      || operation.toolCallId !== request.toolCallId
+      || operation.requestFingerprint !== request.requestFingerprint
+    ) {
+      throw new SessionStoreInvariantError(
+        `Tool approval ${request.id} does not match its durable operation`
+      );
+    }
+  }
+  for (const grant of ledger.grants) {
+    _assertId("Tool approval grant", grant.id);
+    _assertId("Approval grant request", grant.requestId);
+    _assertId("Approval grant tool name", grant.toolName);
+    _assertId("Approval grant contribution", grant.contributionId);
+    _assertId("Agent snapshot fingerprint", grant.agentSnapshotFingerprint);
+    for (const [label, value] of [
+      ["Approval grant source-policy fingerprint", grant.sourcePolicyFingerprint],
+      ["Approval grant Host-policy fingerprint", grant.hostPolicyFingerprint],
+      ["Approval grant current-principal fingerprint", grant.currentPrincipalFingerprint],
+      ["Approval grant initiator-principal fingerprint", grant.initiatorPrincipalFingerprint]
+    ] as const) {
+      _assertSha256(label, value);
+    }
+    if (!Number.isSafeInteger(grant.grantedAt) || grant.grantedAt < 0) {
+      throw new SessionStoreInvariantError(
+        `Tool approval grant ${grant.id} has invalid timestamp`
+      );
+    }
+    const request = ledger.requests.find(item => item.id === grant.requestId);
+    if (
+      request?.state !== "approved"
+      || request.scope !== "session"
+      || request.toolName !== grant.toolName
+      || request.contributionId !== grant.contributionId
+      || request.agentSnapshotFingerprint !== grant.agentSnapshotFingerprint
+      || request.sourcePolicyFingerprint !== grant.sourcePolicyFingerprint
+      || request.hostPolicyFingerprint !== grant.hostPolicyFingerprint
+      || request.currentPrincipalFingerprint
+      !== grant.currentPrincipalFingerprint
+      || request.initiatorPrincipalFingerprint
+      !== grant.initiatorPrincipalFingerprint
+    ) {
+      throw new SessionStoreInvariantError(
+        `Tool approval grant ${grant.id} does not match an approved Session request`
+      );
+    }
+    const identity = [
+      grant.agentSnapshotFingerprint,
+      grant.contributionId,
+      grant.toolName,
+      grant.sourcePolicyFingerprint,
+      grant.hostPolicyFingerprint,
+      grant.currentPrincipalFingerprint,
+      grant.initiatorPrincipalFingerprint
+    ].join("\u0000");
+    if (grantIdentities.has(identity)) {
+      throw new SessionStoreInvariantError(
+        `Tool approval grant ${grant.id} duplicates an existing identity`
+      );
+    }
+    grantIdentities.add(identity);
+  }
+}
+
 function _assertReplayEnvelope(
   replay: NonNullable<RuntimeDurableOperationSnapshot["replay"]>
 ): void {
@@ -1338,6 +1740,14 @@ function _assertCapabilitySnapshot(
     _assertId("Capability tool name", tool.name);
     _assertId("Capability contribution", tool.contributionId);
     _assertId("Capability schema fingerprint", tool.schemaFingerprint);
+    if (
+      tool.approval !== undefined
+      && !isApprovalRequirement(tool.approval)
+    ) {
+      throw new SessionStoreInvariantError(
+        `Tool ${tool.name} has an invalid approval requirement`
+      );
+    }
     _assertJsonStateValue(tool.inputSchema, tool.name, new WeakSet());
     if (tool.outputSchema !== undefined) {
       _assertJsonStateValue(tool.outputSchema, tool.name, new WeakSet());
@@ -1521,6 +1931,7 @@ function _assertStoredSession(session: StoredRuntimeSession): void {
     }
   }
   _assertOperationLedger(session.snapshot);
+  _assertApprovalLedger(session.snapshot);
   for (const [turnId, snapshot] of Object.entries(
     session.snapshot.capabilitySnapshots ?? {}
   )) {
@@ -1801,6 +2212,9 @@ function _assertJournalReconstructsSnapshot(
       || entry.type === "operationSettled"
       || entry.type === "operationStepCheckpointed"
       || entry.type === "operationResumed"
+      || entry.type === "toolApprovalRequested"
+      || entry.type === "toolApprovalDecided"
+      || entry.type === "toolApprovalStaled"
     ) { continue; }
     if (entry.type === "runStarted") {
       const startedState = (entry as { readonly state: unknown; }).state;

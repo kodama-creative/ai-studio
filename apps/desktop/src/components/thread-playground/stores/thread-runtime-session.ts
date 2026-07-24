@@ -101,8 +101,34 @@ export class ThreadRuntimeSession {
       );
     }
     if (recovery.status === "parked") {
+      const pending = recovery.session.snapshot.approvalLedger?.requests.some(
+        request => request.runId === recovery.run.id
+          && request.state === "pending"
+      ) ?? false;
+      const continuationFingerprint = await threadContinuationFingerprint(input);
+      if (
+        !pending
+        && recovery.run.state === "waitingForApproval"
+        && recovery.run.checkpoint?.continuationFingerprint
+        === continuationFingerprint
+      ) {
+        return {
+          runId: recovery.run.id,
+          session: await this._store.commit({
+            sessionId: this._sessionId,
+            expectedVersion: recovery.session.version,
+            mutations: [{
+              type: "transitionRun",
+              runId: recovery.run.id,
+              to: "runningTools"
+            }]
+          })
+        };
+      }
       throw new SessionStoreInvariantError(
-        `Runtime Run ${recovery.run.id} is parked and requires Host resume`
+        pending
+          ? `Runtime Run ${recovery.run.id} is waiting for approval decisions`
+          : `Runtime Run ${recovery.run.id} approval boundary changed`
       );
     }
     if (recovery.status === "cancelled") {
@@ -196,7 +222,7 @@ export class ThreadRuntimeSession {
         `Runtime Run ${input.runId} is not active in Session ${this._sessionId}`
       );
     }
-    const mutations = _settleMutations(input);
+    const mutations = _settleMutations(input, current);
     if (input.sawEvent) {
       mutations.push({
         type: "recordCheckpoint",
@@ -335,7 +361,8 @@ function _settleMutations(
       | "failed"
       | "outcomeUnknown";
     readonly runId: string;
-  } & ThreadRuntimeExecutionInput
+  } & ThreadRuntimeExecutionInput,
+  session: StoredRuntimeSession
 ): Array<
   | {
     continuationFingerprint: string;
@@ -367,9 +394,13 @@ function _settleMutations(
   if (last?.role !== "assistant" || !last.toolCalls?.length) {
     return [{ type: "transitionRun", runId: input.runId, to: "completed" }];
   }
-  const waitingState = last.toolCalls.every(toolCall => toolCall.output)
-    ? "waitingForContinue"
-    : "waitingForToolResults";
+  const waitingState = session.snapshot.approvalLedger?.requests.some(
+    request => request.runId === input.runId && request.state === "pending"
+  )
+    ? "waitingForApproval"
+    : last.toolCalls.every(toolCall => toolCall.output)
+      ? "waitingForContinue"
+      : "waitingForToolResults";
   return [
     { type: "transitionRun", runId: input.runId, to: "runningTools" },
     { type: "transitionRun", runId: input.runId, to: waitingState }

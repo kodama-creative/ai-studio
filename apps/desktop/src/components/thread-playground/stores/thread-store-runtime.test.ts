@@ -17,7 +17,7 @@ globalThis.cancelAnimationFrame = handle => {
 describe("Thread store Runtime Harness integration", () => {
   test("projects a transport-owned Server Run while retaining dormant Desktop state", async () => {
     const { createThreadStore } = await import("./thread-store");
-    const desktopRuntimeSession: StoredRuntimeSession = {
+    const desktopRuntimeSession = {
       version: 0,
       snapshot: {
         schemaVersion: 2,
@@ -27,7 +27,7 @@ describe("Thread store Runtime Harness integration", () => {
       },
       configurations: [],
       journal: []
-    };
+    } as unknown as StoredRuntimeSession;
     let persisted: Thread = {
       ..._initialThread(),
       runtimeSession: desktopRuntimeSession,

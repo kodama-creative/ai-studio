@@ -18,16 +18,24 @@ import type {
 
 import { AgentEventProjector, type AgentSessionEvent, type AgentSessionPersistence } from "../../execution/agent-event-projector";
 import { ToolExecutionPolicy } from "../../execution/tool-execution-policy";
+import { isApprovalRequirement } from "../../public/definitions/approval";
 import { STRUCTURED_OUTPUT_TOOL_NAME } from "../../shared/structured-output";
 import { resolveAgentRuntimeModel } from "../agent/resolve-model";
 import {
   type AgentCapabilityRequest,
+  AgentHostPolicyChangedError,
   AgentSessionCapabilities
 } from "../capabilities/agent-session-capabilities";
 import { ExecutionEnvUnavailableError } from "../execution-env/execution-env-unavailable-error";
 import { DurableOperationOutcomeUnknownError } from "../harness/durable-operation-outcome-unknown-error";
+import { fingerprintRuntimeApprovalPrincipal } from "../harness/runtime-approval-principal";
+import { RuntimeToolApprovalStaleError } from "../harness/runtime-tool-approval-stale-error";
+import { runtimeRunHasParkedToolApprovals } from "../harness/runtime-tool-approval-view";
 import { AgentSessionInstructions } from "../instructions/agent-session-instructions";
-import { DurableOperationCoordinator } from "../operations/durable-operation-coordinator";
+import {
+  DurableOperationCoordinator,
+  fingerprintDurableOperationValue
+} from "../operations/durable-operation-coordinator";
 import { createDurableProviderStream } from "../operations/durable-provider-stream";
 import {
   createStructuredOutputTool
@@ -36,6 +44,11 @@ import { StructuredOutputError } from "../outputs/structured-output-error";
 import { DEFAULT_MAX_STRUCTURED_OUTPUT_BYTES } from "../outputs/structured-output-size";
 import { AgentSessionState } from "../state/agent-session-state";
 
+import type {
+  Approval,
+  ApprovalContext
+} from "../../public/definitions/approval";
+import type { AgentHostApprovalPolicy } from "../../shared/agent-approval-policy";
 import type { AgentCapabilityPolicy } from "../../shared/agent-capability-policy";
 import type {
   AgentModelOptionsDefinition,
@@ -50,6 +63,7 @@ import type {
 import type { PreparedAgentTool } from "../agent/prepared-agent-tool";
 import type { RuntimeStructuredOutputResult } from "../harness/runtime-run";
 import type {
+  RuntimeSessionMutation,
   RuntimeTurnCapabilitySnapshot,
   RuntimeTurnInstructionSnapshot,
   SessionStore,
@@ -68,6 +82,7 @@ export interface AgentSessionOptions {
   initialMessages: AgentMessage[];
   tools: PreparedAgentTool[];
   activeToolNames?: string[];
+  approvalPolicy?: AgentHostApprovalPolicy;
   capabilityPolicy: AgentCapabilityPolicy;
   capabilityRequest: AgentCapabilityRequest;
   instructionsPrefix: string;
@@ -87,6 +102,8 @@ export interface AgentSessionOptions {
 export class AgentSession {
   private readonly _agent: Agent;
   private readonly _project: AgentProjectSnapshot;
+  private readonly _context: AgentSessionContext;
+  private readonly _approvalPolicy?: AgentHostApprovalPolicy;
   private _modelSelector: AgentModelSelector;
   private _reasoning?: ThinkingLevel;
   private readonly _toolPolicy: ToolExecutionPolicy;
@@ -111,9 +128,12 @@ export class AgentSession {
   private readonly _executionEnv?: ExecutionEnv;
   private readonly _durableOperations: DurableOperationCoordinator;
   private _structuredOutput: RuntimeStructuredOutputResult | null = null;
+  private _approvalBatchPending = false;
 
   constructor(options: AgentSessionOptions) {
     this._project = options.project;
+    this._context = options.context;
+    this._approvalPolicy = options.approvalPolicy;
     this._models = options.models;
     this._sessionStore = options.sessionStore;
     this._onSessionCommitted = options.onSessionCommitted;
@@ -212,7 +232,15 @@ export class AgentSession {
         this._beforeToolCall(context, signal),
       afterToolCall: async ({ toolCall }) => {
         const isError = this._toolPolicy.consumeResultError(toolCall.id);
-        return isError === undefined ? undefined : { isError };
+        const terminate = this._executionMode === "autoOnce"
+          ? true
+          : undefined;
+        return isError === undefined && terminate === undefined
+          ? undefined
+          : {
+            ...(isError === undefined ? {} : { isError }),
+            ...(terminate === undefined ? {} : { terminate })
+          };
       },
       prepareNextTurnWithContext: async ({ toolResults }) => {
         try {
@@ -344,6 +372,124 @@ export class AgentSession {
     await this._eventProjector.handleToolResultsResolved();
   }
 
+  async resumeApprovedTools(): Promise<void> {
+    if (this._agent.state.isStreaming) {
+      throw new Error("Cannot resume approved tools while the session is running");
+    }
+    const store = this._sessionStore;
+    if (!store) {
+      throw new Error("Approved tool resume requires a Session Store");
+    }
+    let current = await store.load(this._context.id);
+    if (!current) {
+      throw new Error("Approved tool resume requires a stored Runtime Session");
+    }
+    await this._staleApprovalBatchIfIdentityChanged(current);
+    await this.validateState();
+    try {
+      await this._resolveTurnSetup();
+    } catch (error) {
+      if (error instanceof AgentHostPolicyChangedError) {
+        current = await store.load(this._context.id) ?? current;
+        await this._staleParkedApprovalBatch(current);
+      }
+      throw error;
+    }
+    current = await store.load(this._context.id);
+    const requests = current?.snapshot.approvalLedger?.requests.filter(
+      request => request.runId === this._context.turn.id
+    ) ?? [];
+    if (requests.some(request => request.state === "pending")) {
+      throw new Error("Every tool approval in the batch must be decided first");
+    }
+    const last = this.messages.at(-1);
+    if (last?.role !== "assistant") {
+      throw new Error("Approved tool resume requires a trailing tool-call message");
+    }
+    const calls = last.content.filter(content => content.type === "toolCall");
+    if (calls.length === 0) {
+      throw new Error("Approved tool resume has no tool calls");
+    }
+    for (const call of calls) {
+      const request = requests.find(item => item.toolCallId === call.id);
+      if (!request) { continue; }
+      if (request.state !== "approved" && request.state !== "denied") {
+        throw new Error(`Tool approval ${request.id} cannot resume`);
+      }
+      current = await store.load(this._context.id);
+      const operation = current?.snapshot.operationLedger?.steps
+        .flatMap(step => step.operations)
+        .find(item => item.id === request.operationId);
+      if (!current || operation?.state !== "parked" || !operation.park) {
+        throw new Error(`Tool approval ${request.id} is not ready to resume`);
+      }
+      if (request.state === "denied") {
+        await this._durableOperations.cancelParkedToolCall({
+          operationId: operation.id,
+          parkId: operation.park.parkId,
+          requestFingerprint: operation.requestFingerprint,
+          resumeSchemaFingerprint: operation.park.resumeSchemaFingerprint
+        });
+      } else {
+        await this._durableOperations.resumeParkedOperation({
+          sessionId: this._context.id,
+          runId: this._context.turn.id,
+          expectedVersion: current.version,
+          operationId: operation.id,
+          parkId: operation.park.parkId,
+          resumeSchemaFingerprint: operation.park.resumeSchemaFingerprint
+        }, {
+          name: call.name,
+          arguments: call.arguments
+        });
+      }
+    }
+    this._approvalBatchPending = false;
+    const results = await Promise.all(calls.map(async call => {
+      const request = requests.find(item => item.toolCallId === call.id);
+      if (request?.state === "denied") {
+        return {
+          role: "toolResult" as const,
+          toolCallId: call.id,
+          toolName: call.name,
+          content: [{
+            type: "text" as const,
+            text: request.reason ?? "Tool call denied by the user; not run"
+          }],
+          details: { approval: "denied", notRun: true },
+          isError: true,
+          timestamp: Date.now()
+        } satisfies ToolResultMessage;
+      }
+      const tool = this._toolPolicy.preparedTool(call.name);
+      if (tool?.kind !== "executable") {
+        throw new Error(`Approved tool ${call.name} is not executable`);
+      }
+      const outcome = await tool.execute(call.id, call.arguments);
+      if (outcome.type !== "completed") {
+        throw new Error(`Approved tool ${call.name} remained deferred`);
+      }
+      return {
+        role: "toolResult" as const,
+        toolCallId: call.id,
+        toolName: call.name,
+        content: outcome.result.content,
+        details: outcome.result.details,
+        isError: outcome.result.isError ?? false,
+        timestamp: Date.now()
+      } satisfies ToolResultMessage;
+    }));
+    const checkpoint = this._executionMode === "react";
+    await this._sessionState.completeStep(results, {
+      durableMutations: this._durableOperations.toolBatchMutations({ checkpoint })
+    });
+    this._durableOperations.markToolBatchCommitted({ checkpoint });
+    await this.resolveToolResults(results);
+    if (this._executionMode !== "manual") {
+      await this.continue();
+    }
+  }
+
   async continue(): Promise<void> {
     this._terminalError = null;
     this._structuredOutput = null;
@@ -404,20 +550,100 @@ export class AgentSession {
       this._terminalError = error;
       return { block: true, reason: error.message };
     }
-    if (
-      this._toolPolicy.executesAutomatically(
-        context.toolCall.name,
-        this._executionMode
-      )
-      && this._durableOperations.active
-      && !signal?.aborted
-    ) {
+    if (this._durableOperations.active && !signal?.aborted) {
       try {
-        await this._durableOperations.prepareToolCall({
-          name: context.toolCall.name,
-          toolCallId: context.toolCall.id,
-          arguments: context.args
-        });
+        const tool = this._toolPolicy.preparedTool(context.toolCall.name);
+        if (tool?.kind === "executable") {
+          const approvalContext = {
+            callId: context.toolCall.id,
+            session: this._context,
+            toolInput: context.args as Readonly<unknown>,
+            toolName: context.toolCall.name
+          };
+          const sourceRequirement = await this._resolveApprovalRequirement(
+            tool.approval ?? "never",
+            approvalContext,
+            "Source"
+          );
+          const hostRequirement = this._approvalPolicy
+            ? await this._resolveApprovalRequirement(
+              this._approvalPolicy.evaluate,
+              approvalContext,
+              "Host"
+            )
+            : "never";
+          const requirement = sourceRequirement === "deny"
+            ? sourceRequirement
+            : hostRequirement === "deny"
+              ? hostRequirement
+              : sourceRequirement === "always" || hostRequirement === "always"
+                ? "always"
+                : sourceRequirement === "once" || hostRequirement === "once"
+                  ? "once"
+                  : "never";
+          if (requirement !== "never") {
+            const [currentPrincipalFingerprint, initiatorPrincipalFingerprint] =
+              await Promise.all([
+                fingerprintRuntimeApprovalPrincipal(this._context.auth.current),
+                fingerprintRuntimeApprovalPrincipal(this._context.auth.initiator)
+              ]);
+            const contributionId = tool.provenance?.contributionId
+              ?? `host-tool:${tool.definition.name}`;
+            const sourcePolicyFingerprint =
+              await fingerprintDurableOperationValue({
+                agentSnapshotFingerprint: this._project.fingerprint,
+                contributionId,
+                toolName: tool.definition.name
+              });
+            const hostPolicyFingerprint =
+              await fingerprintDurableOperationValue(
+                this._approvalPolicy
+                  ? { id: this._approvalPolicy.id }
+                  : { id: "neutral-host-approval-policy" }
+              );
+            const stored = requirement === "once" && this._sessionStore
+              ? await this._sessionStore.load(this._context.id)
+              : null;
+            const granted = stored?.snapshot.approvalLedger?.grants.some(grant =>
+              grant.agentSnapshotFingerprint === this._project.fingerprint
+              && grant.contributionId === contributionId
+              && grant.toolName === tool.definition.name
+              && grant.sourcePolicyFingerprint === sourcePolicyFingerprint
+              && grant.hostPolicyFingerprint === hostPolicyFingerprint
+              && grant.currentPrincipalFingerprint
+              === currentPrincipalFingerprint
+              && grant.initiatorPrincipalFingerprint
+              === initiatorPrincipalFingerprint) ?? false;
+            if (!granted) {
+              await this._durableOperations.parkToolCallForApproval({
+                agentSnapshotFingerprint: this._project.fingerprint,
+                arguments: context.args,
+                contributionId,
+                currentPrincipalFingerprint,
+                hostPolicyFingerprint,
+                initiatorPrincipalFingerprint,
+                name: context.toolCall.name,
+                ...(requirement === "deny"
+                  ? { denied: true, reason: this._approvalDenialReason }
+                  : {}),
+                scope: requirement === "once" ? "session" : "call",
+                sourcePolicyFingerprint,
+                sourceRequirement,
+                hostRequirement,
+                toolCallId: context.toolCall.id
+              });
+              if (requirement === "deny") {
+                this._toolPolicy.denyCall(
+                  context.toolCall.id,
+                  this._approvalDenialReason
+                );
+                return undefined;
+              }
+              this._approvalBatchPending = true;
+            }
+          }
+        }
+        if (this._approvalBatchPending) { return undefined; }
       } catch (error) {
         const terminal = error instanceof Error
           ? error
@@ -452,6 +678,16 @@ export class AgentSession {
     const stored = this._sessionStore
       ? await this._sessionStore.load(this._sessionState.context.id)
       : null;
+    const approvalWait = stored
+      ? runtimeRunHasParkedToolApprovals(stored, this._context.turn.id)
+      : false;
+    if (approvalWait) {
+      this._agent.state.messages = this._toolPolicy.restoreDeferredPlaceholders(
+        this._agent.state.messages,
+        this._executionMode,
+        true
+      );
+    }
     const [instructionSnapshot, capabilities] = await Promise.all([
       this._instructions.prepare(stateScopeEnabled, stored),
       this._capabilities.prepare(stateScopeEnabled, stored)
@@ -507,7 +743,9 @@ export class AgentSession {
       ? [...capabilities.tools, this._outputTool]
       : capabilities.tools;
     this._toolPolicy.configure({
-      tools: resolvedTools.map(tool => this._durableOperations.wrapTool(tool))
+      tools: resolvedTools.map(tool => this._wrapApprovalBarrier(
+        this._durableOperations.wrapTool(tool)
+      ))
     });
     this._agent.state.model = resolveAgentRuntimeModel(
       this._models,
@@ -517,5 +755,131 @@ export class AgentSession {
     this._agent.state.tools = this._toolPolicy.toolsForMode(this._executionMode);
     this._agent.state.systemPrompt = this._instructionSnapshot.markdown;
     this._resolvedWithoutSessionStore = !this._sessionStore;
+  }
+
+  private _wrapApprovalBarrier(tool: PreparedAgentTool): PreparedAgentTool {
+    if (tool.kind !== "executable") { return tool; }
+    return {
+      ...tool,
+      execute: async (...args) => (this._approvalBatchPending
+        ? { type: "deferred" }
+        : tool.execute(...args))
+    };
+  }
+
+  private _approvalDenialReason = "Tool execution denied by approval policy";
+
+  private async _staleApprovalBatchIfIdentityChanged(
+    current: StoredRuntimeSession
+  ): Promise<void> {
+    const requests = this._parkedApprovalRequests(current);
+    if (requests.length === 0) { return; }
+    const [
+      currentPrincipalFingerprint,
+      initiatorPrincipalFingerprint,
+      hostPolicyFingerprint
+    ] = await Promise.all([
+      fingerprintRuntimeApprovalPrincipal(this._context.auth.current),
+      fingerprintRuntimeApprovalPrincipal(this._context.auth.initiator),
+      fingerprintDurableOperationValue(
+        this._approvalPolicy
+          ? { id: this._approvalPolicy.id }
+          : { id: "neutral-host-approval-policy" }
+      )
+    ]);
+    const changed = requests.some(request =>
+      request.agentSnapshotFingerprint !== this._project.fingerprint
+      || request.hostPolicyFingerprint !== hostPolicyFingerprint
+      || request.currentPrincipalFingerprint !== currentPrincipalFingerprint
+      || request.initiatorPrincipalFingerprint
+      !== initiatorPrincipalFingerprint);
+    if (changed) {
+      await this._staleParkedApprovalBatch(current);
+    }
+  }
+
+  private async _staleParkedApprovalBatch(
+    current: StoredRuntimeSession
+  ): Promise<never> {
+    const store = this._sessionStore;
+    if (!store) {
+      throw new RuntimeToolApprovalStaleError();
+    }
+    const requests = this._parkedApprovalRequests(current);
+    const operations = new Map(
+      (current.snapshot.operationLedger?.steps ?? []).flatMap(step =>
+        step.operations.map(operation => [operation.id, operation] as const))
+    );
+    const mutations: RuntimeSessionMutation[] = requests.flatMap(request => {
+      const operation = operations.get(request.operationId);
+      if (operation?.state !== "parked" || !operation.park) { return []; }
+      return [
+        {
+          type: "staleToolApproval" as const,
+          requestId: request.id,
+          runId: request.runId
+        },
+        {
+          type: "resumeOperation" as const,
+          runId: request.runId,
+          operationId: operation.id,
+          parkId: operation.park.parkId,
+          requestFingerprint: operation.requestFingerprint,
+          resumeSchemaFingerprint: operation.park.resumeSchemaFingerprint
+        },
+        {
+          type: "settleOperation" as const,
+          runId: request.runId,
+          operationId: operation.id,
+          requestFingerprint: operation.requestFingerprint,
+          state: "cancelled" as const
+        }
+      ];
+    });
+    if (mutations.length > 0) {
+      const committed = await store.commit({
+        sessionId: this._context.id,
+        expectedVersion: current.version,
+        mutations
+      });
+      await this._onSessionCommitted?.(committed);
+    }
+    throw new RuntimeToolApprovalStaleError();
+  }
+
+  private _parkedApprovalRequests(current: StoredRuntimeSession) {
+    const parkedOperationIds = new Set(
+      (current.snapshot.operationLedger?.steps ?? []).flatMap(step =>
+        step.operations
+          .filter(operation => operation.state === "parked")
+          .map(operation => operation.id))
+    );
+    return (current.snapshot.approvalLedger?.requests ?? []).filter(request =>
+      request.runId === this._context.turn.id
+      && (request.state === "pending" || request.state === "approved")
+      && parkedOperationIds.has(request.operationId));
+  }
+
+  private async _resolveApprovalRequirement(
+    approval: Approval,
+    context: ApprovalContext,
+    owner: "Host" | "Source"
+  ): Promise<"always" | "deny" | "never" | "once"> {
+    try {
+      const requirement = typeof approval === "function"
+        ? await approval(context)
+        : approval;
+      if (!isApprovalRequirement(requirement)) {
+        throw new TypeError(`${owner} approval policy returned an invalid decision`);
+      }
+      if (typeof requirement === "object") {
+        this._approvalDenialReason = requirement.reason;
+        return "deny";
+      }
+      return requirement;
+    } catch {
+      this._approvalDenialReason = `${owner} approval policy failed closed`;
+      return "deny";
+    }
   }
 }

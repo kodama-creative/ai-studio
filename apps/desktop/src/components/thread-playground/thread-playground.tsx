@@ -123,6 +123,11 @@ export interface ThreadPlaygroundProps {
   /** The streaming transport used by runs (e.g. HTTP or Electrobun RPC). */
   readonly transport: AgentTransport;
 
+  readonly decideToolApproval?: (
+    requestId: string,
+    decision: "approved" | "denied"
+  ) => Promise<StoredRuntimeSession>;
+
   /** Execute a tool with owning-surface context such as a Project Thread id. */
   readonly toolExecutor?: ToolExecutor;
 
@@ -223,6 +228,7 @@ const _ThreadPlayground = function ThreadPlayground({
   renderPromptVariables,
   preserveSavedModel,
   prepareRunSnapshot,
+  decideToolApproval,
   persistSettledThread,
   loadPromptSkills,
   externalUpdate,
@@ -249,6 +255,7 @@ const _ThreadPlayground = function ThreadPlayground({
   const [store] = useState(() =>
     createThreadStore(initialValue, {
       transport,
+      decideToolApproval,
       resolveModel: saved =>
         (preserveSavedModel && saved
           ? saved

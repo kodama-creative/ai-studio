@@ -57,6 +57,11 @@ export async function recoverRuntimeSession(
   }
   const run = activeRuntimeRun(current);
   if (
+    run.state === "waitingForApproval"
+  ) {
+    return { status: "parked", run, session: current };
+  }
+  if (
     run.state === "waitingForToolResults"
     || run.state === "waitingForContinue"
   ) {

@@ -289,6 +289,128 @@ export class DurableOperationCoordinator {
     return begun;
   }
 
+  async parkToolCallForApproval(input: {
+    readonly agentSnapshotFingerprint: string;
+    readonly arguments: unknown;
+    readonly contributionId: string;
+    readonly currentPrincipalFingerprint: string;
+    readonly denied?: boolean;
+    readonly hostPolicyFingerprint: string;
+    readonly hostRequirement: "always" | "deny" | "never" | "once";
+    readonly initiatorPrincipalFingerprint: string;
+    readonly name: string;
+    readonly reason?: string;
+    readonly scope: "call" | "session";
+    readonly sourcePolicyFingerprint: string;
+    readonly sourceRequirement: "always" | "deny" | "never" | "once";
+    readonly toolCallId: string;
+  }): Promise<RuntimeDurableOperationSnapshot> {
+    return this._serialize(async () => {
+      const store = this._requiredStore();
+      const current = await store.load(this._sessionId);
+      if (current?.snapshot.activeRunId !== this._runId) {
+        throw new Error(
+          `Runtime Run ${this._runId} is not active in Session ${this._sessionId}`
+        );
+      }
+      const step = _activeStep(current, this._runId);
+      if (!step) {
+        throw new Error(
+          `Tool ${input.toolCallId} has no active durable provider Step`
+        );
+      }
+      this._activeStepId = step.id;
+      const operationId = `${step.id}:tool:${input.toolCallId}`;
+      const requestId = `approval:${operationId}`;
+      const requestFingerprint = await fingerprintDurableOperationValue({
+        name: input.name,
+        arguments: input.arguments
+      });
+      const existing = step.operations.find(operation =>
+        operation.id === operationId);
+      if (existing) {
+        await this._existing(existing, requestFingerprint);
+        throw new Error(`Durable operation ${operationId} is not parked`);
+      }
+      const resumeSchemaFingerprint = await fingerprintDurableOperationValue({
+        type: "toolApprovalResume",
+        version: 1
+      });
+      const mutations: RuntimeSessionMutation[] = [
+        {
+          type: "startOperation",
+          runId: this._runId,
+          stepId: step.id,
+          stepSequence: step.sequence,
+          transcriptMessageCount: step.transcriptMessageCount,
+          operationId,
+          kind: "tool",
+          toolCallId: input.toolCallId,
+          requestFingerprint,
+          park: {
+            parkId: requestId,
+            reason: input.reason ?? "Tool approval required",
+            resumeSchemaFingerprint
+          }
+        },
+        {
+          type: "requestToolApproval",
+          requestId,
+          runId: this._runId,
+          stepId: step.id,
+          operationId,
+          toolCallId: input.toolCallId,
+          toolName: input.name,
+          contributionId: input.contributionId,
+          requestFingerprint,
+          agentSnapshotFingerprint: input.agentSnapshotFingerprint,
+          sourcePolicyFingerprint: input.sourcePolicyFingerprint,
+          sourceRequirement: input.sourceRequirement,
+          hostRequirement: input.hostRequirement,
+          hostPolicyFingerprint: input.hostPolicyFingerprint,
+          currentPrincipalFingerprint: input.currentPrincipalFingerprint,
+          initiatorPrincipalFingerprint: input.initiatorPrincipalFingerprint,
+          scope: input.scope,
+          ...(input.reason ? { reason: input.reason } : {})
+        }
+      ];
+      if (input.denied) {
+        mutations.push(
+          {
+            type: "decideToolApproval",
+            requestId,
+            runId: this._runId,
+            currentPrincipalFingerprint: input.currentPrincipalFingerprint,
+            initiatorPrincipalFingerprint: input.initiatorPrincipalFingerprint,
+            decision: "denied"
+          },
+          {
+            type: "resumeOperation",
+            runId: this._runId,
+            operationId,
+            parkId: requestId,
+            requestFingerprint,
+            resumeSchemaFingerprint
+          },
+          {
+            type: "settleOperation",
+            runId: this._runId,
+            operationId,
+            requestFingerprint,
+            state: "cancelled"
+          }
+        );
+      }
+      const committed = await store.commit({
+        sessionId: this._sessionId,
+        expectedVersion: current.version,
+        mutations
+      });
+      await this._onCommitted?.(committed);
+      return _requiredOperation(committed, operationId);
+    });
+  }
+
   async resumeParkedOperation(
     claim: Omit<DurableOperationResumeClaim, "requestFingerprint">,
     input: {
@@ -328,6 +450,48 @@ export class DurableOperationCoordinator {
         );
       }
       return result;
+    });
+  }
+
+  async cancelParkedToolCall(input: {
+    readonly operationId: string;
+    readonly parkId: string;
+    readonly requestFingerprint: string;
+    readonly resumeSchemaFingerprint: string;
+  }): Promise<RuntimeDurableOperationSnapshot> {
+    return this._serialize(async () => {
+      const store = this._requiredStore();
+      const current = await store.load(this._sessionId);
+      if (current?.snapshot.activeRunId !== this._runId) {
+        throw new Error(
+          `Runtime Run ${this._runId} is not active in Session ${this._sessionId}`
+        );
+      }
+      const committed = await store.commit({
+        sessionId: this._sessionId,
+        expectedVersion: current.version,
+        mutations: [
+          {
+            type: "resumeOperation",
+            runId: this._runId,
+            operationId: input.operationId,
+            parkId: input.parkId,
+            requestFingerprint: input.requestFingerprint,
+            resumeSchemaFingerprint: input.resumeSchemaFingerprint
+          },
+          {
+            type: "settleOperation",
+            runId: this._runId,
+            operationId: input.operationId,
+            requestFingerprint: input.requestFingerprint,
+            state: "cancelled"
+          }
+        ]
+      });
+      await this._onCommitted?.(committed);
+      const operation = _requiredOperation(committed, input.operationId);
+      this._activeStepId = operation.stepId;
+      return operation;
     });
   }
 

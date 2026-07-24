@@ -24,8 +24,9 @@ export function createExecutionEnvTool(input: {
   if (!kind) {
     throw new TypeError("Compiled tool is not an ExecutionEnv helper");
   }
-  const { execute: _execute, ...definition } = input.tool;
+  const { approval, execute: _execute, ...definition } = input.tool;
   return {
+    ...(approval ? { approval } : {}),
     kind: "executable",
     definition,
     executionEnvToolKind: kind,

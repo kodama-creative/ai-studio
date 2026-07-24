@@ -1,7 +1,12 @@
 import { defineExecutionEnvToolRuntime } from "../../internal/authored-action-definitions";
 
-import type { ExecutionEnvToolDefinition } from "../definitions/execution-env-tool";
+import type {
+  ExecutionEnvToolDefinition,
+  ExecutionEnvToolOptions
+} from "../definitions/execution-env-tool";
 
-export function defineReadTool(): ExecutionEnvToolDefinition<"read"> {
-  return defineExecutionEnvToolRuntime("read");
+export function defineReadTool(
+  options: ExecutionEnvToolOptions = {}
+): ExecutionEnvToolDefinition<"read"> {
+  return defineExecutionEnvToolRuntime("read", options);
 }

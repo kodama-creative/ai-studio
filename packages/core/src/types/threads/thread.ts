@@ -229,6 +229,7 @@ export type ThreadSnapshot = Static<typeof ThreadSnapshot>;
 export const ThreadRuntimeRunState = Type.Union([
   Type.Literal("runningModel"),
   Type.Literal("runningTools"),
+  Type.Literal("waitingForApproval"),
   Type.Literal("waitingForToolResults"),
   Type.Literal("waitingForContinue"),
   Type.Literal("completed"),

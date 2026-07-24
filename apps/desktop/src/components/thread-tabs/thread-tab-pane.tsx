@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import type { Thread } from "@llm-space/core";
 import type { StoredRuntimeSession } from "@llm-space/runtime/harness";
 
-import { createRpcTransport, localFs } from "@/client";
+import { createRpcTransport, decideToolApproval, localFs } from "@/client";
 import { ThreadPlayground } from "@/components/thread-playground";
 import { getRuntimeExecutionMode } from "@/components/thread-playground/stores";
 import { parentOf, threadPathForTitle } from "@/lib/thread-file";
@@ -199,6 +199,7 @@ export function ThreadTabPane({
       <ThreadPlayground
         active={active}
         className="bg-background size-full shadow-lg"
+        decideToolApproval={decideToolApproval}
         initialValue={thread}
         key={reloadKey}
         loading={isLoading}

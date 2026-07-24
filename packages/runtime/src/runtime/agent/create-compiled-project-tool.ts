@@ -19,6 +19,9 @@ export function createCompiledProjectTool(input: {
     label: input.name,
     description: input.definition.description,
     parameters: input.definition.inputSchema,
+    ...(input.definition.approval
+      ? { approval: input.definition.approval }
+      : {}),
     outputSchema: input.definition.outputSchema,
     ...(input.sourcePath ? { sourcePath: input.sourcePath } : {}),
     async execute(toolCallId, value, signal) {

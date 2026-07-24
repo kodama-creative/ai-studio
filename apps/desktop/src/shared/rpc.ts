@@ -83,6 +83,7 @@ export interface StreamThreadRequestPayload {
 export type StreamThreadResponsePayload =
   | {
     code?:
+      | "approvalStale"
       | "executionEnvUnavailable"
       | "hostPolicyChanged"
       | "outcomeUnknown"
@@ -177,6 +178,13 @@ export interface DesktopRPCType {
       builtinProviders: {
         params: Record<string, never>;
         response: ModelProviderGroup[];
+      };
+      decideToolApproval: {
+        params: {
+          decision: "approved" | "denied";
+          requestId: string;
+        };
+        response: StoredRuntimeSession;
       };
       // Resolve a directory under the llm-space root, creating it (recursively)
       // if missing, and return its absolute path. The renderer can't touch the

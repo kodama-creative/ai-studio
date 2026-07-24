@@ -20,8 +20,9 @@ export function prepareProjectTool(
     const prepared = createExecutionEnvTool({ env: executionEnv, tool });
     return { ...prepared, provenance };
   }
-  const { execute, ...definition } = tool;
+  const { approval, execute, ...definition } = tool;
   return {
+    ...(approval ? { approval } : {}),
     kind: "executable",
     definition,
     provenance,

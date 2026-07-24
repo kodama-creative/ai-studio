@@ -12,6 +12,7 @@ import {
 } from "@earendil-works/pi-ai";
 import { LocalFileSystem } from "@llm-space/core/server";
 import {
+  fingerprintRuntimeApprovalPrincipal,
   InMemorySessionStore,
   type RuntimeRunConfigurationSnapshot,
   type StoredRuntimeSession
@@ -912,6 +913,92 @@ describe("StreamThreadController Agent Project runtime", () => {
 });
 
 describe("StreamThreadController standalone Runtime Harness", () => {
+  test("decides a registered approval using only request identity and decision", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "llm-space-approval-rpc-"));
+    roots.push(root);
+    const localFs = new LocalFileSystem(root);
+    const threadPath = "approval.json";
+    const started = await _startedDesktopRun("react");
+    const store = new InMemorySessionStore([started]);
+    const runId = started.snapshot.activeRunId;
+    if (!runId) { throw new Error("Expected active Runtime Run"); }
+    const requestId = `approval:${runId}:step:1:tool:call-one`;
+    const principal = {
+      issuer: "llm-space-desktop",
+      principalId: "local-user",
+      principalType: "user" as const
+    };
+    const principalFingerprint = await fingerprintRuntimeApprovalPrincipal(
+      principal
+    );
+    const requested = await store.commit({
+      sessionId: started.snapshot.id,
+      expectedVersion: started.version,
+      mutations: [
+        {
+          type: "startOperation",
+          runId,
+          stepId: `${runId}:step:1`,
+          stepSequence: 1,
+          transcriptMessageCount: 1,
+          operationId: `${runId}:step:1:tool:call-one`,
+          kind: "tool",
+          toolCallId: "call-one",
+          requestFingerprint: "a".repeat(64),
+          park: {
+            parkId: requestId,
+            reason: "Tool approval required",
+            resumeSchemaFingerprint: "b".repeat(64)
+          }
+        },
+        {
+          type: "requestToolApproval",
+          requestId,
+          runId,
+          stepId: `${runId}:step:1`,
+          operationId: `${runId}:step:1:tool:call-one`,
+          toolCallId: "call-one",
+          toolName: "echo",
+          contributionId: "tool:echo",
+          requestFingerprint: "a".repeat(64),
+          agentSnapshotFingerprint: "desktop-thread-runtime-v1",
+          sourcePolicyFingerprint: "c".repeat(64),
+          sourceRequirement: "always",
+          hostRequirement: "never",
+          hostPolicyFingerprint: "d".repeat(64),
+          currentPrincipalFingerprint: principalFingerprint,
+          initiatorPrincipalFingerprint: principalFingerprint,
+          scope: "call"
+        }
+      ]
+    });
+    const thread: Thread = { runtimeSession: requested };
+    await localFs.write(threadPath, thread);
+    const controller = new StreamThreadController(
+      _modelManager(createModels()),
+      { capture: () => undefined } as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      localFs
+    );
+    controller.registerDesktopThreadApprovals(threadPath, thread);
+
+    await controller.decideToolApproval({
+      requestId,
+      decision: "approved"
+    });
+
+    const persisted = await localFs.read(threadPath);
+    expect((persisted.runtimeSession as StoredRuntimeSession)
+      .snapshot.approvalLedger?.requests[0]).toMatchObject({
+      id: requestId,
+      state: "approved"
+    });
+  });
+
   test.each([
     ["manual", 0, 1],
     ["autoOnce", 1, 1],

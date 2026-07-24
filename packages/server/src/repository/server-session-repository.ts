@@ -1170,7 +1170,10 @@ function _validEventMap(value: unknown, runs: readonly unknown[]): boolean {
       && event.sequence === index + 1
       && (
         (event.event === "pi" && _validPersistedPiEvent(event.data))
-        || (event.event === "control" && _validPersistedTerminal(event.data))
+        || (event.event === "control" && (
+          _validPersistedTerminal(event.data)
+          || _validPersistedToolApprovalRequired(event.data)
+        ))
       ));
     if (!valid) {
       return false;
@@ -1239,6 +1242,20 @@ function _validPersistedTerminal(value: unknown): value is {
       value.structuredOutput === undefined
       || _validStructuredOutput(value.structuredOutput)
     );
+}
+
+function _validPersistedToolApprovalRequired(value: unknown): boolean {
+  return _isRecord(value)
+    && value.type === "toolApprovalRequired"
+    && Array.isArray(value.approvals)
+    && value.approvals.length > 0
+    && value.approvals.every(approval =>
+      _isRecord(approval)
+      && typeof approval.id === "string"
+      && typeof approval.toolCallId === "string"
+      && typeof approval.toolName === "string"
+      && (approval.scope === "call" || approval.scope === "session")
+      && (approval.reason === undefined || typeof approval.reason === "string"));
 }
 
 function _assertTerminalAuthority(envelope: ServerSessionEnvelope): void {
@@ -1451,6 +1468,9 @@ function _recoverableTranscript(
     step => step.runId === runId && step.state === "active"
   );
   if (!activeStep) {
+    return session.transcript;
+  }
+  if (activeStep.operations.some(operation => operation.state === "parked")) {
     return session.transcript;
   }
   if (activeStep.transcriptMessageCount > session.transcript.length) {

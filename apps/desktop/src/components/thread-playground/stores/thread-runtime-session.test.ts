@@ -221,6 +221,57 @@ describe("ThreadRuntimeSession", () => {
     expect(abortedSettled.checkpoint?.state).toBe("cancelled");
   });
 
+  test("settles a parked approval batch as waiting for approval", async () => {
+    const initial = new ThreadRuntimeSession(undefined);
+    const begun = await initial.begin(_input(_threadWithUser(), "react"));
+    const pending = await _withPendingApproval(begun.session, begun.runId);
+    const coordinator = new ThreadRuntimeSession(pending);
+
+    const settled = await coordinator.settle({
+      ..._input(_threadWithToolCall(), "react"),
+      runId: begun.runId,
+      sawEvent: true,
+      outcome: "completed"
+    });
+
+    expect(settled.checkpoint?.state).toBe("waitingForApproval");
+  });
+
+  test("resumes a fully decided approval batch at the same Thread boundary", async () => {
+    const initial = new ThreadRuntimeSession(undefined);
+    const waitingThread = _threadWithToolCall();
+    const begun = await initial.begin(_input(_threadWithUser(), "react"));
+    const pending = await _withPendingApproval(begun.session, begun.runId);
+    const waiting = await new ThreadRuntimeSession(pending).settle({
+      ..._input(waitingThread, "react"),
+      runId: begun.runId,
+      sawEvent: true,
+      outcome: "completed"
+    });
+    const store = new InMemorySessionStore([waiting.session]);
+    const request = waiting.session.snapshot.approvalLedger?.requests[0];
+    if (!request) { throw new Error("Expected pending approval"); }
+    const decided = await store.commit({
+      sessionId: waiting.session.snapshot.id,
+      expectedVersion: waiting.session.version,
+      mutations: [{
+        type: "decideToolApproval",
+        requestId: request.id,
+        runId: begun.runId,
+        currentPrincipalFingerprint: "e".repeat(64),
+        initiatorPrincipalFingerprint: "e".repeat(64),
+        decision: "approved"
+      }]
+    });
+
+    const resumed = await new ThreadRuntimeSession(decided).begin(
+      _input(waitingThread, "react")
+    );
+
+    expect(resumed.runId).toBe(begun.runId);
+    expect(resumed.session.snapshot.runs.at(-1)?.state).toBe("runningTools");
+  });
+
   test("binds and atomically stores the selected structured output", async () => {
     const coordinator = new ThreadRuntimeSession(undefined);
     const base = _input(_threadWithUser(), "react");
@@ -425,5 +476,54 @@ async function _withPreCall(
       provider: "fake",
       requestFingerprint: "a".repeat(64)
     }]
+  });
+}
+
+async function _withPendingApproval(
+  session: StoredRuntimeSession,
+  runId: string
+): Promise<StoredRuntimeSession> {
+  const store = new InMemorySessionStore([session]);
+  const operationId = `${runId}:step:1:tool:call-one`;
+  return store.commit({
+    sessionId: session.snapshot.id,
+    expectedVersion: session.version,
+    mutations: [
+      {
+        type: "startOperation",
+        runId,
+        stepId: `${runId}:step:1`,
+        stepSequence: 1,
+        transcriptMessageCount: 1,
+        operationId,
+        kind: "tool",
+        toolCallId: "call-one",
+        requestFingerprint: "a".repeat(64),
+        park: {
+          parkId: `approval:${operationId}`,
+          reason: "Tool approval required",
+          resumeSchemaFingerprint: "b".repeat(64)
+        }
+      },
+      {
+        type: "requestToolApproval",
+        requestId: `approval:${operationId}`,
+        runId,
+        stepId: `${runId}:step:1`,
+        operationId,
+        toolCallId: "call-one",
+        toolName: "weather",
+        contributionId: "tool:weather",
+        requestFingerprint: "a".repeat(64),
+        agentSnapshotFingerprint: "standalone-thread",
+        sourcePolicyFingerprint: "c".repeat(64),
+        sourceRequirement: "always",
+        hostRequirement: "never",
+        hostPolicyFingerprint: "d".repeat(64),
+        currentPrincipalFingerprint: "e".repeat(64),
+        initiatorPrincipalFingerprint: "e".repeat(64),
+        scope: "call"
+      }
+    ]
   });
 }

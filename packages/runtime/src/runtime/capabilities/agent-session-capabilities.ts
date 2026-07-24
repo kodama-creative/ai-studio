@@ -170,6 +170,11 @@ export class AgentSessionCapabilities {
         runtimeMetadata?: DynamicToolRuntimeMetadata;
       } & PreparedAgentTool).runtimeMetadata;
       return {
+        ...(tool.kind === "executable"
+          && tool.approval
+          && typeof tool.approval !== "function"
+          ? { approval: tool.approval }
+          : {}),
         contributionId: tool.provenance?.contributionId
           ?? `host-tool:${tool.definition.name}`,
         description: tool.definition.description,
@@ -372,6 +377,11 @@ function _prepareDynamicTool(input: {
   session: AgentSessionContext;
   sourcePath: string;
 }): PreparedAgentTool {
+  if (typeof input.definition.approval === "function") {
+    throw new TypeError(
+      `Dynamic tool ${input.name} approval policy must be a static requirement`
+    );
+  }
   const metadata = (input.definition as {
     __llmSpaceDynamicTool?: DynamicToolRuntimeMetadata;
   } & ToolDefinition).__llmSpaceDynamicTool;
@@ -403,6 +413,7 @@ function _preparedToolFromSnapshot(
   const definition = {
     description: tool.description,
     inputSchema: tool.inputSchema as ToolDefinition["inputSchema"],
+    ...(tool.approval ? { approval: tool.approval } : {}),
     ...(tool.outputSchema
       ? { outputSchema: tool.outputSchema }
       : {}),
