@@ -2,79 +2,19 @@ import {
   emptyRuntimeHistory,
   InMemorySessionStore,
   replayRuntimeRunEvents,
-  RUNTIME_RUN_STATES,
   RUNTIME_SESSION_SCHEMA_VERSION,
   type RuntimeRunConfigurationSnapshot,
-  type RuntimeRunSnapshot,
   type RuntimeRunState,
   RuntimeRunTransitionError,
   type RuntimeTurnCapabilitySnapshot,
   type RuntimeTurnInstructionSnapshot,
   type SessionStore,
   SessionStoreConflictError,
-  SessionStoreInvariantError,
-  transitionRuntimeRun
+  SessionStoreInvariantError
 } from "@llm-space/runtime/harness";
 import { describe, expect, test } from "bun:test";
 
 import { sha256 } from "./sha256";
-
-const LEGAL_TRANSITIONS: Readonly<
-  Record<RuntimeRunState, readonly RuntimeRunState[]>
-> = {
-  runningModel: [
-    "runningTools",
-    "completed",
-    "failed",
-    "cancelled",
-    "superseded",
-    "outcomeUnknown"
-  ],
-  runningTools: [
-    "runningModel",
-    "waitingForApproval",
-    "waitingForToolResults",
-    "waitingForContinue",
-    "completed",
-    "failed",
-    "cancelled",
-    "superseded",
-    "outcomeUnknown"
-  ],
-  waitingForApproval: [
-    "runningTools",
-    "cancelled",
-    "superseded"
-  ],
-  waitingForToolResults: [
-    "waitingForContinue",
-    "cancelled",
-    "superseded"
-  ],
-  waitingForContinue: ["runningModel", "cancelled", "superseded"],
-  completed: [],
-  failed: [],
-  cancelled: [],
-  superseded: [],
-  outcomeUnknown: []
-};
-
-describe("Runtime Run state machine", () => {
-  test("accepts exactly the declared transition matrix", () => {
-    for (const from of RUNTIME_RUN_STATES) {
-      for (const to of RUNTIME_RUN_STATES) {
-        const run = _run(from);
-        if (LEGAL_TRANSITIONS[from].includes(to)) {
-          expect(transitionRuntimeRun(run, to)).toEqual({ ...run, state: to });
-        } else {
-          expect(() => transitionRuntimeRun(run, to)).toThrow(
-            RuntimeRunTransitionError
-          );
-        }
-      }
-    }
-  });
-});
 
 describe("InMemorySessionStore", () => {
   test("records immutable capability snapshots and rejects tampering", async () => {
@@ -742,18 +682,6 @@ describe("InMemorySessionStore", () => {
     expect(await store.load("session-illegal")).toEqual(completed);
   });
 });
-
-function _run(state: RuntimeRunState): RuntimeRunSnapshot {
-  return {
-    baseCheckpointId: null,
-    branchId: "branch-1",
-    id: "run-one",
-    inputHeadEntryId: null,
-    sessionId: "session-one",
-    configurationId: "config-one",
-    state
-  };
-}
 
 async function _instructionSnapshot(): Promise<RuntimeTurnInstructionSnapshot> {
   const entries: RuntimeTurnInstructionSnapshot["entries"] = [

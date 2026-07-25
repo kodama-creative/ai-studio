@@ -3,6 +3,7 @@ import {
   type RuntimeBranchSnapshot,
   type RuntimeCompactionSnapshot,
   runtimeHistoryMessages,
+  type RuntimeSessionBudgetWaitSnapshot,
   runtimeToolApprovalViews,
   type StoredRuntimeSession
 } from "@llm-space/runtime/harness";
@@ -79,6 +80,7 @@ const RUNTIME_STATE_LABELS: Record<ThreadRuntimeRunState, string> = {
   runningModel: "Running model",
   runningTools: "Running tools",
   waitingForApproval: "Waiting for approval",
+  waitingForBudget: "Waiting for budget",
   waitingForToolResults: "Waiting for tool results",
   waitingForContinue: "Waiting to continue",
   completed: "Completed",
@@ -726,6 +728,7 @@ interface RuntimeCheckpointView {
 }
 
 interface RuntimeRunView {
+  readonly budgetWaits: readonly RuntimeSessionBudgetWaitSnapshot[];
   readonly checkpoints: readonly RuntimeCheckpointView[];
   readonly compactions: readonly RuntimeCompactionSnapshot[];
   readonly id: string;
@@ -751,7 +754,7 @@ function _runtimeTree(
 ): RuntimeTreeView | null {
   try {
     const session = persisted as StoredRuntimeSession | undefined;
-    if (session?.snapshot.schemaVersion !== 4) { return null; }
+    if (session?.snapshot.schemaVersion !== 5) { return null; }
     const history = session.snapshot.history;
     const savedByCheckpoint = new Map(
       savedRuns.flatMap(run => (run.runtime?.checkpointId
@@ -797,6 +800,9 @@ function _runtimeTree(
         .map(run => ({
           id: run.id,
           state: run.state,
+          budgetWaits: session.snapshot.budget?.waits.filter(
+            wait => wait.runId === run.id
+          ) ?? [],
           checkpoints: checkpointsByRun.get(run.id) ?? [],
           compactions: compactionsByRun.get(run.id) ?? []
         }))
@@ -868,6 +874,48 @@ function _syntheticRunSnapshot(
       continuationFingerprint: checkpoint.continuationFingerprint
     }
   };
+}
+
+const RuntimeBudgetBoundaryItem = memo(({
+  wait
+}: {
+  readonly wait: RuntimeSessionBudgetWaitSnapshot;
+}) => {
+  const status = wait.status === "waiting"
+    ? "Decision required"
+    : wait.status === "granted"
+      ? "Fresh budget granted"
+      : "Run stopped";
+  const reached = wait.reached.join(" + ");
+  return (
+    <div className="border-amber-500/25 bg-amber-500/6 flex flex-col gap-1 rounded-md border px-2.5 py-2 text-[0.625rem]">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-foreground/85 font-medium">
+          Session budget · {status}
+        </span>
+        <span className="text-muted-foreground capitalize">{reached}</span>
+      </div>
+      <div className="text-muted-foreground font-mono tabular-nums">
+        Window {_compactTokens(wait.window.input)} input · {_compactTokens(wait.window.output)} output
+      </div>
+      <div className="text-muted-foreground font-mono tabular-nums">
+        Lifetime {_compactTokens(wait.lifetime.input)} input · {_compactTokens(wait.lifetime.output)} output
+      </div>
+      <div className="text-muted-foreground font-mono tabular-nums">
+        Baseline {_compactTokens(wait.baseline.input)} input · {_compactTokens(wait.baseline.output)} output
+        {wait.unmeteredProviderCalls > 0
+          ? ` · ${wait.unmeteredProviderCalls} unmetered`
+          : ""}
+      </div>
+    </div>
+  );
+});
+
+function _compactTokens(value: number): string {
+  return new Intl.NumberFormat("en", {
+    maximumFractionDigits: 1,
+    notation: "compact"
+  }).format(value).toLowerCase();
 }
 
 const RuntimeBranchSection = memo(({
@@ -1023,6 +1071,9 @@ const RuntimeBranchSection = memo(({
                   </Button>
                 )}
               </div>
+              {run.budgetWaits.map(wait => (
+                <RuntimeBudgetBoundaryItem key={wait.id} wait={wait} />
+              ))}
               {run.compactions.map(compaction => (
                 <RuntimeCompactionItem
                   compaction={compaction}

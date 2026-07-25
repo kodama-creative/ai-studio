@@ -6,7 +6,8 @@ import type {
   AgentEnvironmentRequirements,
   AgentModelDefinition,
   AgentModelOptionsDefinition,
-  AgentReasoningDefinition
+  AgentReasoningDefinition,
+  AgentSessionLimitsDefinition
 } from "../../shared/agent-definition";
 
 export type {
@@ -16,7 +17,8 @@ export type {
   AgentEnvironmentRequirements,
   AgentModelDefinition,
   AgentModelOptionsDefinition,
-  AgentReasoningDefinition
+  AgentReasoningDefinition,
+  AgentSessionLimitsDefinition
 };
 
 export function defineAgent<TAgent extends AgentDefinition>(

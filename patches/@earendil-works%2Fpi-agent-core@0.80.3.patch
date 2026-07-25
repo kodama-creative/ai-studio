@@ -1,0 +1,57 @@
+diff --git a/dist/agent.d.ts b/dist/agent.d.ts
+index 0e2ba891d337cedfca2eefe3f2ab4b6a46d4ce45..eddc6306043287e1442714543726d54c46c1dee7 100644
+--- a/dist/agent.d.ts
++++ b/dist/agent.d.ts
+@@ -1,5 +1,5 @@
+ import { type ImageContent, type Message, type SimpleStreamOptions, type ThinkingBudgets, type Transport } from "@earendil-works/pi-ai/compat";
+-import type { AfterToolCallContext, AfterToolCallResult, AgentEvent, AgentLoopTurnUpdate, AgentMessage, AgentState, BeforeToolCallContext, BeforeToolCallResult, PrepareNextTurnContext, QueueMode, StreamFn, ToolExecutionMode } from "./types.ts";
++import type { AfterToolCallContext, AfterToolCallResult, AgentEvent, AgentLoopTurnUpdate, AgentMessage, AgentState, BeforeToolCallContext, BeforeToolCallResult, PrepareNextTurnContext, QueueMode, ShouldStopAfterTurnContext, StreamFn, ToolExecutionMode } from "./types.ts";
+ export type { QueueMode } from "./types.ts";
+ /** Options for constructing an {@link Agent}. */
+ export interface AgentOptions {
+@@ -14,6 +14,7 @@ export interface AgentOptions {
+     afterToolCall?: (context: AfterToolCallContext, signal?: AbortSignal) => Promise<AfterToolCallResult | undefined>;
+     prepareNextTurn?: (signal?: AbortSignal) => Promise<AgentLoopTurnUpdate | undefined> | AgentLoopTurnUpdate | undefined;
+     prepareNextTurnWithContext?: (context: PrepareNextTurnContext, signal?: AbortSignal) => Promise<AgentLoopTurnUpdate | undefined> | AgentLoopTurnUpdate | undefined;
++    shouldStopAfterTurn?: (context: ShouldStopAfterTurnContext, signal?: AbortSignal) => boolean | Promise<boolean>;
+     steeringMode?: QueueMode;
+     followUpMode?: QueueMode;
+     sessionId?: string;
+@@ -43,6 +44,7 @@ export declare class Agent {
+     afterToolCall?: (context: AfterToolCallContext, signal?: AbortSignal) => Promise<AfterToolCallResult | undefined>;
+     prepareNextTurn?: (signal?: AbortSignal) => Promise<AgentLoopTurnUpdate | undefined> | AgentLoopTurnUpdate | undefined;
+     prepareNextTurnWithContext?: (context: PrepareNextTurnContext, signal?: AbortSignal) => Promise<AgentLoopTurnUpdate | undefined> | AgentLoopTurnUpdate | undefined;
++    shouldStopAfterTurn?: (context: ShouldStopAfterTurnContext, signal?: AbortSignal) => boolean | Promise<boolean>;
+     private activeRun?;
+     /** Session identifier forwarded to providers for cache-aware backends. */
+     sessionId?: string;
+diff --git a/dist/agent.js b/dist/agent.js
+index c98a07ac413ceda0e4dfedc8f71514965c589af2..a6122327d6395a8b83dd1a2714c4e41c93ecaa8d 100644
+--- a/dist/agent.js
++++ b/dist/agent.js
+@@ -98,6 +98,7 @@ export class Agent {
+     afterToolCall;
+     prepareNextTurn;
+     prepareNextTurnWithContext;
++    shouldStopAfterTurn;
+     activeRun;
+     /** Session identifier forwarded to providers for cache-aware backends. */
+     sessionId;
+@@ -121,6 +122,7 @@ export class Agent {
+         this.afterToolCall = options.afterToolCall;
+         this.prepareNextTurn = options.prepareNextTurn;
+         this.prepareNextTurnWithContext = options.prepareNextTurnWithContext;
++        this.shouldStopAfterTurn = options.shouldStopAfterTurn;
+         this.steeringQueue = new PendingMessageQueue(options.steeringMode ?? "one-at-a-time");
+         this.followUpQueue = new PendingMessageQueue(options.followUpMode ?? "one-at-a-time");
+         this.sessionId = options.sessionId;
+@@ -299,6 +301,9 @@ export class Agent {
+                     return await this.prepareNextTurn?.(this.signal);
+                 }
+                 : undefined,
++            shouldStopAfterTurn: this.shouldStopAfterTurn
++                ? async (context) => await this.shouldStopAfterTurn(context, this.signal)
++                : undefined,
+             convertToLlm: this.convertToLlm,
+             transformContext: this.transformContext,
+             getApiKey: this.getApiKey,

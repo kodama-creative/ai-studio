@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   runtimeRunHasParkedToolApprovals,
+  runtimeSessionBudgetView,
   type RuntimeStructuredOutputResult
 } from "@llm-space/runtime/harness";
 import {
@@ -177,6 +178,7 @@ export class ServerRunController {
       contextFingerprint,
       executionMode: "react",
       model: definition.model,
+      limits: definition.limits ?? null,
       reasoning: definition.reasoning,
       toolConfigurationFingerprint,
       outputContract: outputContract ?? null,
@@ -188,6 +190,7 @@ export class ServerRunController {
       contextFingerprint,
       executionMode: "react" as const,
       model: definition.model,
+      ...(definition.limits ? { limits: definition.limits } : {}),
       reasoning: definition.reasoning,
       toolConfigurationFingerprint,
       ...(outputContract ? { outputContract } : {}),
@@ -251,6 +254,7 @@ export class ServerRunController {
     let code: string | undefined;
     let structuredOutput: RuntimeStructuredOutputResult | undefined;
     let parkedForApproval = false;
+    let parkedForBudget = false;
     try {
       const persistedRuntime = await this._repository.load(run.sessionId);
       const sandboxSession = this._runtime.project.sandbox
@@ -344,6 +348,10 @@ export class ServerRunController {
           await session.continue();
         }
         structuredOutput = session.structuredOutput ?? undefined;
+        const current = await this._repository.load(run.sessionId);
+        parkedForBudget = current?.snapshot.runs.find(
+          item => item.id === run.runId
+        )?.state === "waitingForBudget";
       }
       _throwEventFailure(eventFailure);
       if (this._abortedRuns.has(run.runId)) {
@@ -397,6 +405,8 @@ export class ServerRunController {
       try {
         if (!this._detached && parkedForApproval) {
           await this._parkRunForApproval(run);
+        } else if (!this._detached && parkedForBudget) {
+          await this._publishBudgetWait(run);
         } else if (!this._detached) {
           await this._repository.completeRun({
             sessionId: run.sessionId,
@@ -458,6 +468,18 @@ export class ServerRunController {
     await this._repository.appendEvent(run.sessionId, run.runId, {
       event: "control",
       data: { type: "toolApprovalRequired", approvals }
+    });
+  }
+
+  private async _publishBudgetWait(run: CreatedServerRun): Promise<void> {
+    const current = await this._repository.load(run.sessionId);
+    const budget = current ? runtimeSessionBudgetView(current).wait : null;
+    if (!current || budget?.runId !== run.runId || budget.status !== "waiting") {
+      throw new Error("Runtime Session budget wait disappeared before publish");
+    }
+    await this._repository.appendEvent(run.sessionId, run.runId, {
+      event: "control",
+      data: { type: "sessionBudgetRequired", budget, session: current }
     });
   }
 

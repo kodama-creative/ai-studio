@@ -40,10 +40,12 @@ import {
   MAX_SESSION_STATE_BYTES,
   MAX_SESSION_STATE_SLOT_BYTES,
   MAX_SESSION_STATE_SLOTS,
+  RUNTIME_SESSION_BUDGET_SCHEMA_VERSION,
   RUNTIME_SESSION_SCHEMA_VERSION,
   RUNTIME_SESSION_STATE_SCHEMA_VERSION,
   type RuntimeRunConfigurationSnapshot,
   type RuntimeRunJournalEntry,
+  type RuntimeSessionBudgetSnapshot,
   type RuntimeSessionMutation,
   type RuntimeSessionSnapshot,
   type RuntimeSessionStateEntry,
@@ -59,6 +61,7 @@ import { isApprovalRequirement } from "../../public/definitions/approval";
 
 const CHECKPOINT_STATES = new Set([
   "waitingForApproval",
+  "waitingForBudget",
   "waitingForToolResults",
   "waitingForContinue",
   "completed",
@@ -251,6 +254,20 @@ async function _applyMutation({
   }
   if (mutation.type === "settleOperation") {
     _settleOperation({ journal, mutation, sessionVersion, snapshot });
+    return;
+  }
+  if (mutation.type === "parkSessionBudget") {
+    _parkSessionBudget({
+      configurationById,
+      journal,
+      mutation,
+      sessionVersion,
+      snapshot
+    });
+    return;
+  }
+  if (mutation.type === "decideSessionBudget") {
+    _decideSessionBudget({ journal, mutation, sessionVersion, snapshot });
     return;
   }
   if (mutation.type === "checkpointOperationStep") {
@@ -830,6 +847,236 @@ function _settleOperation({
     requestFingerprint: mutation.requestFingerprint,
     state: mutation.state
   });
+  if (mutation.mainProviderUsage) {
+    if (operation.kind !== "provider") {
+      throw new SessionStoreInvariantError(
+        `Durable operation ${operation.id} is not a provider operation`
+      );
+    }
+    _recordMainProviderUsage({
+      journal,
+      operationId: operation.id,
+      runId: mutation.runId,
+      sessionVersion,
+      snapshot,
+      usage: mutation.mainProviderUsage
+    });
+  }
+}
+
+function _recordMainProviderUsage({
+  journal,
+  operationId,
+  runId,
+  sessionVersion,
+  snapshot,
+  usage
+}: {
+  journal: RuntimeRunJournalEntry[];
+  operationId: string;
+  runId: string;
+  sessionVersion: number;
+  snapshot: RuntimeSessionSnapshot;
+  usage: { readonly input: number; readonly metered: boolean; readonly output: number; };
+}): void {
+  _assertTokenCount("Main provider input usage", usage.input);
+  _assertTokenCount("Main provider output usage", usage.output);
+  if (usage.metered !== (usage.input > 0 || usage.output > 0)) {
+    throw new SessionStoreInvariantError(
+      "Main provider usage metering must match its input/output evidence"
+    );
+  }
+  const current = snapshot.budget ?? _emptyBudget();
+  const inputTokens = current.inputTokens + usage.input;
+  const outputTokens = current.outputTokens + usage.output;
+  _assertTokenCount("Session input usage", inputTokens);
+  _assertTokenCount("Session output usage", outputTokens);
+  const budget: RuntimeSessionBudgetSnapshot = {
+    ...current,
+    inputTokens,
+    outputTokens,
+    unmeteredProviderCalls: current.unmeteredProviderCalls
+      + (usage.metered ? 0 : 1)
+  };
+  (snapshot as { budget?: RuntimeSessionBudgetSnapshot; }).budget = budget;
+  journal.push({
+    type: "mainProviderUsageRecorded",
+    sequence: journal.length + 1,
+    sessionVersion,
+    runId,
+    operationId,
+    input: usage.input,
+    output: usage.output,
+    metered: usage.metered
+  });
+}
+
+function _parkSessionBudget({
+  configurationById,
+  journal,
+  mutation,
+  sessionVersion,
+  snapshot
+}: {
+  configurationById: Map<string, RuntimeRunConfigurationSnapshot>;
+  journal: RuntimeRunJournalEntry[];
+  mutation: Extract<RuntimeSessionMutation, { type: "parkSessionBudget"; }>;
+  sessionVersion: number;
+  snapshot: RuntimeSessionSnapshot;
+}): void {
+  const run = snapshot.runs.find(item => item.id === mutation.runId);
+  if (
+    snapshot.activeRunId !== run?.id
+    || (run.state !== "runningModel" && run.state !== "runningTools")
+  ) {
+    throw new SessionStoreInvariantError(
+      `Runtime Run ${mutation.runId} cannot wait for Session budget`
+    );
+  }
+  const configuration = configurationById.get(run.configurationId);
+  if (!configuration) {
+    throw new SessionStoreInvariantError(
+      `Runtime Run ${run.id} has no budget configuration`
+    );
+  }
+  const limits = configuration.limits ?? {};
+  const budget = snapshot.budget ?? _emptyBudget();
+  const window = {
+    input: budget.inputTokens - budget.inputBaseline,
+    output: budget.outputTokens - budget.outputBaseline
+  };
+  const reached = [
+    ...(typeof limits.maxInputTokensPerSession === "number"
+      && window.input >= limits.maxInputTokensPerSession
+      ? ["input" as const]
+      : []),
+    ...(typeof limits.maxOutputTokensPerSession === "number"
+      && window.output >= limits.maxOutputTokensPerSession
+      ? ["output" as const]
+      : [])
+  ];
+  if (reached.length === 0) {
+    throw new SessionStoreInvariantError(
+      `Runtime Run ${run.id} has not reached its Session budget`
+    );
+  }
+  const wait = {
+    id: `${run.id}:budget:${budget.waits.length + 1}`,
+    runId: run.id,
+    agentSnapshotFingerprint: configuration.agentSnapshotFingerprint,
+    baseline: {
+      input: budget.inputBaseline,
+      output: budget.outputBaseline
+    },
+    lifetime: {
+      input: budget.inputTokens,
+      output: budget.outputTokens
+    },
+    limits: structuredClone(limits),
+    reached,
+    status: "waiting" as const,
+    unmeteredProviderCalls: budget.unmeteredProviderCalls,
+    window
+  };
+  (snapshot as { budget?: RuntimeSessionBudgetSnapshot; }).budget = {
+    ...budget,
+    waits: [...budget.waits, wait]
+  };
+  journal.push({
+    type: "sessionBudgetReached",
+    sequence: journal.length + 1,
+    sessionVersion,
+    runId: run.id,
+    budgetWaitId: wait.id,
+    reached
+  });
+  _transitionRun({
+    journal,
+    mutation: { type: "transitionRun", runId: run.id, to: "waitingForBudget" },
+    sessionVersion,
+    snapshot
+  });
+}
+
+function _decideSessionBudget({
+  journal,
+  mutation,
+  sessionVersion,
+  snapshot
+}: {
+  journal: RuntimeRunJournalEntry[];
+  mutation: Extract<RuntimeSessionMutation, { type: "decideSessionBudget"; }>;
+  sessionVersion: number;
+  snapshot: RuntimeSessionSnapshot;
+}): void {
+  const run = snapshot.runs.find(item => item.id === mutation.runId);
+  const budget = snapshot.budget;
+  const waitIndex = budget?.waits.findLastIndex(wait =>
+    wait.runId === mutation.runId && wait.status === "waiting") ?? -1;
+  const wait = budget?.waits[waitIndex];
+  if (
+    run?.state !== "waitingForBudget"
+    || snapshot.activeRunId !== run.id
+    || !budget
+    || !wait
+  ) {
+    throw new SessionStoreInvariantError(
+      `Runtime Run ${mutation.runId} has no pending Session budget decision`
+    );
+  }
+  const waits = [...budget.waits];
+  waits[waitIndex] = {
+    ...wait,
+    status: mutation.decision === "freshWindow" ? "granted" : "stopped"
+  };
+  (snapshot as { budget?: RuntimeSessionBudgetSnapshot; }).budget = {
+    ...budget,
+    ...(mutation.decision === "freshWindow"
+      ? {
+        inputBaseline: budget.inputTokens,
+        outputBaseline: budget.outputTokens
+      }
+      : {}),
+    waits
+  };
+  journal.push({
+    type: "sessionBudgetDecided",
+    sequence: journal.length + 1,
+    sessionVersion,
+    runId: run.id,
+    budgetWaitId: wait.id,
+    decision: mutation.decision
+  });
+  _transitionRun({
+    journal,
+    mutation: {
+      type: "transitionRun",
+      runId: run.id,
+      to: mutation.decision === "freshWindow" ? "runningModel" : "cancelled"
+    },
+    sessionVersion,
+    snapshot
+  });
+}
+
+function _emptyBudget(): RuntimeSessionBudgetSnapshot {
+  return {
+    schemaVersion: RUNTIME_SESSION_BUDGET_SCHEMA_VERSION,
+    inputBaseline: 0,
+    inputTokens: 0,
+    outputBaseline: 0,
+    outputTokens: 0,
+    unmeteredProviderCalls: 0,
+    waits: []
+  };
+}
+
+function _assertTokenCount(label: string, value: number): void {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new SessionStoreInvariantError(
+      `${label} must be a non-negative safe integer`
+    );
+  }
 }
 
 function _checkpointOperationStep({
@@ -1740,6 +1987,26 @@ function _assertConfiguration(
     "Tool configuration fingerprint",
     configuration.toolConfigurationFingerprint
   );
+  if (configuration.limits) {
+    const keys = Object.keys(configuration.limits);
+    if (keys.some(key =>
+      key !== "maxInputTokensPerSession"
+      && key !== "maxOutputTokensPerSession")) {
+      throw new SessionStoreInvariantError(
+        "Run Configuration Snapshot has invalid Session limit fields"
+      );
+    }
+    for (const limit of Object.values(configuration.limits)) {
+      if (
+        limit !== false
+        && (!Number.isSafeInteger(limit) || (limit as number) <= 0)
+      ) {
+        throw new SessionStoreInvariantError(
+          "Session token limits must be positive safe integers or false"
+        );
+      }
+    }
+  }
   if (configuration.outputContract) {
     _assertId("Output contract name", configuration.outputContract.name);
     if (!/^[0-9a-f]{64}$/.test(configuration.outputContract.schemaFingerprint)) {
@@ -2770,6 +3037,114 @@ async function _assertCapabilitySnapshotIntegrity(
   }
 }
 
+function _assertBudgetSnapshot(snapshot: RuntimeSessionSnapshot): void {
+  const budget = snapshot.budget;
+  if (!budget) { return; }
+  if (budget.schemaVersion !== RUNTIME_SESSION_BUDGET_SCHEMA_VERSION) {
+    throw new SessionStoreInvariantError(
+      `Unsupported Runtime Session budget schema: ${String(budget.schemaVersion)}`
+    );
+  }
+  for (const [label, value] of [
+    ["input total", budget.inputTokens],
+    ["output total", budget.outputTokens],
+    ["input baseline", budget.inputBaseline],
+    ["output baseline", budget.outputBaseline],
+    ["unmetered provider calls", budget.unmeteredProviderCalls]
+  ] as const) {
+    _assertTokenCount(`Session budget ${label}`, value);
+  }
+  if (
+    budget.inputBaseline > budget.inputTokens
+    || budget.outputBaseline > budget.outputTokens
+  ) {
+    throw new SessionStoreInvariantError(
+      "Session budget baselines cannot exceed lifetime totals"
+    );
+  }
+  const waitIds = new Set<string>();
+  let pending = 0;
+  for (const wait of budget.waits) {
+    _assertId("Session budget wait", wait.id);
+    _assertId("Session budget Run", wait.runId);
+    _assertId("Session budget Agent snapshot", wait.agentSnapshotFingerprint);
+    if (waitIds.has(wait.id)) {
+      throw new SessionStoreInvariantError(
+        `Session budget wait ${wait.id} is duplicated`
+      );
+    }
+    waitIds.add(wait.id);
+    if (
+      wait.status !== "waiting"
+      && wait.status !== "granted"
+      && wait.status !== "stopped"
+    ) {
+      throw new SessionStoreInvariantError(
+        `Session budget wait ${wait.id} has invalid status`
+      );
+    }
+    pending += wait.status === "waiting" ? 1 : 0;
+    if (
+      wait.reached.length < 1
+      || wait.reached.length > 2
+      || wait.reached.some((axis, index) =>
+        (axis !== "input" && axis !== "output")
+        || (index > 0 && wait.reached[index - 1] === axis))
+    ) {
+      throw new SessionStoreInvariantError(
+        `Session budget wait ${wait.id} has invalid reached axes`
+      );
+    }
+    _assertTokenCount("Session budget wait input", wait.window.input);
+    _assertTokenCount("Session budget wait output", wait.window.output);
+    _assertTokenCount(
+      "Session budget wait input baseline",
+      wait.baseline.input
+    );
+    _assertTokenCount(
+      "Session budget wait output baseline",
+      wait.baseline.output
+    );
+    _assertTokenCount(
+      "Session budget wait lifetime input",
+      wait.lifetime.input
+    );
+    _assertTokenCount(
+      "Session budget wait lifetime output",
+      wait.lifetime.output
+    );
+    if (
+      wait.baseline.input > wait.lifetime.input
+      || wait.baseline.output > wait.lifetime.output
+      || wait.lifetime.input - wait.baseline.input !== wait.window.input
+      || wait.lifetime.output - wait.baseline.output !== wait.window.output
+    ) {
+      throw new SessionStoreInvariantError(
+        `Session budget wait ${wait.id} has inconsistent accounting provenance`
+      );
+    }
+    _assertTokenCount(
+      "Session budget wait unmetered provider calls",
+      wait.unmeteredProviderCalls
+    );
+  }
+  if (pending > 1) {
+    throw new SessionStoreInvariantError(
+      "Runtime Session has more than one pending budget wait"
+    );
+  }
+  const active = snapshot.runs.find(run => run.id === snapshot.activeRunId);
+  const waiting = budget.waits.findLast(wait => wait.status === "waiting");
+  if (
+    (active?.state === "waitingForBudget")
+    !== Boolean(waiting && waiting.runId === active?.id)
+  ) {
+    throw new SessionStoreInvariantError(
+      "Runtime Session budget wait does not match the active Run"
+    );
+  }
+}
+
 function _sameConfiguration(
   left: RuntimeRunConfigurationSnapshot,
   right: RuntimeRunConfigurationSnapshot
@@ -2782,6 +3157,7 @@ function _sameConfiguration(
     && left.model.provider === right.model.provider
     && left.model.id === right.model.id
     && left.reasoning === right.reasoning
+    && JSON.stringify(left.limits ?? null) === JSON.stringify(right.limits ?? null)
     && left.toolConfigurationFingerprint === right.toolConfigurationFingerprint
     && JSON.stringify(left.outputContract ?? null)
     === JSON.stringify(right.outputContract ?? null)
@@ -2826,6 +3202,7 @@ function _assertStoredSession(session: StoredRuntimeSession): void {
   }
   _assertOperationLedger(session.snapshot);
   _assertApprovalLedger(session.snapshot);
+  _assertBudgetSnapshot(session.snapshot);
   for (const [turnId, snapshot] of Object.entries(
     session.snapshot.capabilitySnapshots ?? {}
   )) {
@@ -3135,6 +3512,9 @@ function _assertJournalReconstructsSnapshot(
       || entry.type === "runtimeBranchCreated"
       || entry.type === "runtimeMessagesCommitted"
       || entry.type === "runtimeCompactionRecorded"
+      || entry.type === "mainProviderUsageRecorded"
+      || entry.type === "sessionBudgetReached"
+      || entry.type === "sessionBudgetDecided"
     ) { continue; }
     if (entry.type === "runStarted") {
       const startedState = (entry as { readonly state: unknown; }).state;

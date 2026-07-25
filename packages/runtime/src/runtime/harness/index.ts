@@ -76,6 +76,12 @@ export {
   type RuntimeRunResumeClaim
 } from "./runtime-run-resume";
 export {
+  decideRuntimeSessionBudget,
+  parkRuntimeRunForBudget,
+  runtimeSessionBudgetView,
+  type RuntimeSessionBudgetView
+} from "./runtime-session-budget";
+export {
   recoverRuntimeSession,
   type RuntimeSessionRecoveryResult
 } from "./runtime-session-recovery";
@@ -91,10 +97,14 @@ export {
   MAX_SESSION_STATE_BYTES,
   MAX_SESSION_STATE_SLOT_BYTES,
   MAX_SESSION_STATE_SLOTS,
+  RUNTIME_SESSION_BUDGET_SCHEMA_VERSION,
   RUNTIME_SESSION_SCHEMA_VERSION,
   RUNTIME_SESSION_STATE_SCHEMA_VERSION,
   type RuntimeRunConfigurationSnapshot,
   type RuntimeRunJournalEntry,
+  type RuntimeSessionBudgetAxis,
+  type RuntimeSessionBudgetSnapshot,
+  type RuntimeSessionBudgetWaitSnapshot,
   type RuntimeSessionMutation,
   type RuntimeSessionSnapshot,
   type RuntimeSessionStateEntry,

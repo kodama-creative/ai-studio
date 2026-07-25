@@ -33,13 +33,16 @@ import {
   isAgentProjectName
 } from "@llm-space/runtime";
 import {
+  type AgentProjectArtifact,
   type AgentProjectSnapshot,
   AgentRuntime,
   type AgentSession,
   type CompiledAgentProjectSnapshot,
+  createAgentProjectBundle,
   type CreateAgentSessionOptions,
   createHostCapabilityPolicy,
   loadAgentProject,
+  loadAgentProjectBundle,
   loadAgentProjectManifest,
   type ProjectMcpConnectionStatus,
   type ProjectMcpConnector,
@@ -555,23 +558,10 @@ export class ExternalAgentProjectManager {
     threadId: string
   ): Promise<{ id: string; record: ExternalAgentProjectThreadRecord; }> {
     const source = await this.readThread(projectId, threadId);
-    if (
-      source.thread.runtimeProfile?.type === "localServer"
-      || source.thread.runtimeProfile?.type === "desktopSandbox"
-    ) {
-      return this.createThread(
-        projectId,
-        `${source.thread.title ?? "untitled"} copy`,
-        source.thread.runtimeProfile.type
-      );
-    }
     const id = randomUUID();
     const record = {
       ...source,
-      thread: {
-        ...source.thread,
-        title: `${source.thread.title ?? "untitled"} copy`
-      }
+      thread: duplicateExternalAgentProjectThreadState(source.thread)
     };
     await this._writeThreadFile(projectId, id, record);
     this._notify(projectId);
@@ -630,12 +620,15 @@ export class ExternalAgentProjectManager {
   ): Promise<CompiledAgentProjectSnapshot> {
     await this._ensureRegistry();
     await this._ensureProject(projectId);
-    const snapshot = [...this._state(projectId).snapshots.values()].find(
+    const loaded = this._state(projectId);
+    const cached = [...loaded.snapshots.values()].find(
       candidate => candidate.artifact?.fingerprint === artifactFingerprint
     );
+    const snapshot = cached
+      ?? await this._loadPersistedSnapshot(projectId, artifactFingerprint);
     if (!snapshot?.artifact) {
       throw new Error(
-        "The Thread's compiled Agent artifact is no longer available in this Desktop process."
+        "The Thread's compiled Agent artifact is no longer available."
       );
     }
     return snapshot as CompiledAgentProjectSnapshot;
@@ -975,25 +968,40 @@ export class ExternalAgentProjectManager {
     projectId: string,
     options: {
       capabilityPolicy?: CreateAgentSessionOptions["capabilityPolicy"];
+      snapshot?: string;
     } & Omit<CreateAgentSessionOptions, "capabilityPolicy">
   ): Promise<AgentSession> {
     await this._ensureProject(projectId);
     const loaded = this._state(projectId);
-    if (loaded.error || !loaded.runtime) {
-      throw new Error(loaded.error ?? "Agent runtime is unavailable.");
+    const { snapshot: snapshotFingerprint, ...sessionOptions } = options;
+    const project = snapshotFingerprint
+      ? await this._resolveSnapshot(projectId, snapshotFingerprint)
+      : loaded.snapshot;
+    if (!snapshotFingerprint && loaded.error) {
+      throw new Error(loaded.error);
+    }
+    if (!project) {
+      throw new Error(
+        snapshotFingerprint
+          ? "The Thread's frozen Agent snapshot is no longer available."
+          : loaded.error ?? "Agent runtime is unavailable."
+      );
     }
     const models = await this._getModels();
     if (models !== loaded.models && loaded.snapshot) {
       loaded.runtime = new AgentRuntime({ models, project: loaded.snapshot });
       loaded.models = models;
     }
-    return loaded.runtime.createSession({
-      ...options,
-      capabilityPolicy: options.capabilityPolicy
+    const runtime = project === loaded.snapshot && loaded.runtime
+      ? loaded.runtime
+      : new AgentRuntime({ models, project });
+    return runtime.createSession({
+      ...sessionOptions,
+      capabilityPolicy: sessionOptions.capabilityPolicy
         ?? createHostCapabilityPolicy({
-          extraTools: options.extraTools,
+          extraTools: sessionOptions.extraTools,
           models,
-          project: loaded.snapshot!
+          project
         })
     });
   }
@@ -1132,6 +1140,8 @@ export class ExternalAgentProjectManager {
       }
       const snapshot = await loadAgentProject(resolved.agentRoot);
       if (state.snapshot?.fingerprint !== snapshot.fingerprint) {
+        state.runtime = null;
+        state.models = null;
         state.connectionReloadCount += 1;
         let released = false;
         releaseConnectionReload = () => {
@@ -1163,6 +1173,7 @@ export class ExternalAgentProjectManager {
           .join("\n")
         : null;
       if (!state.error) {
+        await this._persistSnapshot(projectId, resolved, snapshot);
         const models = await this._getModels();
         state.runtime = new AgentRuntime({
           models,
@@ -1184,6 +1195,64 @@ export class ExternalAgentProjectManager {
       }
     }
     this._notify(projectId);
+  }
+
+  private async _resolveSnapshot(
+    projectId: string,
+    fingerprint: string
+  ): Promise<AgentProjectSnapshot | null> {
+    const loaded = this._state(projectId);
+    return loaded.snapshots.get(fingerprint)
+      ?? await this._loadPersistedSnapshot(projectId, fingerprint);
+  }
+
+  private async _loadPersistedSnapshot(
+    projectId: string,
+    fingerprint: string
+  ): Promise<CompiledAgentProjectSnapshot | null> {
+    if (!/^[a-f0-9]{64}$/.test(fingerprint)) {
+      throw new Error("Invalid frozen Agent snapshot fingerprint.");
+    }
+    const directory = this._snapshotRoot(projectId, fingerprint);
+    let artifact: AgentProjectArtifact;
+    try {
+      artifact = JSON.parse(
+        await readFile(path.join(directory, "artifact.json"), "utf8")
+      ) as AgentProjectArtifact;
+    } catch (error) {
+      if (_hasCode(error, "ENOENT")) { return null; }
+      throw error;
+    }
+    if (artifact.fingerprint !== fingerprint) {
+      throw new Error("Persisted Agent snapshot fingerprint does not match.");
+    }
+    const snapshot = await loadAgentProjectBundle(
+      path.join(directory, "agent.bundle.mjs"),
+      artifact
+    );
+    this._state(projectId).snapshots.set(fingerprint, snapshot);
+    return snapshot;
+  }
+
+  private async _persistSnapshot(
+    projectId: string,
+    resolved: ResolvedAgentProjectManifest,
+    snapshot: CompiledAgentProjectSnapshot
+  ): Promise<void> {
+    const directory = this._snapshotRoot(projectId, snapshot.fingerprint);
+    const bundlePath = path.join(directory, "agent.bundle.mjs");
+    const artifactPath = path.join(directory, "artifact.json");
+    if (await _exists(bundlePath) && await _exists(artifactPath)) { return; }
+    const built = await createAgentProjectBundle(resolved.agentRoot);
+    if (
+      built.artifact.fingerprint !== snapshot.fingerprint
+      || JSON.stringify(built.artifact) !== JSON.stringify(snapshot.artifact)
+    ) {
+      throw new Error("Persisted Agent bundle does not match its snapshot.");
+    }
+    await mkdir(directory, { recursive: true });
+    await _atomicTextWrite(bundlePath, built.bundle);
+    await _atomicJsonWrite(artifactPath, built.artifact);
   }
 
   private _ensureWatcher(
@@ -1466,6 +1535,10 @@ export class ExternalAgentProjectManager {
     return path.join(this._dataRoot, projectId, "threads");
   }
 
+  private _snapshotRoot(projectId: string, fingerprint: string): string {
+    return path.join(this._dataRoot, projectId, "snapshots", fingerprint);
+  }
+
   private _threadFile(projectId: string, threadId: string): string {
     if (!/^[a-zA-Z0-9-]+$/.test(threadId)) {
       throw new Error("Invalid project Thread id.");
@@ -1490,6 +1563,41 @@ export class ExternalAgentProjectManager {
   private _notify(projectId: string): void {
     this._onChange?.(projectId);
   }
+}
+
+export function duplicateExternalAgentProjectThreadState(
+  source: Thread
+): Thread {
+  const normalized = normalizeThread(source);
+  const profile = getThreadRuntimeProfile(normalized);
+  const {
+    evaluations: _evaluations,
+    lockedSandboxAttachmentMessageIds: _lockedSandboxAttachmentMessageIds,
+    runHistory: _runHistory,
+    runtimeSession: _runtimeSession,
+    runtimeWorkingBase: _runtimeWorkingBase,
+    sandboxAttachments: _sandboxAttachments,
+    ...editable
+  } = normalized;
+  const context = editable.context
+    ? (() => {
+      const { snapshot: _snapshot, ...editableContext } = editable.context;
+      return editableContext;
+    })()
+    : undefined;
+  const runtimeProfile = profile.type === "localServer"
+    ? {
+      version: 1 as const,
+      type: profile.type,
+      artifactFingerprint: profile.artifactFingerprint
+    }
+    : { version: 1 as const, type: profile.type };
+  return {
+    ...editable,
+    title: `${normalized.title ?? "untitled"} copy`,
+    runtimeProfile,
+    ...(context ? { context } : {})
+  };
 }
 
 function _projectTools(
@@ -1664,6 +1772,12 @@ async function _safeExistingSource(
 async function _atomicJsonWrite(target: string, value: unknown): Promise<void> {
   const temporary = `${target}.${randomUUID()}.tmp`;
   await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  await rename(temporary, target);
+}
+
+async function _atomicTextWrite(target: string, value: string): Promise<void> {
+  const temporary = `${target}.${randomUUID()}.tmp`;
+  await writeFile(temporary, value, "utf8");
   await rename(temporary, target);
 }
 

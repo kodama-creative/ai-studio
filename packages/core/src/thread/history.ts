@@ -625,6 +625,7 @@ const RUNTIME_RUN_STATES = new Set<ThreadRuntimeRunState>([
   "runningModel",
   "runningTools",
   "waitingForApproval",
+  "waitingForBudget",
   "waitingForToolResults",
   "waitingForContinue",
   "completed",

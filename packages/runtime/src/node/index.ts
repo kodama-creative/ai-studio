@@ -57,6 +57,7 @@ export {
   createAgentProjectBundle
 } from "./compiler/create-agent-project-bundle";
 export { loadAgentProject } from "./compiler/load-agent-project";
+export { loadAgentProjectBundle } from "./compiler/load-agent-project-bundle";
 export {
   type ProjectMcpConnectionStatus,
   type ProjectMcpConnector,

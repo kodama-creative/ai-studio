@@ -185,6 +185,13 @@ export interface DesktopRPCType {
         params: Record<string, never>;
         response: ModelProviderGroup[];
       };
+      decideSessionBudget: {
+        params: {
+          budgetWaitId: string;
+          decision: "freshWindow" | "stop";
+        };
+        response: StoredRuntimeSession;
+      };
       decideToolApproval: {
         params: {
           decision: "approved" | "denied";

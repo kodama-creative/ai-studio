@@ -13,6 +13,7 @@ export {
   type AgentServerRuntimeWorkingBase,
   type AgentServerSession,
   type AgentServerStreamEvent,
+  isRuntimeSessionBudgetWaitSnapshot,
   type ServerControlEvent,
   type ServerRunTerminalOutcome
 } from "./server-protocol";

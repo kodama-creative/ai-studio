@@ -239,6 +239,7 @@ export const ThreadRuntimeRunState = Type.Union([
   Type.Literal("runningModel"),
   Type.Literal("runningTools"),
   Type.Literal("waitingForApproval"),
+  Type.Literal("waitingForBudget"),
   Type.Literal("waitingForToolResults"),
   Type.Literal("waitingForContinue"),
   Type.Literal("completed"),

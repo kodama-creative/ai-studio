@@ -54,6 +54,8 @@ POST /v1/sessions
 POST /v1/sessions/:sessionId/runs
 GET  /v1/sessions/:sessionId/runs/:runId/events
 POST /v1/sessions/:sessionId/runs/:runId/abort
+POST /v1/sessions/:sessionId/runs/:runId/budget
+POST /v1/sessions/:sessionId/runs/:runId/approvals/:requestId
 POST /v1/sessions/:sessionId/continuation/rotate
 POST /v1/sessions/:sessionId/continuation/revoke
 ```
@@ -64,9 +66,19 @@ Channel-generated next credential through `LLM-Space-Next-Continuation`.
 Mutation admission uses `Idempotency-Key`; event replay uses `Last-Event-ID`.
 
 SSE `pi` data is the sanitized, version-pinned Pi `AgentEvent`. `control` adds
-only `runTerminal` and transient `serverShutdown`, which Pi cannot express.
+`toolApprovalRequired`, `sessionBudgetRequired`, `runTerminal`, and transient
+`serverShutdown`, which Pi cannot express.
 Each persisted event is committed before publication and uses its per-Run
 sequence as the SSE `id`.
+
+When source-owned input/output Session limits are reached, the crossing
+provider call and complete tool batch remain settled and the Run stays durably
+open at `waitingForBudget`. The authenticated client posts `freshWindow` or
+`stop` to the budget endpoint. A fresh window advances both input/output
+baselines and resumes the same Run once; Stop cancels only that Run. Server
+derives usage, limits, principal, Session version, and pending Run from its
+repository, so caller data cannot forge the boundary. Missing/all-zero usage
+is recorded as unmetered and never estimated; compaction usage is excluded.
 
 For authored tools, the Server projects the repository owner as Session
 initiator, the authenticated request identity as current principal, optional

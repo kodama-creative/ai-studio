@@ -23,6 +23,9 @@ import { isApprovalRequirement } from "../../public/definitions/approval";
 import { STRUCTURED_OUTPUT_TOOL_NAME } from "../../shared/structured-output";
 import { resolveAgentRuntimeModel } from "../agent/resolve-model";
 import {
+  RuntimeSessionBudgetCoordinator
+} from "../budget/runtime-session-budget-coordinator";
+import {
   type AgentCapabilityRequest,
   AgentHostPolicyChangedError,
   AgentSessionCapabilities
@@ -135,6 +138,8 @@ export class AgentSession {
   private readonly _executionEnv?: ExecutionEnv;
   private readonly _durableOperations: DurableOperationCoordinator;
   private readonly _compaction: RuntimeCompactionCoordinator;
+  private readonly _budget: RuntimeSessionBudgetCoordinator;
+  private readonly _turnToolTermination = new Map<string, boolean>();
   private _structuredOutput: RuntimeStructuredOutputResult | null = null;
   private _approvalBatchPending = false;
   private _compactionAbortController: AbortController | null = null;
@@ -181,6 +186,12 @@ export class AgentSession {
       runId: options.context.turn.id,
       sessionStore: options.sessionStore,
       onPhase: options.onPhase
+    });
+    this._budget = new RuntimeSessionBudgetCoordinator({
+      sessionId: options.context.id,
+      runId: options.context.turn.id,
+      store: options.sessionStore,
+      onCommitted: options.onSessionCommitted
     });
     this._instructions = new AgentSessionInstructions({
       context: this._sessionState.context,
@@ -266,17 +277,28 @@ export class AgentSession {
       ),
       beforeToolCall: async (context, signal) =>
         this._beforeToolCall(context, signal),
-      afterToolCall: async ({ toolCall }) => {
+      afterToolCall: async ({ result, toolCall }) => {
         const isError = this._toolPolicy.consumeResultError(toolCall.id);
         const terminate = this._executionMode === "autoOnce"
           ? true
-          : undefined;
+          : result.terminate;
+        this._turnToolTermination.set(toolCall.id, terminate === true);
         return isError === undefined && terminate === undefined
           ? undefined
           : {
             ...(isError === undefined ? {} : { isError }),
             ...(terminate === undefined ? {} : { terminate })
           };
+      },
+      shouldStopAfterTurn: async ({ message }) => {
+        const calls = message.content.filter(content => content.type === "toolCall");
+        const naturallyTerminates = calls.length === 0 || calls.every(call =>
+          this._turnToolTermination.get(call.id) === true);
+        this._turnToolTermination.clear();
+        if (this._executionMode !== "react" || naturallyTerminates) {
+          return false;
+        }
+        return this._budget.parkIfReached();
       },
       prepareNextTurnWithContext: async ({ toolResults }) => {
         try {
@@ -390,7 +412,9 @@ export class AgentSession {
     this._structuredOutput = null;
     await this.validateState();
     await this._resolveTurnSetup();
+    if (await this._budget.parkIfReached()) { return; }
     await this._agent.prompt(message as AgentMessage | AgentMessage[]);
+    if (await this._budget.isWaiting()) { return; }
     this._assertStructuredOutputCompleted();
     this._throwTerminalError();
   }
@@ -531,7 +555,9 @@ export class AgentSession {
     this._structuredOutput = null;
     await this.validateState();
     await this._resolveTurnSetup();
+    if (await this._budget.parkIfReached()) { return; }
     await this._agent.continue();
+    if (await this._budget.isWaiting()) { return; }
     this._assertStructuredOutputCompleted();
     this._throwTerminalError();
   }

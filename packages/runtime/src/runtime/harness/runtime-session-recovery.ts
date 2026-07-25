@@ -11,6 +11,11 @@ export type RuntimeSessionRecoveryResult =
   | {
     readonly run: RuntimeRunSnapshot;
     readonly session: StoredRuntimeSession;
+    readonly status: "budgetWait";
+  }
+  | {
+    readonly run: RuntimeRunSnapshot;
+    readonly session: StoredRuntimeSession;
     readonly status: "cancelled";
   }
   | {
@@ -60,6 +65,9 @@ export async function recoverRuntimeSession(
     run.state === "waitingForApproval"
   ) {
     return { status: "parked", run, session: current };
+  }
+  if (run.state === "waitingForBudget") {
+    return { status: "budgetWait", run, session: current };
   }
   if (
     run.state === "waitingForToolResults"

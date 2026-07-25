@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
@@ -14,6 +14,7 @@ import {
 import { LocalFileSystem } from "@llm-space/core/server";
 import {
   InMemorySessionStore,
+  parkRuntimeRunForBudget,
   type RuntimeJsonValue,
   type StoredRuntimeSession
 } from "@llm-space/runtime/harness";
@@ -21,11 +22,16 @@ import { afterEach, expect, test } from "bun:test";
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 
+import { ExternalAgentProjectManager } from "../../../src/bun/external-projects/external-agent-project-manager";
 import { StreamThreadController } from "../../../src/bun/streaming/stream-thread";
 
 const ROOTS: string[] = [];
+const MANAGERS: ExternalAgentProjectManager[] = [];
 
 afterEach(async () => {
+  await Promise.all(
+    MANAGERS.splice(0).map(async manager => manager.shutdown())
+  );
   await Promise.all(
     ROOTS.splice(0).map(async root => rm(root, { recursive: true }))
   );
@@ -179,6 +185,328 @@ test("forwards the Local Server base and publishes its terminal Session", async 
     }
   });
 });
+
+test("decides a registered Session budget using only wait identity and decision", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "llm-space-budget-rpc-"));
+  ROOTS.push(root);
+  const localFs = new LocalFileSystem(root);
+  const threadPath = "budget.json";
+  const runId = "run-budget";
+  const store = new InMemorySessionStore();
+  const started = await store.commit({
+    sessionId: "session-budget",
+    expectedVersion: null,
+    mutations: [{
+      type: "startRun",
+      runId,
+      messages: [],
+      configuration: {
+        id: "configuration-budget",
+        agentSnapshotFingerprint: "desktop-thread-runtime-v1",
+        contextFingerprint: "desktop-budget-context",
+        executionMode: "react",
+        limits: { maxInputTokensPerSession: 1 },
+        model: { provider: "fake", id: "fake-model" },
+        toolConfigurationFingerprint: "desktop-budget-tools"
+      }
+    }]
+  });
+  const settled = await store.commit({
+    sessionId: "session-budget",
+    expectedVersion: started.version,
+    mutations: [
+      {
+        type: "startOperation",
+        runId,
+        stepId: `${runId}:step:1`,
+        stepSequence: 1,
+        transcriptMessageCount: 1,
+        operationId: `${runId}:step:1:provider:fake`,
+        kind: "provider",
+        provider: "fake",
+        requestFingerprint: "a".repeat(64)
+      },
+      {
+        type: "settleOperation",
+        runId,
+        operationId: `${runId}:step:1:provider:fake`,
+        requestFingerprint: "a".repeat(64),
+        state: "completed",
+        replay: {
+          byteLength: 2,
+          resultFingerprint:
+            "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          value: {}
+        },
+        mainProviderUsage: { input: 1, output: 0, metered: true }
+      }
+    ]
+  });
+  const waiting = await parkRuntimeRunForBudget(store, {
+    sessionId: "session-budget",
+    runId,
+    expectedVersion: settled.version
+  });
+  const waitId = waiting.snapshot.budget?.waits.at(-1)?.id;
+  if (!waitId) { throw new Error("Expected Session budget wait"); }
+  const thread = { runtimeSession: waiting };
+  await localFs.write(threadPath, thread);
+  const controller = new StreamThreadController(
+    _modelManager(createModels()),
+    { capture: () => undefined } as never,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    localFs
+  );
+  controller.registerDesktopThreadApprovals(threadPath, thread);
+
+  expect(controller.decideSessionBudget({
+    budgetWaitId: "unknown-wait",
+    decision: "freshWindow"
+  })).rejects.toThrow("is not registered");
+  const granted = await controller.decideSessionBudget({
+    budgetWaitId: waitId,
+    decision: "freshWindow"
+  });
+
+  expect(granted.snapshot.runs.at(-1)).toMatchObject({
+    id: runId,
+    state: "runningModel"
+  });
+  expect(granted.snapshot.budget?.waits.at(-1)).toMatchObject({
+    id: waitId,
+    status: "granted"
+  });
+  const persisted = await localFs.read(threadPath);
+  expect((persisted.runtimeSession as StoredRuntimeSession)
+    .snapshot.budget?.waits.at(-1)?.status).toBe("granted");
+});
+
+test("selects a frozen Agent snapshot after source sync and Desktop restart", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "llm-space-frozen-agent-"));
+  ROOTS.push(root);
+  const home = path.join(root, "home");
+  const workspace = path.join(home, "workspace");
+  const project = path.join(root, "project");
+  const agentRoot = path.join(project, "agent");
+  await mkdir(agentRoot, { recursive: true });
+  await mkdir(workspace, { recursive: true });
+  await writeFile(
+    path.join(project, "llm-space.json"),
+    JSON.stringify({ schemaVersion: 1, agent: "./agent" })
+  );
+  await _writeBudgetAgent(agentRoot, 1);
+  const models = _models(() => {});
+  const first = new ExternalAgentProjectManager({
+    getModels: async () => Promise.resolve(models),
+    homePath: home,
+    workspaceRoot: workspace
+  });
+  MANAGERS.push(first);
+  const opened = await first.trustAndOpen(project);
+  const threadId = opened.threads[0]!.id;
+  const snapshotA = opened.snapshot;
+  const waiting = await _waitingProjectRun(snapshotA);
+  const original = await first.readThread(opened.id, threadId);
+  await first.writeThread(opened.id, threadId, {
+    ...original,
+    thread: { ...original.thread, runtimeSession: waiting }
+  });
+
+  await _writeBudgetAgent(agentRoot, 99);
+  const rebuilt = await first.refresh(opened.id);
+  const snapshotB = rebuilt.snapshot;
+  expect(snapshotB).not.toBe(snapshotA);
+  const synced = await first.syncThreadFromAgent(opened.id, threadId);
+  expect(synced.thread.agentRuntime?.snapshot).toBe(snapshotB);
+  expect((synced.thread.runtimeSession as StoredRuntimeSession)
+    .configurations[0]?.agentSnapshotFingerprint).toBe(snapshotA);
+  await first.shutdown();
+
+  const restarted = new ExternalAgentProjectManager({
+    getModels: async () => Promise.resolve(models),
+    homePath: home,
+    workspaceRoot: workspace
+  });
+  MANAGERS.push(restarted);
+  try {
+    await restarted.list();
+    const reopened = await restarted.readThread(opened.id, threadId);
+    const waitId = (reopened.thread.runtimeSession as StoredRuntimeSession)
+      .snapshot.budget?.waits.at(-1)?.id;
+    if (!waitId) { throw new Error("Expected frozen Agent budget wait"); }
+    const controller = new StreamThreadController(
+      _modelManager(models),
+      { capture: () => undefined } as never,
+      restarted
+    );
+    controller.registerAgentProjectThreadApprovals(
+      opened.id,
+      threadId,
+      reopened.thread
+    );
+    await controller.decideSessionBudget({
+      budgetWaitId: waitId,
+      decision: "freshWindow"
+    });
+    const resumedResponses: Array<Record<string, unknown>> = [];
+    await controller.run(
+      _projectRequest(opened.id, threadId, "resume-a"),
+      message => { resumedResponses.push(message); }
+    );
+    expect(resumedResponses.find(message => message.type === "runtime"))
+      .toMatchObject({ runtime: { snapshot: snapshotA } });
+
+    const afterResume = await restarted.readThread(opened.id, threadId);
+    const resumedSession = afterResume.thread.runtimeSession as
+      StoredRuntimeSession;
+    const activeRunId = resumedSession.snapshot.activeRunId;
+    if (!activeRunId) { throw new Error("Expected active frozen Agent Run"); }
+    const store = new InMemorySessionStore([resumedSession]);
+    const next = await store.commit({
+      sessionId: resumedSession.snapshot.id,
+      expectedVersion: resumedSession.version,
+      mutations: [
+        { type: "transitionRun", runId: activeRunId, to: "superseded" },
+        {
+          type: "startRun",
+          runId: "run-agent-b",
+          messages: [],
+          configuration: {
+            id: "configuration-agent-b",
+            agentSnapshotFingerprint: snapshotB,
+            contextFingerprint: "context-agent-b",
+            executionMode: "react",
+            limits: { maxInputTokensPerSession: 99 },
+            model: { provider: "fake", id: "fake-model" },
+            toolConfigurationFingerprint: "tools-agent-b"
+          }
+        }
+      ]
+    });
+    await restarted.writeThread(opened.id, threadId, {
+      ...afterResume,
+      thread: { ...afterResume.thread, runtimeSession: next }
+    });
+    const newRunResponses: Array<Record<string, unknown>> = [];
+    await controller.run(
+      _projectRequest(opened.id, threadId, "run-b"),
+      message => { newRunResponses.push(message); }
+    );
+    expect(newRunResponses.find(message => message.type === "runtime"))
+      .toMatchObject({ runtime: { snapshot: snapshotB } });
+  } finally {
+    await restarted.shutdown();
+  }
+});
+
+async function _writeBudgetAgent(agentRoot: string, inputLimit: number) {
+  await writeFile(
+    path.join(agentRoot, "agent.ts"),
+    `import { defineAgent } from "@llm-space/runtime";
+    export default defineAgent({
+      model: "fake/fake-model",
+      limits: { maxInputTokensPerSession: ${inputLimit} }
+    });`
+  );
+  await writeFile(
+    path.join(agentRoot, "instructions.md"),
+    `Agent input limit is ${inputLimit}.\n`
+  );
+}
+
+async function _waitingProjectRun(
+  agentSnapshotFingerprint: string
+): Promise<StoredRuntimeSession> {
+  const store = new InMemorySessionStore();
+  const started = await store.commit({
+    sessionId: "session-frozen-agent",
+    expectedVersion: null,
+    mutations: [{
+      type: "startRun",
+      runId: "run-agent-a",
+      messages: [_projectUserMessage()] as unknown as RuntimeJsonValue[],
+      configuration: {
+        id: "configuration-agent-a",
+        agentSnapshotFingerprint,
+        contextFingerprint: "context-agent-a",
+        executionMode: "react",
+        limits: { maxInputTokensPerSession: 1 },
+        model: { provider: "fake", id: "fake-model" },
+        toolConfigurationFingerprint: "tools-agent-a"
+      }
+    }]
+  });
+  const settled = await store.commit({
+    sessionId: "session-frozen-agent",
+    expectedVersion: started.version,
+    mutations: [
+      {
+        type: "startOperation",
+        runId: "run-agent-a",
+        stepId: "run-agent-a:step:1",
+        stepSequence: 1,
+        transcriptMessageCount: 1,
+        operationId: "run-agent-a:step:1:provider:fake",
+        kind: "provider",
+        provider: "fake",
+        requestFingerprint: "a".repeat(64)
+      },
+      {
+        type: "settleOperation",
+        runId: "run-agent-a",
+        operationId: "run-agent-a:step:1:provider:fake",
+        requestFingerprint: "a".repeat(64),
+        state: "completed",
+        replay: {
+          byteLength: 2,
+          resultFingerprint:
+            "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          value: {}
+        },
+        mainProviderUsage: { input: 1, output: 0, metered: true }
+      }
+    ]
+  });
+  return parkRuntimeRunForBudget(store, {
+    sessionId: "session-frozen-agent",
+    runId: "run-agent-a",
+    expectedVersion: settled.version
+  });
+}
+
+function _projectRequest(projectId: string, threadId: string, streamId: string) {
+  return {
+    streamId,
+    runtime: {
+      type: "agentProject" as const,
+      executionMode: "react" as const,
+      modelSource: "agent" as const,
+      projectId,
+      sandboxAttachmentMessageIds: [],
+      threadId
+    },
+    request: {
+      model: { provider: "fake", id: "fake-model" },
+      context: {
+        messages: [_projectUserMessage()],
+        tools: [],
+        sourceTools: []
+      }
+    }
+  };
+}
+
+function _projectUserMessage(): Message {
+  return {
+    role: "user",
+    content: [{ type: "text", text: "continue" }],
+    timestamp: 0
+  };
+}
 
 async function _startedDesktopRun(
   messages: AgentMessage[]

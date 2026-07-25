@@ -28,6 +28,7 @@ import type { StoredRuntimeSession } from "@llm-space/runtime/harness";
 
 import {
   createRpcTransport,
+  decideSessionBudget,
   decideToolApproval,
   externalAgentProjects
 } from "@/client";
@@ -45,6 +46,7 @@ import { ConfirmDialog } from "@/components/confirm-dialog";
 import { useModels } from "@/components/model-provider";
 import { ThreadPlayground } from "@/components/thread-playground";
 import { RuntimeProfileControl } from "@/components/thread-playground/runtime-profile-control";
+import { SessionBudgetSummary } from "@/components/thread-playground/session-budget-summary";
 import { getRuntimeExecutionMode } from "@/components/thread-playground/stores/run-mode";
 import { Button } from "@/components/ui/button";
 import { electrobun } from "@/lib/electrobun";
@@ -146,6 +148,9 @@ const _ProjectThreadPane = function ProjectThreadPane({
   const runtimePhaseListener = useRef<((
     phase: "compacting" | "idle"
   ) => void) | null>(null);
+  const runtimeSessionListener = useRef<((
+    session: StoredRuntimeSession
+  ) => void) | null>(null);
   const activeSandboxAttachmentMessageIds = useRef<readonly string[]>([]);
   const activeServerRun = useRef<{
     lineage: ThreadServerRunLineage;
@@ -206,6 +211,7 @@ const _ProjectThreadPane = function ProjectThreadPane({
         },
         onRuntimeSessionCommitted: session => {
           activeRuntimeSession.current = session;
+          runtimeSessionListener.current?.(session);
         },
         onRuntimePhase: phase => {
           runtimePhaseListener.current?.(phase);
@@ -225,6 +231,17 @@ const _ProjectThreadPane = function ProjectThreadPane({
       return () => {
         if (runtimePhaseListener.current === listener) {
           runtimePhaseListener.current = null;
+        }
+      };
+    },
+    []
+  );
+  const subscribeCommittedRuntimeSession = useCallback(
+    (listener: (session: StoredRuntimeSession) => void) => {
+      runtimeSessionListener.current = listener;
+      return () => {
+        if (runtimeSessionListener.current === listener) {
+          runtimeSessionListener.current = null;
         }
       };
     },
@@ -812,6 +829,7 @@ const _ProjectThreadPane = function ProjectThreadPane({
         active={active}
         className="bg-background size-full"
         configurationReadonly={localServer}
+        decideSessionBudget={decideSessionBudget}
         decideToolApproval={decideToolApproval}
         externalUpdate={externalUpdate}
         headerDetails={
@@ -830,6 +848,7 @@ const _ProjectThreadPane = function ProjectThreadPane({
               sandboxStatus={sandboxStatus}
               status={runtimeStatus}
             />
+            <SessionBudgetSummary limits={record.syncedDefinition.limits} />
             {runtimeStatus.message
               && (runtimeStatus.state === "stale"
                 || runtimeStatus.state === "unavailable")
@@ -979,7 +998,9 @@ const _ProjectThreadPane = function ProjectThreadPane({
         }
         runSettingsReadonly={localServer}
         runtimeOwnsToolLoop
+        sessionLimits={record.syncedDefinition.limits}
         stageSandboxFiles={desktopSandbox ? stageSandboxFiles : undefined}
+        subscribeCommittedRuntimeSession={subscribeCommittedRuntimeSession}
         subscribeRuntimePhase={subscribeRuntimePhase}
         title={record.thread.title ?? "untitled"}
         toolExecutor={projectToolExecutor}

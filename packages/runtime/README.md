@@ -133,6 +133,10 @@ import { defineAgent } from "@llm-space/runtime";
 export default defineAgent({
   model: "openai/gpt-5.3-codex",
   reasoning: "high",
+  limits: {
+    maxInputTokensPerSession: 200_000,
+    maxOutputTokensPerSession: 40_000,
+  },
   environment: {
     OPENAI_API_KEY: { kind: "secret", required: true },
   },
@@ -142,6 +146,15 @@ export default defineAgent({
 The model string splits on its first `/`. Reasoning accepts
 `provider-default`, `none`, `minimal`, `low`, `medium`, `high`, and `xhigh`;
 `none` maps to Pi's internal `off` value.
+
+The optional `limits` object independently caps main-provider input and output
+tokens for one Runtime Session. Each value is a positive safe integer or
+`false`; omitted/`false` axes are unlimited. Runtime uses only settled
+provider-reported input/output usage, counts missing or all-zero usage as an
+unmetered zero contribution, and never estimates. A crossing call and its
+complete tool batch settle before the same Run waits for an explicit fresh
+window or Stop decision. Compaction calls and ordinary Desktop Threads are not
+included.
 
 ## Composable Turn instructions
 
@@ -519,6 +532,14 @@ identity. A resume claim uses the recovered Session version, so concurrent
 claimants cannot both win. Persisted `runningModel` or `runningTools` work is
 atomically terminalized as `outcomeUnknown`: the Harness cannot know whether an
 external effect began or completed and never replays it automatically.
+
+`waitingForBudget` is another durable same-Run boundary. Runtime Session schema
+V5 retains lifetime input/output totals, both fresh-window baselines,
+unmetered-provider-call count, and the complete wait/decision history. A
+`freshWindow` decision advances both baselines and resumes once; `stop` cancels
+only the active Run. Neither decision clears the Session or chooses a Thread,
+checkpoint, or branch. Development V4 Session bytes are retained and rejected
+without silent migration.
 
 Replay projects the existing control-plane Run Journal in stable sequence
 order. A cursor is accepted only when it identifies a real prior entry inside

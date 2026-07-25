@@ -2,6 +2,10 @@ import { useCallback } from "react";
 
 import type { KeyboardEvent } from "react";
 
+import {
+  focusSessionBudgetPrimaryAction,
+  pendingSessionBudgetWait
+} from "./session-budget-view";
 import { useThreadStore, useThreadStoreActions } from "./stores";
 
 /**
@@ -10,6 +14,8 @@ import { useThreadStore, useThreadStoreActions } from "./stores";
  */
 export function useShortcuts({ readonly }: { readonly: boolean; }) {
   const status = useThreadStore(s => s.status);
+  const budgetWaitId = useThreadStore(s =>
+    pendingSessionBudgetWait(s.thread.runtimeSession)?.id ?? null);
   const { run, abort } = useThreadStoreActions();
 
   return useCallback(
@@ -28,7 +34,9 @@ export function useShortcuts({ readonly }: { readonly: boolean; }) {
           return;
         }
         event.preventDefault();
-        if (status === "running") {
+        if (budgetWaitId) {
+          focusSessionBudgetPrimaryAction(event.currentTarget);
+        } else if (status === "running") {
           try {
             abort();
           } catch {
@@ -40,7 +48,7 @@ export function useShortcuts({ readonly }: { readonly: boolean; }) {
         return;
       }
     },
-    [abort, readonly, run, status]
+    [abort, budgetWaitId, readonly, run, status]
   );
 }
 

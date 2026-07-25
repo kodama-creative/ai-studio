@@ -1298,9 +1298,13 @@ async function _beginProjectRun(
     });
   }
   const sessionId = current?.snapshot.id ?? `session-${crypto.randomUUID()}`;
+  const agentSnapshotFingerprint = record.thread.agentRuntime?.snapshot;
+  if (!agentSnapshotFingerprint) {
+    throw new Error("Expected Agent Project snapshot provenance");
+  }
   const configuration: RuntimeRunConfigurationSnapshot = {
     id: `configuration-${crypto.randomUUID()}`,
-    agentSnapshotFingerprint: "desktop-test-agent",
+    agentSnapshotFingerprint,
     contextFingerprint: "desktop-test-context",
     executionMode: "react",
     model: { provider: "fake", id: "fake-model" },

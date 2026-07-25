@@ -57,8 +57,14 @@ export type AgentEnvironmentRequirements = Readonly<
   Record<string, AgentEnvironmentRequirement>
 >;
 
+export interface AgentSessionLimitsDefinition {
+  readonly maxInputTokensPerSession?: false | number;
+  readonly maxOutputTokensPerSession?: false | number;
+}
+
 export interface AgentDefinition {
   readonly environment?: AgentEnvironmentRequirements;
+  readonly limits?: AgentSessionLimitsDefinition;
   readonly model: AgentDynamicModelDefinition | AgentModelDefinition;
   readonly modelOptions?: AgentModelOptionsDefinition;
   readonly reasoning?: AgentReasoningDefinition;
@@ -72,6 +78,7 @@ export interface AgentModelSelector {
 export interface CompiledAgentDefinition {
   readonly dynamicModel?: AgentDynamicModelDefinition;
   readonly environment?: AgentEnvironmentRequirements;
+  readonly limits?: AgentSessionLimitsDefinition;
   readonly model: AgentModelSelector;
   readonly modelOptions?: AgentModelOptionsDefinition;
   readonly reasoning?: ThinkingLevel;

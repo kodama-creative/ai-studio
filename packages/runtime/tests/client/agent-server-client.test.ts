@@ -68,7 +68,7 @@ function _runtimeSession() {
   return {
     version: 1,
     snapshot: {
-      schemaVersion: 4,
+      schemaVersion: 5,
       id: "session-one",
       activeRunId: null,
       runs: [],

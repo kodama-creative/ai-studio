@@ -91,6 +91,7 @@ export function createAgentProjectArtifact({
         content: {
           model: definition.model,
           modelOptions: definition.modelOptions ?? null,
+          limits: definition.limits ?? null,
           reasoning: definition.reasoning ?? null,
           environment: definition.environment ?? null,
           dynamicModel: definition.dynamicModel

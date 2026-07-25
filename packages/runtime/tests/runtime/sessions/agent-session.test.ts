@@ -1,4 +1,5 @@
 import {
+  type Api,
   type AssistantMessage,
   type Context,
   createAssistantMessageEventStream,
@@ -16,6 +17,68 @@ import type { AgentProjectSnapshot } from "../../../src/runtime/agent/agent-proj
 import type { RuntimeJsonValue } from "../../../src/runtime/harness/runtime-run";
 
 describe("AgentSession context compaction", () => {
+  test("uses the frozen Run budget after source rebuild and settles its tool batch", async () => {
+    let providerCalls = 0;
+    let toolExecutions = 0;
+    const context = _context("budget-boundary-session");
+    const store = new InMemorySessionStore();
+    await store.commit({
+      sessionId: context.id,
+      expectedVersion: null,
+      mutations: [{
+        type: "startRun",
+        runId: context.turn.id,
+        messages: [],
+        configuration: {
+          id: "configuration-budget-boundary",
+          agentSnapshotFingerprint: "snapshot-compaction",
+          contextFingerprint: "context-budget",
+          executionMode: "react",
+          limits: {
+            maxInputTokensPerSession: 1,
+            maxOutputTokensPerSession: 10
+          },
+          model: { provider: "fake", id: "fake-model" },
+          toolConfigurationFingerprint: "tools-budget"
+        }
+      }]
+    });
+    const runtime = new AgentRuntime({
+      models: _models(),
+      project: _project({
+        limits: { maxInputTokensPerSession: 999, maxOutputTokensPerSession: 999 },
+        onExecute: () => { toolExecutions += 1; }
+      })
+    });
+    const session = await runtime.createSession({
+      capabilityPolicy: _policy(),
+      context,
+      executionMode: "react",
+      sessionStore: store,
+      streamFn: (model, streamContext) => {
+        providerCalls += 1;
+        return _manualStream(model, streamContext);
+      }
+    });
+
+    await session.prompt("hello");
+
+    const persisted = await store.load(context.id);
+    expect(providerCalls).toBe(1);
+    expect(toolExecutions).toBe(1);
+    expect(session.messages.map(message => message.role)).toEqual([
+      "user",
+      "assistant",
+      "toolResult"
+    ]);
+    expect(persisted?.snapshot.runs.at(-1)?.state).toBe("waitingForBudget");
+    expect(persisted?.snapshot.budget).toMatchObject({
+      inputTokens: 1,
+      outputTokens: 1,
+      waits: [{ reached: ["input"], status: "waiting" }]
+    });
+  });
+
   test("explicit compaction never dispatches the main provider", async () => {
     const context = _context("explicit-compaction-session");
     const messages = _longMessages();
@@ -173,7 +236,7 @@ function _policy() {
     modelOptions: {},
     models: [{ provider: "fake", id: "fake-model" }],
     reasoning: ["off", "minimal", "low", "medium", "high", "xhigh"] as const,
-    toolContributions: []
+    toolContributions: ["tool:echo"]
   };
 }
 
@@ -216,17 +279,69 @@ function _fakeModel(): Model<"fake"> {
   };
 }
 
-function _project(): AgentProjectSnapshot {
+function _project(options: {
+  limits?: {
+    readonly maxInputTokensPerSession?: false | number;
+    readonly maxOutputTokensPerSession?: false | number;
+  };
+  onExecute?: () => void;
+} = {}): AgentProjectSnapshot {
   return {
     root: "/agent",
-    definition: { model: { provider: "fake", id: "fake-model" } },
+    definition: {
+      model: { provider: "fake", id: "fake-model" },
+      ...(options.limits ? { limits: options.limits } : {})
+    },
     instructions: "Test agent.",
-    tools: [],
+    tools: [{
+      name: "echo",
+      label: "Echo",
+      description: "Echo input.",
+      parameters: {
+        type: "object",
+        properties: { text: { type: "string" } },
+        required: ["text"],
+        additionalProperties: false
+      },
+      async execute() {
+        options.onExecute?.();
+        return {
+          content: [{ type: "text", text: "echoed" }],
+          details: undefined
+        };
+      }
+    }],
     connections: [],
     resources: { skills: [] },
     diagnostics: [],
     fingerprint: "snapshot-compaction"
   };
+}
+
+function _manualStream(
+  _model: Model<Api>,
+  context: Context
+) {
+  const hasToolResult = context.messages.at(-1)?.role === "toolResult";
+  return _completedStream(
+    hasToolResult
+      ? _assistant([{ type: "text", text: "done" }], "stop")
+      : _assistant([{
+        type: "toolCall",
+        id: "call-one",
+        name: "echo",
+        arguments: { text: "hello" }
+      }], "toolUse")
+  );
+}
+
+function _completedStream(message: AssistantMessage) {
+  const stream = createAssistantMessageEventStream();
+  queueMicrotask(() => {
+    stream.push({ type: "start", partial: message });
+    stream.push({ type: "done", reason: message.stopReason, message });
+  });
+  return stream;
 }
 
 function _stoppedStream() {

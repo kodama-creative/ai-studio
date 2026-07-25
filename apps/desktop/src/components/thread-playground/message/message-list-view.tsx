@@ -37,6 +37,7 @@ import { Button } from "../../ui/button";
 import { ScrollArea } from "../../ui/scroll-area";
 import { ShineBorder } from "../../ui/shine-border";
 import { StructuredOutputCard } from "../output/structured-output-card";
+import { SessionBudgetCard } from "../session-budget-card";
 import {
   type RunValidationIssue,
   useThreadStore,
@@ -188,6 +189,7 @@ export function MessageListView({
           <StreamingMessageListItem streaming={status === "running"} />
         )}
         {!isSnapshotView ? <LatestStructuredOutputFailure /> : null}
+        {!isSnapshotView ? <SessionBudgetCard /> : null}
         <div className="relative rounded-lg">
           <Button
             // No top margin: the preceding message / streaming item (or, in the
@@ -403,7 +405,7 @@ function _compactionBoundaryMessageIndex(input: {
     const session = input.runtimeSession as StoredRuntimeSession | undefined;
     const base = input.runtimeWorkingBase;
     if (
-      session?.snapshot.schemaVersion !== 4
+      session?.snapshot.schemaVersion !== 5
       || base?.sessionId !== session.snapshot.id
     ) {
       return null;

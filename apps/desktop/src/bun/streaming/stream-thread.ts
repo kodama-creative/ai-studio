@@ -9,6 +9,7 @@ import {
 import { type LocalFileSystem, streamAgent } from "@llm-space/core/server";
 import { agentModelMatchesDefinition } from "@llm-space/runtime";
 import {
+  decideRuntimeSessionBudget,
   decideRuntimeToolApproval,
   runtimeRunHasParkedToolApprovals
 } from "@llm-space/runtime/harness";
@@ -64,6 +65,13 @@ export class StreamThreadController {
     }>;
     readonly runId: string;
     readonly sessionId: string;
+  }>();
+
+  private readonly _budgetAuthorities = new Map<string, {
+    readonly decide: (
+      decision: "freshWindow" | "stop"
+    ) => Promise<StoredRuntimeSession>;
+    readonly key: string;
   }>();
 
   constructor(
@@ -156,6 +164,19 @@ export class StreamThreadController {
     return committed;
   }
 
+  async decideSessionBudget(input: {
+    readonly budgetWaitId: string;
+    readonly decision: "freshWindow" | "stop";
+  }): Promise<StoredRuntimeSession> {
+    const authority = this._budgetAuthorities.get(input.budgetWaitId);
+    if (!authority) {
+      throw new Error(`Session budget ${input.budgetWaitId} is not registered`);
+    }
+    const committed = await authority.decide(input.decision);
+    this._budgetAuthorities.delete(input.budgetWaitId);
+    return committed;
+  }
+
   private _registerApprovalAuthorities(
     key: string,
     session: StoredRuntimeSession,
@@ -178,6 +199,39 @@ export class StreamThreadController {
         sessionId: session.snapshot.id
       });
     }
+    this._registerBudgetAuthority(key, session, async decision => {
+      const resolved = await resolve();
+      const current = await resolved.store.load(session.snapshot.id);
+      if (!current) {
+        throw new Error(`Runtime Session ${session.snapshot.id} is unavailable`);
+      }
+      const wait = current.snapshot.budget?.waits.findLast(
+        candidate => candidate.status === "waiting"
+      );
+      if (!wait) { throw new Error("Session budget decision is no longer pending"); }
+      const committed = await decideRuntimeSessionBudget(resolved.store, {
+        decision,
+        expectedVersion: current.version,
+        runId: wait.runId,
+        sessionId: current.snapshot.id
+      });
+      this._registerApprovalAuthorities(key, committed, resolve);
+      return committed;
+    });
+  }
+
+  private _registerBudgetAuthority(
+    key: string,
+    session: StoredRuntimeSession,
+    decide: (decision: "freshWindow" | "stop") => Promise<StoredRuntimeSession>
+  ): void {
+    for (const [waitId, authority] of this._budgetAuthorities) {
+      if (authority.key === key) { this._budgetAuthorities.delete(waitId); }
+    }
+    const wait = session.snapshot.budget?.waits.findLast(
+      candidate => candidate.status === "waiting"
+    );
+    if (wait) { this._budgetAuthorities.set(wait.id, { key, decide }); }
   }
 
   /** Run an agent stream and push each event back through the caller's sender. */
@@ -286,6 +340,7 @@ export class StreamThreadController {
         "Compact now is not available for Local Server Threads"
       );
     }
+    const runtime = payload.runtime;
     const text = _localServerText(payload.request.context.messages.at(-1));
     let structuredOutputFailure:
       | "structured_output_invalid"
@@ -308,6 +363,23 @@ export class StreamThreadController {
           : {})
       },
       {
+        onBudgetRequired: (budget, runtimeSession) => {
+          this._registerBudgetAuthority(
+            `project:${runtime.projectId}:${runtime.threadId}`,
+            runtimeSession,
+            async decision => this._localServers!.decideSessionBudget({
+              decision,
+              projectId: runtime.projectId,
+              runId: budget.runId,
+              threadId: runtime.threadId
+            })
+          );
+          send({
+            streamId: payload.streamId,
+            type: "runtimeSession",
+            runtimeSession
+          });
+        },
         onEvent: event => {
           send({ streamId: payload.streamId, type: "event", event });
         },
@@ -623,6 +695,9 @@ export class StreamThreadController {
       payload.runtime.projectId,
       payload.runtime.threadId
     );
+    const agentSnapshotFingerprint = runtimeState && activeRunId
+      ? _activeRunAgentSnapshotFingerprint(runtimeState.session, activeRunId)
+      : threadRecord.thread.agentRuntime?.snapshot;
     const profile = threadRecord.thread.runtimeProfile?.type
       ?? "desktopDirect";
     if (profile === "desktopSandbox") {
@@ -640,7 +715,7 @@ export class StreamThreadController {
       ? await this._prepareSandboxTurn({
         projectId: payload.runtime.projectId,
         sessionId: sandboxSessionId,
-        snapshot: threadRecord.thread.agentRuntime?.snapshot,
+        snapshot: agentSnapshotFingerprint,
         turnId: activeRunId ?? payload.streamId
       })
       : undefined;
@@ -659,6 +734,7 @@ export class StreamThreadController {
     const session = await this._externalAgentProjects.createRuntimeSession(
       payload.runtime.projectId,
       {
+        snapshot: agentSnapshotFingerprint,
         id: sessionId,
         context: {
           id: sessionId,
@@ -981,6 +1057,25 @@ export class StreamThreadController {
         : "custom"
     };
   }
+}
+
+function _activeRunAgentSnapshotFingerprint(
+  session: StoredRuntimeSession,
+  activeRunId: string
+): string {
+  const run = session.snapshot.runs.find(candidate => candidate.id === activeRunId);
+  if (!run) {
+    throw new Error(`Runtime Run ${activeRunId} is unavailable.`);
+  }
+  const configuration = session.configurations.find(
+    candidate => candidate.id === run.configurationId
+  );
+  if (!configuration) {
+    throw new Error(
+      `Runtime Run ${activeRunId} configuration is unavailable.`
+    );
+  }
+  return configuration.agentSnapshotFingerprint;
 }
 
 function _localServerText(message: AgentMessage | undefined): string {

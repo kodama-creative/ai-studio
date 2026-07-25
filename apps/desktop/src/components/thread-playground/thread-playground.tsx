@@ -4,6 +4,7 @@ import {
   ChevronDownIcon,
   GitBranchIcon,
   HistoryIcon,
+  OctagonPauseIcon,
   PlayIcon,
   Redo2Icon,
   Undo2Icon
@@ -25,6 +26,7 @@ import type {
   Thread,
   ThreadRuntimeCheckpoint
 } from "@llm-space/core";
+import type { AgentSessionLimitsDefinition } from "@llm-space/runtime";
 import type { StoredRuntimeSession } from "@llm-space/runtime/harness";
 
 import {
@@ -50,6 +52,10 @@ import {
 } from "./output/output-contract-selector";
 import { SystemPromptEditor } from "./prompt/system-prompt-editor";
 import { RunHistoryListView } from "./run-history-list-view";
+import {
+  focusSessionBudgetPrimaryAction,
+  pendingSessionBudgetWait as selectPendingSessionBudgetWait
+} from "./session-budget-view";
 import {
   canRedo,
   canUndo,
@@ -131,9 +137,19 @@ export interface ThreadPlaygroundProps {
     listener: (phase: ThreadRuntimePhase) => void
   ) => () => void;
 
+  /** Subscribe to durable Host commits that can arrive while a stream waits. */
+  readonly subscribeCommittedRuntimeSession?: (
+    listener: (session: StoredRuntimeSession) => void
+  ) => () => void;
+
   readonly decideToolApproval?: (
     requestId: string,
     decision: "approved" | "denied"
+  ) => Promise<StoredRuntimeSession>;
+
+  readonly decideSessionBudget?: (
+    budgetWaitId: string,
+    decision: "freshWindow" | "stop"
   ) => Promise<StoredRuntimeSession>;
 
   readonly renameRuntimeBranch?: (
@@ -176,6 +192,9 @@ export interface ThreadPlaygroundProps {
 
   /** Hide Desktop execution-mode controls for a Server-owned ReAct loop. */
   readonly runSettingsReadonly?: boolean;
+
+  /** Source-owned limits copied into the Runtime Run configuration. */
+  readonly sessionLimits?: AgentSessionLimitsDefinition;
 
   /** Open the existing Run History inspector at a newly terminal Server Run. */
   readonly inspectRunRequest?: { revision: number; runId: string; };
@@ -242,9 +261,12 @@ const _ThreadPlayground = function ThreadPlayground({
   preserveSavedModel,
   prepareRunSnapshot,
   decideToolApproval,
+  decideSessionBudget,
   renameRuntimeBranch,
   persistSettledThread,
   subscribeRuntimePhase,
+  subscribeCommittedRuntimeSession,
+  sessionLimits,
   loadPromptSkills,
   externalUpdate,
   onChange,
@@ -267,10 +289,13 @@ const _ThreadPlayground = function ThreadPlayground({
   prepareRunSnapshotRef.current = prepareRunSnapshot;
   const outputDefinitionsRef = useRef(props.outputDefinitions);
   outputDefinitionsRef.current = props.outputDefinitions;
+  const sessionLimitsRef = useRef(sessionLimits);
+  sessionLimitsRef.current = sessionLimits;
   const [store] = useState(() =>
     createThreadStore(initialValue, {
       transport,
       decideToolApproval,
+      decideSessionBudget,
       renameRuntimeBranchAuthority: renameRuntimeBranch,
       resolveModel: saved =>
         (preserveSavedModel && saved
@@ -300,6 +325,7 @@ const _ThreadPlayground = function ThreadPlayground({
           : undefined;
       },
       renderPromptVariables,
+      resolveSessionLimits: () => sessionLimitsRef.current,
       persistSettledThread,
       prepareRunSnapshot: thread =>
         prepareRunSnapshotRef.current?.(thread) ?? thread
@@ -308,6 +334,9 @@ const _ThreadPlayground = function ThreadPlayground({
   useEffect(() => subscribeRuntimePhase?.(phase => {
     store.getState().setRuntimePhase(phase);
   }), [store, subscribeRuntimePhase]);
+  useEffect(() => subscribeCommittedRuntimeSession?.(session => {
+    store.getState().syncCommittedRuntimeSession(session);
+  }), [store, subscribeCommittedRuntimeSession]);
   useEffect(() => {
     if (
       !externalUpdate
@@ -399,12 +428,15 @@ function ThreadPlaygroundContent({
   const persistedRuntimeSession = useThreadStore(
     s => s.thread.runtimeSession
   );
+  const pendingBudgetWait = useMemo(() => {
+    return selectPendingSessionBudgetWait(persistedRuntimeSession);
+  }, [persistedRuntimeSession]);
   const workingBaseView = useMemo(() => {
     const session = persistedRuntimeSession as
       | StoredRuntimeSession
       | undefined;
     if (
-      session?.snapshot.schemaVersion !== 4
+      session?.snapshot.schemaVersion !== 5
       || runtimeWorkingBase?.sessionId !== session.snapshot.id
     ) {
       return null;
@@ -452,9 +484,15 @@ function ThreadPlaygroundContent({
     return readonlyFromProps || status === "running";
   }, [readonlyFromProps, status]);
   const handleRun = useCallback(async () => {
+    if (pendingBudgetWait) {
+      if (containerRef.current) {
+        focusSessionBudgetPrimaryAction(containerRef.current);
+      }
+      return;
+    }
     if (runDisabled) { return; }
     await run();
-  }, [run, runDisabled]);
+  }, [pendingBudgetWait, run, runDisabled]);
   const returnToCurrent = useCallback(() => {
     if (
       workingBaseView?.currentCheckpointId
@@ -472,7 +510,13 @@ function ThreadPlaygroundContent({
   useRegisterCommands(
     {
       runThread: () => {
-        if (status !== "running" && !runDisabled) { void run(); }
+        if (pendingBudgetWait) {
+          if (containerRef.current) {
+            focusSessionBudgetPrimaryAction(containerRef.current);
+          }
+        } else if (status !== "running" && !runDisabled) {
+          void run();
+        }
       },
       stageSandboxAttachments: ({ messageId }) => {
         if (status !== "running") {
@@ -512,7 +556,8 @@ function ThreadPlaygroundContent({
     runHistoryPanelRef.current?.resize(RUN_HISTORY_PANEL_SIZE);
   }, [inspectRunRequest, runHistoryPanelRef]);
   const handleShortcuts = useShortcuts({
-    readonly: readonlyFromProps || (runDisabled && status !== "running")
+    readonly: readonlyFromProps
+      || (!pendingBudgetWait && runDisabled && status !== "running")
   });
   return (
     <div
@@ -597,13 +642,15 @@ function ThreadPlaygroundContent({
                 <Tooltip
                   content={
                     <div>
-                      {status === "running"
-                        ? runtimePhase === "compacting"
-                          ? "Compacting context…"
-                          : "Stop running"
-                        : workingBaseView
-                          ? `Run from ${workingBaseView.label} · checkpoint ${workingBaseView.checkpointOrder}`
-                          : "Run this thread"}
+                      {pendingBudgetWait
+                        ? "Focus the Session budget decision"
+                        : status === "running"
+                          ? runtimePhase === "compacting"
+                            ? "Compacting context…"
+                            : "Stop running"
+                          : workingBaseView
+                            ? `Run from ${workingBaseView.label} · checkpoint ${workingBaseView.checkpointOrder}`
+                            : "Run this thread"}
                       <KbdGroup>
                         <Kbd className="text-foreground!">⌘ Enter</Kbd>
                       </KbdGroup>
@@ -612,29 +659,44 @@ function ThreadPlaygroundContent({
                 >
                   <Button
                     aria-label={
-                      status === "running"
-                        ? "Stop running thread"
-                        : "Run thread"
+                      pendingBudgetWait
+                        ? "Budget reached; review Session budget decision"
+                        : status === "running"
+                          ? "Stop running thread"
+                          : "Run thread"
                     }
                     className="border-r-primary border-none pr-1 pl-4 active:translate-y-0!"
+                    data-session-budget-run-button={pendingBudgetWait
+                      ? ""
+                      : undefined}
                     disabled={
                       readonlyFromProps
-                      || (status !== "running" && (!hasModel || runDisabled))
+                      || (!pendingBudgetWait
+                        && status !== "running"
+                        && (!hasModel || runDisabled))
                     }
-                    onClick={status === "running" ? handleStop : handleRun}
+                    onClick={pendingBudgetWait
+                      ? handleRun
+                      : status === "running"
+                        ? handleStop
+                        : handleRun}
                   >
-                    {status === "running"
-                      ? (
-                        <Spinner className="size-3" />
-                      )
-                      : (
-                        <PlayIcon className="size-3" />
-                      )}
-                    {status === "running"
-                      ? runtimePhase === "compacting"
-                        ? "Compacting context…"
-                        : "Stop"
-                      : "Run"}
+                    {pendingBudgetWait
+                      ? <OctagonPauseIcon className="size-3" />
+                      : status === "running"
+                        ? (
+                          <Spinner className="size-3" />
+                        )
+                        : (
+                          <PlayIcon className="size-3" />
+                        )}
+                    {pendingBudgetWait
+                      ? "Budget reached"
+                      : status === "running"
+                        ? runtimePhase === "compacting"
+                          ? "Compacting context…"
+                          : "Stop"
+                        : "Run"}
                   </Button>
                 </Tooltip>
                 {!runSettingsReadonly

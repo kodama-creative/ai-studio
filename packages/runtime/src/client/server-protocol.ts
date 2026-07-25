@@ -1,6 +1,9 @@
 import type { AgentEvent } from "@earendil-works/pi-agent-core";
 
-import type { StoredRuntimeSession } from "../runtime/harness/session-store";
+import type {
+  RuntimeSessionBudgetWaitSnapshot,
+  StoredRuntimeSession
+} from "../runtime/harness/session-store";
 
 export const AGENT_SERVER_PROTOCOL_SCHEMA_VERSION = 1 as const;
 
@@ -45,6 +48,11 @@ export type ServerControlEvent<TValue extends JsonValue = JsonValue> =
       readonly toolName: string;
     }>;
     readonly type: "toolApprovalRequired";
+  }
+  | {
+    readonly budget: RuntimeSessionBudgetWaitSnapshot;
+    readonly session: StoredRuntimeSession;
+    readonly type: "sessionBudgetRequired";
   }
   | {
     readonly code?: string;
@@ -99,4 +107,54 @@ export interface AgentServerContinuation {
   readonly continuationToken: string;
   readonly schemaVersion: typeof AGENT_SERVER_PROTOCOL_SCHEMA_VERSION;
   readonly sessionId: string;
+}
+
+export function isRuntimeSessionBudgetWaitSnapshot(
+  value: unknown
+): value is RuntimeSessionBudgetWaitSnapshot {
+  if (!_record(value)) { return false; }
+  return typeof value.agentSnapshotFingerprint === "string"
+    && _tokenPair(value.baseline)
+    && typeof value.id === "string"
+    && _tokenPair(value.lifetime)
+    && _record(value.limits)
+    && _validLimit(value.limits.maxInputTokensPerSession)
+    && _validLimit(value.limits.maxOutputTokensPerSession)
+    && Object.keys(value.limits).every(key =>
+      key === "maxInputTokensPerSession"
+      || key === "maxOutputTokensPerSession")
+    && Array.isArray(value.reached)
+    && value.reached.length > 0
+    && value.reached.length <= 2
+    && value.reached.every(axis => axis === "input" || axis === "output")
+    && typeof value.runId === "string"
+    && (
+      value.status === "granted"
+      || value.status === "stopped"
+      || value.status === "waiting"
+    )
+    && _token(value.unmeteredProviderCalls)
+    && _tokenPair(value.window)
+    && value.lifetime.input - value.baseline.input === value.window.input
+    && value.lifetime.output - value.baseline.output === value.window.output;
+}
+
+function _record(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function _token(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+function _tokenPair(
+  value: unknown
+): value is { readonly input: number; readonly output: number; } {
+  return _record(value) && _token(value.input) && _token(value.output);
+}
+
+function _validLimit(value: unknown): boolean {
+  return value === undefined
+    || value === false
+    || (typeof value === "number" && Number.isSafeInteger(value) && value > 0);
 }

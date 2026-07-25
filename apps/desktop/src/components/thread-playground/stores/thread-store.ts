@@ -68,7 +68,10 @@ import type {
   AssistantMessage,
   Message
 } from "@llm-space/core";
-import type { RuntimeExecutionMode } from "@llm-space/runtime";
+import type {
+  AgentSessionLimitsDefinition,
+  RuntimeExecutionMode
+} from "@llm-space/runtime";
 
 import { structuredOutputFromToolCall } from "@/client/structured-output-from-tool-call";
 import { createFrameThrottle } from "@/lib/frame-throttle";
@@ -194,6 +197,11 @@ export interface ThreadState {
     requestId: string,
     decision: "approved" | "denied"
   ): Promise<void>;
+  decideSessionBudget(
+    budgetWaitId: string,
+    decision: "freshWindow" | "stop"
+  ): Promise<void>;
+  syncCommittedRuntimeSession(session: StoredRuntimeSession): void;
   addTool(tool: Tool): boolean;
   updateTool(name: string, tool: Tool): boolean;
   removeTool(name: string): void;
@@ -227,10 +235,17 @@ export function createThreadStore(
       decision: "approved" | "denied"
     ) => Promise<Thread["runtimeSession"]>;
 
+    decideSessionBudget?: (
+      budgetWaitId: string,
+      decision: "freshWindow" | "stop"
+    ) => Promise<Thread["runtimeSession"]>;
+
     renameRuntimeBranchAuthority?: (
       branchId: string,
       label: string
     ) => Promise<Thread["runtimeSession"]>;
+
+    resolveSessionLimits?: () => AgentSessionLimitsDefinition | undefined;
 
     /** Skills available to prompt-variable rendering for this Thread. */
     loadPromptSkills?: typeof listEnabledPromptVariableSkills;
@@ -969,6 +984,22 @@ export function createThreadStore(
             await get().run(messageId);
           }
         },
+        async decideSessionBudget(budgetWaitId, decision) {
+          if (!options.decideSessionBudget) { return; }
+          const committed = await options.decideSessionBudget(
+            budgetWaitId,
+            decision
+          );
+          runtimeSession = new ThreadRuntimeSession(committed);
+          await persistRuntimeSession(committed);
+          if (decision === "freshWindow" && !options.transportOwnsRuntimeRun) {
+            await get().run();
+          }
+        },
+        syncCommittedRuntimeSession(session) {
+          runtimeSession = new ThreadRuntimeSession(session);
+          applyRuntimeSession(session);
+        },
         updateToolCallOutputTextContent(messageId, toolCallId, text, isError) {
           const context = get().thread.context ?? {};
           const messages = context.messages ?? [];
@@ -1074,7 +1105,7 @@ export function createThreadStore(
             const persisted = get().thread.runtimeSession as
               | StoredRuntimeSession
               | undefined;
-            const history = persisted?.snapshot.schemaVersion === 4
+            const history = persisted?.snapshot.schemaVersion === 5
               ? persisted.snapshot.history
               : null;
             const workingBase = get().thread.runtimeWorkingBase;
@@ -1178,6 +1209,7 @@ export function createThreadStore(
                 context: preparedContext,
                 executionMode,
                 model,
+                sessionLimits: options.resolveSessionLimits?.(),
                 outputContractSnapshot: options.resolveOutputContractSnapshot?.(
                   executionThread.outputContract
                 )
@@ -1692,7 +1724,7 @@ export function createThreadStore(
           const persisted = get().thread.runtimeSession as
             | StoredRuntimeSession
             | undefined;
-          if (persisted?.snapshot.schemaVersion !== 4) {
+          if (persisted?.snapshot.schemaVersion !== 5) {
             return false;
           }
           const checkpoint = persisted.snapshot.history.checkpoints.find(
@@ -1748,7 +1780,7 @@ export function createThreadStore(
             | StoredRuntimeSession
             | undefined;
           const trimmed = label.trim();
-          const branch = persisted?.snapshot.schemaVersion === 4
+          const branch = persisted?.snapshot.schemaVersion === 5
             ? persisted.snapshot.history.branches.find(
               item => item.id === branchId
             )
@@ -2005,6 +2037,8 @@ const selectActions = (s: ThreadState) => ({
   markToolCallAttempt: s.markToolCallAttempt,
   continueAfterProjectToolResult: s.continueAfterProjectToolResult,
   decideToolApproval: s.decideToolApproval,
+  decideSessionBudget: s.decideSessionBudget,
+  syncCommittedRuntimeSession: s.syncCommittedRuntimeSession,
   addTool: s.addTool,
   updateTool: s.updateTool,
   removeTool: s.removeTool,

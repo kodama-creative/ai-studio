@@ -59,5 +59,8 @@
     "react": "catalog:",
     "react-dom": "catalog:",
     "typebox": "catalog:"
+  },
+  "patchedDependencies": {
+    "@earendil-works/pi-agent-core@0.80.3": "patches/@earendil-works%2Fpi-agent-core@0.80.3.patch"
   }
 }

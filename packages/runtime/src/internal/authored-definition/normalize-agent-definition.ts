@@ -9,6 +9,7 @@ import type {
 
 const AGENT_DEFINITION_KEYS = new Set([
   "environment",
+  "limits",
   "model",
   "modelOptions",
   "reasoning"
@@ -29,6 +30,10 @@ const ENVIRONMENT_REQUIREMENT_KEYS = new Set([
   "description",
   "kind",
   "required"
+]);
+const SESSION_LIMIT_KEYS = new Set([
+  "maxInputTokensPerSession",
+  "maxOutputTokensPerSession"
 ]);
 const ENVIRONMENT_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const AGENT_REASONING_VALUES = new Set<AgentReasoningDefinition>([
@@ -72,16 +77,38 @@ export function normalizeAgentDefinition(
     throw new TypeError(errorMessage);
   }
   const environment = _normalizeEnvironment(candidate.environment, errorMessage);
+  const limits = _normalizeSessionLimits(candidate.limits, errorMessage);
   const modelOptions = _normalizeModelOptions(
     candidate.modelOptions,
     errorMessage
   );
   return {
     model: candidate.model,
+    ...(limits ? { limits } : {}),
     ...(modelOptions ? { modelOptions } : {}),
     ...(candidate.reasoning ? { reasoning: candidate.reasoning } : {}),
     ...(environment ? { environment } : {})
   };
+}
+
+function _normalizeSessionLimits(
+  value: unknown,
+  errorMessage: string
+): AgentDefinition["limits"] {
+  if (value === undefined) { return undefined; }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError(errorMessage);
+  }
+  const candidate = value as Record<string, unknown>;
+  if (
+    Object.keys(candidate).some(key => !SESSION_LIMIT_KEYS.has(key))
+    || Object.values(candidate).some(limit =>
+      limit !== false
+      && (!Number.isSafeInteger(limit) || (limit as number) <= 0))
+  ) {
+    throw new TypeError(errorMessage);
+  }
+  return { ...candidate };
 }
 
 function _normalizeModelOptions(

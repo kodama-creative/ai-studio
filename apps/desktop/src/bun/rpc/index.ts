@@ -105,6 +105,7 @@ export function createMainWindowRPC({
     maxRequestTime: MAX_REQUEST_TIME_MS,
     handlers: {
       requests: {
+        decideSessionBudget: async input => streaming.decideSessionBudget(input),
         decideToolApproval: async input => streaming.decideToolApproval(input),
         availableModels: async () => getModelProviderGroups(),
         removeProvider: async ({ providerId }) => {

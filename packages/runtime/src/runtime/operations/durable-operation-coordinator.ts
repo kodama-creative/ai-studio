@@ -109,6 +109,11 @@ export class DurableOperationCoordinator {
   }
 
   async settleProvider(input: {
+    readonly mainProviderUsage?: {
+      readonly input: number;
+      readonly metered: boolean;
+      readonly output: number;
+    };
     readonly operation: RuntimeDurableOperationSnapshot;
     readonly state: "completed" | "failed";
     readonly value: unknown;
@@ -132,7 +137,10 @@ export class DurableOperationCoordinator {
         operationId: input.operation.id,
         requestFingerprint: input.operation.requestFingerprint,
         state: input.state,
-        replay
+        replay,
+        ...(input.mainProviderUsage
+          ? { mainProviderUsage: input.mainProviderUsage }
+          : {})
       }]);
     } catch (error) {
       try {

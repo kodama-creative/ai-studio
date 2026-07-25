@@ -22,12 +22,14 @@ import type { ApprovalRequirement } from "../../public/definitions/approval";
 import type { ExecutionEnvToolKind } from "../../public/definitions/execution-env-tool";
 import type {
   AgentModelOptionsDefinition,
-  AgentModelSelector
+  AgentModelSelector,
+  AgentSessionLimitsDefinition
 } from "../../shared/agent-definition";
 import type { RuntimeExecutionMode } from "../../shared/runtime-execution-mode";
 
-export const RUNTIME_SESSION_SCHEMA_VERSION = 4 as const;
+export const RUNTIME_SESSION_SCHEMA_VERSION = 5 as const;
 export const RUNTIME_SESSION_STATE_SCHEMA_VERSION = 1 as const;
+export const RUNTIME_SESSION_BUDGET_SCHEMA_VERSION = 1 as const;
 export const MAX_SESSION_STATE_SLOTS = 64;
 export const MAX_SESSION_STATE_SLOT_BYTES = 64 * 1024;
 export const MAX_SESSION_STATE_BYTES = 256 * 1024;
@@ -101,6 +103,7 @@ export interface RuntimeRunConfigurationSnapshot {
   readonly contextFingerprint: string;
   readonly executionMode: RuntimeExecutionMode;
   readonly model: AgentModelSelector;
+  readonly limits?: AgentSessionLimitsDefinition;
   readonly reasoning?: ThinkingLevel;
   readonly toolConfigurationFingerprint: string;
   readonly outputContract?: {
@@ -108,6 +111,40 @@ export interface RuntimeRunConfigurationSnapshot {
     readonly schemaFingerprint: string;
   };
   readonly maxStructuredOutputBytes?: number;
+}
+
+export type RuntimeSessionBudgetAxis = "input" | "output";
+
+export interface RuntimeSessionBudgetWaitSnapshot {
+  readonly agentSnapshotFingerprint: string;
+  readonly baseline: {
+    readonly input: number;
+    readonly output: number;
+  };
+  readonly id: string;
+  readonly lifetime: {
+    readonly input: number;
+    readonly output: number;
+  };
+  readonly limits: AgentSessionLimitsDefinition;
+  readonly reached: readonly RuntimeSessionBudgetAxis[];
+  readonly runId: string;
+  readonly status: "granted" | "stopped" | "waiting";
+  readonly unmeteredProviderCalls: number;
+  readonly window: {
+    readonly input: number;
+    readonly output: number;
+  };
+}
+
+export interface RuntimeSessionBudgetSnapshot {
+  readonly schemaVersion: typeof RUNTIME_SESSION_BUDGET_SCHEMA_VERSION;
+  readonly inputBaseline: number;
+  readonly inputTokens: number;
+  readonly outputBaseline: number;
+  readonly outputTokens: number;
+  readonly unmeteredProviderCalls: number;
+  readonly waits: readonly RuntimeSessionBudgetWaitSnapshot[];
 }
 
 export interface RuntimeSessionSnapshot {
@@ -125,6 +162,7 @@ export interface RuntimeSessionSnapshot {
   readonly state?: RuntimeSessionStateSnapshot;
   readonly operationLedger?: RuntimeDurableOperationLedgerSnapshot;
   readonly approvalLedger?: RuntimeToolApprovalLedgerSnapshot;
+  readonly budget?: RuntimeSessionBudgetSnapshot;
 }
 
 export type RuntimeRunJournalEntry =
@@ -191,6 +229,22 @@ export type RuntimeRunJournalEntry =
     readonly type: "runtimeBranchRenamed";
   }
   | {
+    readonly budgetWaitId: string;
+    readonly decision: "freshWindow" | "stop";
+    readonly runId: string;
+    readonly sequence: number;
+    readonly sessionVersion: number;
+    readonly type: "sessionBudgetDecided";
+  }
+  | {
+    readonly budgetWaitId: string;
+    readonly reached: readonly RuntimeSessionBudgetAxis[];
+    readonly runId: string;
+    readonly sequence: number;
+    readonly sessionVersion: number;
+    readonly type: "sessionBudgetReached";
+  }
+  | {
     readonly decision: "approved" | "denied";
     readonly requestId: string;
     readonly runId: string;
@@ -219,6 +273,16 @@ export type RuntimeRunJournalEntry =
     readonly sessionVersion: number;
     readonly to: RuntimeRunState;
     readonly type: "runStateChanged";
+  }
+  | {
+    readonly input: number;
+    readonly metered: boolean;
+    readonly operationId: string;
+    readonly output: number;
+    readonly runId: string;
+    readonly sequence: number;
+    readonly sessionVersion: number;
+    readonly type: "mainProviderUsageRecorded";
   }
   | {
     readonly names: readonly string[];
@@ -349,6 +413,11 @@ export type RuntimeSessionMutation =
     readonly type: "decideToolApproval";
   }
   | {
+    readonly decision: "freshWindow" | "stop";
+    readonly runId: string;
+    readonly type: "decideSessionBudget";
+  }
+  | {
     readonly kind: "provider" | "tool";
     readonly operationId: string;
     readonly park?: Omit<RuntimeDurableOperationPark, "parkedSessionVersion">;
@@ -362,20 +431,25 @@ export type RuntimeSessionMutation =
     readonly type: "startOperation";
   }
   | {
-    readonly operationId: string;
-    readonly parkId: string;
-    readonly requestFingerprint: string;
-    readonly resumeSchemaFingerprint: string;
-    readonly runId: string;
-    readonly type: "resumeOperation";
-  }
-  | {
+    readonly mainProviderUsage?: {
+      readonly input: number;
+      readonly metered: boolean;
+      readonly output: number;
+    };
     readonly operationId: string;
     readonly replay?: RuntimeDurableOperationReplayEnvelope;
     readonly requestFingerprint: string;
     readonly runId: string;
     readonly state: "cancelled" | "completed" | "failed" | "outcomeUnknown";
     readonly type: "settleOperation";
+  }
+  | {
+    readonly operationId: string;
+    readonly parkId: string;
+    readonly requestFingerprint: string;
+    readonly resumeSchemaFingerprint: string;
+    readonly runId: string;
+    readonly type: "resumeOperation";
   }
   | {
     readonly requestId: string;
@@ -392,6 +466,10 @@ export type RuntimeSessionMutation =
     readonly structuredOutput?: RuntimeStructuredOutputResult;
     readonly to: RuntimeRunState;
     readonly type: "transitionRun";
+  }
+  | {
+    readonly runId: string;
+    readonly type: "parkSessionBudget";
   }
   | {
     readonly snapshot: RuntimeTurnCapabilitySnapshot;

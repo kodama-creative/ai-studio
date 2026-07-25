@@ -1,4 +1,5 @@
 import {
+  decideRuntimeSessionBudget,
   decideRuntimeToolApproval,
   MAX_RUNTIME_BRANCH_LABEL_LENGTH,
   recoverRuntimeSession
@@ -440,6 +441,17 @@ async function _routeRequest(
       decodeURIComponent(_capture(toolApproval, 3))
     );
   }
+  const sessionBudget = url.pathname.match(
+    /^\/v1\/sessions\/([^/]+)\/runs\/([^/]+)\/budget$/
+  );
+  if (request.method === "POST" && sessionBudget) {
+    return _decideSessionBudget(
+      request,
+      context,
+      decodeURIComponent(_capture(sessionBudget, 1)),
+      decodeURIComponent(_capture(sessionBudget, 2))
+    );
+  }
   const runtimeBranch = url.pathname.match(
     /^\/v1\/sessions\/([^/]+)\/branches\/([^/]+)$/
   );
@@ -768,6 +780,22 @@ async function _abortRun(
     if (terminal) {
       return _json({ status: "terminal", outcome: terminal });
     }
+    const current = await context.repository.load(sessionId);
+    const runtimeRun = current?.snapshot.runs.find(run => run.id === runId);
+    if (current && runtimeRun?.state === "waitingForBudget") {
+      await decideRuntimeSessionBudget(context.repository, {
+        decision: "stop",
+        expectedVersion: current.version,
+        runId,
+        sessionId
+      });
+      await context.repository.completeRun({
+        sessionId,
+        runId,
+        outcome: "cancelled"
+      });
+      return _json({ status: "terminal", outcome: "cancelled" });
+    }
     context.runs.abort(runId);
     return _json({ status: "aborting" }, 202);
   } catch (error) {
@@ -845,6 +873,76 @@ async function _decideToolApproval(
       requestId,
       decision,
       status: pending ? "waitingForApproval" : "resuming"
+    }, 202);
+  } catch (error) {
+    return _mappedError(error);
+  }
+}
+
+async function _decideSessionBudget(
+  request: Request,
+  context: RequestContext,
+  sessionId: string,
+  runId: string
+): Promise<Response> {
+  const principal = await _authenticate(request, context.authenticator);
+  if (!principal) { return _unauthorized(); }
+  const continuationToken = request.headers.get("llm-space-continuation");
+  if (!continuationToken) { return _error(404, "not_found"); }
+  try {
+    await context.repository.authorizeRun({
+      sessionId,
+      runId,
+      owner: principal,
+      continuationToken
+    });
+  } catch (error) {
+    return _mappedError(error);
+  }
+  const bytes = await _bodyBytes(request);
+  if (!bytes) { return _error(413, "request_too_large"); }
+  let decision: "freshWindow" | "stop";
+  try {
+    const value = JSON.parse(
+      new TextDecoder("utf-8", { fatal: true }).decode(bytes)
+    ) as unknown;
+    if (
+      !value
+      || typeof value !== "object"
+      || Array.isArray(value)
+      || Object.keys(value).length !== 1
+      || !("decision" in value)
+      || (value.decision !== "freshWindow" && value.decision !== "stop")
+    ) {
+      return _error(400, "invalid_request");
+    }
+    decision = value.decision;
+  } catch {
+    return _error(400, "invalid_json");
+  }
+  try {
+    const current = await context.repository.load(sessionId);
+    if (!current) { return _error(404, "not_found"); }
+    const decided = await decideRuntimeSessionBudget(context.repository, {
+      decision,
+      expectedVersion: current.version,
+      runId,
+      sessionId
+    });
+    if (decision === "freshWindow") {
+      context.runs.resumeRun(context.repository.recoverableRun(sessionId, runId));
+    } else {
+      await context.repository.completeRun({
+        sessionId,
+        runId,
+        outcome: "cancelled"
+      });
+    }
+    return _json({
+      schemaVersion: 1,
+      decision,
+      session: decided,
+      status: decision === "freshWindow" ? "resuming" : "stopped"
     }, 202);
   } catch (error) {
     return _mappedError(error);

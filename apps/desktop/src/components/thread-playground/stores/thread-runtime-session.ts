@@ -23,7 +23,10 @@ import type {
   ThreadRuntimeRunState,
   ThreadStructuredOutput
 } from "@llm-space/core";
-import type { RuntimeExecutionMode } from "@llm-space/runtime";
+import type {
+  AgentSessionLimitsDefinition,
+  RuntimeExecutionMode
+} from "@llm-space/runtime";
 
 export interface ThreadRuntimeExecutionInput {
   readonly action?: "compact";
@@ -31,6 +34,7 @@ export interface ThreadRuntimeExecutionInput {
   readonly context: ThreadContext;
   readonly executionMode: RuntimeExecutionMode;
   readonly model: ModelConfig;
+  readonly sessionLimits?: AgentSessionLimitsDefinition;
   readonly thread: Thread;
   readonly outputContractSnapshot?: {
     readonly name: string;
@@ -180,6 +184,11 @@ export class ThreadRuntimeSession {
           : `Runtime Run ${recovery.run.id} approval boundary changed`
       );
     }
+    if (recovery.status === "budgetWait") {
+      throw new SessionStoreInvariantError(
+        `Runtime Run ${recovery.run.id} is waiting for a Session budget decision`
+      );
+    }
     if (recovery.status === "cancelled") {
       // A fresh user action begins a new Run after the recovered cancellation.
     }
@@ -300,6 +309,9 @@ export class ThreadRuntimeSession {
         messages: _runtimeMessages(input),
         continuationFingerprint: await threadContinuationFingerprint(input)
       });
+    }
+    if (mutations.length === 0) {
+      return { checkpoint: null, session: current };
     }
     const session = await this._store.commit({
       sessionId: this._sessionId,
@@ -438,6 +450,7 @@ async function _configuration(
     contextFingerprint,
     executionMode: input.executionMode,
     model: { provider: input.model.provider, id: input.model.id },
+    limits: input.sessionLimits ?? null,
     reasoning: input.model.params?.reasoning,
     modelParams: input.model.params,
     toolConfigurationFingerprint,
@@ -450,6 +463,7 @@ async function _configuration(
     contextFingerprint,
     executionMode: input.executionMode,
     model: identity.model,
+    ...(input.sessionLimits ? { limits: input.sessionLimits } : {}),
     reasoning: input.model.params?.reasoning,
     toolConfigurationFingerprint,
     ...(input.outputContractSnapshot
@@ -471,6 +485,10 @@ function _settleMutations(
   } & ThreadRuntimeExecutionInput,
   session: StoredRuntimeSession
 ): RuntimeSessionMutation[] {
+  const runtimeRun = session.snapshot.runs.find(run => run.id === input.runId);
+  if (runtimeRun?.state === "waitingForBudget") {
+    return [];
+  }
   if (input.outcome !== "completed") {
     return [{ type: "transitionRun", runId: input.runId, to: input.outcome }];
   }

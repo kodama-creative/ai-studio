@@ -617,7 +617,7 @@ describe("Durable operation crash matrix", () => {
       old as unknown as StoredRuntimeSession
     ])).toThrow(UnsupportedRuntimeSessionSchemaError);
     expect(old).toEqual(before);
-    expect(RUNTIME_SESSION_SCHEMA_VERSION).toBe(4);
+    expect(RUNTIME_SESSION_SCHEMA_VERSION).toBe(5);
   });
 });
 

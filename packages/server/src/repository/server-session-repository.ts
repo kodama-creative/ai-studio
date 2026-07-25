@@ -10,6 +10,12 @@ import {
 } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  type AgentServerRuntimeProjection,
+  isRuntimeSessionBudgetWaitSnapshot,
+  type ServerControlEvent,
+  type ServerRunTerminalOutcome
+} from "@llm-space/runtime/client";
+import {
   InMemorySessionStore,
   isTerminalRuntimeRunState,
   runtimeHistoryMessages,
@@ -27,11 +33,6 @@ import { dlopen, FFIType } from "bun:ffi";
 import type { FileHandle } from "node:fs/promises";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { UserMessage } from "@earendil-works/pi-ai";
-import type {
-  AgentServerRuntimeProjection,
-  ServerControlEvent,
-  ServerRunTerminalOutcome
-} from "@llm-space/runtime/client";
 
 import { ServerCursorError } from "./server-cursor-error";
 import { ServerEventTooLargeError } from "./server-event-too-large-error";
@@ -720,6 +721,19 @@ export class ServerSessionRepository implements SessionStore {
         });
       } else if (runtimeRun.state !== input.outcome) {
         throw new Error("Runtime Run terminal does not match Server terminal");
+      } else if (!runtimeRun.checkpoint) {
+        const runtimeStore = new InMemorySessionStore([currentRuntime]);
+        runtime = await runtimeStore.commit({
+          sessionId: input.sessionId,
+          expectedVersion: currentRuntime.version,
+          mutations: [{
+            type: "recordCheckpoint",
+            runId: input.runId,
+            messages: current.transcript as unknown as readonly RuntimeJsonValue[],
+            continuationFingerprint:
+              `server-transcript:${_sha256(JSON.stringify(current.transcript))}`
+          }]
+        });
       }
       const authoritativeRun = runtime.snapshot.runs.find(
         run => run.id === input.runId
@@ -1247,6 +1261,7 @@ function _validEventMap(value: unknown, runs: readonly unknown[]): boolean {
         || (event.event === "control" && (
           _validPersistedTerminal(event.data)
           || _validPersistedToolApprovalRequired(event.data)
+          || _validPersistedSessionBudgetRequired(event.data)
         ))
       ));
     if (!valid) {
@@ -1369,6 +1384,16 @@ function _validPersistedToolApprovalRequired(value: unknown): boolean {
       && typeof approval.toolName === "string"
       && (approval.scope === "call" || approval.scope === "session")
       && (approval.reason === undefined || typeof approval.reason === "string"));
+}
+
+function _validPersistedSessionBudgetRequired(value: unknown): boolean {
+  return _isRecord(value)
+    && value.type === "sessionBudgetRequired"
+    && isRuntimeSessionBudgetWaitSnapshot(value.budget)
+    && value.budget.status === "waiting"
+    && _isRecord(value.session)
+    && _isRecord(value.session.snapshot)
+    && typeof value.session.snapshot.id === "string";
 }
 
 function _assertTerminalAuthority(envelope: ServerSessionEnvelope): void {

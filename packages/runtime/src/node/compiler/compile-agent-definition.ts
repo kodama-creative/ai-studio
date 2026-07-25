@@ -26,6 +26,7 @@ export function compileAgentDefinition(
       ? { dynamicModel: definition.model }
       : {}),
     ...(definition.modelOptions ? { modelOptions: definition.modelOptions } : {}),
+    ...(definition.limits ? { limits: definition.limits } : {}),
     ...(reasoning ? { reasoning } : {}),
     ...(definition.environment ? { environment: definition.environment } : {})
   };

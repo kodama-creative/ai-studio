@@ -20,7 +20,10 @@ import type {
   AgentServerRuntimeWorkingBase,
   ServerRunTerminalOutcome
 } from "@llm-space/runtime/client";
-import type { StoredRuntimeSession } from "@llm-space/runtime/harness";
+import type {
+  RuntimeSessionBudgetWaitSnapshot,
+  StoredRuntimeSession
+} from "@llm-space/runtime/harness";
 import type { SandboxProvider } from "@llm-space/runtime/server";
 
 import { LocalServerCredentialStore } from "./local-server-credential-store";
@@ -41,6 +44,10 @@ export interface EmbeddedLocalServerStatus {
 }
 
 export interface EmbeddedLocalServerRunCallbacks {
+  readonly onBudgetRequired: (
+    budget: RuntimeSessionBudgetWaitSnapshot,
+    session: StoredRuntimeSession
+  ) => void;
   readonly onEvent: (event: AgentEvent) => void;
   readonly onLineage: (lineage: ThreadServerRunLineage) => void;
   readonly onStatus: (status: EmbeddedLocalServerStatus) => void;
@@ -285,6 +292,12 @@ export class EmbeddedLocalServerManager {
             state: "ready",
             message: `${event.data.approvals.length} tool approval${event.data.approvals.length === 1 ? "" : "s"} required`
           });
+        } else if (event.data.type === "sessionBudgetRequired") {
+          callbacks.onBudgetRequired(event.data.budget, event.data.session);
+          callbacks.onStatus({
+            state: "ready",
+            message: "Session budget decision required"
+          });
         } else {
           terminalOutcome = event.data.outcome;
           terminalCode = event.data.code;
@@ -371,6 +384,40 @@ export class EmbeddedLocalServerManager {
       label: input.label,
       sessionId: credential.sessionId
     });
+  }
+
+  async decideSessionBudget(input: {
+    readonly decision: "freshWindow" | "stop";
+    readonly projectId: string;
+    readonly runId: string;
+    readonly threadId: string;
+  }): Promise<StoredRuntimeSession> {
+    const record = await this._options.externalAgentProjects.readThread(
+      input.projectId,
+      input.threadId
+    );
+    const profile = record.thread.runtimeProfile;
+    if (profile?.type !== "localServer" || !profile.serverSessionId) {
+      throw new Error("Thread is not bound to a Local Server Session.");
+    }
+    const credential = await this._credentials.get(
+      input.projectId,
+      input.threadId
+    );
+    if (credential?.sessionId !== profile.serverSessionId) {
+      throw new Error("Local Server continuation credential is unavailable.");
+    }
+    const managed = await this._server(
+      input.projectId,
+      profile.artifactFingerprint
+    );
+    const result = await managed.client.decideSessionBudget({
+      continuationToken: credential.continuationToken,
+      decision: input.decision,
+      runId: input.runId,
+      sessionId: credential.sessionId
+    });
+    return result.session;
   }
 
   async detachThread(projectId: string, threadId: string): Promise<void> {

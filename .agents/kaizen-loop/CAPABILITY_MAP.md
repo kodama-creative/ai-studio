@@ -503,6 +503,27 @@
 - Explicit non-goals: no provider billing reconciliation, quota enforcement, usage dashboard across workspaces, token estimation before sending, alerts/budgets, or non-LLM tool runtime cost model.
 - Visible gaps: no global usage dashboard, no context-window preflight, no evaluation cost-diff UI, no live paid-provider smoke in this loop, and no full keyboard/screen-reader audit of tooltip details yet.
 
+## Agent Session Token Budgets
+
+- Status: shipped V1
+- Freshness: confirmed
+- Last checked: 2026-07-25
+- Evidence:
+  - Fresh real Electrobun CEF evidence in `audits/2026-07-25-162558-session-token-budget-discovery/01-current-thread-usage-no-budget.png` shows provider-reported input/output usage on completed assistant steps but no authored limit, remaining-window summary, or reached state.
+  - `audits/2026-07-25-162558-session-token-budget-discovery/02-current-run-settings-no-budget.png` and current DOM inspection show Run settings contains only `Enable ReAct loop` and `Auto run tools`; the page contains no budget text or decision action.
+  - The 1280×800 CEF viewport, document, and body dimensions match exactly, and the console contains only Vite/React development information.
+  - ADR 0014 and `defineAgent({ limits })` expose independent positive-safe-integer-or-`false` input/output Session limits through normalized source, compiled artifacts, immutable Run configurations, and Direct/Sandbox/Server execution.
+  - Runtime Session schema V5 owns lifetime usage, dual fresh-window baselines, unmetered main-provider calls, append-only waits/decisions, and the `waitingForBudget` Run state under the existing Session Store CAS authority.
+  - Durable provider settlement records non-zero real input/output usage exactly once with the operation terminal; missing/all-zero usage contributes zero and is visibly unmetered. Compaction operations remain excluded.
+  - The Pi Agent Core 0.80.3 patch forwards its existing `shouldStopAfterTurn` hook through the stateful `Agent`, so crossing calls and complete approval/tool batches settle before the same Run parks and no second ReAct loop is introduced.
+  - Desktop Direct/Sandbox, embedded Local Server, and protected Server share one authenticated fresh-window/Stop protocol. Renderer data never supplies limits, usage, Session version, or Run authority.
+  - Desktop stores every valid trusted compiled Agent as a Bun-only closed bundle plus artifact descriptor. Active Runs select that bundle from the immutable Runtime Run configuration, so an A wait remains on A after source sync to B and Desktop restart; only a later new Run selects B. Missing or mismatched frozen bytes block without current-source fallback.
+  - Current real CEF evidence in `audits/2026-07-25-230642-session-token-budget-v1/` proves header usage, confirmations, same-Run grant, active-Run Stop, restart recovery, Run/Cmd+Enter focus, read-only history boundaries, no page overflow at 1280×800 and 900×700, and no application console error.
+  - Explicit Project Thread Duplicate creates a new Runtime Session for Direct, Sandbox, and Local Server profiles without copying budget, Run History, checkpoint/branch authority, or Server identity; budget handling itself never creates a Thread.
+- Boundary: Agent Project authors can declare independent input/output limits based only on settled main-provider usage. Runtime completes the crossing call and full tool batch, then blocks the first forbidden next provider dispatch until the user grants a fresh dual-axis window or stops the active Run. Totals, baselines, reached axes, decisions, unmetered calls, and the active Run's compiled Agent survive restart and remain Session-global across model changes, source sync, checkpoint restore, and branches.
+- Explicit non-goals: no estimated enforcement, cost/turn/tool/time/concurrency/schedule limits, auxiliary compaction-call accounting, ordinary Thread budgets, Thread-local overrides, provider quota guarantees, organization policy, subagent inheritance, or automatic Thread creation/reset.
+- Visible gaps: no Host-tightened general policy, parent/child budget aggregation, cost limits, live paid-provider audit, production migration tool, or full screen-reader matrix. The narrow Pi wrapper patch remains until upstream exposes the existing turn-stop hook.
+
 ## Tool Step Orchestration
 
 - Status: shipped manual, auto-once, ReAct, and durable approval paths

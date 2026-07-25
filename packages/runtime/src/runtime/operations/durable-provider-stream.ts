@@ -81,7 +81,8 @@ export function createDurableProviderStream(input: {
           await input.coordinator.settleProvider({
             operation: begun.operation,
             state: message.stopReason === "error" ? "failed" : "completed",
-            value: { type: "providerMessage", message }
+            value: { type: "providerMessage", message },
+            mainProviderUsage: _mainProviderUsage(message)
           });
           outer.push(event);
           return;
@@ -90,7 +91,8 @@ export function createDurableProviderStream(input: {
         await input.coordinator.settleProvider({
           operation: begun.operation,
           state: message.stopReason === "error" ? "failed" : "completed",
-          value: { type: "providerMessage", message }
+          value: { type: "providerMessage", message },
+          mainProviderUsage: _mainProviderUsage(message)
         });
         outer.push(
           message.stopReason === "error" || message.stopReason === "aborted"
@@ -120,6 +122,26 @@ export function createDurableProviderStream(input: {
     })();
     return outer;
   };
+}
+
+function _mainProviderUsage(message: AssistantMessage): {
+  input: number;
+  metered: boolean;
+  output: number;
+} {
+  const input = _tokenCount(message.usage?.input);
+  const output = _tokenCount(message.usage?.output);
+  return {
+    input,
+    output,
+    metered: input > 0 || output > 0
+  };
+}
+
+function _tokenCount(value: unknown): number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : 0;
 }
 
 function _replayedProviderStream(

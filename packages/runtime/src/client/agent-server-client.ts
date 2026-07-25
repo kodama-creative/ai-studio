@@ -5,6 +5,7 @@ import {
   type AgentServerRuntimeWorkingBase,
   type AgentServerSession,
   type AgentServerStreamEvent,
+  isRuntimeSessionBudgetWaitSnapshot,
   type JsonValue,
   type ServerRunTerminalOutcome
 } from "./server-protocol";
@@ -57,6 +58,18 @@ export interface AgentServerClient<TValue extends JsonValue = JsonValue> {
     readonly requestId: string;
     readonly schemaVersion: typeof AGENT_SERVER_PROTOCOL_SCHEMA_VERSION;
     readonly status: "resuming" | "waitingForApproval";
+  }>;
+  decideSessionBudget(options: {
+    readonly continuationToken: string;
+    readonly decision: "freshWindow" | "stop";
+    readonly runId: string;
+    readonly sessionId: string;
+    readonly signal?: AbortSignal;
+  }): Promise<{
+    readonly decision: "freshWindow" | "stop";
+    readonly schemaVersion: typeof AGENT_SERVER_PROTOCOL_SCHEMA_VERSION;
+    readonly session: StoredRuntimeSession;
+    readonly status: "resuming" | "stopped";
   }>;
   createSession(options?: {
     readonly continuationToken?: string;
@@ -111,6 +124,9 @@ type StreamRunInput = Parameters<AgentServerClient["streamRun"]>[0];
 type AbortRunInput = Parameters<AgentServerClient["abortRun"]>[0];
 type DecideToolApprovalInput = Parameters<
   AgentServerClient["decideToolApproval"]
+>[0];
+type DecideSessionBudgetInput = Parameters<
+  AgentServerClient["decideSessionBudget"]
 >[0];
 type RevokeContinuationInput = Parameters<
   AgentServerClient["revokeContinuation"]
@@ -183,6 +199,26 @@ export function createAgentServerClient<TValue extends JsonValue = JsonValue>(
         readonly requestId: string;
         readonly schemaVersion: 1;
         readonly status: "resuming" | "waitingForApproval";
+      }>(response, false);
+    },
+    async decideSessionBudget(input: DecideSessionBudgetInput) {
+      const response = await fetchImplementation(
+        `${baseUrl}/v1/sessions/${encodeURIComponent(input.sessionId)}/runs/${encodeURIComponent(input.runId)}/budget`,
+        {
+          method: "POST",
+          headers: await _headers(options.authorization, {
+            "content-type": "application/json",
+            "llm-space-continuation": input.continuationToken
+          }),
+          body: JSON.stringify({ decision: input.decision }),
+          signal: input.signal
+        }
+      );
+      return _jsonResponse<{
+        readonly decision: "freshWindow" | "stop";
+        readonly schemaVersion: 1;
+        readonly session: StoredRuntimeSession;
+        readonly status: "resuming" | "stopped";
       }>(response, false);
     },
     async createSession(
@@ -526,6 +562,7 @@ function _parseSseFrame(frame: string): AgentServerStreamEvent | null {
     (eventName === "control" && !(
       _validRunTerminal(parsedData)
       || _validToolApprovalRequired(parsedData)
+      || _validSessionBudgetRequired(parsedData)
     ))
     || (eventName === "pi" && !_validPiEvent(parsedData))
   ) {
@@ -678,6 +715,16 @@ function _validToolApprovalRequired(value: unknown): boolean {
       && typeof approval.toolName === "string"
       && (approval.scope === "call" || approval.scope === "session")
       && (approval.reason === undefined || typeof approval.reason === "string"));
+}
+
+function _validSessionBudgetRequired(value: unknown): boolean {
+  return _record(value)
+    && value.type === "sessionBudgetRequired"
+    && isRuntimeSessionBudgetWaitSnapshot(value.budget)
+    && value.budget.status === "waiting"
+    && _record(value.session)
+    && _record(value.session.snapshot)
+    && typeof value.session.snapshot.id === "string";
 }
 
 function _validStructuredOutput(value: unknown): boolean {
