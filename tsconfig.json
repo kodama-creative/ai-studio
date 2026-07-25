@@ -7,6 +7,7 @@
   },
   "include": [
     "packages/*/src",
-    "scripts"
+    "scripts",
+    "eslint.config.mts"
   ]
 }
