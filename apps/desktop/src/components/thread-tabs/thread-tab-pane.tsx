@@ -30,8 +30,15 @@ interface ThreadTabPaneProps {
 
 function _createRuntimeBridge(path: string) {
   let activeRuntimeSession: StoredRuntimeSession | undefined;
+  let phaseListener: ((phase: "compacting" | "idle") => void) | null = null;
   return {
     resolveCommittedRuntimeSession: () => activeRuntimeSession,
+    subscribeRuntimePhase(listener: (phase: "compacting" | "idle") => void) {
+      phaseListener = listener;
+      return () => {
+        if (phaseListener === listener) { phaseListener = null; }
+      };
+    },
     transport: createRpcTransport({
       runtime: () => {
         activeRuntimeSession = undefined;
@@ -43,6 +50,9 @@ function _createRuntimeBridge(path: string) {
       },
       onRuntimeSessionCommitted: session => {
         activeRuntimeSession = session;
+      },
+      onRuntimePhase: phase => {
+        phaseListener?.(phase);
       }
     })
   };
@@ -211,6 +221,7 @@ export function ThreadTabPane({
           runtimeBridge.resolveCommittedRuntimeSession
         }
         runtimeOwnsToolLoop
+        subscribeRuntimePhase={runtimeBridge.subscribeRuntimePhase}
         transport={runtimeBridge.transport}
       />
     </div>

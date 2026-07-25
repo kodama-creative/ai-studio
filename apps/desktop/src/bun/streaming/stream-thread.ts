@@ -281,6 +281,11 @@ export class StreamThreadController {
     ) {
       throw new Error("Local Server runtime is unavailable.");
     }
+    if (payload.request.action === "compact") {
+      throw new Error(
+        "Compact now is not available for Local Server Threads"
+      );
+    }
     const text = _localServerText(payload.request.context.messages.at(-1));
     let structuredOutputFailure:
       | "structured_output_invalid"
@@ -295,6 +300,9 @@ export class StreamThreadController {
         threadId: payload.runtime.threadId,
         signal,
         text,
+        ...(payload.runtime.workingBase
+          ? { workingBase: payload.runtime.workingBase }
+          : {}),
         ...(payload.request.outputContract
           ? { outputContract: payload.request.outputContract }
           : {})
@@ -317,7 +325,14 @@ export class StreamThreadController {
             status
           });
         },
-        onTerminal: (lineage, terminalOutcome, code) => {
+        onTerminal: (lineage, terminalOutcome, code, runtime) => {
+          if (runtime) {
+            send({
+              streamId: payload.streamId,
+              type: "runtimeSession",
+              runtimeSession: runtime.session
+            });
+          }
           send({
             streamId: payload.streamId,
             type: "localServerLineage",
@@ -477,6 +492,9 @@ export class StreamThreadController {
       systemPrompt: payload.request.context.systemPrompt,
       executionMode: payload.runtime.executionMode,
       streamFn: this._streamFn(payload),
+      onPhase: phase => {
+        send({ streamId: payload.streamId, type: "runtimePhase", phase });
+      },
       ...(runtimeState && activeRunId
         ? {
           sessionStore: runtimeState.sessionStore,
@@ -504,9 +522,11 @@ export class StreamThreadController {
       session,
       send,
       onAbort,
-      resumesApproval
-        ? async () => session.resumeApprovedTools()
-        : async () => session.continue()
+      payload.request.action === "compact"
+        ? async () => { await session.compactContext(); }
+        : resumesApproval
+          ? async () => session.resumeApprovedTools()
+          : async () => session.continue()
     );
   }
 
@@ -693,6 +713,9 @@ export class StreamThreadController {
         systemPrompt: payload.request.context.systemPrompt,
         executionMode: payload.runtime.executionMode,
         streamFn: this._streamFn(payload),
+        onPhase: phase => {
+          send({ streamId: payload.streamId, type: "runtimePhase", phase });
+        },
         ...(sandbox ? { sandbox } : {})
       }
     );
@@ -724,9 +747,11 @@ export class StreamThreadController {
       session,
       send,
       onAbort,
-      resumesApproval
-        ? async () => session.resumeApprovedTools()
-        : async () => session.continue()
+      payload.request.action === "compact"
+        ? async () => { await session.compactContext(); }
+        : resumesApproval
+          ? async () => session.resumeApprovedTools()
+          : async () => session.continue()
     );
   }
 

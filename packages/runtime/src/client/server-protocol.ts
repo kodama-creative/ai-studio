@@ -1,5 +1,7 @@
 import type { AgentEvent } from "@earendil-works/pi-agent-core";
 
+import type { StoredRuntimeSession } from "../runtime/harness/session-store";
+
 export const AGENT_SERVER_PROTOCOL_SCHEMA_VERSION = 1 as const;
 
 export type JsonValue =
@@ -22,6 +24,17 @@ export type ServerRunTerminalOutcome =
   | "failed"
   | "outcomeUnknown";
 
+export interface AgentServerRuntimeWorkingBase {
+  readonly branchId: string;
+  readonly checkpointId: string;
+}
+
+export interface AgentServerRuntimeProjection {
+  readonly branchId: string;
+  readonly checkpointId: string;
+  readonly session: StoredRuntimeSession;
+}
+
 export type ServerControlEvent<TValue extends JsonValue = JsonValue> =
   | {
     readonly approvals: ReadonlyArray<{
@@ -36,6 +49,7 @@ export type ServerControlEvent<TValue extends JsonValue = JsonValue> =
   | {
     readonly code?: string;
     readonly outcome: ServerRunTerminalOutcome;
+    readonly runtime?: AgentServerRuntimeProjection;
     readonly structuredOutput?: ServerStructuredOutput<TValue>;
     readonly type: "runTerminal";
   }

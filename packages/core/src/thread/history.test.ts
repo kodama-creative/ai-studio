@@ -290,6 +290,11 @@ describe("run history persistence", () => {
 
   test("keeps Runtime checkpoint identity while de-nesting Session metadata", () => {
     const runtimeSession = { version: 1, opaque: true };
+    const runtimeWorkingBase = {
+      sessionId: "session-one",
+      branchId: "branch-one",
+      checkpointId: "checkpoint-one"
+    };
     const next = recordRun(
       [],
       {
@@ -314,7 +319,7 @@ describe("run history persistence", () => {
       }
     );
     const thread = withRunMetadata(
-      { runtimeSession, runHistory: next },
+      { runtimeSession, runtimeWorkingBase, runHistory: next },
       { runHistory: next }
     );
 
@@ -323,7 +328,11 @@ describe("run history persistence", () => {
     expect(next[0]?.thread.agentRuntime?.snapshot).toBe("snapshot-one");
     expect(next[0]?.thread).not.toHaveProperty("runtimeSession");
     expect(thread.runtimeSession).toBe(runtimeSession);
+    expect(thread.runtimeWorkingBase).toBe(runtimeWorkingBase);
     expect(thread.runHistory?.[0]?.thread).not.toHaveProperty("runtimeSession");
+    expect(thread.runHistory?.[0]?.thread).not.toHaveProperty(
+      "runtimeWorkingBase"
+    );
   });
 
   test("retains validated structured output and failure terminals", () => {

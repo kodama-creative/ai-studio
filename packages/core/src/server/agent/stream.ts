@@ -54,6 +54,12 @@ export async function* streamAgent(
 ): AsyncGenerator<AgentEvent> {
   const { models, signal, getApiKey, getBaseUrl, getHeaders } = options;
 
+  if (request.action === "compact") {
+    throw new Error(
+      "Explicit context compaction requires a Runtime Session Host"
+    );
+  }
+
   if (request.context.messages.length > 0) {
     const lastMessage = request.context.messages.at(-1);
     if (lastMessage?.role === "assistant") {

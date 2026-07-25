@@ -143,6 +143,9 @@ const _ProjectThreadPane = function ProjectThreadPane({
   const projectRef = useRef(project);
   const activeRunProvenance = useRef<ThreadAgentRuntimeProvenance | null>(null);
   const activeRuntimeSession = useRef<StoredRuntimeSession | null>(null);
+  const runtimePhaseListener = useRef<((
+    phase: "compacting" | "idle"
+  ) => void) | null>(null);
   const activeSandboxAttachmentMessageIds = useRef<readonly string[]>([]);
   const activeServerRun = useRef<{
     lineage: ThreadServerRunLineage;
@@ -156,12 +159,29 @@ const _ProjectThreadPane = function ProjectThreadPane({
         runtime: () => {
           activeRuntimeSession.current = null;
           const current = recordRef.current?.thread;
-          return current
-            && getThreadRuntimeProfile(current).type === "localServer"
+          const profile = current ? getThreadRuntimeProfile(current) : null;
+          const workingBase = current?.runtimeWorkingBase;
+          let selectedWorkingBase:
+            | { branchId: string; checkpointId: string; }
+            | null = null;
+          if (
+            profile?.type === "localServer"
+            && workingBase
+            && workingBase.sessionId === profile.serverSessionId
+          ) {
+            selectedWorkingBase = {
+              branchId: workingBase.branchId,
+              checkpointId: workingBase.checkpointId
+            };
+          }
+          return current && profile?.type === "localServer"
             ? {
               type: "localServerAgentProject" as const,
               projectId,
-              threadId
+              threadId,
+              ...(selectedWorkingBase
+                ? { workingBase: selectedWorkingBase }
+                : {})
             }
             : {
               type: "agentProject" as const,
@@ -187,6 +207,9 @@ const _ProjectThreadPane = function ProjectThreadPane({
         onRuntimeSessionCommitted: session => {
           activeRuntimeSession.current = session;
         },
+        onRuntimePhase: phase => {
+          runtimePhaseListener.current?.(phase);
+        },
         onLocalServerStatus: status => {
           setRuntimeStatus(status);
         },
@@ -194,6 +217,30 @@ const _ProjectThreadPane = function ProjectThreadPane({
           activeServerRun.current = { lineage, terminalOutcome };
         }
       }),
+    [projectId, threadId]
+  );
+  const subscribeRuntimePhase = useCallback(
+    (listener: (phase: "compacting" | "idle") => void) => {
+      runtimePhaseListener.current = listener;
+      return () => {
+        if (runtimePhaseListener.current === listener) {
+          runtimePhaseListener.current = null;
+        }
+      };
+    },
+    []
+  );
+  const renameRuntimeBranch = useCallback(
+    async (branchId: string, label: string) => {
+      const committed = await externalAgentProjects.renameRuntimeBranch(
+        projectId,
+        threadId,
+        branchId,
+        label
+      );
+      activeRuntimeSession.current = committed;
+      return committed;
+    },
     [projectId, threadId]
   );
   const projectToolExecutor: ToolExecutor = useCallback(
@@ -619,8 +666,21 @@ const _ProjectThreadPane = function ProjectThreadPane({
       const selectedOutput = projectRef.current?.outputs.find(
         output => output.name === recordRef.current?.thread.outputContract
       );
+      const runtime = activeRuntimeSession.current;
+      const runtimeRun = runtime?.snapshot.runs.find(
+        run => run.id === serverRun.lineage.runId
+      );
+      const checkpoint = runtime?.snapshot.history.checkpoints
+        .filter(item => item.runId === runtimeRun?.id)
+        .at(-1);
       return {
         runId: serverRun.lineage.runId,
+        ...(checkpoint
+          ? {
+            branchId: checkpoint.branchId,
+            checkpointId: checkpoint.id
+          }
+          : {}),
         state,
         checkpointOrder: 1,
         profile: "localServer" as const,
@@ -900,11 +960,10 @@ const _ProjectThreadPane = function ProjectThreadPane({
         persistSettledThread={persistSettledThread}
         prepareRunSnapshot={prepareRunSnapshot}
         preserveSavedModel
+        renameRuntimeBranch={localServer ? renameRuntimeBranch : undefined}
         renderPromptVariables={!localServer}
         resolveCommittedRuntimeSession={
-          localServer
-            ? undefined
-            : () => activeRuntimeSession.current ?? undefined
+          () => activeRuntimeSession.current ?? undefined
         }
         resolveTransportRuntimeCheckpoint={
           localServer ? resolveTransportRuntimeCheckpoint : undefined
@@ -921,6 +980,7 @@ const _ProjectThreadPane = function ProjectThreadPane({
         runSettingsReadonly={localServer}
         runtimeOwnsToolLoop
         stageSandboxFiles={desktopSandbox ? stageSandboxFiles : undefined}
+        subscribeRuntimePhase={subscribeRuntimePhase}
         title={record.thread.title ?? "untitled"}
         toolExecutor={projectToolExecutor}
         toolsReadonly

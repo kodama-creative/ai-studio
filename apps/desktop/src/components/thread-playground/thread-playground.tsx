@@ -2,6 +2,7 @@
 
 import {
   ChevronDownIcon,
+  GitBranchIcon,
   HistoryIcon,
   PlayIcon,
   Redo2Icon,
@@ -90,6 +91,8 @@ import {
 import { Spinner } from "../ui/spinner";
 import { Switch } from "../ui/switch";
 
+import type { ThreadRuntimePhase } from "./stores/thread-store";
+
 export interface ThreadPlaygroundProps {
   readonly className?: string;
   readonly path: string;
@@ -123,9 +126,19 @@ export interface ThreadPlaygroundProps {
   /** The streaming transport used by runs (e.g. HTTP or Electrobun RPC). */
   readonly transport: AgentTransport;
 
+  /** Subscribe to Host phases that occur before ordinary Pi stream events. */
+  readonly subscribeRuntimePhase?: (
+    listener: (phase: ThreadRuntimePhase) => void
+  ) => () => void;
+
   readonly decideToolApproval?: (
     requestId: string,
     decision: "approved" | "denied"
+  ) => Promise<StoredRuntimeSession>;
+
+  readonly renameRuntimeBranch?: (
+    branchId: string,
+    label: string
   ) => Promise<StoredRuntimeSession>;
 
   /** Execute a tool with owning-surface context such as a Project Thread id. */
@@ -229,7 +242,9 @@ const _ThreadPlayground = function ThreadPlayground({
   preserveSavedModel,
   prepareRunSnapshot,
   decideToolApproval,
+  renameRuntimeBranch,
   persistSettledThread,
+  subscribeRuntimePhase,
   loadPromptSkills,
   externalUpdate,
   onChange,
@@ -256,6 +271,7 @@ const _ThreadPlayground = function ThreadPlayground({
     createThreadStore(initialValue, {
       transport,
       decideToolApproval,
+      renameRuntimeBranchAuthority: renameRuntimeBranch,
       resolveModel: saved =>
         (preserveSavedModel && saved
           ? saved
@@ -289,6 +305,9 @@ const _ThreadPlayground = function ThreadPlayground({
         prepareRunSnapshotRef.current?.(thread) ?? thread
     }));
   const appliedExternalRevision = useRef(0);
+  useEffect(() => subscribeRuntimePhase?.(phase => {
+    store.getState().setRuntimePhase(phase);
+  }), [store, subscribeRuntimePhase]);
   useEffect(() => {
     if (
       !externalUpdate
@@ -321,6 +340,7 @@ const _ThreadPlayground = function ThreadPlayground({
       <ToolExecutionProvider execute={toolExecutor}>
         <ThreadStoreContext.Provider value={store}>
           <ThreadPlaygroundContent
+            compactNowAvailable={!transportOwnsRuntimeRun}
             {...props}
             preserveSavedModel={preserveSavedModel}
           />
@@ -334,6 +354,7 @@ const _ThreadPlayground = function ThreadPlayground({
 const RUN_HISTORY_PANEL_SIZE = "16rem";
 
 function ThreadPlaygroundContent({
+  compactNowAvailable,
   className,
   path,
   title: titleFromProps,
@@ -353,7 +374,7 @@ function ThreadPlaygroundContent({
   outputDefinitions,
   outputReadonly = configurationReadonly,
   onOpenProjectTool
-}: Omit<
+}: { readonly compactNowAvailable: boolean; } & Omit<
   ThreadPlaygroundProps,
   | "externalUpdate"
   | "initialValue"
@@ -365,12 +386,49 @@ function ThreadPlaygroundContent({
 >) {
   const containerRef = useRef<HTMLDivElement>(null);
   const status = useThreadStore(s => s.status);
+  const runtimePhase = useThreadStore(s => s.runtimePhase);
   const savedModel = useThreadStore(s => s.thread.model);
   const fallbackModel = useFirstAvailableModel();
   // A thread can run once a model resolves (its own, or the first available).
   const hasModel = Boolean(savedModel ?? fallbackModel);
   const undoable = useThreadStore(s => canUndo(s.changeHistory));
   const redoable = useThreadStore(s => canRedo(s.changeHistory));
+  const runtimeWorkingBase = useThreadStore(
+    s => s.thread.runtimeWorkingBase
+  );
+  const persistedRuntimeSession = useThreadStore(
+    s => s.thread.runtimeSession
+  );
+  const workingBaseView = useMemo(() => {
+    const session = persistedRuntimeSession as
+      | StoredRuntimeSession
+      | undefined;
+    if (
+      session?.snapshot.schemaVersion !== 4
+      || runtimeWorkingBase?.sessionId !== session.snapshot.id
+    ) {
+      return null;
+    }
+    const history = session.snapshot.history;
+    const workingBranch = history.branches.find(
+      branch => branch.id === runtimeWorkingBase.branchId
+    );
+    const workingCheckpoint = history.checkpoints.find(
+      checkpoint => checkpoint.id === runtimeWorkingBase.checkpointId
+    );
+    const currentBranch = history.branches.find(
+      branch => branch.id === history.currentBranchId
+    );
+    if (!workingBranch || !workingCheckpoint || !currentBranch) { return null; }
+    return {
+      label: workingBranch.label,
+      checkpointOrder: workingCheckpoint.order,
+      diverged: runtimeWorkingBase.branchId !== history.currentBranchId
+        || runtimeWorkingBase.checkpointId !== history.currentCheckpointId,
+      currentBranchId: currentBranch.id,
+      currentCheckpointId: history.currentCheckpointId
+    };
+  }, [persistedRuntimeSession, runtimeWorkingBase]);
   const { effectiveAutoRunTools, reactLoop, setAutoRunTools, setReactLoop } =
     useRunMode();
   const {
@@ -378,6 +436,7 @@ function ThreadPlaygroundContent({
     addMessageSandboxFiles,
     redo,
     run,
+    restoreRuntimeCheckpoint,
     syncTitle,
     undo
   } = useThreadStoreActions();
@@ -396,6 +455,17 @@ function ThreadPlaygroundContent({
     if (runDisabled) { return; }
     await run();
   }, [run, runDisabled]);
+  const returnToCurrent = useCallback(() => {
+    if (
+      workingBaseView?.currentCheckpointId
+      && workingBaseView.currentBranchId
+    ) {
+      restoreRuntimeCheckpoint(
+        workingBaseView.currentBranchId,
+        workingBaseView.currentCheckpointId
+      );
+    }
+  }, [restoreRuntimeCheckpoint, workingBaseView]);
   // Expose run as a command, but only from the active tab so a global
   // `runThread` targets it (and no-ops when no tab is active). Skip while
   // already running to avoid run()'s "already running" throw.
@@ -528,8 +598,12 @@ function ThreadPlaygroundContent({
                   content={
                     <div>
                       {status === "running"
-                        ? "Stop running"
-                        : "Run this thread"}
+                        ? runtimePhase === "compacting"
+                          ? "Compacting context…"
+                          : "Stop running"
+                        : workingBaseView
+                          ? `Run from ${workingBaseView.label} · checkpoint ${workingBaseView.checkpointOrder}`
+                          : "Run this thread"}
                       <KbdGroup>
                         <Kbd className="text-foreground!">⌘ Enter</Kbd>
                       </KbdGroup>
@@ -556,7 +630,11 @@ function ThreadPlaygroundContent({
                       : (
                         <PlayIcon className="size-3" />
                       )}
-                    {status === "running" ? "Stop" : "Run"}
+                    {status === "running"
+                      ? runtimePhase === "compacting"
+                        ? "Compacting context…"
+                        : "Stop"
+                      : "Run"}
                   </Button>
                 </Tooltip>
                 {!runSettingsReadonly
@@ -617,6 +695,22 @@ function ThreadPlaygroundContent({
               </ButtonGroup>
             </div>
           </header>
+          {status === "idle" && workingBaseView?.diverged ? (
+            <div className="border-amber-500/25 bg-amber-500/10 text-amber-100 flex shrink-0 items-center gap-2 border-b px-3 py-2 text-xs">
+              <GitBranchIcon className="size-3.5 shrink-0" />
+              <span className="min-w-0 flex-1 truncate">
+                Working from {workingBaseView.label} · checkpoint {workingBaseView.checkpointOrder} — running will create a new branch
+              </span>
+              <Button
+                className="h-7 shrink-0 px-2 text-xs"
+                onClick={returnToCurrent}
+                size="sm"
+                variant="ghost"
+              >
+                Return to current
+              </Button>
+            </div>
+          ) : null}
           <ResizablePanelGroup
             className="flex min-h-0 grow"
             orientation="horizontal"
@@ -711,6 +805,7 @@ function ThreadPlaygroundContent({
           panelRef={runHistoryPanelRef}
         >
           <RunHistoryListView
+            compactNowAvailable={compactNowAvailable}
             inspectRunRequest={inspectRunRequest}
             onClose={closeHistory}
           />

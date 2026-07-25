@@ -16,6 +16,7 @@ import type {
 
 export async function* streamThread(
   args: {
+    action?: "compact";
     context: ThreadContext;
     model: ModelConfig;
     outputContract?: string;
@@ -27,7 +28,10 @@ export async function* streamThread(
     transport?: AgentTransport;
   } = {}
 ): AsyncGenerator<AgentEvent> {
-  if (!isRunnableConversation(args.context.messages)) {
+  if (
+    args.action !== "compact"
+    && !isRunnableConversation(args.context.messages)
+  ) {
     throw new Error(RUN_LAST_MESSAGE_ERROR);
   }
   const context = convertToPiContext(
@@ -35,6 +39,7 @@ export async function* streamThread(
     args.sandboxAttachments
   );
   const request: AgentStreamRequest = {
+    ...(args.action ? { action: args.action } : {}),
     model: {
       provider: args.model.provider,
       id: args.model.id

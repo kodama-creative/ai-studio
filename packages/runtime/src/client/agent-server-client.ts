@@ -2,11 +2,14 @@ import {
   AGENT_SERVER_PROTOCOL_SCHEMA_VERSION,
   type AgentServerContinuation,
   type AgentServerRun,
+  type AgentServerRuntimeWorkingBase,
   type AgentServerSession,
   type AgentServerStreamEvent,
   type JsonValue,
   type ServerRunTerminalOutcome
 } from "./server-protocol";
+
+import type { StoredRuntimeSession } from "../runtime/harness/session-store";
 
 const DEFAULT_RETRY_CAP_MS = 5_000;
 const PI_EVENT_TYPES = new Set([
@@ -67,7 +70,15 @@ export interface AgentServerClient<TValue extends JsonValue = JsonValue> {
     readonly sessionId: string;
     readonly signal?: AbortSignal;
     readonly text: string;
+    readonly workingBase?: AgentServerRuntimeWorkingBase;
   }): Promise<AgentServerRun>;
+  renameBranch(options: {
+    readonly branchId: string;
+    readonly continuationToken: string;
+    readonly label: string;
+    readonly sessionId: string;
+    readonly signal?: AbortSignal;
+  }): Promise<StoredRuntimeSession>;
   revokeContinuation(options: {
     readonly continuationToken: string;
     readonly sessionId: string;
@@ -104,6 +115,7 @@ type DecideToolApprovalInput = Parameters<
 type RevokeContinuationInput = Parameters<
   AgentServerClient["revokeContinuation"]
 >[0];
+type RenameBranchInput = Parameters<AgentServerClient["renameBranch"]>[0];
 type RotateContinuationInput = Parameters<
   AgentServerClient["rotateContinuation"]
 >[0];
@@ -203,6 +215,7 @@ export function createAgentServerClient<TValue extends JsonValue = JsonValue>(
           }),
           body: JSON.stringify({
             input: { type: "text", text: input.text },
+            ...(input.workingBase ? { workingBase: input.workingBase } : {}),
             ...(input.outputContract
               ? { outputContract: input.outputContract }
               : {})
@@ -211,6 +224,21 @@ export function createAgentServerClient<TValue extends JsonValue = JsonValue>(
         }
       );
       return _jsonResponse<AgentServerRun>(response);
+    },
+    async renameBranch(input: RenameBranchInput) {
+      const response = await fetchImplementation(
+        `${baseUrl}/v1/sessions/${encodeURIComponent(input.sessionId)}/branches/${encodeURIComponent(input.branchId)}`,
+        {
+          method: "POST",
+          headers: await _headers(options.authorization, {
+            "content-type": "application/json",
+            "llm-space-continuation": input.continuationToken
+          }),
+          body: JSON.stringify({ label: input.label }),
+          signal: input.signal
+        }
+      );
+      return _jsonResponse<StoredRuntimeSession>(response, false);
     },
     async revokeContinuation(input: RevokeContinuationInput): Promise<void> {
       const response = await fetchImplementation(

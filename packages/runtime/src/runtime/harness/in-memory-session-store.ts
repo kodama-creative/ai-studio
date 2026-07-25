@@ -16,8 +16,22 @@ import {
 } from "./durable-tool-approval";
 import { immutableSnapshot } from "./immutable-snapshot";
 import {
+  emptyRuntimeHistory,
+  MAX_RUNTIME_BRANCH_LABEL_LENGTH,
+  RUNTIME_HISTORY_SCHEMA_VERSION,
+  runtimeBranchContainsCheckpoint,
+  type RuntimeBranchSnapshot,
+  type RuntimeCheckpointSnapshot,
+  runtimeEntryIsAncestor,
+  runtimeHistoryCheckpointPath,
+  type RuntimeHistoryMessageEntrySnapshot,
+  runtimeHistoryMessagePath,
+  type RuntimeHistorySnapshot
+} from "./runtime-history";
+import {
   isTerminalRuntimeRunState,
   RUNTIME_RUN_STATES,
+  type RuntimeJsonValue,
   type RuntimeRunSnapshot,
   type RuntimeRunState,
   transitionRuntimeRun
@@ -81,6 +95,7 @@ export class InMemorySessionStore implements SessionStore {
       await _assertInstructionSnapshotIntegrity(stored.snapshot);
       await _assertCapabilitySnapshotIntegrity(stored.snapshot);
       await _assertOperationReplayIntegrity(stored.snapshot);
+      await _assertRuntimeHistoryIntegrity(stored.snapshot.history);
     }
     return Promise.resolve(stored ? immutableSnapshot(stored) : null);
   }
@@ -109,6 +124,17 @@ export class InMemorySessionStore implements SessionStore {
       if (mutation.type === "settleOperation" && mutation.replay) {
         await _assertReplayEnvelopeIntegrity(mutation.replay);
       }
+      if (mutation.type === "recordCompaction") {
+        _assertSha256(
+          "Compaction summary fingerprint",
+          mutation.summaryFingerprint
+        );
+        if (mutation.summaryFingerprint !== await sha256(mutation.summary)) {
+          throw new SessionStoreInvariantError(
+            "Compaction summary fingerprint does not match its content"
+          );
+        }
+      }
     }
 
     let current = this._sessions.get(input.sessionId);
@@ -116,6 +142,7 @@ export class InMemorySessionStore implements SessionStore {
       await _assertInstructionSnapshotIntegrity(current.snapshot);
       await _assertCapabilitySnapshotIntegrity(current.snapshot);
       await _assertOperationReplayIntegrity(current.snapshot);
+      await _assertRuntimeHistoryIntegrity(current.snapshot.history);
       current = this._sessions.get(input.sessionId);
     }
     const actualVersion = current?.version ?? null;
@@ -134,6 +161,7 @@ export class InMemorySessionStore implements SessionStore {
         schemaVersion: RUNTIME_SESSION_SCHEMA_VERSION,
         id: input.sessionId,
         activeRunId: null,
+        history: emptyRuntimeHistory(),
         runs: []
       };
     const configurations = new Map(
@@ -147,7 +175,7 @@ export class InMemorySessionStore implements SessionStore {
     ]);
 
     for (const mutation of input.mutations) {
-      _applyMutation({
+      await _applyMutation({
         configurationById: configurations,
         journal,
         mutation,
@@ -163,12 +191,22 @@ export class InMemorySessionStore implements SessionStore {
       journal
     });
     _assertStoredSession(stored);
+    await _assertRuntimeHistoryIntegrity(stored.snapshot.history);
+    const finalActualVersion = this._sessions.get(input.sessionId)?.version
+      ?? null;
+    if (finalActualVersion !== actualVersion) {
+      throw new SessionStoreConflictError(
+        input.sessionId,
+        input.expectedVersion,
+        finalActualVersion
+      );
+    }
     this._sessions.set(input.sessionId, stored);
     return Promise.resolve(immutableSnapshot(stored));
   }
 }
 
-function _applyMutation({
+async function _applyMutation({
   configurationById,
   journal,
   mutation,
@@ -180,9 +218,9 @@ function _applyMutation({
   mutation: RuntimeSessionMutation;
   sessionVersion: number;
   snapshot: RuntimeSessionSnapshot;
-}): void {
+}): Promise<void> {
   if (mutation.type === "startRun") {
-    _startRun({
+    await _startRun({
       configurationById,
       journal,
       mutation,
@@ -235,7 +273,21 @@ function _applyMutation({
     _staleToolApproval({ journal, mutation, sessionVersion, snapshot });
     return;
   }
-  _recordCheckpoint({ journal, mutation, sessionVersion, snapshot });
+  if (mutation.type === "renameBranch") {
+    _renameBranch({ journal, mutation, sessionVersion, snapshot });
+    return;
+  }
+  if (mutation.type === "recordCompaction") {
+    _recordCompaction({
+      configurationById,
+      journal,
+      mutation,
+      sessionVersion,
+      snapshot
+    });
+    return;
+  }
+  await _recordCheckpoint({ journal, mutation, sessionVersion, snapshot });
 }
 
 function _requestToolApproval({
@@ -922,7 +974,180 @@ function _replaceState({
   });
 }
 
-function _startRun({
+function _renameBranch({
+  journal,
+  mutation,
+  sessionVersion,
+  snapshot
+}: {
+  journal: RuntimeRunJournalEntry[];
+  mutation: Extract<RuntimeSessionMutation, { type: "renameBranch"; }>;
+  sessionVersion: number;
+  snapshot: RuntimeSessionSnapshot;
+}): void {
+  _assertId("Runtime branch", mutation.branchId);
+  const label = mutation.label.trim();
+  if (
+    label.length === 0
+    || label.length > MAX_RUNTIME_BRANCH_LABEL_LENGTH
+  ) {
+    throw new SessionStoreInvariantError(
+      `Runtime branch labels must contain 1-${MAX_RUNTIME_BRANCH_LABEL_LENGTH} characters`
+    );
+  }
+  const history = snapshot.history;
+  const branchIndex = history.branches.findIndex(
+    branch => branch.id === mutation.branchId
+  );
+  const branch = history.branches[branchIndex];
+  if (!branch) {
+    throw new SessionStoreInvariantError(
+      `Runtime branch ${mutation.branchId} does not exist`
+    );
+  }
+  const normalized = label.toLocaleLowerCase("en-US");
+  if (history.branches.some(candidate =>
+    candidate.id !== branch.id
+    && candidate.label.toLocaleLowerCase("en-US") === normalized)) {
+    throw new SessionStoreInvariantError(
+      `Runtime branch label "${label}" already exists`
+    );
+  }
+  if (branch.label === label) { return; }
+  const branches = [...history.branches];
+  branches[branchIndex] = { ...branch, label };
+  _replaceHistory(snapshot, { ...history, branches });
+  journal.push({
+    type: "runtimeBranchRenamed",
+    sequence: journal.length + 1,
+    sessionVersion,
+    branchId: branch.id,
+    label
+  });
+}
+
+function _recordCompaction({
+  configurationById,
+  journal,
+  mutation,
+  sessionVersion,
+  snapshot
+}: {
+  configurationById: Map<string, RuntimeRunConfigurationSnapshot>;
+  journal: RuntimeRunJournalEntry[];
+  mutation: Extract<RuntimeSessionMutation, { type: "recordCompaction"; }>;
+  sessionVersion: number;
+  snapshot: RuntimeSessionSnapshot;
+}): void {
+  _assertId("Runtime Run", mutation.runId);
+  _assertSha256(
+    "Compaction request fingerprint",
+    mutation.requestFingerprint
+  );
+  _assertSha256(
+    "Compaction summary fingerprint",
+    mutation.summaryFingerprint
+  );
+  if (mutation.summary.trim().length === 0) {
+    throw new SessionStoreInvariantError(
+      "Runtime compaction summary must not be empty"
+    );
+  }
+  const numericEvidence = [
+    mutation.contextWindow,
+    mutation.tokensBefore,
+    mutation.tokensAfter,
+    mutation.usageTokens,
+    mutation.trailingTokens
+  ];
+  if (
+    numericEvidence.some(value => !Number.isSafeInteger(value) || value < 0)
+    || mutation.contextWindow === 0
+    || (
+      mutation.lastUsageMessageIndex !== null
+      && (
+        !Number.isSafeInteger(mutation.lastUsageMessageIndex)
+        || mutation.lastUsageMessageIndex < 0
+      )
+    )
+  ) {
+    throw new SessionStoreInvariantError(
+      "Runtime compaction token evidence is invalid"
+    );
+  }
+  const run = snapshot.runs.find(item => item.id === mutation.runId);
+  if (run?.id !== snapshot.activeRunId) {
+    throw new SessionStoreInvariantError(
+      `Runtime Run ${mutation.runId} is not active for compaction`
+    );
+  }
+  if (run.inputHeadEntryId === null) {
+    throw new SessionStoreInvariantError(
+      `Runtime Run ${run.id} has no messages to compact`
+    );
+  }
+  const history = snapshot.history;
+  if (history.compactions.some(item => item.runId === run.id)) {
+    throw new SessionStoreInvariantError(
+      `Runtime Run ${run.id} already recorded compaction`
+    );
+  }
+  if (
+    !runtimeEntryIsAncestor(
+      history,
+      mutation.firstKeptEntryId,
+      run.inputHeadEntryId
+    )
+  ) {
+    throw new SessionStoreInvariantError(
+      `Compaction first-kept entry ${mutation.firstKeptEntryId} is not on Runtime Run ${run.id}`
+    );
+  }
+  const compactionId = `${run.id}:compaction:1`;
+  const configuration = configurationById.get(run.configurationId);
+  if (!configuration) {
+    throw new SessionStoreInvariantError(
+      `Runtime Run ${run.id} configuration disappeared`
+    );
+  }
+  const compaction = {
+    id: compactionId,
+    runId: run.id,
+    branchId: run.branchId,
+    sourceCheckpointId: run.baseCheckpointId,
+    sourceHeadEntryId: run.inputHeadEntryId,
+    firstKeptEntryId: mutation.firstKeptEntryId,
+    summary: mutation.summary,
+    summaryFingerprint: mutation.summaryFingerprint,
+    requestFingerprint: mutation.requestFingerprint,
+    model: configuration.model,
+    contextWindow: mutation.contextWindow,
+    tokenEvidence: {
+      tokensBefore: mutation.tokensBefore,
+      tokensAfter: mutation.tokensAfter,
+      usageTokens: mutation.usageTokens,
+      trailingTokens: mutation.trailingTokens,
+      lastUsageMessageIndex: mutation.lastUsageMessageIndex
+    },
+    createdAt: Date.now()
+  };
+  _replaceHistory(snapshot, {
+    ...history,
+    compactions: [...history.compactions, compaction]
+  });
+  journal.push({
+    type: "runtimeCompactionRecorded",
+    sequence: journal.length + 1,
+    sessionVersion,
+    runId: run.id,
+    branchId: run.branchId,
+    compactionId,
+    firstKeptEntryId: mutation.firstKeptEntryId,
+    summaryFingerprint: mutation.summaryFingerprint
+  });
+}
+
+async function _startRun({
   configurationById,
   journal,
   mutation,
@@ -934,7 +1159,7 @@ function _startRun({
   mutation: Extract<RuntimeSessionMutation, { type: "startRun"; }>;
   sessionVersion: number;
   snapshot: RuntimeSessionSnapshot;
-}): void {
+}): Promise<void> {
   _assertId("Runtime Run", mutation.runId);
   _assertConfiguration(mutation.configuration);
   if (snapshot.activeRunId !== null) {
@@ -965,19 +1190,143 @@ function _startRun({
     );
   }
 
+  const history = snapshot.history;
+  let branch: RuntimeBranchSnapshot;
+  let createdBranch = false;
+  let baseCheckpointId: string | null;
+  if (history.branches.length === 0) {
+    if (mutation.workingBase) {
+      throw new SessionStoreInvariantError(
+        "The first Runtime Run cannot select an existing checkpoint"
+      );
+    }
+    branch = {
+      id: "branch-1",
+      ordinal: 1,
+      label: "Main",
+      parentCheckpointId: null,
+      headCheckpointId: null,
+      createdAt: Date.now()
+    };
+    baseCheckpointId = null;
+    createdBranch = true;
+  } else {
+    const selectedBranchId = mutation.workingBase?.branchId
+      ?? history.currentBranchId;
+    const selected = history.branches.find(
+      item => item.id === selectedBranchId
+    );
+    if (!selected) {
+      throw new SessionStoreInvariantError(
+        `Runtime working branch ${String(selectedBranchId)} does not exist`
+      );
+    }
+    baseCheckpointId = mutation.workingBase?.checkpointId
+      ?? history.currentCheckpointId;
+    if (
+      baseCheckpointId !== null
+      && !runtimeBranchContainsCheckpoint(
+        history,
+        selected.id,
+        baseCheckpointId
+      )
+    ) {
+      throw new SessionStoreInvariantError(
+        `Runtime checkpoint ${baseCheckpointId} is not on branch ${selected.id}`
+      );
+    }
+    if (selected.headCheckpointId === baseCheckpointId) {
+      branch = selected;
+    } else {
+      let ordinal = Math.max(
+        1,
+        ...history.branches.map(item => item.ordinal)
+      ) + 1;
+      const labels = new Set(
+        history.branches.map(item => item.label.toLocaleLowerCase("en-US"))
+      );
+      while (labels.has(`branch ${ordinal}`.toLocaleLowerCase("en-US"))) {
+        ordinal += 1;
+      }
+      branch = {
+        id: `branch-${ordinal}`,
+        ordinal,
+        label: `Branch ${ordinal}`,
+        parentCheckpointId: baseCheckpointId,
+        headCheckpointId: baseCheckpointId,
+        createdAt: Date.now()
+      };
+      createdBranch = true;
+    }
+  }
+
+  const baseCheckpoint = baseCheckpointId === null
+    ? null
+    : history.checkpoints.find(item => item.id === baseCheckpointId);
+  if (baseCheckpointId !== null && !baseCheckpoint) {
+    throw new SessionStoreInvariantError(
+      `Runtime Run ${mutation.runId} references missing base checkpoint ${baseCheckpointId}`
+    );
+  }
+  const appended = await _appendRuntimeMessages({
+    baseHeadEntryId: baseCheckpoint?.headEntryId ?? null,
+    history,
+    messages: mutation.messages,
+    runId: mutation.runId
+  });
+  const branches = createdBranch
+    ? [...history.branches, branch]
+    : history.branches;
+  _replaceHistory(snapshot, {
+    ...history,
+    branches,
+    entries: appended.entries,
+    currentBranchId: branch.id,
+    currentCheckpointId: baseCheckpointId
+  });
+
   const run: RuntimeRunSnapshot = {
+    baseCheckpointId,
+    branchId: branch.id,
     id: mutation.runId,
+    inputHeadEntryId: appended.headEntryId,
     sessionId: snapshot.id,
     configurationId: mutation.configuration.id,
     state: "runningModel"
   };
   (snapshot.runs as RuntimeRunSnapshot[]).push(run);
   (snapshot as { activeRunId: string | null; }).activeRunId = run.id;
+  if (createdBranch) {
+    journal.push({
+      type: "runtimeBranchCreated",
+      sequence: journal.length + 1,
+      sessionVersion,
+      runId: run.id,
+      branchId: branch.id,
+      createdBranchId: branch.id,
+      label: branch.label,
+      ordinal: branch.ordinal,
+      parentCheckpointId: branch.parentCheckpointId
+    });
+  }
+  journal.push({
+    type: "runtimeMessagesCommitted",
+    sequence: journal.length + 1,
+    sessionVersion,
+    runId: run.id,
+    branchId: branch.id,
+    boundaryId: `${run.id}:input`,
+    headEntryId: run.inputHeadEntryId,
+    messageEntryIds: appended.appendedEntryIds
+  });
   journal.push({
     type: "runStarted",
     sequence: journal.length + 1,
     sessionVersion,
     runId: run.id,
+    branchId: run.branchId,
+    baseCheckpointId: run.baseCheckpointId,
+    inputHeadEntryId: run.inputHeadEntryId,
     configurationId: run.configurationId,
     state: "runningModel"
   });
@@ -1045,7 +1394,7 @@ function _transitionRun({
   });
 }
 
-function _recordCheckpoint({
+async function _recordCheckpoint({
   journal,
   mutation,
   sessionVersion,
@@ -1055,7 +1404,7 @@ function _recordCheckpoint({
   mutation: Extract<RuntimeSessionMutation, { type: "recordCheckpoint"; }>;
   sessionVersion: number;
   snapshot: RuntimeSessionSnapshot;
-}): void {
+}): Promise<void> {
   _assertId("Runtime Run", mutation.runId);
   _assertId("Continuation fingerprint", mutation.continuationFingerprint);
   const runIndex = snapshot.runs.findIndex(run => run.id === mutation.runId);
@@ -1075,6 +1424,19 @@ function _recordCheckpoint({
       `Runtime Run ${run.id} already recorded its ${run.state} checkpoint`
     );
   }
+  const history = snapshot.history;
+  const previousRunCheckpoint = history.checkpoints
+    .filter(item => item.runId === run.id)
+    .at(-1);
+  const parentCheckpointId = previousRunCheckpoint?.id
+    ?? run.baseCheckpointId;
+  const appended = await _appendRuntimeMessages({
+    baseHeadEntryId: previousRunCheckpoint?.headEntryId
+      ?? run.inputHeadEntryId,
+    history,
+    messages: mutation.messages,
+    runId: run.id
+  });
   const checkpoint = {
     order: (run.checkpoint?.order ?? 0) + 1,
     state: run.state,
@@ -1084,6 +1446,39 @@ function _recordCheckpoint({
     ...run,
     checkpoint
   };
+  const historyCheckpoint = {
+    id: `${run.id}:checkpoint:${checkpoint.order}`,
+    runId: run.id,
+    branchId: run.branchId,
+    parentCheckpointId,
+    headEntryId: appended.headEntryId,
+    continuationFingerprint: checkpoint.continuationFingerprint,
+    state: checkpoint.state,
+    order: history.checkpoints.length + 1,
+    createdAt: Date.now()
+  };
+  const branchIndex = history.branches.findIndex(
+    branch => branch.id === run.branchId
+  );
+  const branch = history.branches[branchIndex];
+  if (!branch) {
+    throw new SessionStoreInvariantError(
+      `Runtime Run ${run.id} references missing branch ${run.branchId}`
+    );
+  }
+  const branches = [...history.branches];
+  branches[branchIndex] = {
+    ...branch,
+    headCheckpointId: historyCheckpoint.id
+  };
+  _replaceHistory(snapshot, {
+    ...history,
+    branches,
+    checkpoints: [...history.checkpoints, historyCheckpoint],
+    entries: appended.entries,
+    currentBranchId: run.branchId,
+    currentCheckpointId: historyCheckpoint.id
+  });
   if (run.state !== "waitingForApproval") {
     _checkpointActiveOperationSteps({
       journal,
@@ -1093,12 +1488,161 @@ function _recordCheckpoint({
     });
   }
   journal.push({
+    type: "runtimeMessagesCommitted",
+    sequence: journal.length + 1,
+    sessionVersion,
+    runId: run.id,
+    branchId: run.branchId,
+    boundaryId: historyCheckpoint.id,
+    headEntryId: historyCheckpoint.headEntryId,
+    messageEntryIds: appended.appendedEntryIds
+  });
+  journal.push({
     type: "runCheckpointRecorded",
     sequence: journal.length + 1,
     sessionVersion,
     runId: run.id,
+    branchId: run.branchId,
+    checkpointId: historyCheckpoint.id,
+    parentCheckpointId: historyCheckpoint.parentCheckpointId,
+    headEntryId: historyCheckpoint.headEntryId,
     ...checkpoint
   });
+}
+
+async function _appendRuntimeMessages(input: {
+  readonly baseHeadEntryId: string | null;
+  readonly history: RuntimeHistorySnapshot;
+  readonly messages: readonly RuntimeJsonValue[];
+  readonly runId: string;
+}): Promise<{
+  readonly appendedEntryIds: readonly string[];
+  readonly entries: readonly RuntimeHistoryMessageEntrySnapshot[];
+  readonly headEntryId: string | null;
+}> {
+  const prepared = await Promise.all(input.messages.map(async message => {
+    const value = _runtimeJsonSnapshot(message);
+    _assertRuntimeMessage(value);
+    const canonical = _canonicalJson(value);
+    return {
+      canonical,
+      fingerprint: await sha256(canonical),
+      message: value
+    };
+  }));
+  const basePath = runtimeHistoryMessagePath(
+    input.history,
+    input.baseHeadEntryId
+  );
+  let sharedCount = 0;
+  while (sharedCount < basePath.length && sharedCount < prepared.length) {
+    const previous = basePath[sharedCount];
+    const next = prepared[sharedCount];
+    if (!previous || !next) { break; }
+    if (
+      previous.fingerprint !== next.fingerprint
+      || _canonicalJson(previous.message) !== next.canonical
+    ) {
+      break;
+    }
+    sharedCount += 1;
+  }
+  const entries = [...input.history.entries];
+  const byId = new Map(entries.map(entry => [entry.id, entry]));
+  const appendedEntryIds: string[] = [];
+  let parentId = sharedCount === 0
+    ? null
+    : basePath[sharedCount - 1]?.id ?? null;
+  for (let index = sharedCount; index < prepared.length; index += 1) {
+    const value = prepared[index];
+    if (!value) {
+      throw new SessionStoreInvariantError(
+        "Runtime message preparation lost an entry"
+      );
+    }
+    const id = `message-${await sha256(
+      `${parentId ?? "root"}\n${value.fingerprint}`
+    )}`;
+    const existing = byId.get(id);
+    if (existing) {
+      if (
+        existing.parentId !== parentId
+        || existing.fingerprint !== value.fingerprint
+        || _canonicalJson(existing.message) !== value.canonical
+      ) {
+        throw new SessionStoreInvariantError(
+          `Runtime message entry ${id} has a content-address collision`
+        );
+      }
+    } else {
+      const entry: RuntimeHistoryMessageEntrySnapshot = {
+        id,
+        parentId,
+        runId: input.runId,
+        fingerprint: value.fingerprint,
+        message: value.message,
+        createdAt: Date.now()
+      };
+      entries.push(entry);
+      byId.set(id, entry);
+      appendedEntryIds.push(id);
+    }
+    parentId = id;
+  }
+  return {
+    entries,
+    appendedEntryIds,
+    headEntryId: prepared.length === 0
+      ? null
+      : sharedCount === prepared.length
+        ? basePath[prepared.length - 1]?.id ?? null
+        : parentId
+  };
+}
+
+function _runtimeJsonSnapshot(value: unknown): RuntimeJsonValue {
+  let serialized: string | undefined;
+  try {
+    serialized = JSON.stringify(value);
+  } catch (error) {
+    throw new SessionStoreInvariantError(
+      `Runtime history message is not serializable: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+  if (serialized === undefined) {
+    throw new SessionStoreInvariantError(
+      "Runtime history message is not JSON data"
+    );
+  }
+  return JSON.parse(serialized) as RuntimeJsonValue;
+}
+
+function _assertRuntimeMessage(
+  message: RuntimeJsonValue
+): void {
+  if (
+    !_isJsonValue(message, new WeakSet())
+    || message === null
+    || Array.isArray(message)
+    || typeof message !== "object"
+  ) {
+    throw new SessionStoreInvariantError(
+      "Runtime history messages must be JSON objects with a role"
+    );
+  }
+  const role = (message as { readonly role?: unknown; }).role;
+  if (typeof role !== "string" || role.trim().length === 0) {
+    throw new SessionStoreInvariantError(
+      "Runtime history messages must be JSON objects with a role"
+    );
+  }
+}
+
+function _replaceHistory(
+  snapshot: RuntimeSessionSnapshot,
+  history: RuntimeHistorySnapshot
+): void {
+  (snapshot as { history: RuntimeHistorySnapshot; }).history = history;
 }
 
 function _settleInterruptedOperationsForTerminal({
@@ -1247,6 +1791,356 @@ function _isJsonValue(value: unknown, ancestors: WeakSet<object>): boolean {
     .every(child => _isJsonValue(child, ancestors));
   ancestors.delete(value);
   return valid;
+}
+
+function _assertRuntimeHistory(
+  session: StoredRuntimeSession,
+  configurations: ReadonlyMap<string, RuntimeRunConfigurationSnapshot>
+): void {
+  const history = session.snapshot.history;
+  if (history.schemaVersion !== RUNTIME_HISTORY_SCHEMA_VERSION) {
+    throw new SessionStoreInvariantError(
+      `Unsupported Runtime history schema: ${String(history.schemaVersion)}`
+    );
+  }
+  const runs = new Map(session.snapshot.runs.map(run => [run.id, run]));
+  const entries = new Map<string, RuntimeHistoryMessageEntrySnapshot>();
+  for (const [index, entry] of history.entries.entries()) {
+    _assertId("Runtime message entry", entry.id);
+    _assertId("Runtime message Run", entry.runId);
+    _assertSha256("Runtime message fingerprint", entry.fingerprint);
+    _assertRuntimeTimestamp("Runtime message entry", entry.createdAt);
+    _assertRuntimeMessage(entry.message);
+    if (!runs.has(entry.runId)) {
+      throw new SessionStoreInvariantError(
+        `Runtime message entry ${entry.id} references missing Run ${entry.runId}`
+      );
+    }
+    if (entries.has(entry.id)) {
+      throw new SessionStoreInvariantError(
+        `Runtime message entry ${entry.id} is duplicated`
+      );
+    }
+    if (entry.parentId !== null) {
+      const parentIndex = history.entries.findIndex(
+        candidate => candidate.id === entry.parentId
+      );
+      if (parentIndex < 0 || parentIndex >= index) {
+        throw new SessionStoreInvariantError(
+          `Runtime message entry ${entry.id} has an invalid parent ${entry.parentId}`
+        );
+      }
+    }
+    entries.set(entry.id, entry);
+  }
+
+  const branchIds = new Set<string>();
+  const branchOrdinals = new Set<number>();
+  const branchLabels = new Set<string>();
+  let previousOrdinal = 0;
+  for (const [index, branch] of history.branches.entries()) {
+    _assertId("Runtime branch", branch.id);
+    _assertRuntimeTimestamp("Runtime branch", branch.createdAt);
+    if (
+      !Number.isSafeInteger(branch.ordinal)
+      || branch.ordinal <= previousOrdinal
+      || branch.ordinal < 1
+    ) {
+      throw new SessionStoreInvariantError(
+        `Runtime branch ${branch.id} has invalid creation ordinal`
+      );
+    }
+    previousOrdinal = branch.ordinal;
+    const label = branch.label.trim();
+    const normalizedLabel = label.toLocaleLowerCase("en-US");
+    if (
+      label !== branch.label
+      || label.length === 0
+      || label.length > MAX_RUNTIME_BRANCH_LABEL_LENGTH
+      || branchIds.has(branch.id)
+      || branchOrdinals.has(branch.ordinal)
+      || branchLabels.has(normalizedLabel)
+    ) {
+      throw new SessionStoreInvariantError(
+        `Runtime branch ${branch.id} has invalid identity or label`
+      );
+    }
+    if (
+      index === 0
+      && (
+        branch.id !== "branch-1"
+        || branch.ordinal !== 1
+        || branch.parentCheckpointId !== null
+      )
+    ) {
+      throw new SessionStoreInvariantError(
+        "The first Runtime branch must be branch-1 at the root"
+      );
+    }
+    branchIds.add(branch.id);
+    branchOrdinals.add(branch.ordinal);
+    branchLabels.add(normalizedLabel);
+  }
+
+  const checkpointIds = new Set<string>();
+  const checkpointsByRun = new Map<string, RuntimeCheckpointSnapshot[]>();
+  for (const [index, checkpoint] of history.checkpoints.entries()) {
+    _assertId("Runtime checkpoint", checkpoint.id);
+    _assertId("Runtime checkpoint branch", checkpoint.branchId);
+    _assertId("Runtime checkpoint Run", checkpoint.runId);
+    _assertId(
+      "Runtime checkpoint continuation",
+      checkpoint.continuationFingerprint
+    );
+    _assertRuntimeTimestamp("Runtime checkpoint", checkpoint.createdAt);
+    if (
+      checkpoint.order !== index + 1
+      || checkpointIds.has(checkpoint.id)
+      || !CHECKPOINT_STATES.has(checkpoint.state)
+    ) {
+      throw new SessionStoreInvariantError(
+        `Runtime checkpoint ${checkpoint.id} has invalid identity or order`
+      );
+    }
+    const run = runs.get(checkpoint.runId);
+    if (run?.branchId !== checkpoint.branchId) {
+      throw new SessionStoreInvariantError(
+        `Runtime checkpoint ${checkpoint.id} does not match its Run branch`
+      );
+    }
+    if (
+      checkpoint.headEntryId !== null
+      && !entries.has(checkpoint.headEntryId)
+    ) {
+      throw new SessionStoreInvariantError(
+        `Runtime checkpoint ${checkpoint.id} references missing message head ${checkpoint.headEntryId}`
+      );
+    }
+    if (
+      checkpoint.parentCheckpointId !== null
+      && !checkpointIds.has(checkpoint.parentCheckpointId)
+    ) {
+      throw new SessionStoreInvariantError(
+        `Runtime checkpoint ${checkpoint.id} references a missing or later parent`
+      );
+    }
+    const runCheckpoints = checkpointsByRun.get(run.id) ?? [];
+    const expectedParent = runCheckpoints.at(-1)?.id ?? run.baseCheckpointId;
+    const expectedId = `${run.id}:checkpoint:${runCheckpoints.length + 1}`;
+    if (
+      checkpoint.parentCheckpointId !== expectedParent
+      || checkpoint.id !== expectedId
+    ) {
+      throw new SessionStoreInvariantError(
+        `Runtime checkpoint ${checkpoint.id} does not extend Run ${run.id}`
+      );
+    }
+    runCheckpoints.push(checkpoint);
+    checkpointsByRun.set(run.id, runCheckpoints);
+    checkpointIds.add(checkpoint.id);
+  }
+
+  for (const branch of history.branches) {
+    if (
+      branch.parentCheckpointId !== null
+      && !checkpointIds.has(branch.parentCheckpointId)
+    ) {
+      throw new SessionStoreInvariantError(
+        `Runtime branch ${branch.id} references missing parent checkpoint ${branch.parentCheckpointId}`
+      );
+    }
+    if (
+      branch.headCheckpointId !== null
+      && !checkpointIds.has(branch.headCheckpointId)
+    ) {
+      throw new SessionStoreInvariantError(
+        `Runtime branch ${branch.id} references missing head checkpoint ${branch.headCheckpointId}`
+      );
+    }
+    if (
+      branch.parentCheckpointId !== null
+      && (
+        branch.headCheckpointId === null
+        || !runtimeHistoryCheckpointPath(history, branch.headCheckpointId)
+          .some(checkpoint => checkpoint.id === branch.parentCheckpointId)
+      )
+    ) {
+      throw new SessionStoreInvariantError(
+        `Runtime branch ${branch.id} head does not descend from its parent checkpoint`
+      );
+    }
+  }
+
+  for (const run of runs.values()) {
+    const branch = history.branches.find(item => item.id === run.branchId);
+    if (!branch) {
+      throw new SessionStoreInvariantError(
+        `Runtime Run ${run.id} references missing branch ${run.branchId}`
+      );
+    }
+    if (
+      run.baseCheckpointId !== null
+      && !runtimeBranchContainsCheckpoint(
+        history,
+        branch.id,
+        run.baseCheckpointId
+      )
+    ) {
+      throw new SessionStoreInvariantError(
+        `Runtime Run ${run.id} base is outside branch ${branch.id}`
+      );
+    }
+    if (
+      run.inputHeadEntryId !== null
+      && !entries.has(run.inputHeadEntryId)
+    ) {
+      throw new SessionStoreInvariantError(
+        `Runtime Run ${run.id} references missing input message head ${run.inputHeadEntryId}`
+      );
+    }
+    const runCheckpoints = checkpointsByRun.get(run.id) ?? [];
+    const latest = runCheckpoints.at(-1);
+    if (
+      (run.checkpoint === undefined) !== (latest === undefined)
+      || (
+        run.checkpoint
+        && latest
+        && (
+          run.checkpoint.order !== runCheckpoints.length
+          || run.checkpoint.state !== latest.state
+          || run.checkpoint.continuationFingerprint
+          !== latest.continuationFingerprint
+        )
+      )
+    ) {
+      throw new SessionStoreInvariantError(
+        `Runtime Run ${run.id} checkpoint does not match immutable history`
+      );
+    }
+  }
+
+  const compactionIds = new Set<string>();
+  const compactedRuns = new Set<string>();
+  for (const compaction of history.compactions) {
+    _assertId("Runtime compaction", compaction.id);
+    _assertId("Runtime compaction Run", compaction.runId);
+    _assertId("Runtime compaction branch", compaction.branchId);
+    _assertSha256(
+      "Runtime compaction summary fingerprint",
+      compaction.summaryFingerprint
+    );
+    _assertSha256(
+      "Runtime compaction request fingerprint",
+      compaction.requestFingerprint
+    );
+    _assertRuntimeTimestamp("Runtime compaction", compaction.createdAt);
+    const run = runs.get(compaction.runId);
+    const configuration = run
+      ? configurations.get(run.configurationId)
+      : undefined;
+    if (
+      !run
+      || !configuration
+      || run.branchId !== compaction.branchId
+      || run.inputHeadEntryId !== compaction.sourceHeadEntryId
+      || run.baseCheckpointId !== compaction.sourceCheckpointId
+      || configuration.model.provider !== compaction.model.provider
+      || configuration.model.id !== compaction.model.id
+      || compaction.id !== `${run.id}:compaction:1`
+      || compactionIds.has(compaction.id)
+      || compactedRuns.has(run.id)
+      || compaction.summary.trim().length === 0
+      || new TextEncoder().encode(compaction.summary).byteLength
+      > MAX_DURABLE_OPERATION_REPLAY_BYTES
+      || !runtimeEntryIsAncestor(
+        history,
+        compaction.firstKeptEntryId,
+        compaction.sourceHeadEntryId
+      )
+    ) {
+      throw new SessionStoreInvariantError(
+        `Runtime compaction ${compaction.id} has invalid lineage or identity`
+      );
+    }
+    const evidence = compaction.tokenEvidence;
+    if (
+      !Number.isSafeInteger(compaction.contextWindow)
+      || compaction.contextWindow < 1
+      || [
+        evidence.tokensBefore,
+        evidence.tokensAfter,
+        evidence.usageTokens,
+        evidence.trailingTokens
+      ].some(value => !Number.isSafeInteger(value) || value < 0)
+      || (
+        evidence.lastUsageMessageIndex !== null
+        && (
+          !Number.isSafeInteger(evidence.lastUsageMessageIndex)
+          || evidence.lastUsageMessageIndex < 0
+        )
+      )
+    ) {
+      throw new SessionStoreInvariantError(
+        `Runtime compaction ${compaction.id} has invalid token evidence`
+      );
+    }
+    compactionIds.add(compaction.id);
+    compactedRuns.add(run.id);
+  }
+
+  if (history.branches.length === 0) {
+    if (
+      history.currentBranchId !== null
+      || history.currentCheckpointId !== null
+      || history.checkpoints.length > 0
+      || history.entries.length > 0
+      || history.compactions.length > 0
+    ) {
+      throw new SessionStoreInvariantError(
+        "An empty Runtime history cannot retain current pointers or entries"
+      );
+    }
+  } else {
+    const currentBranch = history.branches.find(
+      branch => branch.id === history.currentBranchId
+    );
+    if (
+      currentBranch?.headCheckpointId !== history.currentCheckpointId
+    ) {
+      throw new SessionStoreInvariantError(
+        "Runtime history current branch and checkpoint do not match"
+      );
+    }
+  }
+}
+
+async function _assertRuntimeHistoryIntegrity(
+  history: RuntimeHistorySnapshot
+): Promise<void> {
+  for (const entry of history.entries) {
+    const fingerprint = await sha256(_canonicalJson(entry.message));
+    const id = `message-${await sha256(
+      `${entry.parentId ?? "root"}\n${fingerprint}`
+    )}`;
+    if (entry.fingerprint !== fingerprint || entry.id !== id) {
+      throw new SessionStoreInvariantError(
+        `Runtime message entry ${entry.id} content fingerprint does not match`
+      );
+    }
+  }
+  for (const compaction of history.compactions) {
+    if (compaction.summaryFingerprint !== await sha256(compaction.summary)) {
+      throw new SessionStoreInvariantError(
+        `Runtime compaction ${compaction.id} summary fingerprint does not match`
+      );
+    }
+  }
+}
+
+function _assertRuntimeTimestamp(label: string, value: number): void {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new SessionStoreInvariantError(`${label} has an invalid timestamp`);
+  }
 }
 
 function _assertOperationLedger(snapshot: RuntimeSessionSnapshot): void {
@@ -1958,6 +2852,13 @@ function _assertStoredSession(session: StoredRuntimeSession): void {
   let activeRunCount = 0;
   for (const run of session.snapshot.runs) {
     _assertId("Runtime Run", run.id);
+    _assertId("Runtime branch", run.branchId);
+    if (run.baseCheckpointId !== null) {
+      _assertId("Runtime base checkpoint", run.baseCheckpointId);
+    }
+    if (run.inputHeadEntryId !== null) {
+      _assertId("Runtime input message head", run.inputHeadEntryId);
+    }
     if (!RUN_STATES.has(run.state)) {
       throw new SessionStoreInvariantError(
         `Runtime Run ${run.id} has invalid state ${run.state}`
@@ -2063,6 +2964,7 @@ function _assertStoredSession(session: StoredRuntimeSession): void {
       `Session ${session.snapshot.id} active Runtime Run invariant is invalid`
     );
   }
+  _assertRuntimeHistory(session, configurations);
 
   let previousSessionVersion = 0;
   let stateRevision = 0;
@@ -2136,6 +3038,17 @@ function _assertStoredSession(session: StoredRuntimeSession): void {
       capabilityTurns.add(entry.turnId);
       continue;
     }
+    if (entry.type === "runtimeBranchRenamed") {
+      const branch = session.snapshot.history.branches.find(
+        item => item.id === entry.branchId
+      );
+      if (branch?.label !== entry.label) {
+        throw new SessionStoreInvariantError(
+          `Runtime branch rename journal entry ${entry.sequence} is invalid`
+        );
+      }
+      continue;
+    }
     if (!runIds.has(entry.runId)) {
       throw new SessionStoreInvariantError(
         `Run Journal entry ${entry.sequence} references missing Runtime Run ${entry.runId}`
@@ -2197,8 +3110,11 @@ function _assertJournalReconstructsSnapshot(
   session: StoredRuntimeSession
 ): void {
   const replayed = new Map<string, {
+    baseCheckpointId: string | null;
+    branchId: string;
     checkpoint?: RuntimeRunSnapshot["checkpoint"];
     configurationId: string;
+    inputHeadEntryId: string | null;
     state: RuntimeRunState;
   }>();
   for (const entry of session.journal) {
@@ -2206,6 +3122,7 @@ function _assertJournalReconstructsSnapshot(
       entry.type === "sessionStateReplaced"
       || entry.type === "turnInstructionsRecorded"
       || entry.type === "turnCapabilitiesRecorded"
+      || entry.type === "runtimeBranchRenamed"
     ) { continue; }
     if (
       entry.type === "operationStarted"
@@ -2215,6 +3132,9 @@ function _assertJournalReconstructsSnapshot(
       || entry.type === "toolApprovalRequested"
       || entry.type === "toolApprovalDecided"
       || entry.type === "toolApprovalStaled"
+      || entry.type === "runtimeBranchCreated"
+      || entry.type === "runtimeMessagesCommitted"
+      || entry.type === "runtimeCompactionRecorded"
     ) { continue; }
     if (entry.type === "runStarted") {
       const startedState = (entry as { readonly state: unknown; }).state;
@@ -2229,7 +3149,10 @@ function _assertJournalReconstructsSnapshot(
         );
       }
       replayed.set(entry.runId, {
+        baseCheckpointId: entry.baseCheckpointId,
+        branchId: entry.branchId,
         configurationId: entry.configurationId,
+        inputHeadEntryId: entry.inputHeadEntryId,
         state: "runningModel"
       });
       continue;
@@ -2248,7 +3171,10 @@ function _assertJournalReconstructsSnapshot(
       }
       try {
         transitionRuntimeRun({
+          baseCheckpointId: current.baseCheckpointId,
+          branchId: current.branchId,
           id: entry.runId,
+          inputHeadEntryId: current.inputHeadEntryId,
           sessionId: session.snapshot.id,
           configurationId: current.configurationId,
           state: current.state
@@ -2292,6 +3218,9 @@ function _assertJournalReconstructsSnapshot(
     }
     if (
       reconstructed.configurationId !== run.configurationId
+      || reconstructed.branchId !== run.branchId
+      || reconstructed.baseCheckpointId !== run.baseCheckpointId
+      || reconstructed.inputHeadEntryId !== run.inputHeadEntryId
       || reconstructed.state !== run.state
       || !_sameCheckpoint(reconstructed.checkpoint, run.checkpoint)
     ) {

@@ -6,19 +6,30 @@ import {
   type DropResult
 } from "@hello-pangea/dnd";
 import {
+  type AssistantMessage,
+  convertToPiContext,
+  type Message,
+  type ThreadContext,
+  type ThreadRuntimeWorkingBase,
+  type ThreadSandboxAttachments
+} from "@llm-space/core";
+import {
+  latestRuntimeCompaction,
+  runtimeHistoryMessagePath,
   type RuntimeToolApprovalView,
   runtimeToolApprovalViews,
   type StoredRuntimeSession
 } from "@llm-space/runtime/harness";
 import { PlusIcon } from "lucide-react";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-
-import type {
-  AssistantMessage,
-  Message,
-  ThreadContext,
-  ThreadSandboxAttachments
-} from "@llm-space/core";
+import {
+  Fragment,
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState
+} from "react";
 
 import { cn } from "@/lib/utils";
 import { MessageListItem } from "./message-list-item";
@@ -56,6 +67,12 @@ export function MessageListView({
   const persistedRuntimeSession = useThreadStore(state => (
     isSnapshotView ? undefined : state.thread.runtimeSession
   ));
+  const runtimeWorkingBase = useThreadStore(state => (
+    isSnapshotView ? undefined : state.thread.runtimeWorkingBase
+  ));
+  const sandboxAttachments = useThreadStore(state => (
+    isSnapshotView ? undefined : state.thread.sandboxAttachments
+  ));
   const { appendMessage, moveMessage, resolveRunValidationIssue } =
     useThreadStoreActions();
   const [dragging, setDragging] = useState(false);
@@ -86,6 +103,22 @@ export function MessageListView({
   const readonly = useMemo(() => {
     return readonlyFromProps || dragging || isSnapshotView;
   }, [dragging, isSnapshotView, readonlyFromProps]);
+  const compactionBoundaryIndex = useMemo(
+    () => _compactionBoundaryMessageIndex({
+      context: contextFromProps,
+      messages,
+      runtimeSession: persistedRuntimeSession,
+      runtimeWorkingBase,
+      sandboxAttachments
+    }),
+    [
+      contextFromProps,
+      messages,
+      persistedRuntimeSession,
+      runtimeWorkingBase,
+      sandboxAttachments
+    ]
+  );
   const addMessageSuggested =
     runValidationIssue?.resolution?.type === "appendUserMessage";
 
@@ -138,6 +171,7 @@ export function MessageListView({
                   <DroppableMessageList
                     autoFocusMessageId={autoFocusMessageId}
                     collapsedMessageIds={collapsedMessageIds}
+                    compactionBoundaryIndex={compactionBoundaryIndex}
                     droppableProvided={droppableProvided}
                     editingMode={editingMode}
                     messages={messages}
@@ -283,11 +317,13 @@ function DroppableMessageList({
   runDisabled,
   autoFocusMessageId,
   collapsedMessageIds,
+  compactionBoundaryIndex,
   runValidationIssue,
   toolApprovalsByMessageId
 }: {
   readonly autoFocusMessageId: string | null;
   readonly collapsedMessageIds: string[];
+  readonly compactionBoundaryIndex: number | null;
   readonly droppableProvided: DroppableProvided;
   readonly editingMode: "appendTextOnly" | "full";
   readonly messages: Message[];
@@ -311,25 +347,29 @@ function DroppableMessageList({
           && index === messages.length - 1
           && message.role === "user";
         return (
-          <DraggableMessageRow
-            autoFocus={message.id === autoFocusMessageId}
-            collapsed={collapsedMessageIds.includes(message.id)}
-            index={index}
-            key={message.id}
-            message={message}
-            readonly={
-              readonly
-              || (editingMode === "appendTextOnly" && !textOnlyDraft)
-            }
-            runDisabled={runDisabled}
-            runValidationIssue={
-              message.id === runValidationIssue?.messageId
-                ? runValidationIssue
-                : null
-            }
-            textOnlyDraft={textOnlyDraft}
-            toolApprovals={toolApprovalsByMessageId.get(message.id)}
-          />
+          <Fragment key={message.id}>
+            {index === compactionBoundaryIndex
+              ? <CompactionBoundaryMarker />
+              : null}
+            <DraggableMessageRow
+              autoFocus={message.id === autoFocusMessageId}
+              collapsed={collapsedMessageIds.includes(message.id)}
+              index={index}
+              message={message}
+              readonly={
+                readonly
+                || (editingMode === "appendTextOnly" && !textOnlyDraft)
+              }
+              runDisabled={runDisabled}
+              runValidationIssue={
+                message.id === runValidationIssue?.messageId
+                  ? runValidationIssue
+                  : null
+              }
+              textOnlyDraft={textOnlyDraft}
+              toolApprovals={toolApprovalsByMessageId.get(message.id)}
+            />
+          </Fragment>
         );
       })}
       {droppableProvided.placeholder}
@@ -337,6 +377,67 @@ function DroppableMessageList({
   );
 }
 /* eslint-enable react-hooks/refs */
+
+function CompactionBoundaryMarker() {
+  return (
+    <div
+      aria-label="Context compaction boundary"
+      className="text-muted-foreground mb-3.5 flex items-center gap-2 px-1 text-[0.625rem]"
+      role="note"
+    >
+      <span aria-hidden className="bg-border h-px flex-1" />
+      <span>Context compacted · earlier messages retained</span>
+      <span aria-hidden className="bg-border h-px flex-1" />
+    </div>
+  );
+}
+
+function _compactionBoundaryMessageIndex(input: {
+  readonly context?: ThreadContext;
+  readonly messages: readonly Message[];
+  readonly runtimeSession: unknown;
+  readonly runtimeWorkingBase?: ThreadRuntimeWorkingBase;
+  readonly sandboxAttachments?: ThreadSandboxAttachments;
+}): number | null {
+  try {
+    const session = input.runtimeSession as StoredRuntimeSession | undefined;
+    const base = input.runtimeWorkingBase;
+    if (
+      session?.snapshot.schemaVersion !== 4
+      || base?.sessionId !== session.snapshot.id
+    ) {
+      return null;
+    }
+    const history = session.snapshot.history;
+    const checkpoint = history.checkpoints.find(item => (
+      item.id === base.checkpointId && item.branchId === base.branchId
+    ));
+    if (!checkpoint) { return null; }
+    const compaction = latestRuntimeCompaction(history, checkpoint.headEntryId);
+    if (!compaction) { return null; }
+    const firstKeptIndex = runtimeHistoryMessagePath(
+      history,
+      checkpoint.headEntryId
+    ).findIndex(entry => entry.id === compaction.firstKeptEntryId);
+    if (firstKeptIndex <= 0) { return null; }
+    let runtimeMessageIndex = 0;
+    for (let index = 0; index < input.messages.length; index += 1) {
+      const message = input.messages[index];
+      if (!message) { continue; }
+      const convertedCount = convertToPiContext({
+        ...input.context,
+        messages: [message]
+      }, input.sandboxAttachments).messages.length;
+      if (runtimeMessageIndex + convertedCount > firstKeptIndex) {
+        return index;
+      }
+      runtimeMessageIndex += convertedCount;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 // One draggable row. The `memo` boundary sits *above* the `<Draggable>` (not
 // inside its render prop) so that editing one message doesn't re-render every

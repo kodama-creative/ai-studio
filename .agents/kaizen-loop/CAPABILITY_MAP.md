@@ -1,7 +1,7 @@
 # LLM Space Capability Map
 
-- Last updated: 2026-07-24
-- Map status: refreshed through shipped roadmap item 19. Items 12 through 16, 18, and 19 are shipped under ADRs 0006-0009, 0011, and 0012 where applicable; item 17 again passes its local real-Docker gate but existing shipment policy still awaits a current-head CI pass, which the owner deferred, so item 10 remains dependency-blocked.
+- Last updated: 2026-07-25
+- Map status: refreshed through shipped roadmap item 20. Items 12 through 16 and 18 through 20 are shipped under ADRs 0006-0009 and 0011-0013 where applicable; item 17 again passes its local real-Docker gate but existing shipment policy still awaits a current-head CI pass, which the owner deferred, so item 10 remains dependency-blocked.
 - Evidence rule: entries marked `confirmed` cite current rendered-product or current-code evidence. Entries marked `stale` rely on previous logs or code paths not fully re-inspected in this loop. Entries marked `unknown` need a future product-surface check before they can drive a recommendation.
 
 ## First-Run Model Setup
@@ -153,6 +153,24 @@
 - Boundary: a Host can recover safe waits, replay only durably completed provider/tool results, resume one exact parked operation through CAS, or stop ambiguous effects as `outcomeUnknown`, while preserving one Runtime Run and one Host-owned Session/transcript authority. Principal/transport authorization remains outside Runtime.
 - Explicit non-goals: automatic retry of ambiguous provider/tool effects, authored idempotency declarations, exactly-once, distributed leases/heartbeats, workflow DSL, approval policy/UI, raw stream retention, generic operation inspector, canonical Trace, compaction, or background scheduling.
 - Visible gaps: V1 deliberately has no trusted adapter idempotency evidence, distributed retry policy, approval policy, generic operation inspector, migration/reset flow for schema v1 Sessions, or live paid-provider crash injection. Imported Trace workbenches are explicitly outside item 18 and continue to use their trace-owned persistence path until canonical Trace integration in item 32.
+
+## Long Session Context And Branch Navigation
+
+- Status: shipped V1
+- Freshness: confirmed
+- Last checked: 2026-07-25
+- Evidence:
+  - Runtime Session schema V4 adds content-addressed immutable message entries, parent-linked checkpoints, stable branches and mutable labels, current branch/checkpoint pointers, and durable compaction provenance without replacing the Session Store CAS authority.
+  - A Run started at the current settled tip continues the same branch. Starting at an older explicit working base atomically creates one child branch before provider/tool work; Inspect and Restore alone create neither a Run nor a branch.
+  - Pi Agent Core 0.80.3 public context helpers prepare and project summary-plus-recent context while Pi `Agent` remains the ReAct-loop owner. The summary provider call uses the durable operation ledger, known completions replay, ambiguous effects become `outcomeUnknown`, and the main provider is fail-closed behind compaction.
+  - Desktop persists `runtimeWorkingBase` with the editable Thread and renders Branch → Run → compaction/checkpoint history with independent `Current`, `Working from`, and inspection states, same-Thread Restore/Return to current, durable rename, keyboard navigation, and a read-only compaction inspector.
+  - `Compact now` is a compaction-only Runtime Run at the current settled Desktop tip: it never dispatches the main provider or fabricates a message/checkpoint, and it is intentionally unavailable for an older restored base and Local Server V1. An unknown summary outcome requires an explicit warning confirmation before Desktop creates the retry Run/provider operation; other unknown operations remain fail-closed.
+  - Server records transcript-backed Runtime checkpoints while keeping its transcript as the protected active-path projection/cache. Local Server create-Run commands validate the selected working base against the authenticated Server Session, rebuild fork input from that checkpoint, return the authoritative Runtime Session/checkpoint terminal projection, and rename branches through the Server authority. V3 Runtime bytes remain unchanged and execution rejects them explicitly rather than clearing or migrating development data.
+  - Runtime history/compaction, Desktop, Server, and Core suites prove retained original entries, deterministic fork/CAS behavior, restart projection, 60 sequential Runtime Turns/checkpoints followed by two historical forks and restart, compaction completion and record-commit crash boundaries, summary fingerprint stability, Local Server same-base idempotent retry, failure/unknown handling, and no main-provider dispatch for explicit compaction. Final local acceptance passed 386 tests with one opt-in Docker acceptance skip (Core 41, Runtime 199, Server 29, Desktop 117), all eight TypeScript configurations, lint, diff checks, and renderer Vite.
+  - Fresh real CEF evidence in `audits/2026-07-25-114849-runtime-history-compaction/` verifies the tree, inspector entry boundaries, main-message compaction marker, Restore/Return, rename persistence, Escape/arrow/F2 keyboard behavior, current-tip `Compact now` gating, explicit unknown-summary retry/cost confirmation, console cleanliness, and no page overflow at 1280×800 and 900×700.
+- Boundary: a user can inspect a complete immutable checkpoint tree, explicitly select a safe same-Thread execution base, create and label a child branch only by executing from older history, and continue a long active path from an inspectable durable summary while all original messages and journal evidence remain retained.
+- Explicit non-goals: destructive history deletion, implicit Thread creation, branch merge/rebase, cross-Thread branches, AI-generated labels, source compaction DSL, summary editing, generic operation inspector, token/cost enforcement, Pi `AgentHarness`/`Session` durable authority, or production migration/reset.
+- Visible gaps: V1 has no branch merge/rebase/delete, cross-Thread lineage, production migration, Local Server explicit compaction control, formal ARIA tree semantics, or live paid-provider context-exhaustion acceptance. At 900×700 the full sidebar + two-pane editor + history layout is usable without page overflow but remains dense; variable labels and usage chips can wrap or clip.
 
 ## Trusted Session Context And Structured State
 

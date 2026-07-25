@@ -1,10 +1,15 @@
-import { getThreadRuntimeProfile, uuid } from "@llm-space/core";
+import {
+  convertToPiContext,
+  getThreadRuntimeProfile,
+  uuid
+} from "@llm-space/core";
 import {
   claimRuntimeRunResume,
   InMemorySessionStore,
   recoverRuntimeSession,
+  type RuntimeJsonValue,
   type RuntimeRunConfigurationSnapshot,
-  type RuntimeRunState,
+  type RuntimeSessionMutation,
   type RuntimeStructuredOutputResult,
   SessionStoreInvariantError,
   type StoredRuntimeSession
@@ -21,6 +26,8 @@ import type {
 import type { RuntimeExecutionMode } from "@llm-space/runtime";
 
 export interface ThreadRuntimeExecutionInput {
+  readonly action?: "compact";
+  readonly confirmCompactionOutcomeUnknownRetry?: boolean;
   readonly context: ThreadContext;
   readonly executionMode: RuntimeExecutionMode;
   readonly model: ModelConfig;
@@ -43,16 +50,24 @@ export interface SettledThreadRuntimeRun {
 }
 
 export class ThreadRuntimeOutcomeUnknownError extends Error {
+  readonly retryableCompaction: boolean;
   readonly runId: string;
   readonly session: StoredRuntimeSession;
 
-  constructor(runId: string, session: StoredRuntimeSession) {
+  constructor(
+    runId: string,
+    session: StoredRuntimeSession,
+    retryableCompaction = false
+  ) {
     super(
-      `Runtime Run ${runId} was interrupted during model or tool work; its outcome is unknown and automatic replay is disabled`
+      retryableCompaction
+        ? `Runtime Run ${runId} may have completed a context summary whose outcome is unknown; retry only after confirming that the summary provider may be charged again`
+        : `Runtime Run ${runId} was interrupted during model or tool work; its outcome is unknown and automatic replay is disabled`
     );
     this.name = "ThreadRuntimeOutcomeUnknownError";
     this.runId = runId;
     this.session = session;
+    this.retryableCompaction = retryableCompaction;
   }
 }
 
@@ -95,9 +110,43 @@ export class ThreadRuntimeSession {
     this._assertLoaded();
     const recovery = await recoverRuntimeSession(this._store, this._sessionId);
     if (recovery.status === "outcomeUnknown") {
+      const retryableCompaction = _isOutcomeUnknownCompaction(
+        recovery.session,
+        recovery.run.id
+      );
+      if (
+        retryableCompaction
+        && input.action === "compact"
+        && input.confirmCompactionOutcomeUnknownRetry === true
+      ) {
+        // The recovered Run remains terminal evidence. The explicit user
+        // confirmation authorizes a fresh Run/operation identity below.
+      } else {
+        throw new ThreadRuntimeOutcomeUnknownError(
+          recovery.run.id,
+          recovery.session,
+          retryableCompaction
+        );
+      }
+    }
+    const recoveredSession = recovery.status === "missing"
+      ? null
+      : recovery.session;
+    const latestUnknownCompaction = recoveredSession
+      ? _latestOutcomeUnknownCompactionRunId(recoveredSession)
+      : null;
+    if (
+      latestUnknownCompaction
+      && recoveredSession
+      && !(
+        input.action === "compact"
+        && input.confirmCompactionOutcomeUnknownRetry === true
+      )
+    ) {
       throw new ThreadRuntimeOutcomeUnknownError(
-        recovery.run.id,
-        recovery.session
+        latestUnknownCompaction,
+        recoveredSession,
+        true
       );
     }
     if (recovery.status === "parked") {
@@ -137,6 +186,14 @@ export class ThreadRuntimeSession {
     const current = recovery.status === "missing" ? null : recovery.session;
     const continuationFingerprint = await threadContinuationFingerprint(input);
     const configuration = await _configuration(input);
+    const messages = _runtimeMessages(input);
+    const selectedBase = input.thread.runtimeWorkingBase?.sessionId
+      === this._sessionId
+      ? {
+        branchId: input.thread.runtimeWorkingBase.branchId,
+        checkpointId: input.thread.runtimeWorkingBase.checkpointId
+      }
+      : undefined;
     const activeRunId = current?.snapshot.activeRunId ?? null;
 
     if (recovery.status === "operationReplay") {
@@ -187,7 +244,13 @@ export class ThreadRuntimeSession {
           expectedVersion: current.version,
           mutations: [
             { type: "transitionRun", runId: active.id, to: "superseded" },
-            { type: "startRun", runId, configuration }
+            {
+              type: "startRun",
+              runId,
+              configuration,
+              messages,
+              ...(selectedBase ? { workingBase: selectedBase } : {})
+            }
           ]
         })
       };
@@ -199,13 +262,20 @@ export class ThreadRuntimeSession {
       session: await this._store.commit({
         sessionId: this._sessionId,
         expectedVersion: current?.version ?? null,
-        mutations: [{ type: "startRun", runId, configuration }]
+        mutations: [{
+          type: "startRun",
+          runId,
+          configuration,
+          messages,
+          ...(selectedBase ? { workingBase: selectedBase } : {})
+        }]
       })
     };
   }
 
   async settle(
     input: {
+      readonly action?: "compact";
       readonly outcome:
         | "cancelled"
         | "completed"
@@ -227,6 +297,7 @@ export class ThreadRuntimeSession {
       mutations.push({
         type: "recordCheckpoint",
         runId: input.runId,
+        messages: _runtimeMessages(input),
         continuationFingerprint: await threadContinuationFingerprint(input)
       });
     }
@@ -244,10 +315,21 @@ export class ThreadRuntimeSession {
         `Runtime Run ${input.runId} did not record its settled checkpoint`
       );
     }
+    const historyCheckpoint = session.snapshot.history.checkpoints.find(
+      checkpoint => checkpoint.id
+        === `${run.id}:checkpoint:${run.checkpoint?.order}`
+    );
+    if (!historyCheckpoint) {
+      throw new SessionStoreInvariantError(
+        `Runtime Run ${input.runId} has no immutable checkpoint record`
+      );
+    }
     return {
       session,
       checkpoint: {
         runId: input.runId,
+        branchId: historyCheckpoint.branchId,
+        checkpointId: historyCheckpoint.id,
         state: run.checkpoint.state,
         checkpointOrder: run.checkpoint.order,
         continuationFingerprint: run.checkpoint.continuationFingerprint,
@@ -266,6 +348,30 @@ export class ThreadRuntimeSession {
       );
     }
   }
+}
+
+function _latestOutcomeUnknownCompactionRunId(
+  session: StoredRuntimeSession
+): string | null {
+  const run = session.snapshot.runs.at(-1);
+  return run?.state === "outcomeUnknown"
+    && _isOutcomeUnknownCompaction(session, run.id)
+    ? run.id
+    : null;
+}
+
+function _isOutcomeUnknownCompaction(
+  session: StoredRuntimeSession,
+  runId: string
+): boolean {
+  return session.snapshot.operationLedger?.steps.some(step => (
+    step.runId === runId
+    && step.operations.some(operation => (
+      operation.kind === "provider"
+      && operation.state === "outcomeUnknown"
+      && /:compaction-[1-9][0-9]*$/.test(operation.id)
+    ))
+  )) ?? false;
 }
 
 /** Read current Runtime Run states for Run History presentation. */
@@ -355,6 +461,7 @@ async function _configuration(
 
 function _settleMutations(
   input: {
+    readonly action?: "compact";
     readonly outcome:
       | "cancelled"
       | "completed"
@@ -363,21 +470,12 @@ function _settleMutations(
     readonly runId: string;
   } & ThreadRuntimeExecutionInput,
   session: StoredRuntimeSession
-): Array<
-  | {
-    continuationFingerprint: string;
-    runId: string;
-    type: "recordCheckpoint";
-  }
-  | {
-    runId: string;
-    structuredOutput?: RuntimeStructuredOutputResult;
-    to: RuntimeRunState;
-    type: "transitionRun";
-  }
-> {
+): RuntimeSessionMutation[] {
   if (input.outcome !== "completed") {
     return [{ type: "transitionRun", runId: input.runId, to: input.outcome }];
+  }
+  if (input.action === "compact") {
+    return [{ type: "transitionRun", runId: input.runId, to: "completed" }];
   }
   if (input.structuredOutput) {
     return [
@@ -414,6 +512,15 @@ function _hasCompleteTrailingToolResults(thread: Thread): boolean {
     && last.toolCalls?.length
     && last.toolCalls.every(toolCall => toolCall.output)
   );
+}
+
+function _runtimeMessages(
+  input: ThreadRuntimeExecutionInput
+): readonly RuntimeJsonValue[] {
+  return convertToPiContext(
+    input.context,
+    input.thread.sandboxAttachments
+  ).messages as unknown as readonly RuntimeJsonValue[];
 }
 
 function _asStoredRuntimeSession(value: unknown): StoredRuntimeSession {

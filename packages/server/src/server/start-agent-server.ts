@@ -1,9 +1,11 @@
 import {
   decideRuntimeToolApproval,
+  MAX_RUNTIME_BRANCH_LABEL_LENGTH,
   recoverRuntimeSession
 } from "@llm-space/runtime/harness";
 
 import type { Models } from "@earendil-works/pi-ai";
+import type { RuntimeWorkingBase } from "@llm-space/runtime/harness";
 import type {
   AgentHostApprovalPolicy,
   CompiledAgentProjectSnapshot,
@@ -438,6 +440,17 @@ async function _routeRequest(
       decodeURIComponent(_capture(toolApproval, 3))
     );
   }
+  const runtimeBranch = url.pathname.match(
+    /^\/v1\/sessions\/([^/]+)\/branches\/([^/]+)$/
+  );
+  if (request.method === "POST" && runtimeBranch) {
+    return _renameRuntimeBranch(
+      request,
+      context,
+      decodeURIComponent(_capture(runtimeBranch, 1)),
+      decodeURIComponent(_capture(runtimeBranch, 2))
+    );
+  }
   const continuation = url.pathname.match(
     /^\/v1\/sessions\/([^/]+)\/continuation\/(rotate|revoke)$/
   );
@@ -524,6 +537,7 @@ async function _createRun(
       continuationToken,
       idempotencyKey,
       text: parsed.text,
+      ...(parsed.workingBase ? { workingBase: parsed.workingBase } : {}),
       ...(parsed.outputContract
         ? { outputContract: parsed.outputContract }
         : {})
@@ -532,6 +546,46 @@ async function _createRun(
       { schemaVersion: 1, sessionId: run.sessionId, runId: run.runId },
       202
     );
+  } catch (error) {
+    return _mappedError(error);
+  }
+}
+
+async function _renameRuntimeBranch(
+  request: Request,
+  context: RequestContext,
+  sessionId: string,
+  branchId: string
+): Promise<Response> {
+  const principal = await _authenticate(request, context.authenticator);
+  if (!principal) { return _unauthorized(); }
+  const continuationToken = request.headers.get("llm-space-continuation");
+  if (!continuationToken) { return _error(404, "not_found"); }
+  const bytes = await _bodyBytes(request);
+  if (!bytes) { return _error(413, "request_too_large"); }
+  try {
+    const value = JSON.parse(
+      new TextDecoder("utf-8", { fatal: true }).decode(bytes)
+    ) as unknown;
+    if (
+      !value
+      || typeof value !== "object"
+      || Array.isArray(value)
+      || Object.keys(value).length !== 1
+      || !("label" in value)
+      || typeof value.label !== "string"
+      || value.label.trim().length === 0
+      || value.label.trim().length > MAX_RUNTIME_BRANCH_LABEL_LENGTH
+    ) {
+      return _error(400, "invalid_request");
+    }
+    return _json(await context.repository.renameBranch({
+      branchId,
+      continuationToken,
+      label: value.label,
+      owner: principal,
+      sessionId
+    }));
   } catch (error) {
     return _mappedError(error);
   }
@@ -883,7 +937,11 @@ async function _revokeContinuation(
 }
 
 async function _runInput(request: Request): Promise<
-  | { readonly outputContract?: string; readonly text: string; }
+  | {
+    readonly outputContract?: string;
+    readonly text: string;
+    readonly workingBase?: RuntimeWorkingBase;
+  }
   | Response
 > {
   const bytes = await _bodyBytes(request);
@@ -899,7 +957,7 @@ async function _runInput(request: Request): Promise<
       || typeof value !== "object"
       || Array.isArray(value)
       || Object.keys(value).some(key =>
-        key !== "input" && key !== "outputContract")
+        key !== "input" && key !== "outputContract" && key !== "workingBase")
       || !("input" in value)
       || !value.input
       || typeof value.input !== "object"
@@ -926,11 +984,34 @@ async function _runInput(request: Request): Promise<
     ) {
       return _error(400, "invalid_request");
     }
+    const workingBase = "workingBase" in value
+      ? value.workingBase
+      : undefined;
+    if (
+      workingBase !== undefined
+      && (
+        !workingBase
+        || typeof workingBase !== "object"
+        || Array.isArray(workingBase)
+        || Object.keys(workingBase).length !== 2
+        || !("branchId" in workingBase)
+        || typeof workingBase.branchId !== "string"
+        || workingBase.branchId.length === 0
+        || !("checkpointId" in workingBase)
+        || typeof workingBase.checkpointId !== "string"
+        || workingBase.checkpointId.length === 0
+      )
+    ) {
+      return _error(400, "invalid_request");
+    }
     if (new TextEncoder().encode(input.text).byteLength > MAX_TEXT_INPUT_BYTES) {
       return _error(413, "input_too_large");
     }
     return {
       text: input.text,
+      ...(workingBase
+        ? { workingBase: workingBase as RuntimeWorkingBase }
+        : {}),
       ...(outputContract ? { outputContract } : {})
     };
   } catch {

@@ -2,6 +2,7 @@ import {
   Agent,
   type AgentMessage,
   type BeforeToolCallContext,
+  convertToLlm as convertHarnessMessagesToLlm,
   type ExecutionEnv,
   type StreamFn,
   type ThinkingLevel
@@ -26,6 +27,11 @@ import {
   AgentHostPolicyChangedError,
   AgentSessionCapabilities
 } from "../capabilities/agent-session-capabilities";
+import {
+  RuntimeCompactionCoordinator,
+  runtimeCompactionErrorStream,
+  type RuntimeCompactionPhase
+} from "../compaction/runtime-compaction-coordinator";
 import { ExecutionEnvUnavailableError } from "../execution-env/execution-env-unavailable-error";
 import { DurableOperationOutcomeUnknownError } from "../harness/durable-operation-outcome-unknown-error";
 import { fingerprintRuntimeApprovalPrincipal } from "../harness/runtime-approval-principal";
@@ -91,6 +97,7 @@ export interface AgentSessionOptions {
   context: AgentSessionContext;
   sessionStore?: SessionStore;
   onSessionCommitted?: (session: StoredRuntimeSession) => Promise<void> | void;
+  onPhase?: (phase: RuntimeCompactionPhase) => void;
   persistence?: AgentSessionPersistence;
   streamFn?: StreamFn;
   outputDefinition?: CompiledAgentOutputDefinition;
@@ -127,8 +134,10 @@ export class AgentSession {
   private readonly _outputValidator?: ReturnType<typeof Compile>;
   private readonly _executionEnv?: ExecutionEnv;
   private readonly _durableOperations: DurableOperationCoordinator;
+  private readonly _compaction: RuntimeCompactionCoordinator;
   private _structuredOutput: RuntimeStructuredOutputResult | null = null;
   private _approvalBatchPending = false;
+  private _compactionAbortController: AbortController | null = null;
 
   constructor(options: AgentSessionOptions) {
     this._project = options.project;
@@ -164,6 +173,14 @@ export class AgentSession {
       runId: options.context.turn.id,
       sessionStore: options.sessionStore,
       onCommitted: options.onSessionCommitted
+    });
+    this._compaction = new RuntimeCompactionCoordinator({
+      durableOperations: this._durableOperations,
+      models: options.models,
+      sessionId: options.context.id,
+      runId: options.context.turn.id,
+      sessionStore: options.sessionStore,
+      onPhase: options.onPhase
     });
     this._instructions = new AgentSessionInstructions({
       context: this._sessionState.context,
@@ -215,8 +232,21 @@ export class AgentSession {
       transcriptMessageCount: () => this.messages.length,
       onTerminalError: error => { this._terminalError = error; }
     });
+    const compactionGatedProviderStream: StreamFn = async (
+      model,
+      context,
+      streamOptions
+    ) => {
+      const error = this._compaction.terminalError;
+      if (error) {
+        this._terminalError = error;
+        return runtimeCompactionErrorStream(model, error);
+      }
+      return durableProviderStream(model, context, streamOptions);
+    };
     this._agent = new Agent({
       sessionId: options.id,
+      convertToLlm: convertHarnessMessagesToLlm,
       initialState: {
         systemPrompt: "",
         model: options.model,
@@ -227,7 +257,13 @@ export class AgentSession {
         ),
         tools: this._toolPolicy.toolsForMode(options.executionMode)
       },
-      streamFn: durableProviderStream,
+      streamFn: compactionGatedProviderStream,
+      transformContext: async (messages, signal) => this._compaction.transform(
+        messages,
+        this._agent.state.model,
+        this._agent.state.thinkingLevel,
+        signal
+      ),
       beforeToolCall: async (context, signal) =>
         this._beforeToolCall(context, signal),
       afterToolCall: async ({ toolCall }) => {
@@ -500,8 +536,30 @@ export class AgentSession {
     this._throwTerminalError();
   }
 
+  async compactContext(): Promise<boolean> {
+    if (this._agent.state.isStreaming || this._compactionAbortController) {
+      throw new Error("Cannot compact context while the session is running");
+    }
+    this._terminalError = null;
+    await this.validateState();
+    await this._resolveTurnSetup();
+    const abortController = new AbortController();
+    this._compactionAbortController = abortController;
+    try {
+      return await this._compaction.compactNow(
+        this.messages,
+        this._agent.state.model,
+        this._agent.state.thinkingLevel,
+        abortController.signal
+      );
+    } finally {
+      this._compactionAbortController = null;
+    }
+  }
+
   abort(): void {
     this._sessionState.discardStep();
+    this._compactionAbortController?.abort();
     this._agent.abort();
   }
 

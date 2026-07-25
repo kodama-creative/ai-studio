@@ -6,6 +6,7 @@ import type {
   AgentProjectMcpConnectionPreset,
   AgentProjectPreset
 } from "@llm-space/runtime";
+import type { StoredRuntimeSession } from "@llm-space/runtime/harness";
 
 import { electrobun } from "@/lib/electrobun";
 
@@ -80,6 +81,19 @@ export const externalAgentProjects = {
     threadId: string
   ): Promise<ExternalAgentProjectRuntimeStatus> {
     return _rpc().request.externalAgentProjectRuntimeStatus({
+      projectId,
+      threadId
+    });
+  },
+  async renameRuntimeBranch(
+    projectId: string,
+    threadId: string,
+    branchId: string,
+    label: string
+  ): Promise<StoredRuntimeSession> {
+    return _rpc().request.externalAgentProjectRenameRuntimeBranch({
+      branchId,
+      label,
       projectId,
       threadId
     });

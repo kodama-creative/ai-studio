@@ -149,6 +149,15 @@ export const ThreadRuntimeProfileType = Type.Union([
 ]);
 export type ThreadRuntimeProfileType = Static<typeof ThreadRuntimeProfileType>;
 
+export const ThreadRuntimeWorkingBase = Type.Object({
+  sessionId: Type.String(),
+  branchId: Type.String(),
+  checkpointId: Type.String()
+});
+export type ThreadRuntimeWorkingBase = Static<
+  typeof ThreadRuntimeWorkingBase
+>;
+
 export const ThreadServerRunLineage = Type.Object({
   profile: Type.Literal("localServer"),
   artifactFingerprint: Type.String(),
@@ -243,6 +252,8 @@ export type ThreadRuntimeRunState = Static<typeof ThreadRuntimeRunState>;
 /** Runtime Harness identity attached to one settled debugging checkpoint. */
 export const ThreadRuntimeCheckpoint = Type.Object({
   runId: Type.String(),
+  branchId: Type.Optional(Type.String()),
+  checkpointId: Type.Optional(Type.String()),
   state: ThreadRuntimeRunState,
   checkpointOrder: Type.Integer({ minimum: 1 }),
   continuationFingerprint: Type.String(),
@@ -433,6 +444,9 @@ export const Thread = Type.Object({
 
   /** Immutable execution authority for an Agent Project Thread. */
   runtimeProfile: Type.Optional(ThreadRuntimeProfile),
+
+  /** Explicit same-Thread checkpoint selected as the next execution base. */
+  runtimeWorkingBase: Type.Optional(ThreadRuntimeWorkingBase),
 
   /**
    * Recent completed runs for debugging and replay. Entries are bounded by the

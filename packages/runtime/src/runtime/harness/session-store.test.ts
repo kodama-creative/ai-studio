@@ -1,4 +1,5 @@
 import {
+  emptyRuntimeHistory,
   InMemorySessionStore,
   replayRuntimeRunEvents,
   RUNTIME_RUN_STATES,
@@ -279,7 +280,11 @@ describe("InMemorySessionStore", () => {
     expect(replayRuntimeRunEvents(recorded, {
       sessionId: "session-instruction-replay",
       runId: "run-instruction-replay"
-    }).map(event => event.entry.type)).toEqual(["runStarted"]);
+    }).map(event => event.entry.type)).toEqual([
+      "runtimeBranchCreated",
+      "runtimeMessagesCommitted",
+      "runStarted"
+    ]);
   });
 
   test("hydrates a persisted safe-boundary Session without replaying mutations", async () => {
@@ -291,6 +296,7 @@ describe("InMemorySessionStore", () => {
         {
           type: "startRun",
           runId: "run-hydrated",
+          messages: [],
           configuration: _configuration("config-hydrated")
         },
         {
@@ -334,6 +340,7 @@ describe("InMemorySessionStore", () => {
         {
           type: "startRun",
           runId: "run-checkpoints",
+          messages: [],
           configuration: _configuration("config-checkpoints")
         },
         { type: "transitionRun", runId: "run-checkpoints", to: "runningTools" },
@@ -345,6 +352,7 @@ describe("InMemorySessionStore", () => {
         {
           type: "recordCheckpoint",
           runId: "run-checkpoints",
+          messages: [],
           continuationFingerprint: "continuation-one"
         }
       ]
@@ -367,6 +375,7 @@ describe("InMemorySessionStore", () => {
         {
           type: "recordCheckpoint",
           runId: "run-checkpoints",
+          messages: [],
           continuationFingerprint: "continuation-two"
         }
       ]
@@ -395,6 +404,7 @@ describe("InMemorySessionStore", () => {
             schemaVersion: RUNTIME_SESSION_SCHEMA_VERSION,
             id: "session-invalid",
             activeRunId: "missing-run",
+            history: emptyRuntimeHistory(),
             runs: []
           },
           configurations: [],
@@ -449,12 +459,14 @@ describe("InMemorySessionStore", () => {
       }
     });
     expect(completed.journal.map(entry => entry.sequence)).toEqual([
-      1, 2, 3, 4, 5, 6
+      1, 2, 3, 4, 5, 6, 7, 8
     ]);
     expect(completed.journal.map(entry => entry.sessionVersion)).toEqual([
-      1, 2, 2, 3, 4, 4
+      1, 1, 1, 2, 2, 3, 4, 4
     ]);
     expect(completed.journal.map(entry => entry.type)).toEqual([
+      "runtimeBranchCreated",
+      "runtimeMessagesCommitted",
       "runStarted",
       "runStateChanged",
       "runStateChanged",
@@ -498,7 +510,9 @@ describe("InMemorySessionStore", () => {
       "config-one",
       "config-branch"
     ]);
-    expect(branched.journal.map(entry => entry.sequence)).toEqual([1, 2, 3]);
+    expect(branched.journal.map(entry => entry.sequence)).toEqual([
+      1, 2, 3, 4, 5, 6
+    ]);
   });
 
   test("rejects stale and simultaneous writers through compare-and-swap", async () => {
@@ -568,7 +582,7 @@ describe("InMemorySessionStore", () => {
     const stored = await store.load("session-atomic");
     expect(stored).toEqual(created);
     expect(stored?.snapshot.runs[0]?.state).toBe("runningModel");
-    expect(stored?.journal).toHaveLength(1);
+    expect(stored?.journal).toHaveLength(3);
   });
 
   test("snapshots inputs and returns deeply immutable records", async () => {
@@ -731,7 +745,10 @@ describe("InMemorySessionStore", () => {
 
 function _run(state: RuntimeRunState): RuntimeRunSnapshot {
   return {
+    baseCheckpointId: null,
+    branchId: "branch-1",
     id: "run-one",
+    inputHeadEntryId: null,
     sessionId: "session-one",
     configurationId: "config-one",
     state
@@ -797,7 +814,12 @@ function _start(
   runId: string,
   configuration: RuntimeRunConfigurationSnapshot
 ) {
-  return { type: "startRun" as const, runId, configuration };
+  return {
+    type: "startRun" as const,
+    runId,
+    configuration,
+    messages: []
+  };
 }
 
 function _transition(runId: string, to: RuntimeRunState) {

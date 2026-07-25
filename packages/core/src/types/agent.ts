@@ -23,6 +23,7 @@ export interface PiThreadContext {
  * server side, where `streamAgent` runs the loop.
  */
 export interface AgentStreamRequest {
+  action?: "compact";
   model: { id: string; provider: string; };
   config?: { model?: ModelConfigParams; };
   context: PiThreadContext;

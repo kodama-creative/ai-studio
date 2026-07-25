@@ -90,7 +90,12 @@ async function _startedSession(): Promise<StoredRuntimeSession> {
   return store.commit({
     sessionId: "session-one",
     expectedVersion: null,
-    mutations: [{ type: "startRun", runId: "run-one", configuration }]
+    mutations: [{
+      type: "startRun",
+      runId: "run-one",
+      configuration,
+      messages: []
+    }]
   });
 }
 

@@ -111,6 +111,7 @@ describe("AgentSession Pi Agent ownership", () => {
       mutations: [{
         type: "startRun",
         runId: context.turn.id,
+        messages: [],
         configuration: {
           id: "configuration-approval",
           agentSnapshotFingerprint: "snapshot-approval",
@@ -743,6 +744,7 @@ async function _startedStore(
     mutations: [{
       type: "startRun",
       runId: context.turn.id,
+      messages: [],
       configuration: {
         id: `configuration-${context.id}`,
         agentSnapshotFingerprint: "snapshot-approval",

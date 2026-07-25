@@ -331,6 +331,8 @@ export function createMainWindowRPC({
           }
           return { state: "ready" as const };
         },
+        externalAgentProjectRenameRuntimeBranch: async input =>
+          localServers.renameBranch(input),
         externalAgentProjectSandboxStatus: async ({ threadId }) =>
           sandboxes.status(threadId),
         externalAgentProjectSetRuntimeProfile: async ({

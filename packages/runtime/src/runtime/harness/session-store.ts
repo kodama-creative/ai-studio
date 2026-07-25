@@ -9,6 +9,11 @@ import type {
   RuntimeToolApprovalLedgerSnapshot
 } from "./durable-tool-approval";
 import type {
+  RuntimeHistorySnapshot,
+  RuntimeWorkingBase
+} from "./runtime-history";
+import type {
+  RuntimeJsonValue,
   RuntimeRunSnapshot,
   RuntimeRunState,
   RuntimeStructuredOutputResult
@@ -21,7 +26,7 @@ import type {
 } from "../../shared/agent-definition";
 import type { RuntimeExecutionMode } from "../../shared/runtime-execution-mode";
 
-export const RUNTIME_SESSION_SCHEMA_VERSION = 3 as const;
+export const RUNTIME_SESSION_SCHEMA_VERSION = 4 as const;
 export const RUNTIME_SESSION_STATE_SCHEMA_VERSION = 1 as const;
 export const MAX_SESSION_STATE_SLOTS = 64;
 export const MAX_SESSION_STATE_SLOT_BYTES = 64 * 1024;
@@ -109,6 +114,7 @@ export interface RuntimeSessionSnapshot {
   readonly schemaVersion: typeof RUNTIME_SESSION_SCHEMA_VERSION;
   readonly id: string;
   readonly activeRunId: string | null;
+  readonly history: RuntimeHistorySnapshot;
   readonly runs: readonly RuntimeRunSnapshot[];
   readonly instructionSnapshots?: Readonly<
     Record<string, RuntimeTurnInstructionSnapshot>
@@ -123,7 +129,10 @@ export interface RuntimeSessionSnapshot {
 
 export type RuntimeRunJournalEntry =
   | {
+    readonly baseCheckpointId: string | null;
+    readonly branchId: string;
     readonly configurationId: string;
+    readonly inputHeadEntryId: string | null;
     readonly runId: string;
     readonly sequence: number;
     readonly sessionVersion: number;
@@ -131,13 +140,55 @@ export type RuntimeRunJournalEntry =
     readonly type: "runStarted";
   }
   | {
+    readonly boundaryId: string;
+    readonly branchId: string;
+    readonly headEntryId: string | null;
+    readonly messageEntryIds: readonly string[];
+    readonly runId: string;
+    readonly sequence: number;
+    readonly sessionVersion: number;
+    readonly type: "runtimeMessagesCommitted";
+  }
+  | {
+    readonly branchId: string;
+    readonly checkpointId: string;
     readonly continuationFingerprint: string;
+    readonly headEntryId: string | null;
     readonly order: number;
+    readonly parentCheckpointId: string | null;
     readonly runId: string;
     readonly sequence: number;
     readonly sessionVersion: number;
     readonly state: Exclude<RuntimeRunState, "runningModel" | "runningTools">;
     readonly type: "runCheckpointRecorded";
+  }
+  | {
+    readonly branchId: string;
+    readonly compactionId: string;
+    readonly firstKeptEntryId: string;
+    readonly runId: string;
+    readonly sequence: number;
+    readonly sessionVersion: number;
+    readonly summaryFingerprint: string;
+    readonly type: "runtimeCompactionRecorded";
+  }
+  | {
+    readonly branchId: string;
+    readonly createdBranchId: string;
+    readonly label: string;
+    readonly ordinal: number;
+    readonly parentCheckpointId: string | null;
+    readonly runId: string;
+    readonly sequence: number;
+    readonly sessionVersion: number;
+    readonly type: "runtimeBranchCreated";
+  }
+  | {
+    readonly branchId: string;
+    readonly label: string;
+    readonly sequence: number;
+    readonly sessionVersion: number;
+    readonly type: "runtimeBranchRenamed";
   }
   | {
     readonly decision: "approved" | "denied";
@@ -258,12 +309,34 @@ export type RuntimeSessionMutation =
     readonly type: "requestToolApproval";
   }
   | {
+    readonly branchId: string;
+    readonly label: string;
+    readonly type: "renameBranch";
+  }
+  | {
     readonly configuration: RuntimeRunConfigurationSnapshot;
+    readonly messages: readonly RuntimeJsonValue[];
     readonly runId: string;
     readonly type: "startRun";
+    readonly workingBase?: RuntimeWorkingBase;
+  }
+  | {
+    readonly contextWindow: number;
+    readonly firstKeptEntryId: string;
+    readonly lastUsageMessageIndex: number | null;
+    readonly requestFingerprint: string;
+    readonly runId: string;
+    readonly summary: string;
+    readonly summaryFingerprint: string;
+    readonly tokensAfter: number;
+    readonly tokensBefore: number;
+    readonly trailingTokens: number;
+    readonly type: "recordCompaction";
+    readonly usageTokens: number;
   }
   | {
     readonly continuationFingerprint: string;
+    readonly messages: readonly RuntimeJsonValue[];
     readonly runId: string;
     readonly type: "recordCheckpoint";
   }

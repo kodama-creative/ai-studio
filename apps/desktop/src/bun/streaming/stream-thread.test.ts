@@ -1151,6 +1151,7 @@ async function _startedDesktopRun(
     mutations: [{
       type: "startRun",
       runId: `run-${executionMode}`,
+      messages: [],
       configuration: {
         id: `configuration-${executionMode}`,
         agentSnapshotFingerprint: "desktop-thread-runtime-v1",
@@ -1311,7 +1312,8 @@ async function _beginProjectRun(
     mutations: [{
       type: "startRun",
       runId: `run-${crypto.randomUUID()}`,
-      configuration
+      configuration,
+      messages: []
     }]
   });
   await manager.writeThread(projectId, threadId, {

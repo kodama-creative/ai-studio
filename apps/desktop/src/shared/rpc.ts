@@ -76,6 +76,7 @@ export interface StreamThreadRequestPayload {
       projectId: string;
       threadId: string;
       type: "localServerAgentProject";
+      workingBase?: { branchId: string; checkpointId: string; };
     };
 }
 
@@ -102,6 +103,11 @@ export type StreamThreadResponsePayload =
     streamId: string;
     terminalOutcome?: "cancelled" | "completed" | "failed" | "outcomeUnknown";
     type: "localServerLineage";
+  }
+  | {
+    phase: "compacting" | "idle";
+    streamId: string;
+    type: "runtimePhase";
   }
   | {
     runtime: ThreadAgentRuntimeProvenance;
@@ -269,6 +275,15 @@ export interface DesktopRPCType {
       externalAgentProjectRemove: {
         params: { projectId: string; };
         response: null;
+      };
+      externalAgentProjectRenameRuntimeBranch: {
+        params: {
+          branchId: string;
+          label: string;
+          projectId: string;
+          threadId: string;
+        };
+        response: StoredRuntimeSession;
       };
       externalAgentProjectRuntimeStatus: {
         params: { projectId: string; threadId: string; };

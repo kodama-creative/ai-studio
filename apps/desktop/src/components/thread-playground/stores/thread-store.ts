@@ -1,6 +1,7 @@
 
 import {
   type AgentTransport,
+  convertFromPiMessages,
   getMessageText,
   type MessageContent,
   type ModelConfig,
@@ -50,6 +51,11 @@ import {
   withPromptVariableSnapshot,
   withRunMetadata
 } from "@llm-space/core/thread";
+import {
+  InMemorySessionStore,
+  runtimeHistoryMessages,
+  type StoredRuntimeSession
+} from "@llm-space/runtime/harness";
 import { createContext, useContext } from "react";
 import { toast } from "sonner";
 import { Compile } from "typebox/compile";
@@ -57,12 +63,12 @@ import { createStore, type StoreApi, useStore } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
 import { useShallow } from "zustand/shallow";
 
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type {
   AssistantMessage,
   Message
 } from "@llm-space/core";
 import type { RuntimeExecutionMode } from "@llm-space/runtime";
-import type { StoredRuntimeSession } from "@llm-space/runtime/harness";
 
 import { structuredOutputFromToolCall } from "@/client/structured-output-from-tool-call";
 import { createFrameThrottle } from "@/lib/frame-throttle";
@@ -87,10 +93,15 @@ import type { RunValidationIssue } from "./run-validation-issue";
 const toolValidator = Compile(ToolSchema);
 
 export type ThreadStoreStatus = "idle" | "running";
+export type ThreadRuntimePhase = "compacting" | "idle";
+export type ThreadCompactionRequestResult =
+  | "confirmationRequired"
+  | "finished";
 export interface ThreadState {
   thread: Thread;
   streamingMessage: AssistantMessage | null;
   status: ThreadStoreStatus;
+  runtimePhase: ThreadRuntimePhase;
   abortController: AbortController | null;
   activeRunId: string | null;
   collapsedMessageIds: string[];
@@ -116,11 +127,25 @@ export interface ThreadState {
   /** Reusable manual evaluation rubrics owned by this thread. */
   evaluationRubrics: EvaluationRubricRecord[];
 
-  run(fromMessageId?: string): Promise<void>;
+  run(
+    fromMessageId?: string,
+    action?: "compact",
+    confirmCompactionOutcomeUnknownRetry?: boolean
+  ): Promise<"compactionConfirmationRequired" | undefined>;
+  compactNow(
+    confirmOutcomeUnknownRetry?: boolean
+  ): Promise<ThreadCompactionRequestResult>;
+  setRuntimePhase(phase: ThreadRuntimePhase): void;
   resolveRunValidationIssue(): void;
   undo(): void;
   redo(): void;
   restoreThread(thread: Thread): void;
+  restoreRuntimeCheckpoint(
+    branchId: string,
+    checkpointId: string,
+    snapshot?: RunSnapshot["thread"]
+  ): boolean;
+  renameRuntimeBranch(branchId: string, label: string): Promise<boolean>;
   removeRun(run: RunSnapshot): void;
   saveEvaluation(input: {
     leftRunId: string;
@@ -202,6 +227,11 @@ export function createThreadStore(
       decision: "approved" | "denied"
     ) => Promise<Thread["runtimeSession"]>;
 
+    renameRuntimeBranchAuthority?: (
+      branchId: string,
+      label: string
+    ) => Promise<Thread["runtimeSession"]>;
+
     /** Skills available to prompt-variable rendering for this Thread. */
     loadPromptSkills?: typeof listEnabledPromptVariableSkills;
 
@@ -242,7 +272,7 @@ export function createThreadStore(
     ) => ThreadRuntimeCheckpoint | null;
 
     /** Latest Session snapshot durably committed by the Bun project Runtime. */
-    resolveCommittedRuntimeSession?: () => Thread["runtimeSession"];
+    resolveCommittedRuntimeSession?: () => StoredRuntimeSession | undefined;
     resolveOutputContractSnapshot?: (
       name: string | undefined
     ) => ThreadRuntimeCheckpoint["outputContract"];
@@ -489,6 +519,7 @@ export function createThreadStore(
         thread: normalizedInitialThread,
         streamingMessage: null,
         status: "idle",
+        runtimePhase: "idle",
         abortController: null,
         activeRunId: null,
         collapsedMessageIds: [],
@@ -1016,9 +1047,18 @@ export function createThreadStore(
               : [...collapsedMessageIds, id]
           });
         },
-        async run(fromMessageId?: string) {
+        async run(
+          fromMessageId?: string,
+          action?: "compact",
+          confirmCompactionOutcomeUnknownRetry = false
+        ) {
+          const compactOnly = action === "compact";
           if (get().status === "running") {
             throw new Error("Thread is already running");
+          }
+          if (compactOnly && options.transportOwnsRuntimeRun) {
+            toast.error("Compact now is unavailable for this Runtime profile");
+            return;
           }
           if (get().stagingSandboxAttachmentMessageIds.length > 0) {
             toast.error("Wait for files to finish staging before running.");
@@ -1030,15 +1070,48 @@ export function createThreadStore(
             return;
           }
           let messages = [...(get().thread.context?.messages ?? [])];
+          if (compactOnly) {
+            const persisted = get().thread.runtimeSession as
+              | StoredRuntimeSession
+              | undefined;
+            const history = persisted?.snapshot.schemaVersion === 4
+              ? persisted.snapshot.history
+              : null;
+            const workingBase = get().thread.runtimeWorkingBase;
+            const currentCheckpoint = history?.checkpoints.find(
+              checkpoint => checkpoint.id === history.currentCheckpointId
+            );
+            if (
+              persisted?.snapshot.activeRunId !== null
+              || !history?.currentBranchId
+              || !currentCheckpoint
+              || workingBase?.sessionId !== persisted.snapshot.id
+              || workingBase.branchId !== history.currentBranchId
+              || workingBase.checkpointId !== currentCheckpoint.id
+            ) {
+              toast.error("Compact now requires the current settled checkpoint");
+              return;
+            }
+            messages = convertFromPiMessages(
+              runtimeHistoryMessages(
+                history,
+                currentCheckpoint.headEntryId
+              ) as unknown as AgentMessage[],
+              messages,
+              get().thread.sandboxAttachments
+            );
+          }
           let truncated = false;
-          if (fromMessageId) {
+          if (!compactOnly && fromMessageId) {
             const index = messages.findIndex(m => m.id === fromMessageId);
             if (index !== -1 && index !== messages.length - 1) {
               messages = messages.slice(0, index + 1);
               truncated = true;
             }
           }
-          const runValidationIssue = getRunValidationIssue(messages);
+          const runValidationIssue = compactOnly
+            ? null
+            : getRunValidationIssue(messages);
           if (runValidationIssue) {
             set({ runValidationIssue });
             return;
@@ -1049,7 +1122,7 @@ export function createThreadStore(
             get().thread.context?.snapshot;
           let preparedContext: ThreadContext;
           try {
-            if (options.renderPromptVariables === false) {
+            if (compactOnly || options.renderPromptVariables === false) {
               preparedContext = { ...get().thread.context, messages };
             } else {
               const rendered = await renderThreadPromptVariables({
@@ -1070,7 +1143,7 @@ export function createThreadStore(
             return;
           }
 
-          const attachmentMessageIds = messages
+          const attachmentMessageIds = compactOnly ? [] : messages
             .map(message => message.id)
             .filter(messageId =>
               Boolean(get().thread.sandboxAttachments?.[messageId]?.length));
@@ -1095,6 +1168,12 @@ export function createThreadStore(
           if (!options.transportOwnsRuntimeRun) {
             try {
               const begun = await runtimeSession.begin({
+                ...(compactOnly
+                  ? {
+                    action: "compact" as const,
+                    confirmCompactionOutcomeUnknownRetry
+                  }
+                  : {}),
                 thread: executionThread,
                 context: preparedContext,
                 executionMode,
@@ -1125,7 +1204,9 @@ export function createThreadStore(
                 toast.error("Runtime Run outcome unknown", {
                   description: error.message
                 });
-                return;
+                return compactOnly && error.retryableCompaction
+                  ? "compactionConfirmationRequired"
+                  : undefined;
               }
               runtimeSession = new ThreadRuntimeSession(previousRuntimeSession);
               applyRuntimeSession(previousRuntimeSession);
@@ -1141,6 +1222,7 @@ export function createThreadStore(
           const isActiveRun = () => get().activeRunId === runId;
           set({
             status: "running",
+            runtimePhase: "idle",
             abortController,
             activeRunId: runId,
             streamingMessage: null
@@ -1189,6 +1271,7 @@ export function createThreadStore(
               promptSnapshot = preparedContext.snapshot;
               const response = streamThread(
                 {
+                  ...(compactOnly ? { action: "compact" as const } : {}),
                   context: preparedContext,
                   model,
                   sandboxAttachments: executionThread.sandboxAttachments,
@@ -1287,10 +1370,12 @@ export function createThreadStore(
             const outputSnapshot = options.resolveOutputContractSnapshot?.(
               threadWithSnapshot.outputContract
             );
-            const structuredOutput = _structuredOutputFromThread(
-              threadWithSnapshot,
-              runStartMessageCount
-            );
+            const structuredOutput = compactOnly
+              ? undefined
+              : _structuredOutputFromThread(
+                threadWithSnapshot,
+                runStartMessageCount
+              );
             const structuredOutputFailure =
               structuredOutputFailureCode && outputSnapshot
                 ? {
@@ -1319,15 +1404,45 @@ export function createThreadStore(
               if (options.transportOwnsRuntimeRun) {
                 const checkpoint =
                   options.resolveTransportRuntimeCheckpoint?.(outcome) ?? null;
+                const committedRuntimeSession =
+                  options.resolveCommittedRuntimeSession?.();
+                let threadWithRuntime = threadWithSnapshot;
+                if (committedRuntimeSession !== undefined) {
+                  const authoritativeCheckpoint = checkpoint?.branchId
+                    && checkpoint.checkpointId
+                    ? committedRuntimeSession.snapshot.history.checkpoints.find(
+                      item => item.id === checkpoint.checkpointId
+                        && item.branchId === checkpoint.branchId
+                        && item.runId === checkpoint.runId
+                    )
+                    : undefined;
+                  if (!authoritativeCheckpoint) {
+                    throw new Error(
+                      "Transport terminal Session does not contain its projected checkpoint"
+                    );
+                  }
+                  runtimeSession = new ThreadRuntimeSession(
+                    committedRuntimeSession
+                  );
+                  threadWithRuntime = {
+                    ...threadWithSnapshot,
+                    runtimeSession: committedRuntimeSession,
+                    runtimeWorkingBase: {
+                      sessionId: committedRuntimeSession.snapshot.id,
+                      branchId: authoritativeCheckpoint.branchId,
+                      checkpointId: authoritativeCheckpoint.id
+                    }
+                  };
+                }
                 const runUsage = aggregateMessageUsage(
-                  (threadWithSnapshot.context?.messages ?? []).slice(
+                  (threadWithRuntime.context?.messages ?? []).slice(
                     runStartMessageCount
                   )
                 );
                 const runHistory = checkpoint
                   ? recordRun(
                     get().runHistory,
-                    threadWithSnapshot,
+                    threadWithRuntime,
                     Date.now(),
                     {
                       runtime: checkpoint,
@@ -1343,21 +1458,25 @@ export function createThreadStore(
                   get().evaluations,
                   runHistory
                 );
-                const thread = withRunMetadata(threadWithSnapshot, {
+                const settledThread = withRunMetadata(threadWithRuntime, {
                   runHistory,
                   evaluations,
                   evaluationRubrics: get().evaluationRubrics
                 });
                 set({
-                  thread,
+                  thread: settledThread,
                   streamingMessage: null,
-                  changeHistory: recordSnapshot(get().changeHistory, thread),
+                  changeHistory: recordSnapshot(
+                    get().changeHistory,
+                    settledThread
+                  ),
                   runHistory,
                   evaluations
                 });
-                await options.persistSettledThread?.(thread);
+                await options.persistSettledThread?.(settledThread);
                 set({
                   status: "idle",
+                  runtimePhase: "idle",
                   abortController: null,
                   activeRunId: null
                 });
@@ -1372,6 +1491,7 @@ export function createThreadStore(
                 applyRuntimeSession(committedRuntimeSession);
               }
               const settled = await runtimeSession.settle({
+                ...(compactOnly ? { action: "compact" as const } : {}),
                 thread: threadWithSnapshot,
                 context: settledContext,
                 executionMode,
@@ -1384,9 +1504,22 @@ export function createThreadStore(
                 ),
                 structuredOutput
               });
+              const currentHistoryBranch = settled.session.snapshot.history
+                .currentBranchId;
+              const currentHistoryCheckpoint = settled.session.snapshot.history
+                .currentCheckpointId;
               const threadWithRuntime = {
                 ...threadWithSnapshot,
-                runtimeSession: settled.session
+                runtimeSession: settled.session,
+                ...(currentHistoryBranch && currentHistoryCheckpoint
+                  ? {
+                    runtimeWorkingBase: {
+                      sessionId: settled.session.snapshot.id,
+                      branchId: currentHistoryBranch,
+                      checkpointId: currentHistoryCheckpoint
+                    }
+                  }
+                  : {})
               };
               const runUsage = aggregateMessageUsage(
                 (threadWithRuntime.context?.messages ?? []).slice(
@@ -1427,13 +1560,22 @@ export function createThreadStore(
               await options.persistSettledThread?.(thread);
               set({
                 status: "idle",
+                runtimePhase: "idle",
                 abortController: null,
                 activeRunId: null
               });
+              if (compactOnly && outcome === "completed") {
+                const compacted = settled.session.snapshot.history.compactions
+                  .some(compaction => compaction.runId === runId);
+                toast.success(
+                  compacted ? "Context compacted" : "Nothing new to compact"
+                );
+              }
             } catch (error) {
               set({
                 streamingMessage: null,
                 status: "idle",
+                runtimePhase: "idle",
                 abortController: null,
                 activeRunId: null,
                 changeHistory: recordSnapshot(
@@ -1450,6 +1592,17 @@ export function createThreadStore(
 
           const outcome = await streamRuntimeRun();
           await finalizeRuntimeRun(outcome);
+        },
+        async compactNow(confirmOutcomeUnknownRetry = false) {
+          if (get().status === "running") { return "finished"; }
+          const result = await get().run(
+            undefined,
+            "compact",
+            confirmOutcomeUnknownRetry
+          );
+          return result === "compactionConfirmationRequired"
+            ? "confirmationRequired"
+            : "finished";
         },
         undo() {
           if (get().status === "running") {
@@ -1533,6 +1686,113 @@ export function createThreadStore(
             runValidationIssue: null,
             changeHistory: recordSnapshot(get().changeHistory, next)
           });
+        },
+        restoreRuntimeCheckpoint(branchId, checkpointId, snapshot) {
+          if (get().status === "running") { return false; }
+          const persisted = get().thread.runtimeSession as
+            | StoredRuntimeSession
+            | undefined;
+          if (persisted?.snapshot.schemaVersion !== 4) {
+            return false;
+          }
+          const checkpoint = persisted.snapshot.history.checkpoints.find(
+            item => item.id === checkpointId && item.branchId === branchId
+          );
+          if (!checkpoint) { return false; }
+          try {
+            const current = get().thread;
+            const piMessages = runtimeHistoryMessages(
+              persisted.snapshot.history,
+              checkpoint.headEntryId
+            ) as unknown as AgentMessage[];
+            const restoredMessages = convertFromPiMessages(
+              piMessages,
+              current.context?.messages ?? [],
+              current.sandboxAttachments
+            );
+            const source = snapshot ?? current;
+            const restored = {
+              ...source,
+              context: {
+                ...source.context,
+                messages: restoredMessages
+              }
+            };
+            const next = withRunMetadata({
+              ..._preserveSandboxAttachmentAuthority(current, restored),
+              runtimeSession: current.runtimeSession,
+              runtimeProfile: current.runtimeProfile,
+              runtimeWorkingBase: {
+                sessionId: persisted.snapshot.id,
+                branchId,
+                checkpointId
+              }
+            }, {
+              runHistory: get().runHistory,
+              evaluations: get().evaluations,
+              evaluationRubrics: get().evaluationRubrics
+            });
+            set({
+              thread: next,
+              runValidationIssue: null,
+              changeHistory: recordSnapshot(get().changeHistory, next)
+            });
+            return true;
+          } catch {
+            return false;
+          }
+        },
+        async renameRuntimeBranch(branchId, label) {
+          if (get().status === "running") { return false; }
+          const persisted = get().thread.runtimeSession as
+            | StoredRuntimeSession
+            | undefined;
+          const trimmed = label.trim();
+          const branch = persisted?.snapshot.schemaVersion === 4
+            ? persisted.snapshot.history.branches.find(
+              item => item.id === branchId
+            )
+            : undefined;
+          if (!persisted || !branch) { return false; }
+          if (branch.label === trimmed) { return true; }
+          const previousRuntimeSession = get().thread.runtimeSession;
+          let authorityCommitted: StoredRuntimeSession | null = null;
+          try {
+            const committed = options.renameRuntimeBranchAuthority
+              ? await options.renameRuntimeBranchAuthority(branchId, label)
+              : await new InMemorySessionStore([persisted]).commit({
+                sessionId: persisted.snapshot.id,
+                expectedVersion: persisted.version,
+                mutations: [{ type: "renameBranch", branchId, label }]
+              });
+            if (options.renameRuntimeBranchAuthority) {
+              authorityCommitted = committed as StoredRuntimeSession;
+            }
+            runtimeSession = new ThreadRuntimeSession(committed);
+            await persistRuntimeSession(committed);
+            return true;
+          } catch (error) {
+            if (authorityCommitted) {
+              runtimeSession = new ThreadRuntimeSession(authorityCommitted);
+              applyRuntimeSession(authorityCommitted);
+              toast.warning("Branch renamed on Local Server", {
+                description:
+                  "The local Thread projection could not be saved and will reconcile on the next Server update."
+              });
+              return true;
+            }
+            runtimeSession = new ThreadRuntimeSession(previousRuntimeSession);
+            applyRuntimeSession(previousRuntimeSession);
+            toast.error("Unable to rename branch", {
+              description: error instanceof Error
+                ? error.message
+                : "Runtime Session failed"
+            });
+            return false;
+          }
+        },
+        setRuntimePhase(phase) {
+          set({ runtimePhase: phase });
         },
         removeRun(run: RunSnapshot) {
           if (get().status === "running") {
@@ -1705,11 +1965,15 @@ export function useThreadStore<T>(selector: (s: ThreadState) => T): T {
 
 const selectActions = (s: ThreadState) => ({
   run: s.run,
+  compactNow: s.compactNow,
+  setRuntimePhase: s.setRuntimePhase,
   resolveRunValidationIssue: s.resolveRunValidationIssue,
   abort: s.abort,
   undo: s.undo,
   redo: s.redo,
   restoreThread: s.restoreThread,
+  restoreRuntimeCheckpoint: s.restoreRuntimeCheckpoint,
+  renameRuntimeBranch: s.renameRuntimeBranch,
   removeRun: s.removeRun,
   saveEvaluation: s.saveEvaluation,
   removeEvaluation: s.removeEvaluation,

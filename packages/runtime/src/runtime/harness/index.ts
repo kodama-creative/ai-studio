@@ -37,6 +37,23 @@ export {
   fingerprintRuntimeApprovalPrincipal
 } from "./runtime-approval-principal";
 export {
+  emptyRuntimeHistory,
+  latestRuntimeCompaction,
+  MAX_RUNTIME_BRANCH_LABEL_LENGTH,
+  RUNTIME_HISTORY_SCHEMA_VERSION,
+  runtimeBranchContainsCheckpoint,
+  type RuntimeBranchSnapshot,
+  type RuntimeCheckpointSnapshot,
+  type RuntimeCompactionSnapshot,
+  runtimeEntryIsAncestor,
+  runtimeHistoryCheckpointPath,
+  type RuntimeHistoryMessageEntrySnapshot,
+  runtimeHistoryMessagePath,
+  runtimeHistoryMessages,
+  type RuntimeHistorySnapshot,
+  type RuntimeWorkingBase
+} from "./runtime-history";
+export {
   isTerminalRuntimeRunState,
   RUNTIME_RUN_STATES,
   type RuntimeJsonValue,

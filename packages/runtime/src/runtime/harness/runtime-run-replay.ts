@@ -53,6 +53,7 @@ export function replayRuntimeRunEvents(
       entry.type !== "sessionStateReplaced"
       && entry.type !== "turnInstructionsRecorded"
       && entry.type !== "turnCapabilitiesRecorded"
+      && entry.type !== "runtimeBranchRenamed"
       && entry.runId === authorization.runId
       && entry.sequence > afterSequence)
     .map(entry => ({
@@ -96,6 +97,7 @@ function _validatedCursorSequence(
     || entry.type === "sessionStateReplaced"
     || entry.type === "turnInstructionsRecorded"
     || entry.type === "turnCapabilitiesRecorded"
+    || entry.type === "runtimeBranchRenamed"
     || entry.runId !== cursor.runId
   ) {
     throw new SessionStoreInvariantError(

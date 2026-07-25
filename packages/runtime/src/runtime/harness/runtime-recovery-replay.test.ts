@@ -150,7 +150,7 @@ describe("Runtime Run replay", () => {
     const store = new InMemorySessionStore();
     const started = await _start(store, "session-corrupt", "run-corrupt");
     const corrupted = structuredClone(started);
-    const entry = corrupted.journal[0];
+    const entry = corrupted.journal.find(item => item.type === "runStarted");
     if (entry?.type !== "runStarted") {
       throw new Error("Expected a run-start journal entry");
     }
@@ -172,6 +172,7 @@ describe("Runtime Run replay", () => {
         {
           type: "startRun",
           runId: "run-second",
+          messages: [],
           configuration: _configuration("config-second")
         }
       ]
@@ -190,20 +191,21 @@ describe("Runtime Run replay", () => {
     };
     const all = replayRuntimeRunEvents(waiting, authorization);
 
-    expect(all.map(event => event.entry.sequence)).toEqual([3, 4, 5]);
+    expect(all.map(event => event.entry.sequence)).toEqual([5, 6, 7, 8]);
     expect(all.map(event => event.entry.type)).toEqual([
+      "runtimeMessagesCommitted",
       "runStarted",
       "runStateChanged",
       "runStateChanged"
     ]);
-    expect(new Set(all.map(event => event.cursor.sequence)).size).toBe(3);
+    expect(new Set(all.map(event => event.cursor.sequence)).size).toBe(4);
     expect(Object.isFrozen(all)).toBe(true);
     const afterSecond = replayRuntimeRunEvents(
       waiting,
       authorization,
       all[1]?.cursor
     );
-    expect(afterSecond.map(event => event.entry.sequence)).toEqual([5]);
+    expect(afterSecond.map(event => event.entry.sequence)).toEqual([7, 8]);
     expect(replayRuntimeRunEvents(
       waiting,
       authorization,
@@ -239,12 +241,12 @@ describe("Runtime Run replay", () => {
     };
 
     expect(replayRuntimeRunEvents(completed, authorization)
-      .map(event => event.entry.sequence)).toEqual([1, 3]);
+      .map(event => event.entry.sequence)).toEqual([1, 2, 3, 5]);
     expect(() => replayRuntimeRunEvents(completed, authorization, {
       schemaVersion: RUNTIME_RUN_REPLAY_CURSOR_SCHEMA_VERSION,
       sessionId: authorization.sessionId,
       runId: authorization.runId,
-      sequence: 2
+      sequence: 4
     })).toThrow("does not identify a durable entry in scope");
   });
 
@@ -259,6 +261,7 @@ describe("Runtime Run replay", () => {
         {
           type: "startRun",
           runId: "run-two",
+          messages: [],
           configuration: _configuration("config-two")
         }
       ]
@@ -301,6 +304,7 @@ async function _start(
     mutations: [{
       type: "startRun",
       runId,
+      messages: [],
       configuration: _configuration()
     }]
   });

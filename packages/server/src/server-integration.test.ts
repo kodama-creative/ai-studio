@@ -693,11 +693,11 @@ describe("Agent Server HTTP protocol", () => {
     }
     expect(events).toEqual([expect.objectContaining({
       event: "control",
-      data: {
+      data: expect.objectContaining({
         type: "runTerminal",
         outcome: "failed",
         code: "executionEnvUnavailable"
-      }
+      })
     })]);
   });
 

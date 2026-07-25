@@ -567,6 +567,9 @@ export function withRunMetadata(
   if (thread.runtimeProfile !== undefined) {
     next.runtimeProfile = thread.runtimeProfile;
   }
+  if (thread.runtimeWorkingBase !== undefined) {
+    next.runtimeWorkingBase = thread.runtimeWorkingBase;
+  }
   if (normalized.length > 0) {
     next.runHistory = normalized;
   }
@@ -642,6 +645,8 @@ function _normalizeRuntimeCheckpoint(
   const continuationFingerprint = _trimmed(record.continuationFingerprint);
   const state = record.state;
   const checkpointOrder = record.checkpointOrder;
+  const branchId = _trimmed(record.branchId);
+  const checkpointId = _trimmed(record.checkpointId);
   const profile = _normalizeRuntimeProfileType(record.profile);
   const server = _normalizeServerRunLineage(record.server, runId);
   const outputContract = _normalizeOutputContract(record.outputContract);
@@ -652,6 +657,8 @@ function _normalizeRuntimeCheckpoint(
     || !RUNTIME_RUN_STATES.has(state as ThreadRuntimeRunState)
     || !Number.isSafeInteger(checkpointOrder)
     || (checkpointOrder as number) < 1
+    || (record.branchId !== undefined && !branchId)
+    || (record.checkpointId !== undefined && !checkpointId)
     || (record.profile !== undefined && !profile)
     || (record.server !== undefined && !server)
   ) {
@@ -659,6 +666,8 @@ function _normalizeRuntimeCheckpoint(
   }
   return {
     runId,
+    ...(branchId ? { branchId } : {}),
+    ...(checkpointId ? { checkpointId } : {}),
     state: state as ThreadRuntimeRunState,
     checkpointOrder: checkpointOrder as number,
     continuationFingerprint,

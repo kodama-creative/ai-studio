@@ -33,6 +33,7 @@ import type {
 } from "../../shared/agent-definition";
 import type { AgentSessionContext } from "../../shared/agent-session-context";
 import type { RuntimeExecutionMode } from "../../shared/runtime-execution-mode";
+import type { RuntimeCompactionPhase } from "../compaction/runtime-compaction-coordinator";
 import type { SessionStore, StoredRuntimeSession } from "../harness/session-store";
 import type { SandboxTurnEnvironment } from "../sandbox/sandbox-provider";
 
@@ -60,6 +61,7 @@ export interface CreateAgentSessionOptions {
   persistence?: AgentSessionPersistence;
   sessionStore?: SessionStore;
   onSessionCommitted?: (session: StoredRuntimeSession) => Promise<void> | void;
+  onPhase?: (phase: RuntimeCompactionPhase) => void;
   streamFn?: StreamFn;
   outputContract?: string;
   executionEnv?: ExecutionEnv;
@@ -203,6 +205,7 @@ export class AgentRuntime {
       context: options.context,
       sessionStore: options.sessionStore,
       onSessionCommitted: options.onSessionCommitted,
+      onPhase: options.onPhase,
       persistence: options.persistence,
       streamFn: options.streamFn,
       outputDefinition,

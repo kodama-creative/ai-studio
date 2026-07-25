@@ -1,3 +1,5 @@
+import type { AssistantMessage } from "@earendil-works/pi-ai";
+
 import {
   MAX_DURABLE_OPERATION_REPLAY_BYTES,
   MAX_DURABLE_STEP_REPLAY_BYTES,
@@ -143,6 +145,67 @@ export class DurableOperationCoordinator {
         error instanceof Error ? error.message : String(error)
       );
     }
+  }
+
+  async completeAuxiliaryProvider(input: {
+    readonly execute: () => Promise<AssistantMessage>;
+    readonly provider: string;
+    readonly request: unknown;
+    readonly signal?: AbortSignal;
+    readonly slot: string;
+    readonly transcriptMessageCount: number;
+  }): Promise<AssistantMessage> {
+    if (!this._sessionStore) { return input.execute(); }
+    const current = await this._sessionStore.load(this._sessionId);
+    if (current?.snapshot.activeRunId !== this._runId) {
+      throw new Error(
+        `Runtime Run ${this._runId} is not active for auxiliary provider work`
+      );
+    }
+    const requestFingerprint = await fingerprintDurableOperationValue(
+      input.request
+    );
+    const begun = await this._serialize(async () => this._begin({
+      kind: "provider",
+      provider: input.provider,
+      providerSlot: input.slot,
+      requestFingerprint,
+      transcriptMessageCount: input.transcriptMessageCount
+    }));
+    if (begun.type === "replay") {
+      return _replayProviderMessage(begun.operation, begun.value);
+    }
+    if (input.signal?.aborted) {
+      await this.markCancelled(begun.operation);
+      const error = new Error("Auxiliary provider operation cancelled before dispatch");
+      error.name = "AbortError";
+      throw error;
+    }
+    let message: AssistantMessage;
+    try {
+      message = await input.execute();
+    } catch (error) {
+      try {
+        await this.markOutcomeUnknown(begun.operation);
+      } catch {}
+      throw new DurableOperationOutcomeUnknownError(
+        begun.operation.id,
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+    if (message.stopReason === "aborted") {
+      await this.markOutcomeUnknown(begun.operation);
+      throw new DurableOperationOutcomeUnknownError(
+        begun.operation.id,
+        `Auxiliary provider operation ${begun.operation.id} was aborted after possible dispatch`
+      );
+    }
+    await this.settleProvider({
+      operation: begun.operation,
+      state: message.stopReason === "error" ? "failed" : "completed",
+      value: { type: "providerMessage", message }
+    });
+    return message;
   }
 
   async markOutcomeUnknown(
@@ -539,9 +602,32 @@ export class DurableOperationCoordinator {
     this._activeStepId = null;
   }
 
+  async commitProviderOnlyStepWith(
+    mutations: readonly RuntimeSessionMutation[]
+  ): Promise<StoredRuntimeSession> {
+    if (!this._sessionStore) {
+      throw new Error("Durable provider Session Store is unavailable");
+    }
+    if (!this._activeStepId) {
+      return this._commit(mutations);
+    }
+    const stepId = this._activeStepId;
+    const committed = await this._commit([
+      ...mutations,
+      {
+        type: "checkpointOperationStep",
+        runId: this._runId,
+        stepId
+      }
+    ]);
+    this._activeStepId = null;
+    return committed;
+  }
+
   private async _begin(input: {
     readonly kind: "provider";
     readonly provider: string;
+    readonly providerSlot?: string;
     readonly requestFingerprint: string;
     readonly transcriptMessageCount: number;
   } | {
@@ -576,7 +662,11 @@ export class DurableOperationCoordinator {
     }
     this._activeStepId = step.id;
     const operationId = input.kind === "provider"
-      ? `${step.id}:provider:${encodeURIComponent(input.provider)}`
+      ? `${step.id}:provider:${encodeURIComponent(input.provider)}${
+        input.providerSlot
+          ? `:${encodeURIComponent(input.providerSlot)}`
+          : ""
+      }`
       : `${step.id}:tool:${input.toolCallId}`;
     const existing = step.operations.find(operation =>
       operation.id === operationId);
@@ -585,6 +675,7 @@ export class DurableOperationCoordinator {
     }
     if (
       input.kind === "provider"
+      && input.providerSlot === undefined
       && step.operations.some(operation => operation.kind === "provider")
     ) {
       throw new DurableOperationFingerprintMismatchError(operationId);
@@ -734,6 +825,26 @@ export class DurableOperationCoordinator {
     this._commitTail = result.then(() => {}, () => {});
     return result;
   }
+}
+
+function _replayProviderMessage(
+  operation: RuntimeDurableOperationSnapshot,
+  value: RuntimeJsonValue
+): AssistantMessage {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new DurableOperationOutcomeUnknownError(operation.id);
+  }
+  const record = value as Record<string, RuntimeJsonValue>;
+  const message = record.type === "providerMessage"
+    ? record.message as unknown as AssistantMessage
+    : null;
+  if (
+    message?.role !== "assistant"
+    || (operation.state !== "completed" && operation.state !== "failed")
+  ) {
+    throw new DurableOperationOutcomeUnknownError(operation.id);
+  }
+  return message;
 }
 
 export async function fingerprintDurableOperationValue(

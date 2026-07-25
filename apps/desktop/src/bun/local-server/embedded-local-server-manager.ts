@@ -16,8 +16,11 @@ import type { AgentEvent } from "@earendil-works/pi-agent-core";
 import type { Models } from "@earendil-works/pi-ai";
 import type { ThreadServerRunLineage } from "@llm-space/core";
 import type {
+  AgentServerRuntimeProjection,
+  AgentServerRuntimeWorkingBase,
   ServerRunTerminalOutcome
 } from "@llm-space/runtime/client";
+import type { StoredRuntimeSession } from "@llm-space/runtime/harness";
 import type { SandboxProvider } from "@llm-space/runtime/server";
 
 import { LocalServerCredentialStore } from "./local-server-credential-store";
@@ -44,7 +47,8 @@ export interface EmbeddedLocalServerRunCallbacks {
   readonly onTerminal: (
     lineage: ThreadServerRunLineage,
     outcome: ServerRunTerminalOutcome,
-    code?: string
+    code?: string,
+    runtime?: AgentServerRuntimeProjection
   ) => void;
 }
 
@@ -139,6 +143,7 @@ export class EmbeddedLocalServerManager {
       readonly signal: AbortSignal;
       readonly text: string;
       readonly threadId: string;
+      readonly workingBase?: AgentServerRuntimeWorkingBase;
     },
     callbacks: EmbeddedLocalServerRunCallbacks
   ): Promise<void> {
@@ -226,6 +231,7 @@ export class EmbeddedLocalServerManager {
       continuationToken: credential.continuationToken,
       sessionId: credential.sessionId,
       text: input.text,
+      ...(input.workingBase ? { workingBase: input.workingBase } : {}),
       ...(input.outputContract
         ? { outputContract: input.outputContract }
         : {})
@@ -243,6 +249,9 @@ export class EmbeddedLocalServerManager {
     const abortState: {
       request: ReturnType<typeof managed.client.abortRun> | null;
     } = { request: null };
+    let terminalCode: string | undefined;
+    let terminalRuntime: AgentServerRuntimeProjection | undefined;
+    let abortSettlementError: Error | null = null;
     const abort = () => {
       abortState.request = abortState.request ?? managed.client.abortRun({
         continuationToken: credential.continuationToken,
@@ -278,7 +287,14 @@ export class EmbeddedLocalServerManager {
           });
         } else {
           terminalOutcome = event.data.outcome;
-          callbacks.onTerminal(lineage, terminalOutcome, event.data.code);
+          terminalCode = event.data.code;
+          terminalRuntime = event.data.runtime;
+          callbacks.onTerminal(
+            lineage,
+            terminalOutcome,
+            terminalCode,
+            terminalRuntime
+          );
         }
       }
     } finally {
@@ -287,7 +303,8 @@ export class EmbeddedLocalServerManager {
       if (input.signal.aborted && !terminalOutcome) {
         if (abortResult?.status === "terminal") {
           terminalOutcome = abortResult.outcome;
-        } else {
+        }
+        try {
           for await (const event of managed.client.streamRun({
             continuationToken: credential.continuationToken,
             sessionId: run.sessionId,
@@ -295,12 +312,65 @@ export class EmbeddedLocalServerManager {
           })) {
             if (event.event === "control" && event.data.type === "runTerminal") {
               terminalOutcome = event.data.outcome;
+              terminalCode = event.data.code;
+              terminalRuntime = event.data.runtime;
+              break;
             }
           }
+        } catch (error) {
+          if (!terminalOutcome) {
+            abortSettlementError = error instanceof Error
+              ? error
+              : new Error("Unable to read the Local Server terminal event");
+          }
         }
-        callbacks.onTerminal(lineage, terminalOutcome ?? "cancelled");
+        if (!abortSettlementError) {
+          callbacks.onTerminal(
+            lineage,
+            terminalOutcome ?? "cancelled",
+            terminalCode,
+            terminalRuntime
+          );
+        }
       }
     }
+    if (abortSettlementError) { throw abortSettlementError; }
+  }
+
+  async renameBranch(input: {
+    readonly branchId: string;
+    readonly label: string;
+    readonly projectId: string;
+    readonly threadId: string;
+  }): Promise<StoredRuntimeSession> {
+    const record = await this._options.externalAgentProjects.readThread(
+      input.projectId,
+      input.threadId
+    );
+    const profile = record.thread.runtimeProfile;
+    if (profile?.type !== "localServer" || !profile.serverSessionId) {
+      throw new Error("Thread is not bound to a Local Server Session.");
+    }
+    const credential = await this._credentials.get(
+      input.projectId,
+      input.threadId
+    );
+    if (
+      credential?.sessionId !== profile.serverSessionId
+      || credential?.artifactFingerprint !== profile.artifactFingerprint
+    ) {
+      throw new Error("Local Server continuation credential is unavailable.");
+    }
+    const managed = await this._server(
+      input.projectId,
+      profile.artifactFingerprint
+    );
+    return managed.client.renameBranch({
+      branchId: input.branchId,
+      continuationToken: credential.continuationToken,
+      label: input.label,
+      sessionId: credential.sessionId
+    });
   }
 
   async detachThread(projectId: string, threadId: string): Promise<void> {

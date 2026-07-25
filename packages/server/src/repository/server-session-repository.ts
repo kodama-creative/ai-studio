@@ -12,9 +12,12 @@ import { join } from "node:path";
 import {
   InMemorySessionStore,
   isTerminalRuntimeRunState,
+  runtimeHistoryMessages,
+  type RuntimeJsonValue,
   type RuntimeRunConfigurationSnapshot,
   type RuntimeRunState,
   type RuntimeStructuredOutputResult,
+  type RuntimeWorkingBase,
   type SessionStore,
   type SessionStoreCommit,
   type StoredRuntimeSession
@@ -25,6 +28,7 @@ import type { FileHandle } from "node:fs/promises";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { UserMessage } from "@earendil-works/pi-ai";
 import type {
+  AgentServerRuntimeProjection,
   ServerControlEvent,
   ServerRunTerminalOutcome
 } from "@llm-space/runtime/client";
@@ -284,6 +288,7 @@ export class ServerSessionRepository implements SessionStore {
     readonly owner: ServerPrincipal;
     readonly sessionId: string;
     readonly userMessage: UserMessage;
+    readonly workingBase?: RuntimeWorkingBase;
   }): Promise<CreatedServerRun> {
     return this._exclusive(async () => {
       const current = this._authorized(
@@ -291,7 +296,11 @@ export class ServerSessionRepository implements SessionStore {
         input.owner,
         input.continuationToken
       );
-      const inputHash = _runInputHash(input.inputText, input.outputContract);
+      const inputHash = _runInputHash(
+        input.inputText,
+        input.outputContract,
+        input.workingBase
+      );
       const idempotent = current.runs.find(
         run => run.idempotencyKey === input.idempotencyKey
       );
@@ -316,18 +325,24 @@ export class ServerSessionRepository implements SessionStore {
         throw new ServerRunConflictError();
       }
       const runId = `run-${randomUUID()}`;
+      const transcript: readonly AgentMessage[] = [
+        ..._transcriptAtWorkingBase(current, input.workingBase),
+        input.userMessage
+      ];
       const store = new InMemorySessionStore(
         current.runtime ? [current.runtime] : []
       );
       const runtime = await store.commit({
         sessionId: current.sessionId,
         expectedVersion: current.runtime?.version ?? null,
-        mutations: [{ type: "startRun", runId, configuration: input.configuration }]
+        mutations: [{
+          type: "startRun",
+          runId,
+          configuration: input.configuration,
+          messages: transcript as unknown as readonly RuntimeJsonValue[],
+          ...(input.workingBase ? { workingBase: input.workingBase } : {})
+        }]
       });
-      const transcript: readonly AgentMessage[] = [
-        ...current.transcript,
-        input.userMessage
-      ];
       const next: ServerSessionEnvelope = {
         ...current,
         runtime,
@@ -367,6 +382,7 @@ export class ServerSessionRepository implements SessionStore {
     readonly outputContract?: string;
     readonly owner: ServerPrincipal;
     readonly sessionId: string;
+    readonly workingBase?: RuntimeWorkingBase;
   }): Promise<CreatedServerRun | null> {
     const current = this._authorized(
       input.sessionId,
@@ -379,7 +395,11 @@ export class ServerSessionRepository implements SessionStore {
     if (!run) {
       return null;
     }
-    if (run.inputHash !== _runInputHash(input.inputText, input.outputContract)) {
+    if (run.inputHash !== _runInputHash(
+      input.inputText,
+      input.outputContract,
+      input.workingBase
+    )) {
       throw new ServerIdempotencyConflictError();
     }
     return {
@@ -398,12 +418,45 @@ export class ServerSessionRepository implements SessionStore {
     readonly continuationToken: string;
     readonly owner: ServerPrincipal;
     readonly sessionId: string;
+    readonly workingBase?: RuntimeWorkingBase;
   }): readonly AgentMessage[] {
-    return _snapshot(this._authorized(
+    const current = this._authorized(
       input.sessionId,
       input.owner,
       input.continuationToken
-    ).transcript);
+    );
+    return _snapshot(_transcriptAtWorkingBase(current, input.workingBase));
+  }
+
+  async renameBranch(input: {
+    readonly branchId: string;
+    readonly continuationToken: string;
+    readonly label: string;
+    readonly owner: ServerPrincipal;
+    readonly sessionId: string;
+  }): Promise<StoredRuntimeSession> {
+    return this._exclusive(async () => {
+      const current = this._authorized(
+        input.sessionId,
+        input.owner,
+        input.continuationToken
+      );
+      if (!current.runtime) {
+        throw new TypeError("Runtime Session is unavailable");
+      }
+      const store = new InMemorySessionStore([current.runtime]);
+      const runtime = await store.commit({
+        sessionId: input.sessionId,
+        expectedVersion: current.runtime.version,
+        mutations: [{
+          type: "renameBranch",
+          branchId: input.branchId,
+          label: input.label
+        }]
+      });
+      await this._save({ ...current, runtime });
+      return _snapshot(runtime);
+    });
   }
 
   async authorizeRun(input: {
@@ -647,14 +700,23 @@ export class ServerSessionRepository implements SessionStore {
         runtime = await runtimeStore.commit({
           sessionId: input.sessionId,
           expectedVersion: currentRuntime.version,
-          mutations: [{
-            type: "transitionRun",
-            runId: input.runId,
-            to: input.outcome as RuntimeRunState,
-            ...(input.structuredOutput
-              ? { structuredOutput: input.structuredOutput }
-              : {})
-          }]
+          mutations: [
+            {
+              type: "transitionRun",
+              runId: input.runId,
+              to: input.outcome as RuntimeRunState,
+              ...(input.structuredOutput
+                ? { structuredOutput: input.structuredOutput }
+                : {})
+            },
+            {
+              type: "recordCheckpoint",
+              runId: input.runId,
+              messages: current.transcript as unknown as readonly RuntimeJsonValue[],
+              continuationFingerprint:
+                `server-transcript:${_sha256(JSON.stringify(current.transcript))}`
+            }
+          ]
         });
       } else if (runtimeRun.state !== input.outcome) {
         throw new Error("Runtime Run terminal does not match Server terminal");
@@ -677,9 +739,19 @@ export class ServerSessionRepository implements SessionStore {
         );
       }
       const events = current.events[input.runId] ?? [];
+      const runtimeProjection = _terminalRuntimeProjection(
+        runtime,
+        authoritativeRun
+      );
+      if (!runtimeProjection) {
+        throw new Error(
+          `Runtime Run ${authoritativeRun.id} has no terminal checkpoint`
+        );
+      }
       const data: ServerControlEvent = {
         type: "runTerminal",
         outcome: input.outcome,
+        runtime: runtimeProjection,
         ...(input.code ? { code: input.code } : {}),
         ...(authoritativeRun.structuredOutput
           ? { structuredOutput: authoritativeRun.structuredOutput }
@@ -817,6 +889,7 @@ export class ServerSessionRepository implements SessionStore {
           continue;
         }
         const runEvents = events[runtimeRun.id] ?? [];
+        const runtimeProjection = _terminalRuntimeProjection(runtime, runtimeRun);
         const terminal: PersistedServerEvent = _snapshot({
           event: "control" as const,
           data: {
@@ -827,7 +900,8 @@ export class ServerSessionRepository implements SessionStore {
               : {}),
             ...(runtimeRun.structuredOutput
               ? { structuredOutput: runtimeRun.structuredOutput }
-              : {})
+              : {}),
+            ...(runtimeProjection ? { runtime: runtimeProjection } : {})
           },
           sequence: runEvents.length + 1
         });
@@ -1226,6 +1300,7 @@ function _validPersistedPiEvent(value: unknown): boolean {
 
 function _validPersistedTerminal(value: unknown): value is {
   readonly outcome: ServerRunTerminalOutcome;
+  readonly runtime?: AgentServerRuntimeProjection;
   readonly structuredOutput?: RuntimeStructuredOutputResult;
   readonly type: "runTerminal";
 } {
@@ -1239,9 +1314,47 @@ function _validPersistedTerminal(value: unknown): value is {
     )
     && (value.code === undefined || typeof value.code === "string")
     && (
+      value.runtime === undefined
+      || _validRuntimeProjection(value.runtime)
+    )
+    && (
       value.structuredOutput === undefined
       || _validStructuredOutput(value.structuredOutput)
     );
+}
+
+function _validRuntimeProjection(
+  value: unknown
+): value is AgentServerRuntimeProjection {
+  if (
+    !_isRecord(value)
+    || typeof value.branchId !== "string"
+    || value.branchId.length === 0
+    || typeof value.checkpointId !== "string"
+    || value.checkpointId.length === 0
+    || !_isRecord(value.session)
+  ) {
+    return false;
+  }
+  let session: StoredRuntimeSession;
+  try {
+    session = value.session as unknown as StoredRuntimeSession;
+    const validationStore = new InMemorySessionStore([session]);
+    void validationStore;
+  } catch {
+    return false;
+  }
+  const checkpoint = session.snapshot.history.checkpoints.find(item =>
+    item.id === value.checkpointId && item.branchId === value.branchId);
+  const run = checkpoint
+    ? session.snapshot.runs.find(item => item.id === checkpoint.runId)
+    : undefined;
+  return Boolean(
+    checkpoint
+    && run?.branchId === value.branchId
+    && session.snapshot.history.currentBranchId === value.branchId
+    && session.snapshot.history.currentCheckpointId === value.checkpointId
+  );
 }
 
 function _validPersistedToolApprovalRequired(value: unknown): boolean {
@@ -1265,6 +1378,19 @@ function _assertTerminalAuthority(envelope: ServerSessionEnvelope): void {
     const runtimeRun = envelope.runtime?.snapshot.runs.find(
       candidate => candidate.id === run.id
     );
+    const runtimeProjection = terminal?.event === "control"
+      && _validPersistedTerminal(terminal.data)
+      ? terminal.data.runtime
+      : undefined;
+    const projectedCheckpoint = runtimeProjection?.session.snapshot.history
+      .checkpoints.find(candidate =>
+        candidate.id === runtimeProjection.checkpointId
+        && candidate.branchId === runtimeProjection.branchId);
+    const projectedRun = projectedCheckpoint
+      ? runtimeProjection?.session.snapshot.runs.find(
+        candidate => candidate.id === projectedCheckpoint.runId
+      )
+      : undefined;
     if (
       terminal?.event !== "control"
       || !_validPersistedTerminal(terminal.data)
@@ -1273,6 +1399,13 @@ function _assertTerminalAuthority(envelope: ServerSessionEnvelope): void {
         terminal.data.structuredOutput,
         runtimeRun.structuredOutput
       )
+      || (runtimeProjection !== undefined && (
+        runtimeProjection.session.snapshot.id !== envelope.sessionId
+        || projectedCheckpoint?.runId !== run.id
+        || projectedCheckpoint.state !== terminal.data.outcome
+        || projectedRun?.id !== run.id
+        || projectedRun.state !== terminal.data.outcome
+      ))
     ) {
       throw new Error(
         `Server Run ${run.id} terminal does not match Runtime authority`
@@ -1450,10 +1583,49 @@ function _sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
-function _runInputHash(text: string, outputContract?: string): string {
-  return _sha256(outputContract
-    ? JSON.stringify({ text, outputContract })
-    : text);
+function _runInputHash(
+  text: string,
+  outputContract?: string,
+  workingBase?: RuntimeWorkingBase
+): string {
+  return _sha256(JSON.stringify({
+    text,
+    outputContract: outputContract ?? null,
+    workingBase: workingBase ?? null
+  }));
+}
+
+function _transcriptAtWorkingBase(
+  session: ServerSessionEnvelope,
+  workingBase?: RuntimeWorkingBase
+): readonly AgentMessage[] {
+  if (!workingBase) { return session.transcript; }
+  const history = session.runtime?.snapshot.history;
+  const checkpoint = history?.checkpoints.find(item =>
+    item.id === workingBase.checkpointId
+    && item.branchId === workingBase.branchId);
+  if (!history || !checkpoint) {
+    throw new TypeError("Runtime working base is unavailable");
+  }
+  return runtimeHistoryMessages(
+    history,
+    checkpoint.headEntryId
+  ) as unknown as readonly AgentMessage[];
+}
+
+function _terminalRuntimeProjection(
+  session: StoredRuntimeSession,
+  run: StoredRuntimeSession["snapshot"]["runs"][number]
+): AgentServerRuntimeProjection | null {
+  const checkpoint = session.snapshot.history.checkpoints
+    .filter(item => item.runId === run.id)
+    .at(-1);
+  if (!checkpoint) { return null; }
+  return {
+    branchId: checkpoint.branchId,
+    checkpointId: checkpoint.id,
+    session
+  };
 }
 
 function _equalHash(left: string, right: string): boolean {

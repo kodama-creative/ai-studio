@@ -1,15 +1,23 @@
+import { convertFromPiMessages, type Thread } from "@llm-space/core";
 import {
+  type RuntimeBranchSnapshot,
+  type RuntimeCompactionSnapshot,
+  runtimeHistoryMessages,
   runtimeToolApprovalViews,
   type StoredRuntimeSession
 } from "@llm-space/runtime/harness";
 import {
   ArrowLeftIcon,
   CheckIcon,
+  ChevronDownIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  CopyIcon,
   EyeIcon,
   GitBranchIcon,
   GitCompareArrowsIcon,
+  Minimize2Icon,
+  PencilIcon,
   RotateCcwIcon,
   Trash2Icon,
   XIcon
@@ -25,6 +33,7 @@ import {
 } from "react";
 import { format } from "timeago.js";
 
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ThreadRuntimeRunState } from "@llm-space/core";
 import type {
   EvaluationRecord,
@@ -80,19 +89,26 @@ const RUNTIME_STATE_LABELS: Record<ThreadRuntimeRunState, string> = {
 };
 
 const _RunHistoryListView = function RunHistoryListView({
+  compactNowAvailable,
   inspectRunRequest,
   onClose
 }: {
+  readonly compactNowAvailable: boolean;
   readonly inspectRunRequest?: { revision: number; runId: string; };
   readonly onClose: () => void;
 }) {
   const [containerRef] = useAutoAnimation();
   const runHistory = useThreadStore(s => s.runHistory);
+  const status = useThreadStore(s => s.status);
+  const thread = useThreadStore(s => s.thread);
   const evaluations = useThreadStore(s => s.evaluations);
   const evaluationRubrics = useThreadStore(s => s.evaluationRubrics);
   const persistedRuntimeSession = useThreadStore(s => s.thread.runtimeSession);
   const {
+    compactNow,
     restoreThread,
+    restoreRuntimeCheckpoint,
+    renameRuntimeBranch,
     removeRun,
     saveEvaluation,
     removeEvaluation,
@@ -102,11 +118,30 @@ const _RunHistoryListView = function RunHistoryListView({
   const [selectedRunIds, setSelectedRunIds] = useState<string[]>([]);
   const [evaluationOpen, setEvaluationOpen] = useState(false);
   const [inspectingRunId, setInspectingRunId] = useState<string | null>(null);
+  const [inspectingCompactionId, setInspectingCompactionId] =
+    useState<string | null>(null);
+  const [collapsedBranchIds, setCollapsedBranchIds] = useState<Set<string>>(
+    () => new Set()
+  );
   const [runPendingRemoval, setRunPendingRemoval] =
     useState<RunSnapshot | null>(null);
   const [evaluationPendingRemoval, setEvaluationPendingRemoval] =
     useState<EvaluationRecord | null>(null);
+  const [compactionRetryOpen, setCompactionRetryOpen] = useState(false);
+  const handleCompactNow = useCallback(() => {
+    void compactNow().then(result => {
+      if (result === "confirmationRequired") {
+        setCompactionRetryOpen(true);
+      }
+    });
+  }, [compactNow]);
   const runs = useMemo(() => runHistory.slice().reverse(), [runHistory]);
+  const runtimeTree = useMemo(() => _runtimeTree(
+    persistedRuntimeSession,
+    runHistory,
+    thread
+  ), [persistedRuntimeSession, runHistory, thread]);
+  const inspectionRuns = runtimeTree?.inspectionRuns ?? runs;
   const currentRuntimeRunStates = useMemo(
     () => runtimeRunStates(persistedRuntimeSession),
     [persistedRuntimeSession]
@@ -142,13 +177,17 @@ const _RunHistoryListView = function RunHistoryListView({
     if (!inspectingRunId) {
       return -1;
     }
-    return runs.findIndex(run => run.id === inspectingRunId);
-  }, [inspectingRunId, runs]);
+    return inspectionRuns.findIndex(run => run.id === inspectingRunId);
+  }, [inspectingRunId, inspectionRuns]);
   const inspectingRun =
-    inspectingRunIndex >= 0 ? runs[inspectingRunIndex] : null;
+    inspectingRunIndex >= 0 ? inspectionRuns[inspectingRunIndex] : null;
+  const inspectingCompaction = runtimeTree?.compactions.find(
+    compaction => compaction.id === inspectingCompactionId
+  ) ?? null;
   const canInspectPrevious = inspectingRunIndex > 0;
   const canInspectNext =
-    inspectingRunIndex >= 0 && inspectingRunIndex < runs.length - 1;
+    inspectingRunIndex >= 0
+    && inspectingRunIndex < inspectionRuns.length - 1;
   const runById = useMemo(() => {
     return new Map(runHistory.map(run => [run.id, run]));
   }, [runHistory]);
@@ -218,27 +257,207 @@ const _RunHistoryListView = function RunHistoryListView({
     }
   }, [comparisonRuns]);
   const handleRestoreRun = useCallback(
-    (thread: RunSnapshot["thread"]) => {
-      restoreThread(thread);
+    (run: RunSnapshot) => {
+      if (
+        run.runtime?.branchId
+        && run.runtime.checkpointId
+        && restoreRuntimeCheckpoint(
+          run.runtime.branchId,
+          run.runtime.checkpointId,
+          run.thread
+        )
+      ) {
+        return;
+      }
+      restoreThread(run.thread);
     },
-    [restoreThread]
+    [restoreRuntimeCheckpoint, restoreThread]
   );
   const inspectRunFromHistory = useCallback((run: RunSnapshot) => {
+    setInspectingCompactionId(null);
     setInspectingRunId(run.id);
+  }, []);
+  const inspectCompactionFromHistory = useCallback((id: string) => {
+    setInspectingRunId(null);
+    setInspectingCompactionId(id);
   }, []);
   const handleBackToHistory = useCallback(() => {
     setInspectingRunId(null);
+    setInspectingCompactionId(null);
+  }, []);
+  useEffect(() => {
+    if (!inspectingRunId && !inspectingCompactionId) { return; }
+    const handleEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Escape") { return; }
+      event.preventDefault();
+      handleBackToHistory();
+    };
+    document.addEventListener("keydown", handleEscape);
+    return () => { document.removeEventListener("keydown", handleEscape); };
+  }, [handleBackToHistory, inspectingCompactionId, inspectingRunId]);
+  const toggleBranch = useCallback((branchId: string) => {
+    setCollapsedBranchIds(current => {
+      const next = new Set(current);
+      if (next.has(branchId)) {
+        next.delete(branchId);
+      } else {
+        next.add(branchId);
+      }
+      return next;
+    });
   }, []);
   const inspectPreviousRun = useCallback(() => {
     if (canInspectPrevious) {
-      setInspectingRunId(runs[inspectingRunIndex - 1].id);
+      setInspectingRunId(inspectionRuns[inspectingRunIndex - 1].id);
     }
-  }, [canInspectPrevious, inspectingRunIndex, runs]);
+  }, [canInspectPrevious, inspectingRunIndex, inspectionRuns]);
   const inspectNextRun = useCallback(() => {
     if (canInspectNext) {
-      setInspectingRunId(runs[inspectingRunIndex + 1].id);
+      setInspectingRunId(inspectionRuns[inspectingRunIndex + 1].id);
     }
-  }, [canInspectNext, inspectingRunIndex, runs]);
+  }, [canInspectNext, inspectingRunIndex, inspectionRuns]);
+  const handleTreeNavigation = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>) => {
+      if (!runtimeTree || event.target instanceof HTMLInputElement) { return; }
+      if (
+        event.key !== "ArrowUp"
+        && event.key !== "ArrowDown"
+        && event.key !== "ArrowLeft"
+        && event.key !== "ArrowRight"
+      ) {
+        return;
+      }
+      const target = (event.target as HTMLElement).closest<HTMLElement>(
+        "[data-runtime-tree-node]"
+      );
+      if (!target) { return; }
+      if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+        const nodes = [...event.currentTarget.querySelectorAll<HTMLElement>(
+          "[data-runtime-tree-node]"
+        )].filter(node => node.offsetParent !== null);
+        const index = nodes.indexOf(target);
+        const next = nodes[index + (event.key === "ArrowDown" ? 1 : -1)];
+        if (next) {
+          event.preventDefault();
+          next.focus();
+        }
+        return;
+      }
+      const section = target.closest<HTMLElement>(
+        "section[data-runtime-branch-section]"
+      );
+      const branchNode = section?.querySelector<HTMLElement>(
+        "[data-runtime-branch-node]"
+      );
+      if (event.key === "ArrowLeft" && branchNode && target !== branchNode) {
+        event.preventDefault();
+        event.stopPropagation();
+        branchNode.focus();
+      } else if (
+        event.key === "ArrowRight"
+        && branchNode
+        && target === branchNode
+      ) {
+        const firstChild = [
+          ...(section?.querySelectorAll<HTMLElement>(
+            "[data-runtime-tree-node]"
+          ) ?? [])
+        ].find(node => node !== branchNode && node.offsetParent !== null);
+        if (firstChild) {
+          event.preventDefault();
+          event.stopPropagation();
+          firstChild.focus();
+        }
+      }
+    },
+    [runtimeTree]
+  );
+
+  if (inspectingCompaction) {
+    return (
+      <div className="flex size-full flex-col">
+        <div className="text-muted-foreground flex h-12 shrink-0 items-center gap-1 border-b px-2 text-sm">
+          <Button
+            aria-label="Back to run history"
+            onClick={handleBackToHistory}
+            size="sm"
+            variant="ghost"
+          >
+            <ArrowLeftIcon className="size-3" />
+            Back
+          </Button>
+          <div className="min-w-0 flex-1 px-1">
+            <div className="text-foreground truncate text-sm">
+              Context compacted
+            </div>
+            <div className="text-muted-foreground truncate text-[0.625rem]">
+              {inspectingCompaction.model.provider} / {inspectingCompaction.model.id}
+            </div>
+          </div>
+          <Tooltip content="Copy summary">
+            <Button
+              aria-label="Copy compaction summary"
+              onClick={() => {
+                void navigator.clipboard.writeText(
+                  inspectingCompaction.summary
+                );
+              }}
+              size="icon-sm"
+              variant="ghost"
+            >
+              <CopyIcon className="size-3" />
+            </Button>
+          </Tooltip>
+          <Button
+            aria-label="Close run history"
+            onClick={onClose}
+            size="icon-sm"
+            variant="ghost"
+          >
+            <XIcon className="size-3" />
+          </Button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-3">
+          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[0.6875rem]">
+            <dt className="text-muted-foreground">Before</dt>
+            <dd className="text-right tabular-nums">
+              {inspectingCompaction.tokenEvidence.tokensBefore.toLocaleString()} tokens
+            </dd>
+            <dt className="text-muted-foreground">After</dt>
+            <dd className="text-right tabular-nums">
+              {inspectingCompaction.tokenEvidence.tokensAfter.toLocaleString()} tokens
+            </dd>
+            <dt className="text-muted-foreground">Provider usage</dt>
+            <dd className="text-right tabular-nums">
+              {inspectingCompaction.tokenEvidence.usageTokens.toLocaleString()}
+            </dd>
+            <dt className="text-muted-foreground">Trailing estimate</dt>
+            <dd className="text-right tabular-nums">
+              {inspectingCompaction.tokenEvidence.trailingTokens.toLocaleString()}
+            </dd>
+            <dt className="text-muted-foreground">Covered through</dt>
+            <dd
+              className="truncate text-right font-mono"
+              title={inspectingCompaction.sourceHeadEntryId}
+            >
+              {inspectingCompaction.sourceHeadEntryId}
+            </dd>
+            <dt className="text-muted-foreground">Retained from</dt>
+            <dd
+              className="truncate text-right font-mono"
+              title={inspectingCompaction.firstKeptEntryId}
+            >
+              {inspectingCompaction.firstKeptEntryId}
+            </dd>
+          </dl>
+          <div className="mt-4 text-xs font-medium">Summary</div>
+          <pre className="bg-muted/50 mt-2 whitespace-pre-wrap rounded-md border p-3 font-mono text-[0.6875rem] leading-relaxed">
+            {inspectingCompaction.summary}
+          </pre>
+        </div>
+      </div>
+    );
+  }
 
   if (inspectingRun) {
     return (
@@ -256,7 +475,7 @@ const _RunHistoryListView = function RunHistoryListView({
           <div className="min-w-0 flex-1 px-1">
             <div className="text-foreground truncate text-sm">Inspect Run</div>
             <div className="text-muted-foreground text-[0.625rem]">
-              {inspectingRunIndex + 1} of {runs.length}
+              {inspectingRunIndex + 1} of {inspectionRuns.length}
             </div>
           </div>
           <Tooltip content="Previous run">
@@ -330,77 +549,101 @@ const _RunHistoryListView = function RunHistoryListView({
       </div>
       <div
         className="min-h-0 grow overflow-y-auto px-3 py-3.5"
+        onKeyDownCapture={handleTreeNavigation}
         ref={containerRef}
       >
         <div className="flex flex-col gap-3.5">
-          {runs.length === 0
-            ? (
-              <div className="text-muted-foreground m-auto text-xs">
-                No runs yet
-              </div>
-            )
-            : (
-              runGroups.map(group => (
-                <section
-                  aria-label={group.runtimeRunId
-                    ? `Runtime Run ${group.runtimeRunId}`
-                    : "Legacy run checkpoint"}
-                  className="flex flex-col gap-2"
-                  key={group.id}
-                >
-                  {group.runtimeRunId && group.state
-                    ? (
-                      <div className="text-muted-foreground flex min-w-0 items-center gap-1.5 px-1 text-[0.625rem]">
-                        <GitBranchIcon className="size-3 shrink-0" />
-                        <span
-                          className="text-foreground/80 truncate font-medium"
-                          title={group.runtimeRunId}
-                        >
-                          Run {group.runtimeRunId.replace(/^run-/, "").slice(0, 8)}
-                        </span>
-                        <span aria-hidden>·</span>
-                        <span className="truncate">
+          {runtimeTree
+            ? runtimeTree.branches.map(branch => (
+              <RuntimeBranchSection
+                branch={branch}
+                collapsed={collapsedBranchIds.has(branch.branch.id)}
+                currentCheckpointId={runtimeTree.currentCheckpointId}
+                key={branch.branch.id}
+                onCompactNow={compactNowAvailable && status === "idle"
+                  ? handleCompactNow
+                  : undefined}
+                onInspectCompaction={inspectCompactionFromHistory}
+                onInspectRun={inspectRunFromHistory}
+                onRenameBranch={renameRuntimeBranch}
+                onRequestRemove={setRunPendingRemoval}
+                onRestore={handleRestoreRun}
+                onReviewApprovals={reviewApprovals}
+                onToggleBranch={toggleBranch}
+                onToggleSelected={toggleRunSelection}
+                pendingApprovalCounts={pendingApprovalCounts}
+                selectedRunIds={selectedRunIds}
+                workingBase={thread.runtimeWorkingBase}
+              />
+            ))
+            : runs.length === 0
+              ? (
+                <div className="text-muted-foreground m-auto text-xs">
+                  No runs yet
+                </div>
+              )
+              : (
+                runGroups.map(group => (
+                  <section
+                    aria-label={group.runtimeRunId
+                      ? `Runtime Run ${group.runtimeRunId}`
+                      : "Legacy run checkpoint"}
+                    className="flex flex-col gap-2"
+                    key={group.id}
+                  >
+                    {group.runtimeRunId && group.state
+                      ? (
+                        <div className="text-muted-foreground flex min-w-0 items-center gap-1.5 px-1 text-[0.625rem]">
+                          <GitBranchIcon className="size-3 shrink-0" />
+                          <span
+                            className="text-foreground/80 truncate font-medium"
+                            title={group.runtimeRunId}
+                          >
+                            Run {group.runtimeRunId.replace(/^run-/, "").slice(0, 8)}
+                          </span>
+                          <span aria-hidden>·</span>
+                          <span className="truncate">
+                            {group.state === "waitingForApproval"
+                              ? `Waiting for approval · ${pendingApprovalCounts.get(group.runtimeRunId) ?? 0} pending`
+                              : RUNTIME_STATE_LABELS[group.state]}
+                          </span>
                           {group.state === "waitingForApproval"
-                            ? `Waiting for approval · ${pendingApprovalCounts.get(group.runtimeRunId) ?? 0} pending`
-                            : RUNTIME_STATE_LABELS[group.state]}
-                        </span>
-                        {group.state === "waitingForApproval"
-                          ? (
-                            <Button
-                              className="ml-auto h-5 px-1.5 text-[10px]"
-                              onClick={reviewApprovals}
-                              size="sm"
-                              variant="ghost"
-                            >
-                              Review
-                            </Button>
-                          )
-                          : null}
-                        <span className="ml-auto shrink-0 tabular-nums">
-                          {group.runs.length} {group.runs.length === 1
-                            ? "checkpoint"
-                            : "checkpoints"}
-                        </span>
-                      </div>
-                    )
-                    : null}
-                  <ItemGroup className="gap-2!">
-                    {group.runs.map(run => (
-                      <RunHistoryItem
-                        key={run.id}
-                        newest={run.id === runs[0]?.id}
-                        onInspectRun={inspectRunFromHistory}
-                        onRequestRemove={setRunPendingRemoval}
-                        onRestore={handleRestoreRun}
-                        onToggleSelected={toggleRunSelection}
-                        run={run}
-                        selected={selectedRunIds.includes(run.id)}
-                      />
-                    ))}
-                  </ItemGroup>
-                </section>
-              ))
-            )}
+                            ? (
+                              <Button
+                                className="ml-auto h-5 px-1.5 text-[10px]"
+                                onClick={reviewApprovals}
+                                size="sm"
+                                variant="ghost"
+                              >
+                                Review
+                              </Button>
+                            )
+                            : null}
+                          <span className="ml-auto shrink-0 tabular-nums">
+                            {group.runs.length} {group.runs.length === 1
+                              ? "checkpoint"
+                              : "checkpoints"}
+                          </span>
+                        </div>
+                      )
+                      : null}
+                    <ItemGroup className="gap-2!">
+                      {group.runs.map(run => (
+                        <RunHistoryItem
+                          key={run.id}
+                          newest={run.id === runs[0]?.id}
+                          onInspectRun={inspectRunFromHistory}
+                          onRequestRemove={setRunPendingRemoval}
+                          onRestore={handleRestoreRun}
+                          onToggleSelected={toggleRunSelection}
+                          run={run}
+                          selected={selectedRunIds.includes(run.id)}
+                        />
+                      ))}
+                    </ItemGroup>
+                  </section>
+                ))
+              )}
         </div>
         {evaluations.length > 0 && (
           <_EvaluationList
@@ -422,6 +665,18 @@ const _RunHistoryListView = function RunHistoryListView({
         preferredRubricId={preferredRubricId}
         rightRun={comparisonRuns?.[1] ?? null}
         rubrics={evaluationRubrics}
+      />
+      <ConfirmDialog
+        confirmLabel="Retry compaction"
+        confirmVariant="default"
+        description="The previous summary request may have reached the model, but its result could not be confirmed. Retrying starts a new provider operation and may incur the summary cost again."
+        onConfirm={() => {
+          setCompactionRetryOpen(false);
+          void compactNow(true);
+        }}
+        onOpenChange={setCompactionRetryOpen}
+        open={compactionRetryOpen}
+        title="Retry context compaction?"
       />
       <ConfirmDialog
         confirmLabel="Remove"
@@ -465,22 +720,401 @@ const _RunHistoryListView = function RunHistoryListView({
 
 export const RunHistoryListView = memo(_RunHistoryListView);
 
+interface RuntimeCheckpointView {
+  readonly run: RunSnapshot;
+  readonly saved: boolean;
+}
+
+interface RuntimeRunView {
+  readonly checkpoints: readonly RuntimeCheckpointView[];
+  readonly compactions: readonly RuntimeCompactionSnapshot[];
+  readonly id: string;
+  readonly state: ThreadRuntimeRunState;
+}
+
+interface RuntimeBranchView {
+  readonly branch: RuntimeBranchSnapshot;
+  readonly runs: readonly RuntimeRunView[];
+}
+
+interface RuntimeTreeView {
+  readonly branches: readonly RuntimeBranchView[];
+  readonly compactions: readonly RuntimeCompactionSnapshot[];
+  readonly currentCheckpointId: string | null;
+  readonly inspectionRuns: readonly RunSnapshot[];
+}
+
+function _runtimeTree(
+  persisted: unknown,
+  savedRuns: readonly RunSnapshot[],
+  thread: Thread
+): RuntimeTreeView | null {
+  try {
+    const session = persisted as StoredRuntimeSession | undefined;
+    if (session?.snapshot.schemaVersion !== 4) { return null; }
+    const history = session.snapshot.history;
+    const savedByCheckpoint = new Map(
+      savedRuns.flatMap(run => (run.runtime?.checkpointId
+        ? [[run.runtime.checkpointId, run] as const]
+        : []))
+    );
+    const configurations = new Map(
+      session.configurations.map(configuration => [
+        configuration.id,
+        configuration
+      ])
+    );
+    const checkpointsByRun = new Map<string, RuntimeCheckpointView[]>();
+    for (const checkpoint of history.checkpoints) {
+      const saved = savedByCheckpoint.get(checkpoint.id);
+      const runtimeRun = session.snapshot.runs.find(
+        run => run.id === checkpoint.runId
+      );
+      const configuration = runtimeRun
+        ? configurations.get(runtimeRun.configurationId)
+        : undefined;
+      if (!runtimeRun || !configuration) { continue; }
+      const run = saved ?? _syntheticRunSnapshot(
+        thread,
+        session,
+        checkpoint,
+        configuration.model
+      );
+      const views = checkpointsByRun.get(checkpoint.runId) ?? [];
+      views.push({ run, saved: Boolean(saved) });
+      checkpointsByRun.set(checkpoint.runId, views);
+    }
+    const compactionsByRun = new Map<string, RuntimeCompactionSnapshot[]>();
+    for (const compaction of history.compactions) {
+      const items = compactionsByRun.get(compaction.runId) ?? [];
+      items.push(compaction);
+      compactionsByRun.set(compaction.runId, items);
+    }
+    const branches = history.branches.map(branch => ({
+      branch,
+      runs: session.snapshot.runs
+        .filter(run => run.branchId === branch.id)
+        .map(run => ({
+          id: run.id,
+          state: run.state,
+          checkpoints: checkpointsByRun.get(run.id) ?? [],
+          compactions: compactionsByRun.get(run.id) ?? []
+        }))
+    }));
+    return {
+      branches,
+      compactions: history.compactions,
+      currentCheckpointId: history.currentCheckpointId,
+      inspectionRuns: branches.flatMap(branch =>
+        branch.runs.flatMap(run => run.checkpoints.map(item => item.run)))
+    };
+  } catch {
+    return null;
+  }
+}
+
+function _syntheticRunSnapshot(
+  thread: Thread,
+  session: StoredRuntimeSession,
+  checkpoint: StoredRuntimeSession["snapshot"]["history"]["checkpoints"][number],
+  model: { readonly id: string; readonly provider: string; }
+): RunSnapshot {
+  const piMessages = runtimeHistoryMessages(
+    session.snapshot.history,
+    checkpoint.headEntryId
+  ) as unknown as AgentMessage[];
+  const messages = convertFromPiMessages(
+    piMessages,
+    thread.context?.messages ?? [],
+    thread.sandboxAttachments
+  );
+  const sameModel = thread.model?.provider === model.provider
+    && thread.model.id === model.id;
+  return {
+    id: `runtime:${checkpoint.id}`,
+    timestamp: checkpoint.createdAt,
+    thread: {
+      ...(thread.title ? { title: thread.title } : {}),
+      model: {
+        provider: model.provider,
+        id: model.id,
+        ...(sameModel && thread.model?.params
+          ? { params: thread.model.params }
+          : {})
+      },
+      ...(thread.outputContract
+        ? { outputContract: thread.outputContract }
+        : {}),
+      ...(thread.agentRuntime ? { agentRuntime: thread.agentRuntime } : {}),
+      ...(thread.sandboxAttachments
+        ? { sandboxAttachments: thread.sandboxAttachments }
+        : {}),
+      ...(thread.lockedSandboxAttachmentMessageIds
+        ? {
+          lockedSandboxAttachmentMessageIds:
+            thread.lockedSandboxAttachmentMessageIds
+        }
+        : {}),
+      context: { ...thread.context, messages }
+    },
+    runtime: {
+      runId: checkpoint.runId,
+      branchId: checkpoint.branchId,
+      checkpointId: checkpoint.id,
+      state: checkpoint.state,
+      checkpointOrder: session.snapshot.history.checkpoints
+        .filter(item => item.runId === checkpoint.runId)
+        .findIndex(item => item.id === checkpoint.id) + 1,
+      continuationFingerprint: checkpoint.continuationFingerprint
+    }
+  };
+}
+
+const RuntimeBranchSection = memo(({
+  branch,
+  collapsed,
+  currentCheckpointId,
+  onCompactNow,
+  onInspectCompaction,
+  onInspectRun,
+  onRenameBranch,
+  onRequestRemove,
+  onRestore,
+  onReviewApprovals,
+  onToggleBranch,
+  onToggleSelected,
+  pendingApprovalCounts,
+  selectedRunIds,
+  workingBase
+}: {
+  readonly branch: RuntimeBranchView;
+  readonly collapsed: boolean;
+  readonly currentCheckpointId: string | null;
+  readonly onCompactNow?: () => void;
+  readonly onInspectCompaction: (id: string) => void;
+  readonly onInspectRun: (run: RunSnapshot) => void;
+  readonly onRenameBranch: (branchId: string, label: string) => Promise<boolean>;
+  readonly onRequestRemove: (run: RunSnapshot) => void;
+  readonly onRestore: (run: RunSnapshot) => void;
+  readonly onReviewApprovals: () => void;
+  readonly onToggleBranch: (branchId: string) => void;
+  readonly onToggleSelected: (runId: string) => void;
+  readonly pendingApprovalCounts: ReadonlyMap<string, number>;
+  readonly selectedRunIds: readonly string[];
+  readonly workingBase: Thread["runtimeWorkingBase"];
+}) => {
+  const [editing, setEditing] = useState(false);
+  const [label, setLabel] = useState(branch.branch.label);
+  useEffect(() => { setLabel(branch.branch.label); }, [branch.branch.label]);
+  const beginRename = useCallback(() => {
+    setLabel(branch.branch.label);
+    setEditing(true);
+  }, [branch.branch.label]);
+  const submitRename = useCallback(async () => {
+    if (await onRenameBranch(branch.branch.id, label)) {
+      setEditing(false);
+    }
+  }, [branch.branch.id, label, onRenameBranch]);
+  return (
+    <section
+      aria-label={`Branch ${branch.branch.label}`}
+      className="flex flex-col gap-2"
+      data-runtime-branch-section
+    >
+      <div
+        className="group/branch focus-visible:ring-ring flex min-w-0 items-center rounded px-0.5 text-xs focus-visible:ring-2"
+        data-runtime-branch-node
+        data-runtime-tree-node
+        onKeyDown={event => {
+          if (event.key === "F2") {
+            event.preventDefault();
+            beginRename();
+          } else if (event.key === "ArrowLeft" && !collapsed) {
+            event.preventDefault();
+            onToggleBranch(branch.branch.id);
+          } else if (event.key === "ArrowRight" && collapsed) {
+            event.preventDefault();
+            onToggleBranch(branch.branch.id);
+          }
+        }}
+        tabIndex={0}
+      >
+        <Button
+          aria-label={`${collapsed ? "Expand" : "Collapse"} ${branch.branch.label}`}
+          onClick={() => { onToggleBranch(branch.branch.id); }}
+          size="icon-sm"
+          variant="ghost"
+        >
+          {collapsed
+            ? <ChevronRightIcon className="size-3" />
+            : <ChevronDownIcon className="size-3" />}
+        </Button>
+        <GitBranchIcon className="text-muted-foreground mr-1 size-3 shrink-0" />
+        {editing
+          ? (
+            <input
+              aria-label="Branch name"
+              autoFocus
+              className="bg-background border-input h-7 min-w-0 flex-1 rounded border px-1.5 text-xs outline-none focus:ring-2"
+              maxLength={80}
+              onBlur={() => { void submitRename(); }}
+              onChange={event => { setLabel(event.target.value); }}
+              onKeyDown={event => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  void submitRename();
+                } else if (event.key === "Escape") {
+                  event.preventDefault();
+                  setLabel(branch.branch.label);
+                  setEditing(false);
+                }
+              }}
+              value={label}
+            />
+          )
+          : (
+            <span className="text-foreground min-w-0 flex-1 truncate font-medium">
+              {branch.branch.label}
+            </span>
+          )}
+        {!editing && (
+          <Tooltip content="Rename branch">
+            <Button
+              aria-label={`Rename ${branch.branch.label}`}
+              className="pointer-events-none opacity-0 group-focus-within/branch:pointer-events-auto group-focus-within/branch:opacity-100 group-hover/branch:pointer-events-auto group-hover/branch:opacity-100"
+              onClick={beginRename}
+              size="icon-sm"
+              variant="ghost"
+            >
+              <PencilIcon className="size-3" />
+            </Button>
+          </Tooltip>
+        )}
+      </div>
+      {!collapsed && (
+        <div className="border-border/70 ml-3 flex flex-col gap-3 border-l pl-3">
+          {branch.runs.map(run => (
+            <section className="flex flex-col gap-2" key={run.id}>
+              <div
+                className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-[0.625rem]"
+                data-runtime-tree-node
+                tabIndex={0}
+              >
+                <span
+                  className="text-foreground/80 truncate font-medium"
+                  title={run.id}
+                >
+                  Run {run.id.replace(/^run-/, "").slice(0, 8)}
+                </span>
+                <span aria-hidden>·</span>
+                <span className="truncate">
+                  {run.state === "waitingForApproval"
+                    ? `Waiting for approval · ${pendingApprovalCounts.get(run.id) ?? 0} pending`
+                    : RUNTIME_STATE_LABELS[run.state]}
+                </span>
+                {run.state === "waitingForApproval" && (
+                  <Button
+                    className="ml-auto h-5 px-1.5 text-[10px]"
+                    onClick={onReviewApprovals}
+                    size="sm"
+                    variant="ghost"
+                  >
+                    Review
+                  </Button>
+                )}
+              </div>
+              {run.compactions.map(compaction => (
+                <RuntimeCompactionItem
+                  compaction={compaction}
+                  key={compaction.id}
+                  onInspect={onInspectCompaction}
+                />
+              ))}
+              <ItemGroup className="gap-2!">
+                {run.checkpoints.map(checkpoint => (
+                  <RunHistoryItem
+                    comparable={checkpoint.saved}
+                    current={checkpoint.run.runtime?.checkpointId
+                      === currentCheckpointId}
+                    key={checkpoint.run.id}
+                    newest={checkpoint.run.runtime?.checkpointId
+                      === currentCheckpointId}
+                    onCompactNow={workingBase?.branchId === branch.branch.id
+                      && workingBase.checkpointId === currentCheckpointId
+                      && checkpoint.run.runtime?.checkpointId
+                      === currentCheckpointId
+                      ? onCompactNow
+                      : undefined}
+                    onInspectRun={onInspectRun}
+                    onRequestRemove={onRequestRemove}
+                    onRestore={onRestore}
+                    onToggleSelected={onToggleSelected}
+                    run={checkpoint.run}
+                    selected={selectedRunIds.includes(checkpoint.run.id)}
+                    workingFrom={workingBase?.branchId === branch.branch.id
+                      && workingBase.checkpointId
+                      === checkpoint.run.runtime?.checkpointId}
+                  />
+                ))}
+              </ItemGroup>
+            </section>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+});
+
+const RuntimeCompactionItem = memo(({
+  compaction,
+  onInspect
+}: {
+  readonly compaction: RuntimeCompactionSnapshot;
+  readonly onInspect: (id: string) => void;
+}) => {
+  return (
+    <button
+      aria-label={`Inspect context compaction from ${compaction.tokenEvidence.tokensBefore} to ${compaction.tokenEvidence.tokensAfter} tokens`}
+      className="bg-muted/40 hover:bg-muted focus-visible:ring-ring flex w-full items-center gap-2 rounded-md border px-2.5 py-2 text-left focus-visible:ring-2"
+      data-runtime-tree-node
+      onClick={() => { onInspect(compaction.id); }}
+      type="button"
+    >
+      <GitCompareArrowsIcon className="text-muted-foreground size-3 shrink-0" />
+      <span className="min-w-0 flex-1 text-[0.6875rem] font-medium">
+        Context compacted
+      </span>
+      <span className="text-muted-foreground shrink-0 text-[0.5625rem] tabular-nums">
+        {compaction.tokenEvidence.tokensBefore.toLocaleString()} → {compaction.tokenEvidence.tokensAfter.toLocaleString()}
+      </span>
+    </button>
+  );
+});
+
 const _RunHistoryItem = function RunHistoryItem({
   run,
   newest,
   selected,
   onToggleSelected,
   onInspectRun,
+  onCompactNow,
   onRestore,
-  onRequestRemove
+  onRequestRemove,
+  current = false,
+  workingFrom = false,
+  comparable = true
 }: {
+  readonly comparable?: boolean;
+  readonly current?: boolean;
   readonly newest: boolean;
+  readonly onCompactNow?: () => void;
   readonly onInspectRun: (run: RunSnapshot) => void;
   readonly onRequestRemove: (run: RunSnapshot) => void;
-  readonly onRestore: (thread: RunSnapshot["thread"]) => void;
+  readonly onRestore: (run: RunSnapshot) => void;
   readonly onToggleSelected: (runId: string) => void;
   readonly run: RunSnapshot;
   readonly selected: boolean;
+  readonly workingFrom?: boolean;
 }) {
   const summary = summarizeRun(run.thread);
   const modelLabel = runModelLabel(run.thread);
@@ -514,6 +1148,7 @@ const _RunHistoryItem = function RunHistoryItem({
         // Flash the newest run's background, fading to the resting color.
         newest && "animate-run-history-enter"
       )}
+      data-runtime-tree-node
       onClick={handleInspect}
       onKeyDown={handleInspectKeyDown}
       role="listitem"
@@ -542,6 +1177,20 @@ const _RunHistoryItem = function RunHistoryItem({
           </Tooltip>
         </div>
       </ItemContent>
+      {(current || workingFrom) ? (
+        <div className="flex w-full flex-wrap gap-1 text-[0.5625rem] font-medium">
+          {current ? (
+            <span className="bg-primary/15 text-primary rounded px-1 py-0.5">
+              Current
+            </span>
+          ) : null}
+          {workingFrom ? (
+            <span className="bg-amber-500/15 text-amber-300 rounded px-1 py-0.5">
+              Working from
+            </span>
+          ) : null}
+        </div>
+      ) : null}
       <div className="flex w-full min-w-0 items-end gap-2">
         <div className="text-muted-foreground min-w-0 flex-1 text-[0.625rem]">
           <div className="truncate">
@@ -556,35 +1205,49 @@ const _RunHistoryItem = function RunHistoryItem({
           className="flex shrink-0 items-center gap-0.5"
           onClick={stopInspectClick}
         >
-          <Tooltip content={selected ? "Remove from comparison" : "Select run"}>
-            <Button
-              aria-label={
-                selected
-                  ? `Remove run from comparison: ${summary}`
-                  : `Select run for comparison: ${summary}`
-              }
-              aria-pressed={selected}
-              className={cn(
-                "text-muted-foreground/70 hover:text-foreground opacity-70 transition-opacity",
-                "group-focus-within:opacity-100 group-hover:opacity-100 focus-visible:opacity-100",
-                selected && "text-primary opacity-100"
-              )}
-              onClick={() => { onToggleSelected(run.id); }}
-              size="icon-sm"
-              variant="ghost"
-            >
-              <span
-                aria-hidden
-                className={cn(
-                  "flex size-3 items-center justify-center rounded-[3px] border border-current",
+          {comparable ? (
+            <Tooltip content={selected ? "Remove from comparison" : "Select run"}>
+              <Button
+                aria-label={
                   selected
-                  && "border-primary bg-primary text-primary-foreground"
+                    ? `Remove run from comparison: ${summary}`
+                    : `Select run for comparison: ${summary}`
+                }
+                aria-pressed={selected}
+                className={cn(
+                  "text-muted-foreground/70 hover:text-foreground opacity-70 transition-opacity",
+                  "group-focus-within:opacity-100 group-hover:opacity-100 focus-visible:opacity-100",
+                  selected && "text-primary opacity-100"
                 )}
+                onClick={() => { onToggleSelected(run.id); }}
+                size="icon-sm"
+                variant="ghost"
               >
-                {selected ? <CheckIcon className="size-2.5" /> : null}
-              </span>
-            </Button>
-          </Tooltip>
+                <span
+                  aria-hidden
+                  className={cn(
+                    "flex size-3 items-center justify-center rounded-[3px] border border-current",
+                    selected
+                    && "border-primary bg-primary text-primary-foreground"
+                  )}
+                >
+                  {selected ? <CheckIcon className="size-2.5" /> : null}
+                </span>
+              </Button>
+            </Tooltip>
+          ) : null}
+          {onCompactNow ? (
+            <Tooltip content="Compact context now">
+              <Button
+                aria-label="Compact context now"
+                onClick={onCompactNow}
+                size="icon-sm"
+                variant="ghost"
+              >
+                <Minimize2Icon className="size-3" />
+              </Button>
+            </Tooltip>
+          ) : null}
           <Tooltip content="Inspect run">
             <Button
               aria-label={`Inspect run from ${time}: ${summary}. ${modelLabel}. ${runtimeProfileLabel ? `${runtimeProfileLabel}. ` : ""}${messageCountLabel}`}
@@ -598,7 +1261,7 @@ const _RunHistoryItem = function RunHistoryItem({
           <Tooltip content="Restore run">
             <Button
               aria-label={`Restore run from ${time}: ${summary}. ${modelLabel}. ${runtimeProfileLabel ? `${runtimeProfileLabel}. ` : ""}${messageCountLabel}`}
-              onClick={() => { onRestore(run.thread); }}
+              onClick={() => { onRestore(run); }}
               size="icon-sm"
               variant="ghost"
             >

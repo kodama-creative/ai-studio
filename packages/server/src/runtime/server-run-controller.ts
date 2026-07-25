@@ -22,6 +22,7 @@ import {
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Models, UserMessage } from "@earendil-works/pi-ai";
 import type { AgentCapabilityPolicy } from "@llm-space/runtime";
+import type { RuntimeWorkingBase } from "@llm-space/runtime/harness";
 
 import { ServerCapacityError } from "./server-capacity-error";
 import { serializePiAgentEvent } from "../protocol/pi-event-serializer";
@@ -107,6 +108,7 @@ export class ServerRunController {
     readonly owner: ServerPrincipal;
     readonly sessionId: string;
     readonly text: string;
+    readonly workingBase?: RuntimeWorkingBase;
   }): Promise<CreatedServerRun> {
     const result = this._creationTail.then(async () => this._createRun(input));
     this._creationTail = result.then(() => {}, () => {});
@@ -126,6 +128,7 @@ export class ServerRunController {
     readonly owner: ServerPrincipal;
     readonly sessionId: string;
     readonly text: string;
+    readonly workingBase?: RuntimeWorkingBase;
   }): Promise<CreatedServerRun> {
     const definition = this._runtime.project.definition;
     if (!definition) {
@@ -144,7 +147,10 @@ export class ServerRunController {
       timestamp: Date.now()
     };
     const contextFingerprint = _sha256(JSON.stringify([
-      ...this._repository.authorizedTranscript(input),
+      ...this._repository.authorizedTranscript({
+        ...input,
+        ...(input.workingBase ? { workingBase: input.workingBase } : {})
+      }),
       userMessage
     ]));
     const toolConfigurationFingerprint = _sha256(

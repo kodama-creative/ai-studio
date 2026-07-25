@@ -36,6 +36,7 @@ describe("durable tool approval", () => {
       mutations: [{
         type: "startRun",
         runId: "run-approval",
+        messages: [],
         configuration: _configuration()
       }]
     });
@@ -136,6 +137,7 @@ describe("durable tool approval", () => {
       mutations: [{
         type: "startRun",
         runId: "run-resume",
+        messages: [],
         configuration: _configuration()
       }]
     });

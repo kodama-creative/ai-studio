@@ -52,6 +52,7 @@ export function createRpcTransport(options?: {
     terminalOutcome?: "cancelled" | "completed" | "failed" | "outcomeUnknown"
   ) => void;
   onLocalServerStatus?: (status: ExternalAgentProjectRuntimeStatus) => void;
+  onRuntimePhase?: (phase: "compacting" | "idle") => void;
   onRuntimeResolved?: (runtime: ThreadAgentRuntimeProvenance) => void;
   onRuntimeSessionCommitted?: (session: StoredRuntimeSession) => void;
   runtime?: () => StreamThreadRequestPayload["runtime"];
@@ -94,6 +95,8 @@ export function createRpcTransport(options?: {
         options?.onRuntimeResolved?.(message.runtime);
       } else if (message.type === "runtimeSession") {
         options?.onRuntimeSessionCommitted?.(message.runtimeSession);
+      } else if (message.type === "runtimePhase") {
+        options?.onRuntimePhase?.(message.phase);
       } else if (message.type === "localServerStatus") {
         options?.onLocalServerStatus?.(message.status);
       } else if (message.type === "localServerLineage") {

@@ -36,7 +36,10 @@ export interface RuntimeRunCheckpointSnapshot {
 }
 
 export interface RuntimeRunSnapshot {
+  readonly baseCheckpointId: string | null;
+  readonly branchId: string;
   readonly id: string;
+  readonly inputHeadEntryId: string | null;
   readonly sessionId: string;
   readonly configurationId: string;
   readonly state: RuntimeRunState;

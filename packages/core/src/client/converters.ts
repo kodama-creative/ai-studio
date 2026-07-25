@@ -42,7 +42,7 @@ function _convertToPiMessages(
           message,
           sandboxAttachments[message.id]
         ) as Array<pi.ImageContent | pi.TextContent>,
-        timestamp: Date.now()
+        timestamp: 0
       };
       result.push(piMessage);
     } else if (message.role === "assistant") {
@@ -53,7 +53,7 @@ function _convertToPiMessages(
         model: "",
         provider: "",
         stopReason: "stop",
-        timestamp: Date.now(),
+        timestamp: 0,
         usage: _convertUsage(message.usage)
       };
       result.push(piMessage);
@@ -69,7 +69,7 @@ function _convertToPiMessages(
           toolName: toolCall.input.name,
           content: toolCall.output.content,
           isError: toolCall.output.isError ?? false,
-          timestamp: Date.now()
+          timestamp: 0
         });
       }
     }
