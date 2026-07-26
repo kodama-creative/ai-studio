@@ -1,3 +1,4 @@
+import { rmSync } from "node:fs";
 import {
   cp,
   mkdtemp,
@@ -9,12 +10,24 @@ import {
 import { builtinModules } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { pathToFileURL } from "node:url";
 
+import {
+  AGENT_BUNDLE_COMPILER_SUPPORT_FILENAME,
+  AGENT_BUNDLE_COMPILER_SUPPORT_HELPER_SPECIFIER
+} from "./agent-bundle-compiler-support";
+import { generateAgentBundleCompilerSupport } from "./generate-agent-bundle-compiler-support";
+import {
+  loadAgentBundleCompilerSupport
+} from "./load-agent-bundle-compiler-support";
 import { loadAgentProject } from "./load-agent-project";
+import {
+  validateAgentBundleCompilerSupport
+} from "./validate-agent-bundle-compiler-support";
 import { assertValidAgentProject } from "../../runtime/agent/assert-valid-agent-project";
 import { discoverAgentProject } from "../discover/discover-agent-project";
 
+import type { AgentBundleCompilerSupportModule } from "./load-agent-bundle-compiler-support";
 import type { AgentProjectArtifact } from "../../runtime/agent/agent-project-artifact";
 import type {
   AgentEnvironmentRequirements,
@@ -26,6 +39,7 @@ const BUN_COMPATIBILITY_BUILTINS = new Set(["node-fetch", "ws"]);
 const NODE_BUILTINS = new Set(
   builtinModules.map(name => name.replace(/^node:/, ""))
 );
+let sourceCompilerSupportPromise: Promise<string> | null = null;
 
 export interface AgentProjectBundle {
   readonly artifact: AgentProjectArtifact;
@@ -33,8 +47,13 @@ export interface AgentProjectBundle {
   readonly environment: AgentEnvironmentRequirements;
 }
 
+export interface CreateAgentProjectBundleOptions {
+  readonly compilerSupportPath?: string;
+}
+
 export async function createAgentProjectBundle(
-  agentRoot: string
+  agentRoot: string,
+  options: CreateAgentProjectBundleOptions = {}
 ): Promise<AgentProjectBundle> {
   const temporaryRoot = await mkdtemp(path.join(
     await realpath(tmpdir()),
@@ -55,9 +74,7 @@ export async function createAgentProjectBundle(
       discovered,
       project
     );
-    const helperPath = fileURLToPath(
-      new URL("./create-bundled-agent-project.ts", import.meta.url)
-    );
+    const helperPath = AGENT_BUNDLE_COMPILER_SUPPORT_HELPER_SPECIFIER;
     const entryPath = path.join(temporaryRoot, "entry.mjs");
     await writeFile(
       entryPath,
@@ -65,14 +82,17 @@ export async function createAgentProjectBundle(
       "utf8"
     );
     const bundlePath = path.join(temporaryRoot, "agent.bundle.mjs");
-    await _buildInFreshBunProcess(
-      entryPath,
+    const compilerSupportPath = options.compilerSupportPath
+      ?? await _sourceCompilerSupportPath();
+    await _buildWithCompilerSupport(compilerSupportPath, {
+      authoredRoot: bundleRoot,
       bundlePath,
-      bundleRoot,
-      helperPath,
-      dynamicInstructionSources.map(source => source.absolutePath),
-      discovered.tools.map(source => source.absolutePath)
-    );
+      entryPath,
+      instructionEntryPaths: dynamicInstructionSources.map(
+        source => source.absolutePath
+      ),
+      toolEntryPaths: discovered.tools.map(source => source.absolutePath)
+    });
     const bundle = await readFile(bundlePath, "utf8");
     _assertClosedBundle(bundle);
     const verificationPath = path.join(temporaryRoot, "verify.mjs");
@@ -149,6 +169,32 @@ export async function createAgentProjectBundle(
   }
 }
 
+async function _sourceCompilerSupportPath(): Promise<string> {
+  sourceCompilerSupportPromise = sourceCompilerSupportPromise
+    ?? _generateSourceCompilerSupport().catch(error => {
+      sourceCompilerSupportPromise = null;
+      throw error;
+    });
+  return sourceCompilerSupportPromise;
+}
+
+async function _generateSourceCompilerSupport(): Promise<string> {
+  const root = await mkdtemp(path.join(
+    await realpath(tmpdir()),
+    "llm-space-source-compiler-support-"
+  ));
+  try {
+    await generateAgentBundleCompilerSupport(root);
+  } catch (error) {
+    await rm(root, { recursive: true, force: true });
+    throw error;
+  }
+  process.once("exit", () => {
+    rmSync(root, { recursive: true, force: true });
+  });
+  return path.join(root, AGENT_BUNDLE_COMPILER_SUPPORT_FILENAME);
+}
+
 function _assertClosedBundle(bundle: string): void {
   const external = new Bun.Transpiler({ loader: "js" })
     .scanImports(bundle)
@@ -163,167 +209,19 @@ function _assertClosedBundle(bundle: string): void {
   }
 }
 
-async function _buildInFreshBunProcess(
-  entryPath: string,
-  bundlePath: string,
-  authoredRoot: string,
-  helperPath: string,
-  instructionEntryPaths: readonly string[],
-  toolEntryPaths: readonly string[]
+async function _buildWithCompilerSupport(
+  compilerSupportPath: string,
+  input: Parameters<
+    AgentBundleCompilerSupportModule["buildAgentProjectBundle"]
+  >[0]
 ): Promise<void> {
-  const scriptPath = `${bundlePath}.build.mjs`;
-  const validatorPath = fileURLToPath(
-    new URL("./validate-authored-source.ts", import.meta.url)
+  const validatedSupport = await validateAgentBundleCompilerSupport(
+    compilerSupportPath
   );
-  const dynamicToolTransformerPath = fileURLToPath(
-    new URL("./transform-dynamic-tool-source.ts", import.meta.url)
+  const compilerSupport = await loadAgentBundleCompilerSupport(
+    validatedSupport
   );
-  await writeFile(scriptPath, `
-    import path from "node:path";
-    import { builtinModules } from "node:module";
-    import {
-      assertInstructionSourceImports,
-      assertNoNonLiteralRuntimeImports
-    } from ${JSON.stringify(validatorPath)};
-    import { transformDynamicToolSource } from ${JSON.stringify(dynamicToolTransformerPath)};
-    const [
-      ENTRY_PATH,
-      BUNDLE_PATH,
-      RESOLVE_ROOT,
-      AUTHORED_ROOT,
-      HELPER_PATH,
-      INSTRUCTION_ENTRY_PATHS,
-      TOOL_ENTRY_PATHS
-    ]
-      = process.argv.slice(2);
-    const AUTHORED_FILES = new Set();
-    const INSTRUCTION_ENTRY_FILES = new Set(
-      JSON.parse(INSTRUCTION_ENTRY_PATHS)
-    );
-    const INSTRUCTION_FILES = new Set(INSTRUCTION_ENTRY_FILES);
-    const TOOL_ENTRY_FILES = new Set(JSON.parse(TOOL_ENTRY_PATHS));
-    const RUNTIME_FILES = new Set([ENTRY_PATH, HELPER_PATH]);
-    const STATE_ROOT = path.join(AUTHORED_ROOT, "state");
-    const NODE_BUILTINS = new Set(
-      builtinModules.map(name => name.replace(/^node:/, ""))
-    );
-    const BUN_COMPATIBILITY_BUILTINS = new Set(["node-fetch", "ws"]);
-    const RUNTIME_SPECIFIER = /^(?:@llm-space\\/runtime(?:\\/tools|\\/connections|\\/state|\\/instructions|\\/outputs|\\/sandbox)?|typebox)$/;
-    const PLUGIN = {
-      name: "llm-space-deployment-dependencies",
-      setup(build) {
-        build.onResolve({ filter: /.*/ }, args => {
-          const builtin = args.path.startsWith("node:")
-            || args.path.startsWith("bun:")
-            || NODE_BUILTINS.has(args.path)
-            || BUN_COMPATIBILITY_BUILTINS.has(args.path);
-          if (builtin) { return; }
-          const runtimeSpecifier = RUNTIME_SPECIFIER.test(args.path);
-          const resolveFrom = runtimeSpecifier
-            ? RESOLVE_ROOT
-            : args.importer ? path.dirname(args.importer) : RESOLVE_ROOT;
-          const resolved = Bun.resolveSync(args.path, resolveFrom);
-          if (
-            INSTRUCTION_FILES.has(args.importer)
-            && args.path.startsWith(".")
-            && !resolved.startsWith(STATE_ROOT + path.sep)
-          ) {
-            throw new Error("Instruction dependency escapes agent/state");
-          }
-          if (
-            INSTRUCTION_FILES.has(args.importer)
-            && resolved.startsWith(STATE_ROOT + path.sep)
-          ) {
-            INSTRUCTION_FILES.add(resolved);
-          }
-          if (args.importer === ENTRY_PATH) {
-            if (resolved.startsWith(AUTHORED_ROOT + path.sep)) {
-              AUTHORED_FILES.add(resolved);
-            } else {
-              RUNTIME_FILES.add(resolved);
-            }
-          } else if (
-            runtimeSpecifier
-            || RUNTIME_FILES.has(args.importer)
-          ) {
-            RUNTIME_FILES.add(resolved);
-          } else if (
-            AUTHORED_FILES.has(args.importer)
-            || args.importer.startsWith(AUTHORED_ROOT + path.sep)
-          ) {
-            AUTHORED_FILES.add(resolved);
-          }
-          return { path: resolved };
-        });
-        build.onLoad({ filter: /\\.[cm]?[jt]sx?$/ }, async args => {
-          if (!AUTHORED_FILES.has(args.path)) { return; }
-          const source = await Bun.file(args.path).text();
-          assertNoNonLiteralRuntimeImports(source, args.path);
-          if (INSTRUCTION_FILES.has(args.path)) {
-            assertInstructionSourceImports(source, args.path, {
-              entryPaths: [...INSTRUCTION_ENTRY_FILES],
-              stateRoot: STATE_ROOT
-            });
-          }
-          const extension = path.extname(args.path);
-          const loader = extension === ".tsx"
-            ? "tsx"
-            : extension === ".ts" || extension === ".mts" || extension === ".cts"
-              ? "ts"
-              : extension === ".jsx" ? "jsx" : "js";
-          return {
-            contents: TOOL_ENTRY_FILES.has(args.path)
-              ? transformDynamicToolSource(
-                source,
-                path.relative(AUTHORED_ROOT, args.path).split(path.sep).join(path.posix.sep)
-              )
-              : source,
-            loader
-          };
-        });
-      }
-    };
-    const RESULT = await Bun.build({
-      entrypoints: [ENTRY_PATH],
-      format: "esm",
-      minify: {
-        identifiers: false,
-        syntax: true,
-        whitespace: true
-      },
-      sourcemap: "none",
-      target: "bun",
-      write: false,
-      plugins: [PLUGIN]
-    });
-    if (!RESULT.success || !RESULT.outputs[0]) {
-      throw new Error(RESULT.logs.map(log => log.message).join("\\n") || "Unable to build Agent deployment bundle");
-    }
-    await Bun.write(BUNDLE_PATH, RESULT.outputs[0]);
-  `, "utf8");
-  const child = Bun.spawn([
-    process.execPath,
-    scriptPath,
-    entryPath,
-    bundlePath,
-    import.meta.dir,
-    authoredRoot,
-    helperPath,
-    JSON.stringify(instructionEntryPaths),
-    JSON.stringify(toolEntryPaths)
-  ], {
-    stdout: "pipe",
-    stderr: "pipe"
-  });
-  const [exitCode, standardError] = await Promise.all([
-    child.exited,
-    new Response(child.stderr).text()
-  ]);
-  if (exitCode !== 0) {
-    throw new Error(
-      standardError.trim() || "Unable to build Agent deployment bundle"
-    );
-  }
+  await compilerSupport.buildAgentProjectBundle(input);
 }
 
 function _entrySource(

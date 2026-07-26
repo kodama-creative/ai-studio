@@ -397,10 +397,42 @@
 
 ## Agent Project Activation
 
-- Status: shipped One Agent Project Model and Creation V1
+- Status: shipped V1; packaged Desktop regression repaired
 - Freshness: confirmed
-- Last checked: 2026-07-21
+- Last checked: 2026-07-26
 - Evidence:
+  - The 2026-07-26 prerequisite repair replaces rebased `import.meta.url`
+    compiler-source lookup with the Runtime-owned
+    `createAgentProjectBundle(agentRoot, { compilerSupportPath? })` boundary.
+    One deterministic minified `agent-bundle-compiler-support.mjs` embeds the
+    closed Runtime authored SDK, TypeBox, bundle reconstruction, validation,
+    and dynamic-tool transformation graph; it has no sourcemap or broad copied
+    source/`node_modules` tree.
+  - A sidecar pins schema version, byte length, and SHA-256. Runtime reads and
+    validates the exact bytes once, writes only that verified value into a
+    private temporary module, and imports the copy rather than the mutable
+    packaged path. Source/CLI use one process-frozen generated support;
+    packaged Desktop injects its explicit `Resources/app/bun/support/` path
+    with no environment-variable or path guessing.
+  - Desktop generates support before direct dev, CEF dev, canary, or stable
+    build entry points, copies it only into the Bun resource tree, and validates
+    it before manager, RPC, or window construction. Missing, stale, truncated,
+    or fingerprint-mismatched support fails Host startup without classifying an
+    Agent invalid or clearing Projects, Threads, Sessions, or snapshots.
+  - Top-level Runtime tests prove byte-identical generation from two different
+    checkout roots, absence of checkout/dependency paths, missing/schema/
+    length/fingerprint rejection, verified-byte swap resistance,
+    source/support bundle-byte equality, every authored SDK surface, import
+    confinement, and source-edit capture safety. Desktop's A-waits → sync-B →
+    restart fixture injects the generated support and restores frozen A before
+    a later Run selects B.
+  - Fresh real CEF acceptance opens the checked-in `apps/example-agent` through
+    the actual renderer client and Electrobun RPC as `ready`, opens Build and
+    its default Thread, persists a 508-KiB closed snapshot, and restores the
+    same Thread/fingerprint after process restart. The support is 4,178,318
+    bytes in the checked dev build. 1280×800 and 900×700 DOM checks have no
+    document/body overflow and the console has no application error.
+  - Historical discovery evidence in `audits/2026-07-26-103139-general-limits-v2-discovery/02-agent-project-bundle-regression.png` records the repaired failure: both the workspace and explicitly opened `apps/example-agent` were `invalid` because packaged `createAgentProjectBundle()` resolved an unshipped `validate-authored-source.ts` beside `Resources/app/bun/index.js`.
   - `packages/cli` exposes mandatory-destination `llm-space init <directory>` over the shared Runtime Node scaffolder, with repeatable `--preset`, empty-preset `--blank` compatibility, and explicit MCP URL/tool inputs.
   - Desktop exposes New Agent Project through Welcome, the Agents sidebar, and Command Palette. It asks for a parent folder, creates only an absent kebab-case child, then auto-trusts it, creates the existing default Project Thread under `LLM_SPACE_HOME`, switches to Agents, and opens Build.
   - Current CEF audit `audits/2026-07-17-175010-canonical-agent-project/` proves default and conditional MCP dialog states, keyboard/focus behavior, 1280×800 and 900×700 reflow, real Bun RPC creation, source inspection in Build, separated source/registry/Thread ownership, and no application console errors.
@@ -424,9 +456,9 @@
   - Current 2026-07-21 acceptance makes the shared selector and parameter actions visible at rest, persists repeated model-change events as one Thread override, and grants only Desktop `threadOverride` runs explicit Host model-configuration authority. The real Run History records `openai-codex/gpt-5.5 · Desktop Sandbox`; Local Server remains Agent-owned and read-only.
   - Runtime Profile selection now mutates the current Project Thread in place. Direct/Sandbox/Local Server transitions preserve messages, Run History, and Desktop Runtime Session data; profile changes branch a waiting Runtime Run through the continuation fingerprint instead of resuming under the wrong authority. Leaving Sandbox stops its container without deleting the named volume.
   - `apps/sandbox-example-agent` is a separate checked-in learning path with `defineSandbox({})`, an immutable workspace README seed, canonical read/write/bash declarations, README walkthrough, and a source contract test. It is intentionally not added to the Desktop template picker.
-- Boundary: users can create or open one portable Agent Project contract in the default workspace or an explicit user-owned directory; a manifest is optional when the Agent lives under `agent/`. Every Agent uses one Build + nested Project Threads workflow, while source remains user-owned and trust, Threads, tool execution, and persistence remain path-safe and Desktop-owned where appropriate.
+- Boundary: source/runtime and packaged Desktop support creating or opening one portable Agent Project in the default workspace or an explicit user-owned directory, compiling it through one validated closed support boundary, persisting Bun-only frozen snapshots, and using the shared Build and nested Project Thread flow without repository-only compiler paths.
 - Explicit non-goals: no external source copy, Git/cloud/deployment workflow, Builder Agent or AI source mutation, sandbox or per-call approval system, public plugin SDK, multiple Agents per manifest, graphs/subagents/schedules, breakpoint debugger, directory merge/overwrite, directory-move migration, or destructive deletion of desktop-owned project data.
-- Visible gaps: the unavailable-model badge still does not include a dedicated adjacent action, although the model selector is now persistently visible in the same row. Native-picker completion remains a manual supplementary check; Thread-to-project promotion remains item 10, while source moves and automated CEF regression coverage remain future work.
+- Visible gaps: the legacy automatic first-workspace example seed still emits a pre-canonical bare tool object and is independently invalid; the checked-in canonical `apps/example-agent` is ready and remains the compiler acceptance target. The unavailable-model badge still does not include a dedicated adjacent action, native-picker completion remains a manual supplementary check, and source moves plus automated CEF coverage remain future work.
 
 ## Canonical Agent Project Scaffolding
 
@@ -520,9 +552,23 @@
   - Desktop stores every valid trusted compiled Agent as a Bun-only closed bundle plus artifact descriptor. Active Runs select that bundle from the immutable Runtime Run configuration, so an A wait remains on A after source sync to B and Desktop restart; only a later new Run selects B. Missing or mismatched frozen bytes block without current-source fallback.
   - Current real CEF evidence in `audits/2026-07-25-230642-session-token-budget-v1/` proves header usage, confirmations, same-Run grant, active-Run Stop, restart recovery, Run/Cmd+Enter focus, read-only history boundaries, no page overflow at 1280×800 and 900×700, and no application console error.
   - Explicit Project Thread Duplicate creates a new Runtime Session for Direct, Sandbox, and Local Server profiles without copying budget, Run History, checkpoint/branch authority, or Server identity; budget handling itself never creates a Thread.
+  - Fresh 2026-07-26 packaged-compiler acceptance repairs that regression: the checked-in example reaches `ready`, opens its Project Thread, persists a closed snapshot, and restores the same fingerprint after Desktop restart. Runtime/Server budget evidence and current Desktop interaction are no longer blocked by Agent activation.
 - Boundary: Agent Project authors can declare independent input/output limits based only on settled main-provider usage. Runtime completes the crossing call and full tool batch, then blocks the first forbidden next provider dispatch until the user grants a fresh dual-axis window or stops the active Run. Totals, baselines, reached axes, decisions, unmetered calls, and the active Run's compiled Agent survive restart and remain Session-global across model changes, source sync, checkpoint restore, and branches.
 - Explicit non-goals: no estimated enforcement, cost/turn/tool/time/concurrency/schedule limits, auxiliary compaction-call accounting, ordinary Thread budgets, Thread-local overrides, provider quota guarantees, organization policy, subagent inheritance, or automatic Thread creation/reset.
 - Visible gaps: no Host-tightened general policy, parent/child budget aggregation, cost limits, live paid-provider audit, production migration tool, or full screen-reader matrix. The narrow Pi wrapper patch remains until upstream exposes the existing turn-stop hook.
+
+## General Runtime Limits
+
+- Status: missing; roadmap Item 22 not started
+- Freshness: confirmed
+- Last checked: 2026-07-26
+- Evidence:
+  - Fresh real CEF evidence in `audits/2026-07-26-103139-general-limits-v2-discovery/01-current-thread-no-general-limits.png` and DOM inspection show no cost, model-call, tool-call, duration, concurrency, or schedule limit surface on an ordinary Thread. Current source inspection finds only Session token limits plus Server Host capacity through `maxActiveRuns`.
+  - Primary-source market review on 2026-07-26 found OpenAI Agents `maxTurns`, Pydantic AI request/tool/token limits, Claude Agent SDK `maxTurns`/`maxBudgetUsd`, AI SDK `stopWhen`, and LangGraph `recursionLimit`. These establish per-run loop fuses as table stakes, but not one universal durable continuation model.
+  - Roadmap Item 22 currently combines per-Run source policy, Host concurrency, schedules, and parent-child aggregation even though schedules already belong to Item 28 and inheritance requires Item 27.
+- Boundary: no general Runtime limit contract or UI exists yet. Session token budgets remain the only source-owned enforcement, and Server `maxActiveRuns` is Host capacity rather than Agent policy.
+- Explicit non-goals: do not claim cost, turn, tool, time, concurrency, schedule, or child-policy coverage from token-budget behavior.
+- Visible gaps: packaged Agent activation is restored. The next Item 22 loop should implement one coherent per-Run safety-limit slice and leave schedules, Host capacity, and parent-child inheritance with Items 28, Server policy, and 27 respectively.
 
 ## Tool Step Orchestration
 

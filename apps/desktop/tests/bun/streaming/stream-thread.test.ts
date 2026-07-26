@@ -18,6 +18,10 @@ import {
   type RuntimeJsonValue,
   type StoredRuntimeSession
 } from "@llm-space/runtime/harness";
+import {
+  AGENT_BUNDLE_COMPILER_SUPPORT_FILENAME,
+  generateAgentBundleCompilerSupport
+} from "@llm-space/runtime/node";
 import { afterEach, expect, test } from "bun:test";
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
@@ -292,6 +296,12 @@ test("selects a frozen Agent snapshot after source sync and Desktop restart", as
   const workspace = path.join(home, "workspace");
   const project = path.join(root, "project");
   const agentRoot = path.join(project, "agent");
+  const compilerSupportRoot = path.join(root, "compiler-support");
+  await generateAgentBundleCompilerSupport(compilerSupportRoot);
+  const compilerSupportPath = path.join(
+    compilerSupportRoot,
+    AGENT_BUNDLE_COMPILER_SUPPORT_FILENAME
+  );
   await mkdir(agentRoot, { recursive: true });
   await mkdir(workspace, { recursive: true });
   await writeFile(
@@ -301,6 +311,7 @@ test("selects a frozen Agent snapshot after source sync and Desktop restart", as
   await _writeBudgetAgent(agentRoot, 1);
   const models = _models(() => {});
   const first = new ExternalAgentProjectManager({
+    compilerSupportPath,
     getModels: async () => Promise.resolve(models),
     homePath: home,
     workspaceRoot: workspace
@@ -327,6 +338,7 @@ test("selects a frozen Agent snapshot after source sync and Desktop restart", as
   await first.shutdown();
 
   const restarted = new ExternalAgentProjectManager({
+    compilerSupportPath,
     getModels: async () => Promise.resolve(models),
     homePath: home,
     workspaceRoot: workspace

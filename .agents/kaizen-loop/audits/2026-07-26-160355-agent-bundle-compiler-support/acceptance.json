@@ -1,0 +1,27 @@
+{
+  "artifactFingerprint": "20da7a921def052aa3dc203965c0531769e2d24a439acdf3773d2ce90ebcf866",
+  "checkedProject": "/Users/feng/Projects/ai-studio/apps/example-agent",
+  "consoleApplicationErrors": 0,
+  "desktopRestartRestoredFingerprint": true,
+  "projectStatus": "ready",
+  "snapshotBundleBytes": 520393,
+  "support": {
+    "byteLength": 4178318,
+    "schemaVersion": 1,
+    "sha256": "2eb3534f8fe991caf3e8b3c31c299745a50bfd7077b1434a18d225336e74df68"
+  },
+  "viewports": [
+    {
+      "bodyOverflow": false,
+      "height": 800,
+      "rootOverflow": false,
+      "width": 1280
+    },
+    {
+      "bodyOverflow": false,
+      "height": 700,
+      "rootOverflow": false,
+      "width": 900
+    }
+  ]
+}

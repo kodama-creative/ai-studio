@@ -123,6 +123,7 @@ export class ExternalAgentProjectManager {
   private readonly _settingsFile: string;
   private readonly _dataRoot: string;
   private readonly _workspaceRoot: string;
+  private readonly _compilerSupportPath?: string;
   private readonly _getModels: () => Promise<Models>;
   private readonly _projectMcpConnector?: ProjectMcpConnector;
   private readonly _sandboxReadiness?: () => Promise<SandboxReadiness>;
@@ -132,6 +133,7 @@ export class ExternalAgentProjectManager {
   private _onChange: ((projectId: string) => void) | null = null;
 
   constructor(options: {
+    compilerSupportPath?: string;
     getModels?: () => Promise<Models>;
     homePath: string;
     projectMcpConnector?: ProjectMcpConnector;
@@ -145,6 +147,7 @@ export class ExternalAgentProjectManager {
         Promise.resolve({ getModel: () => undefined } as unknown as Models));
     this._projectMcpConnector = options.projectMcpConnector;
     this._sandboxReadiness = options.sandboxReadiness;
+    this._compilerSupportPath = options.compilerSupportPath;
     this._settingsFile = path.join(
       homePath,
       "settings",
@@ -1243,7 +1246,12 @@ export class ExternalAgentProjectManager {
     const bundlePath = path.join(directory, "agent.bundle.mjs");
     const artifactPath = path.join(directory, "artifact.json");
     if (await _exists(bundlePath) && await _exists(artifactPath)) { return; }
-    const built = await createAgentProjectBundle(resolved.agentRoot);
+    const built = await createAgentProjectBundle(
+      resolved.agentRoot,
+      this._compilerSupportPath
+        ? { compilerSupportPath: this._compilerSupportPath }
+        : undefined
+    );
     if (
       built.artifact.fingerprint !== snapshot.fingerprint
       || JSON.stringify(built.artifact) !== JSON.stringify(snapshot.artifact)

@@ -111,6 +111,24 @@ uses B because its new configuration records B's fingerprint. A missing,
 malformed, or mismatched bundle blocks the old Run; Desktop never substitutes
 current source or a fallback runtime.
 
+Packaged Desktop compilation uses one Runtime-owned closed compiler-support
+artifact rather than resolving compiler TypeScript beside the rebased Bun
+bundle. `createAgentProjectBundle(agentRoot, { compilerSupportPath? })` is the
+only interface: source/CLI callers use one process-frozen generated support,
+while Desktop explicitly injects the pre-generated packaged path. Runtime
+reads and validates the support schema version, byte length, and SHA-256 once,
+then writes those exact verified bytes into a private temporary module and
+imports only that copy. Bundled TypeScript paths use a stable virtual identity,
+so support bytes do not depend on checkout location. There is no
+environment-variable or filesystem guessing.
+
+Desktop generates `agent-bundle-compiler-support.mjs` plus its JSON sidecar
+before dev/build, copies both only to `Resources/app/bun/support/`, and validates
+them before manager, RPC, or window construction. Missing or mismatched support
+therefore fails Host startup without marking mutable Agent source invalid or
+clearing a Project, Thread, Runtime Session, or prior snapshot. Compiler-source
+edits require a Desktop process restart; support is not an HMR surface.
+
 ### Unsupported V4 bytes remain untouched
 
 Development V4 Runtime Sessions are retained and rejected explicitly. Runtime,

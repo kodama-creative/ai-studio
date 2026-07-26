@@ -53,11 +53,25 @@ export {
 } from "../runtime/state/agent-session-state";
 export type { StructuredOutputFailureCode } from "../shared/structured-output";
 export {
+  AGENT_BUNDLE_COMPILER_SUPPORT_FILENAME,
+  AGENT_BUNDLE_COMPILER_SUPPORT_MANIFEST_FILENAME,
+  AGENT_BUNDLE_COMPILER_SUPPORT_SCHEMA_VERSION,
+  type AgentBundleCompilerSupport,
+  type AgentBundleCompilerSupportManifest
+} from "./compiler/agent-bundle-compiler-support";
+export {
   type AgentProjectBundle,
-  createAgentProjectBundle
+  createAgentProjectBundle,
+  type CreateAgentProjectBundleOptions
 } from "./compiler/create-agent-project-bundle";
+export {
+  generateAgentBundleCompilerSupport
+} from "./compiler/generate-agent-bundle-compiler-support";
 export { loadAgentProject } from "./compiler/load-agent-project";
 export { loadAgentProjectBundle } from "./compiler/load-agent-project-bundle";
+export {
+  validateAgentBundleCompilerSupport
+} from "./compiler/validate-agent-bundle-compiler-support";
 export {
   type ProjectMcpConnectionStatus,
   type ProjectMcpConnector,

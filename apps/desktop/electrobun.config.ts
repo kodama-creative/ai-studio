@@ -40,7 +40,8 @@ export default {
     copy: {
       "dist/index.html": "views/mainview/index.html",
       "dist/assets": "views/mainview/assets",
-      "dist/images": "views/mainview/images"
+      "dist/images": "views/mainview/images",
+      ".generated/agent-bundle-compiler": "bun/support"
     },
     // Ignore Vite output in watch mode — HMR handles view rebuilds separately
     watchIgnore: ["dist/**"],

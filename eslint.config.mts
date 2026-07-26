@@ -9,6 +9,7 @@ export default [
       "**/build/**",
       "**/coverage/**",
       "**/dist/**",
+      "**/.generated/**",
       "**/out/**",
       ".agents/**",
       "apps/desktop/src/components/ui/**"

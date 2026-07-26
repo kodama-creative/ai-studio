@@ -1,6 +1,9 @@
 import path from "node:path";
 import { getLlmSpaceHomePath } from "@llm-space/core/server";
-import { DockerSandboxProvider } from "@llm-space/runtime/node";
+import {
+  DockerSandboxProvider,
+  validateAgentBundleCompilerSupport
+} from "@llm-space/runtime/node";
 import Electrobun, {
   app,
   type BrowserWindow,
@@ -8,6 +11,7 @@ import Electrobun, {
 } from "electrobun/bun";
 
 import { createDirtyAgentSourceCoordinator } from "./dirty-agent-source-coordinator";
+import { getAgentBundleCompilerSupportPath } from "./get-agent-bundle-compiler-support-path";
 import { createShutdownCoordinator } from "./shutdown-coordinator";
 import { createMainWindow } from "./window";
 import { Analytics } from "../analytics";
@@ -38,6 +42,8 @@ export interface DesktopAppRuntime {
 
 /** Build and start the production Bun object graph. */
 export async function startDesktopApp(): Promise<DesktopAppRuntime> {
+  const compilerSupportPath = getAgentBundleCompilerSupportPath();
+  await validateAgentBundleCompilerSupport(compilerSupportPath);
   const homePath = getLlmSpaceHomePath();
   const workspacePath = path.join(homePath, "workspace");
   const analytics = new Analytics();
@@ -49,7 +55,8 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
     homePath,
     workspaceRoot: workspacePath,
     getModels: async () => modelManager.getAvailableModels(),
-    sandboxReadiness: async () => sandboxes.readiness()
+    sandboxReadiness: async () => sandboxes.readiness(),
+    compilerSupportPath
   });
   const localServers = new EmbeddedLocalServerManager({
     externalAgentProjects,

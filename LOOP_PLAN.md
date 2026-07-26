@@ -191,6 +191,7 @@ Runtime architecture follows [ADR 0001](./docs/adr/0001-runtime-harness-over-pi-
   - Done when: every limit has a deterministic persisted terminal/paused state; Host and child policy can only tighten source limits.
   - Boundary: no billing system, provider quota guarantee, or organization-policy admin product.
   - Metric: complete and attributable policy enforcement.
+  - Prerequisite restored (2026-07-26): Runtime now generates one checkout-independent closed compiler-support module plus schema/length/SHA-256 sidecar; source callers and explicitly injected packaged Desktop paths use identical validated build bytes. Runtime reads and validates once, then imports only a private copy of those exact bytes, so replacement of the packaged path cannot change executed code. Desktop generates support before dev/build, copies it only to `Resources/app/bun/support/`, and fails startup before RPC/window if it is missing or mismatched. Automated cross-root determinism, swap resistance, source/support equivalence, authored-surface/confinement, capture-race, and A→B frozen-restart tests pass. Real CEF opens the checked-in `apps/example-agent` as `ready`, opens Build and its Thread, and restores the identical fingerprint after restart at 1280×800 and 900×700 without page overflow or application console errors. Item 22 itself remains unstarted; its next loop should implement only coherent per-Run safety limits, leaving parent-child tightening with Item 27 and schedules with Item 28.
 
 ## Connections And Lifecycle Hooks
 
