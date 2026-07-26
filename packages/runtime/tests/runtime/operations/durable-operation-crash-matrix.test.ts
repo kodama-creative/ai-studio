@@ -15,6 +15,7 @@ import {
   recoverRuntimeSession,
   RUNTIME_SESSION_SCHEMA_VERSION,
   type RuntimeRunConfigurationSnapshot,
+  RuntimeRunLimitExceededError,
   type SessionStore,
   SessionStoreConflictError,
   type StoredRuntimeSession,
@@ -41,6 +42,96 @@ const CONFIGURATION: RuntimeRunConfigurationSnapshot = {
 };
 
 describe("Durable operation crash matrix", () => {
+  test("counts failed main claims once while excluding replay and auxiliary providers", async () => {
+    const store = await _startedStore({
+      ...CONFIGURATION,
+      limits: { maxModelCallsPerRun: 1 }
+    });
+    const first = new DurableOperationCoordinator(_options(store));
+    const begun = await first.beginProvider({
+      provider: "fake",
+      request: { messages: ["limit"] }
+    });
+    if (begun?.type !== "dispatch") {
+      throw new Error("Expected provider dispatch");
+    }
+    await first.settleProvider({
+      operation: begun.operation,
+      state: "failed",
+      value: { type: "providerMessage", message: _assistant("failed") }
+    });
+
+    const recovered = new DurableOperationCoordinator(_options(store));
+    expect(await recovered.beginProvider({
+      provider: "fake",
+      request: { messages: ["limit"] }
+    })).toMatchObject({ type: "replay" });
+    let auxiliaryDispatches = 0;
+    await recovered.completeAuxiliaryProvider({
+      execute: async () => {
+        auxiliaryDispatches += 1;
+        return _assistant("summary");
+      },
+      provider: "fake",
+      request: { messages: ["summary"] },
+      slot: "compaction",
+      transcriptMessageCount: 1
+    });
+    await recovered.checkpointProviderOnlyStep();
+
+    expect(auxiliaryDispatches).toBe(1);
+    expect(await _rejection(recovered.beginProvider({
+      provider: "fake",
+      request: { messages: ["forbidden"] }
+    }))).toBeInstanceOf(RuntimeRunLimitExceededError);
+    expect((await _required(store.load("session-durable"))).snapshot.runs[0])
+      .toMatchObject({
+        state: "failed",
+        failure: { consumed: 1, attempted: 2, limit: 1 }
+      });
+  });
+
+  test("counts unknown claims and excludes proven pre-dispatch cancellation", async () => {
+    const cancelledStore = await _startedStore({
+      ...CONFIGURATION,
+      limits: { maxModelCallsPerRun: 1 }
+    });
+    const cancelled = new DurableOperationCoordinator(_options(cancelledStore));
+    const cancelledBegin = await cancelled.beginProvider({
+      provider: "fake",
+      request: { messages: ["cancelled"] }
+    });
+    if (cancelledBegin?.type !== "dispatch") {
+      throw new Error("Expected cancelled provider claim");
+    }
+    await cancelled.markCancelled(cancelledBegin.operation);
+    await cancelled.checkpointProviderOnlyStep();
+    expect(await cancelled.beginProvider({
+      provider: "fake",
+      request: { messages: ["allowed"] }
+    })).toMatchObject({ type: "dispatch" });
+
+    const unknownStore = await _startedStore({
+      ...CONFIGURATION,
+      limits: { maxModelCallsPerRun: 1 }
+    });
+    const unknown = new DurableOperationCoordinator(_options(unknownStore));
+    const unknownBegin = await unknown.beginProvider({
+      provider: "fake",
+      request: { messages: ["unknown"] }
+    });
+    if (unknownBegin?.type !== "dispatch") {
+      throw new Error("Expected unknown provider claim");
+    }
+    await unknown.markOutcomeUnknown(unknownBegin.operation);
+    await unknown.checkpointProviderOnlyStep();
+    expect(await _rejection(unknown.beginProvider({
+      provider: "fake",
+      request: { messages: ["forbidden"] }
+    }))).toBeInstanceOf(RuntimeRunLimitExceededError);
+  });
+
+
   test("replays a durable provider completion without dispatching it again", async () => {
     const store = await _startedStore();
     const first = new DurableOperationCoordinator(_options(store));
@@ -617,11 +708,13 @@ describe("Durable operation crash matrix", () => {
       old as unknown as StoredRuntimeSession
     ])).toThrow(UnsupportedRuntimeSessionSchemaError);
     expect(old).toEqual(before);
-    expect(RUNTIME_SESSION_SCHEMA_VERSION).toBe(5);
+    expect(RUNTIME_SESSION_SCHEMA_VERSION).toBe(6);
   });
 });
 
-async function _startedStore(): Promise<InMemorySessionStore> {
+async function _startedStore(
+  configuration = CONFIGURATION
+): Promise<InMemorySessionStore> {
   const store = new InMemorySessionStore();
   await store.commit({
     sessionId: "session-durable",
@@ -630,7 +723,7 @@ async function _startedStore(): Promise<InMemorySessionStore> {
       type: "startRun",
       runId: "run-durable",
       messages: [],
-      configuration: CONFIGURATION
+      configuration
     }]
   });
   return store;

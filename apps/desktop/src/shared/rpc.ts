@@ -88,6 +88,7 @@ export type StreamThreadResponsePayload =
       | "executionEnvUnavailable"
       | "hostPolicyChanged"
       | "outcomeUnknown"
+      | "runLimitExceeded"
       | "sandboxUnavailable"
       | "sandboxWorkspaceLost"
       | "structured_output_invalid"

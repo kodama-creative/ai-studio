@@ -559,16 +559,21 @@
 
 ## General Runtime Limits
 
-- Status: missing; roadmap Item 22 not started
+- Status: shipped model-call V1; broader roadmap Item 22 remains open
 - Freshness: confirmed
 - Last checked: 2026-07-26
 - Evidence:
-  - Fresh real CEF evidence in `audits/2026-07-26-103139-general-limits-v2-discovery/01-current-thread-no-general-limits.png` and DOM inspection show no cost, model-call, tool-call, duration, concurrency, or schedule limit surface on an ordinary Thread. Current source inspection finds only Session token limits plus Server Host capacity through `maxActiveRuns`.
-  - Primary-source market review on 2026-07-26 found OpenAI Agents `maxTurns`, Pydantic AI request/tool/token limits, Claude Agent SDK `maxTurns`/`maxBudgetUsd`, AI SDK `stopWhen`, and LangGraph `recursionLimit`. These establish per-run loop fuses as table stakes, but not one universal durable continuation model.
-  - Roadmap Item 22 currently combines per-Run source policy, Host concurrency, schedules, and parent-child aggregation even though schedules already belong to Item 28 and inheritance requires Item 27.
-- Boundary: no general Runtime limit contract or UI exists yet. Session token budgets remain the only source-owned enforcement, and Server `maxActiveRuns` is Host capacity rather than Agent policy.
-- Explicit non-goals: do not claim cost, turn, tool, time, concurrency, schedule, or child-policy coverage from token-budget behavior.
-- Visible gaps: packaged Agent activation is restored. The next Item 22 loop should implement one coherent per-Run safety-limit slice and leave schedules, Host capacity, and parent-child inheritance with Items 28, Server policy, and 27 respectively.
+  - ADR 0015 and compiled Agent definitions add `maxModelCallsPerRun`: omission freezes 25, explicit `false` is unlimited, positive safe integers are accepted, and invalid values fail compilation.
+  - Runtime Session schema V6 stores an attributable `failed + runLimitExceeded` terminal whose limit matches the immutable Run configuration and whose consumed count matches unique non-cancelled main-provider durable operations.
+  - Runtime checks the boundary before a new durable main-provider claim. Success, known provider failure, and unknown outcome consume the identity; durable replay, proven pre-dispatch cancellation, and auxiliary compaction provider slots do not.
+  - Runtime and protected-Server integration fixtures prove that a limit-1 ReAct Run completes its tool call, blocks its second model request before dispatch, persists the failure, and exposes the Runtime projection and error code to clients while the physical provider-call count remains exactly one.
+  - Desktop Direct, Sandbox, embedded Local Server, and protected Server propagate the same Runtime-owned terminal. Desktop shows read-only `Model calls n/limit`, hides explicit `false`, uses `Run limit reached` for the terminal toast, and persists `Model limit reached · n/limit` in Run History and inspector.
+  - Real Electrobun CEF evidence in `audits/2026-07-26-205500-per-run-model-call-limit-v1/` uses an isolated temporary `LLM_SPACE_HOME`. It confirms default `Model calls 0/25`, explicit-unlimited hiding, frozen A before sync, reached `1/1` error styling, Run History and inspector attribution at 1280×800 and 900×700, exact viewport dimensions without page overflow, and no application console error.
+  - Primary-source market review on 2026-07-26 found OpenAI Agents `maxTurns`, Pydantic AI request/tool/token limits, Claude Agent SDK `maxTurns`/`maxBudgetUsd`, AI SDK `stopWhen` with a default `isStepCount(20)` runaway-loop safety measure, and LangGraph `recursionLimit`. These establish per-run request/step fuses as table stakes, but not one universal durable continuation model.
+  - Roadmap Item 22 still combines future cost/tool/time and Host policy with schedules and parent-child aggregation even though schedules belong to Item 28 and inheritance requires Item 27.
+- Boundary: an Agent author can bound each Runtime Run's main-model dispatches. Reaching the limit fails the same Run before the first forbidden dispatch and leaves the user to choose the next normal execution point; it never grants, continues, retries, creates, resets, or clears a Thread or Session.
+- Explicit non-goals: no tool-call quota, cost, duration, concurrency, schedule, Host/organization tightening, provider quota guarantee, or child-policy aggregation. Auxiliary compaction remains outside the model-call count.
+- Visible gaps: cost, tool, duration, Host policy, production migration, and parent-child aggregation remain future slices. Schedules remain Item 28 and child inheritance remains Item 27.
 
 ## Tool Step Orchestration
 

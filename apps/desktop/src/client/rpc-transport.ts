@@ -10,6 +10,7 @@ import type { StoredRuntimeSession } from "@llm-space/runtime/harness";
 
 import { electrobun } from "@/lib/electrobun";
 import { RuntimeExecutionEnvUnavailableError } from "./runtime-execution-env-unavailable-error";
+import { RuntimeRunLimitExceededError } from "./runtime-run-limit-exceeded-error";
 import { RuntimeSandboxUnavailableError } from "./runtime-sandbox-unavailable-error";
 import { RuntimeSandboxWorkspaceLostError } from "./runtime-sandbox-workspace-lost-error";
 import { RuntimeStructuredOutputError } from "./runtime-structured-output-error";
@@ -157,6 +158,9 @@ export function createRpcTransport(options?: {
           }
           if (errorCode === "hostPolicyChanged") {
             throw new RuntimeHostPolicyChangedError(errorMessage);
+          }
+          if (errorCode === "runLimitExceeded") {
+            throw new RuntimeRunLimitExceededError(errorMessage);
           }
           if (errorCode === "executionEnvUnavailable") {
             throw new RuntimeExecutionEnvUnavailableError(errorMessage);

@@ -35,6 +35,7 @@ const _RunTraceView = function RunTraceView({
     run.thread.context?.systemPrompt?.trim() || "No system prompt";
   const server = run.runtime?.server;
   const runtimeProfileLabel = runRuntimeProfileLabel(run.runtime);
+  const modelCallLimit = run.runLimitFailure;
 
   return (
     <div className={cn("flex min-h-0 flex-col", className)}>
@@ -82,6 +83,13 @@ const _RunTraceView = function RunTraceView({
           )
           : null}
         {usage ? <TokenUsageSummary className="mt-2" usage={usage} /> : null}
+        {modelCallLimit
+          ? (
+            <div className="border-destructive/30 bg-destructive/8 text-destructive mt-2 rounded-md border px-2 py-1.5 text-[0.625rem]">
+              Model limit reached · {modelCallLimit.consumed}/{modelCallLimit.limit}
+            </div>
+          )
+          : null}
         {run.structuredOutput || run.structuredOutputFailure
           ? (
             <StructuredOutputCard

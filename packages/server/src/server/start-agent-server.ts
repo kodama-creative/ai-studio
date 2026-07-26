@@ -163,6 +163,14 @@ export async function startAgentServer(
           recovery.run.id
         ));
       }
+      for (const terminal of repository.pendingRuntimeTerminals(sessionId)) {
+        await repository.completeRun({
+          sessionId,
+          runId: terminal.runId,
+          outcome: terminal.outcome,
+          ...(terminal.code ? { code: terminal.code } : {})
+        });
+      }
     }
     const runs = new ServerRunController({
       repository,

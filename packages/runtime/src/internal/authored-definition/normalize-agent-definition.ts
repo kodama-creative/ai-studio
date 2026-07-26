@@ -1,3 +1,4 @@
+import { DEFAULT_MAX_MODEL_CALLS_PER_RUN } from "../../shared/agent-definition";
 import { isDynamicModelDefinition } from "../authored-dynamic-model-definition";
 
 import type {
@@ -33,6 +34,7 @@ const ENVIRONMENT_REQUIREMENT_KEYS = new Set([
 ]);
 const SESSION_LIMIT_KEYS = new Set([
   "maxInputTokensPerSession",
+  "maxModelCallsPerRun",
   "maxOutputTokensPerSession"
 ]);
 const ENVIRONMENT_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -95,7 +97,9 @@ function _normalizeSessionLimits(
   value: unknown,
   errorMessage: string
 ): AgentDefinition["limits"] {
-  if (value === undefined) { return undefined; }
+  if (value === undefined) {
+    return { maxModelCallsPerRun: DEFAULT_MAX_MODEL_CALLS_PER_RUN };
+  }
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new TypeError(errorMessage);
   }
@@ -108,7 +112,11 @@ function _normalizeSessionLimits(
   ) {
     throw new TypeError(errorMessage);
   }
-  return { ...candidate };
+  return {
+    ...candidate,
+    maxModelCallsPerRun: candidate.maxModelCallsPerRun as false | number | undefined
+      ?? DEFAULT_MAX_MODEL_CALLS_PER_RUN
+  };
 }
 
 function _normalizeModelOptions(

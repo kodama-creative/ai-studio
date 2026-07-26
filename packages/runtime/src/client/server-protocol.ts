@@ -119,9 +119,11 @@ export function isRuntimeSessionBudgetWaitSnapshot(
     && _tokenPair(value.lifetime)
     && _record(value.limits)
     && _validLimit(value.limits.maxInputTokensPerSession)
+    && _validLimit(value.limits.maxModelCallsPerRun)
     && _validLimit(value.limits.maxOutputTokensPerSession)
     && Object.keys(value.limits).every(key =>
       key === "maxInputTokensPerSession"
+      || key === "maxModelCallsPerRun"
       || key === "maxOutputTokensPerSession")
     && Array.isArray(value.reached)
     && value.reached.length > 0

@@ -9,6 +9,7 @@ import type {
   AgentReasoningDefinition,
   AgentSessionLimitsDefinition
 } from "../../shared/agent-definition";
+export { DEFAULT_MAX_MODEL_CALLS_PER_RUN } from "../../shared/agent-definition";
 
 export type {
   AgentDefinition,

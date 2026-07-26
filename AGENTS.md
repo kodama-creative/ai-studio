@@ -89,6 +89,16 @@ typed value only to the existing `runTerminal`, and Desktop hides the internal
 tool pair behind the generic structured-output card in messages and Run
 History. See `docs/adr/0008-named-structured-output-contracts.md`.
 
+### Per-Run model-call limit
+
+Compiled Agent definitions materialize `limits.maxModelCallsPerRun` to `25` by
+default; explicit `false` is unlimited. Runtime counts unique durable
+main-provider dispatch claims per Run, excluding cancelled claims, replay, and
+auxiliary compaction provider operations. The first forbidden claim fails the
+same Run before provider dispatch with durable `runLimitExceeded` attribution.
+Desktop and Server only project that Runtime authority; they do not edit,
+renew, or reset it. See `docs/adr/0015-per-run-model-call-limit.md`.
+
 ### ExecutionEnv-backed authored tools
 
 Agent Projects may opt into the canonical `tools/read.ts`, `tools/write.ts`,

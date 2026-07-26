@@ -52,6 +52,7 @@ describe("LocalAgentRuntime", () => {
 
     expect(runtime.project.definition).toEqual({
       model: { provider: "fake", id: "fake-model" },
+      limits: { maxModelCallsPerRun: 25 },
       reasoning: "high"
     });
     expect(session.messages.map(message => message.role)).toEqual([

@@ -13,6 +13,7 @@ import {
   createHostCapabilityPolicy,
   DurableOperationOutcomeUnknownError,
   ExecutionEnvUnavailableError,
+  RuntimeRunLimitExceededError,
   RuntimeToolApprovalStaleError,
   type SandboxProvider,
   SandboxUnavailableError,
@@ -379,6 +380,9 @@ export class ServerRunController {
         outcome = "failed";
         code = "hostPolicyChanged";
       } else if (error instanceof RuntimeToolApprovalStaleError) {
+        outcome = "failed";
+        code = error.code;
+      } else if (error instanceof RuntimeRunLimitExceededError) {
         outcome = "failed";
         code = error.code;
       } else if (error instanceof ExecutionEnvUnavailableError) {

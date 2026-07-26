@@ -965,8 +965,9 @@ describe("Agent Server HTTP protocol", () => {
     );
     const stream = await recovered.text();
     expect(stream).toContain(
-      '"type":"runTerminal","outcome":"outcomeUnknown","code":"process_interrupted"'
+      '"type":"runTerminal","outcome":"outcomeUnknown"'
     );
+    expect(stream).toContain('"code":"process_interrupted"');
     expect(stream.match(/"type":"runTerminal"/g)).toHaveLength(1);
   });
 

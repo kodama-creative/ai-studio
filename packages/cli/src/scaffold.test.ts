@@ -55,6 +55,7 @@ describe("scaffoldAgentProject", () => {
         const snapshot = await loadAgentProject(resolved.agentRoot);
         expect(snapshot.diagnostics).toEqual([]);
         expect(snapshot.definition).toEqual({
+          limits: { maxModelCallsPerRun: 25 },
           model: { provider: "openai", id: "gpt-5.3-codex" },
           reasoning: "high",
           environment: {

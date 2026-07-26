@@ -23,6 +23,7 @@ import {
   DurableOperationOutcomeUnknownError,
   ExecutionEnvUnavailableError,
   type PreparedAgentTool,
+  RuntimeRunLimitExceededError,
   RuntimeToolApprovalStaleError,
   SandboxUnavailableError,
   SandboxWorkspaceLostError,
@@ -34,6 +35,7 @@ import type {
   StreamFn
 } from "@earendil-works/pi-agent-core";
 import type {
+  RuntimeRunLimitExceededFailure,
   SessionStore,
   StoredRuntimeSession
 } from "@llm-space/runtime/harness";
@@ -298,17 +300,19 @@ export class StreamThreadController {
             ? { code: "outcomeUnknown" as const }
             : error instanceof RuntimeToolApprovalStaleError
               ? { code: error.code }
-              : error instanceof AgentHostPolicyChangedError
-                ? { code: "hostPolicyChanged" as const }
-                : error instanceof ExecutionEnvUnavailableError
-                  ? { code: "executionEnvUnavailable" as const }
-                  : error instanceof SandboxWorkspaceLostError
-                    ? { code: "sandboxWorkspaceLost" as const }
-                    : error instanceof SandboxUnavailableError
-                      ? { code: "sandboxUnavailable" as const }
-                      : error instanceof StructuredOutputError
-                        ? { code: error.code }
-                        : {})
+              : error instanceof RuntimeRunLimitExceededError
+                ? { code: error.code }
+                : error instanceof AgentHostPolicyChangedError
+                  ? { code: "hostPolicyChanged" as const }
+                  : error instanceof ExecutionEnvUnavailableError
+                    ? { code: "executionEnvUnavailable" as const }
+                    : error instanceof SandboxWorkspaceLostError
+                      ? { code: "sandboxWorkspaceLost" as const }
+                      : error instanceof SandboxUnavailableError
+                        ? { code: "sandboxUnavailable" as const }
+                        : error instanceof StructuredOutputError
+                          ? { code: error.code }
+                          : {})
         });
       }
     } finally {
@@ -348,6 +352,7 @@ export class StreamThreadController {
       | "structured_output_too_large"
       | undefined;
     let executionEnvUnavailable = false;
+    let runLimitFailure: RuntimeRunLimitExceededFailure | undefined;
     let sandboxFailure: "sandboxUnavailable" | "sandboxWorkspaceLost" | undefined;
     await this._localServers.run(
       {
@@ -417,6 +422,10 @@ export class StreamThreadController {
             || code === "structured_output_too_large"
           ) {
             structuredOutputFailure = code;
+          } else if (code === "runLimitExceeded") {
+            runLimitFailure = runtime?.session.snapshot.runs.find(
+              run => run.id === lineage.runId
+            )?.failure;
           } else if (code === "executionEnvUnavailable") {
             executionEnvUnavailable = true;
           } else if (
@@ -433,6 +442,9 @@ export class StreamThreadController {
         structuredOutputFailure,
         "The selected structured output did not complete"
       );
+    }
+    if (runLimitFailure) {
+      throw new RuntimeRunLimitExceededError(runLimitFailure);
     }
     if (executionEnvUnavailable) {
       throw new ExecutionEnvUnavailableError();

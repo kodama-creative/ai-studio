@@ -1,7 +1,36 @@
-import { createAgentServerClient } from "@llm-space/runtime/client";
+import {
+  AgentServerClientError,
+  createAgentServerClient
+} from "@llm-space/runtime/client";
 import { describe, expect, test } from "bun:test";
 
 describe("Agent Server Runtime authority client", () => {
+  test("rejects a model-limit terminal without durable Runtime attribution", async () => {
+    const client = createAgentServerClient({
+      authorization: "Bearer local-test",
+      baseUrl: "https://agent.example",
+      fetch: (async () => new Response(
+        "id: 1\nevent: control\ndata: "
+        + '{"type":"runTerminal","outcome":"failed","code":"runLimitExceeded"}\n\n',
+        { headers: { "content-type": "text/event-stream" } }
+      )) as typeof globalThis.fetch
+    });
+
+    try {
+      for await (const event of client.streamRun({
+        continuationToken: "continuation-one",
+        runId: "run-one",
+        sessionId: "session-one"
+      })) {
+        void event;
+      }
+      throw new Error("Expected invalid terminal rejection");
+    } catch (error) {
+      expect(error).toBeInstanceOf(AgentServerClientError);
+      expect(error).toMatchObject({ code: "invalid_event_data" });
+    }
+  });
+
   test("sends the selected working base and authenticates branch rename", async () => {
     const requests: Array<{ body: unknown; headers: Headers; url: string; }> = [];
     const client = createAgentServerClient({
@@ -68,7 +97,7 @@ function _runtimeSession() {
   return {
     version: 1,
     snapshot: {
-      schemaVersion: 5,
+      schemaVersion: 6,
       id: "session-one",
       activeRunId: null,
       runs: [],

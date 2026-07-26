@@ -1,4 +1,7 @@
 export {
+  RuntimeRunLimitExceededError
+} from "../limits/runtime-run-limit-exceeded-error";
+export {
   MAX_DURABLE_OPERATION_REPLAY_BYTES,
   MAX_DURABLE_STEP_REPLAY_BYTES,
   RUNTIME_DURABLE_OPERATION_STATES,
@@ -58,6 +61,8 @@ export {
   RUNTIME_RUN_STATES,
   type RuntimeJsonValue,
   type RuntimeRunCheckpointSnapshot,
+  type RuntimeRunFailure,
+  type RuntimeRunLimitExceededFailure,
   type RuntimeRunSnapshot,
   type RuntimeRunState,
   RuntimeRunTransitionError,

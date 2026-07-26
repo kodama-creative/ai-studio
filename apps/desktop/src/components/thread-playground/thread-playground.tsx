@@ -436,7 +436,7 @@ function ThreadPlaygroundContent({
       | StoredRuntimeSession
       | undefined;
     if (
-      session?.snapshot.schemaVersion !== 5
+      session?.snapshot.schemaVersion !== 6
       || runtimeWorkingBase?.sessionId !== session.snapshot.id
     ) {
       return null;

@@ -194,6 +194,15 @@ export type ThreadStructuredOutputFailure = Static<
   typeof ThreadStructuredOutputFailure
 >;
 
+export const ThreadRunLimitFailure = Type.Object({
+  axis: Type.Literal("modelCalls"),
+  attempted: Type.Integer({ minimum: 2 }),
+  code: Type.Literal("runLimitExceeded"),
+  consumed: Type.Integer({ minimum: 1 }),
+  limit: Type.Integer({ minimum: 1 })
+});
+export type ThreadRunLimitFailure = Static<typeof ThreadRunLimitFailure>;
+
 const THREAD_FIELDS = {
   /**
    * The title of the thread.
@@ -291,6 +300,7 @@ export const ThreadRunSnapshot = Type.Object({
 
   /** Stable Runtime Run grouping and settled-boundary identity. */
   runtime: Type.Optional(ThreadRuntimeCheckpoint),
+  runLimitFailure: Type.Optional(ThreadRunLimitFailure),
 
   /** Runtime-validated terminal JSON value, when a contract was selected. */
   structuredOutput: Type.Optional(ThreadStructuredOutput),

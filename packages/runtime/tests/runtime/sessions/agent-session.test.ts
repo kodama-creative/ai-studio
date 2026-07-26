@@ -17,6 +17,45 @@ import type { AgentProjectSnapshot } from "../../../src/runtime/agent/agent-proj
 import type { RuntimeJsonValue } from "../../../src/runtime/harness/runtime-run";
 
 describe("AgentSession context compaction", () => {
+  test("uses the frozen Run limit before the first forbidden provider dispatch", async () => {
+    let providerCalls = 0;
+    const context = _context("model-call-limit-session");
+    const store = await _startedStore(context, [], 1);
+    const session = await new AgentRuntime({
+      models: _models(),
+      project: _project({ limits: { maxModelCallsPerRun: false } })
+    }).createSession({
+      capabilityPolicy: _policy(),
+      context,
+      executionMode: "react",
+      sessionStore: store,
+      streamFn: (model, piContext) => {
+        providerCalls += 1;
+        return _manualStream(model, piContext);
+      }
+    });
+
+    expect(await _rejection(session.prompt("hello"))).toMatchObject({
+      name: "RuntimeRunLimitExceededError",
+      code: "runLimitExceeded",
+      axis: "modelCalls",
+      consumed: 1,
+      attempted: 2,
+      limit: 1
+    });
+    expect(providerCalls).toBe(1);
+    expect((await store.load(context.id))?.snapshot.runs[0]).toMatchObject({
+      state: "failed",
+      failure: {
+        code: "runLimitExceeded",
+        axis: "modelCalls",
+        consumed: 1,
+        attempted: 2,
+        limit: 1
+      }
+    });
+  });
+
   test("uses the frozen Run budget after source rebuild and settles its tool batch", async () => {
     let providerCalls = 0;
     let toolExecutions = 0;
@@ -196,7 +235,8 @@ describe("AgentSession context compaction", () => {
 
 async function _startedStore(
   context: ReturnType<typeof _context>,
-  messages: AgentMessage[]
+  messages: AgentMessage[],
+  maxModelCallsPerRun?: number
 ): Promise<InMemorySessionStore> {
   const store = new InMemorySessionStore();
   await store.commit({
@@ -212,6 +252,9 @@ async function _startedStore(
         contextFingerprint: "context-compaction",
         executionMode: "react",
         model: { provider: "fake", id: "fake-model" },
+        ...(maxModelCallsPerRun === undefined
+          ? {}
+          : { limits: { maxModelCallsPerRun } }),
         toolConfigurationFingerprint: "tools-compaction"
       }
     }]
@@ -282,6 +325,7 @@ function _fakeModel(): Model<"fake"> {
 function _project(options: {
   limits?: {
     readonly maxInputTokensPerSession?: false | number;
+    readonly maxModelCallsPerRun?: false | number;
     readonly maxOutputTokensPerSession?: false | number;
   };
   onExecute?: () => void;
@@ -376,4 +420,13 @@ function _assistant(
     ...(stopReason === "error" ? { errorMessage: "summary unavailable" } : {}),
     timestamp: Date.now()
   };
+}
+
+async function _rejection(promise: Promise<unknown>): Promise<unknown> {
+  try {
+    await promise;
+  } catch (error) {
+    return error;
+  }
+  throw new Error("Expected operation to reject");
 }

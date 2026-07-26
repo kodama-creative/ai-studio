@@ -13,6 +13,7 @@ import {
   streamThread,
   type Thread,
   type ThreadContext,
+  type ThreadRunLimitFailure,
   type ThreadRuntimeCheckpoint,
   type ThreadStructuredOutput,
   type ThreadStructuredOutputFailure,
@@ -1105,7 +1106,7 @@ export function createThreadStore(
             const persisted = get().thread.runtimeSession as
               | StoredRuntimeSession
               | undefined;
-            const history = persisted?.snapshot.schemaVersion === 5
+            const history = persisted?.snapshot.schemaVersion === 6
               ? persisted.snapshot.history
               : null;
             const workingBase = get().thread.runtimeWorkingBase;
@@ -1375,7 +1376,12 @@ export function createThreadStore(
                 structuredOutputFailureCode = error.code;
               }
               if (error instanceof Error) {
-                toast.error("Error", { description: error.message });
+                toast.error(
+                  error.name === "RuntimeRunLimitExceededError"
+                    ? "Run limit reached"
+                    : "Error",
+                  { description: error.message }
+                );
               }
               return error instanceof Error
                 && error.name === "RuntimeOutcomeUnknownError"
@@ -1471,6 +1477,9 @@ export function createThreadStore(
                     runStartMessageCount
                   )
                 );
+                const runLimitFailure = checkpoint
+                  ? _runLimitFailure(committedRuntimeSession, checkpoint.runId)
+                  : undefined;
                 const runHistory = checkpoint
                   ? recordRun(
                     get().runHistory,
@@ -1478,6 +1487,7 @@ export function createThreadStore(
                     Date.now(),
                     {
                       runtime: checkpoint,
+                      ...(runLimitFailure ? { runLimitFailure } : {}),
                       usage: runUsage,
                       ...(structuredOutput ? { structuredOutput } : {}),
                       ...(structuredOutputFailure
@@ -1558,6 +1568,10 @@ export function createThreadStore(
                   runStartMessageCount
                 )
               );
+              const runLimitFailure = _runLimitFailure(
+                settled.session,
+                runId
+              );
               const runHistory = settled.checkpoint
                 ? recordRun(
                   get().runHistory,
@@ -1565,6 +1579,7 @@ export function createThreadStore(
                   Date.now(),
                   {
                     runtime: settled.checkpoint,
+                    ...(runLimitFailure ? { runLimitFailure } : {}),
                     usage: runUsage,
                     ...(structuredOutput ? { structuredOutput } : {}),
                     ...(structuredOutputFailure
@@ -1724,7 +1739,7 @@ export function createThreadStore(
           const persisted = get().thread.runtimeSession as
             | StoredRuntimeSession
             | undefined;
-          if (persisted?.snapshot.schemaVersion !== 5) {
+          if (persisted?.snapshot.schemaVersion !== 6) {
             return false;
           }
           const checkpoint = persisted.snapshot.history.checkpoints.find(
@@ -1780,7 +1795,7 @@ export function createThreadStore(
             | StoredRuntimeSession
             | undefined;
           const trimmed = label.trim();
-          const branch = persisted?.snapshot.schemaVersion === 5
+          const branch = persisted?.snapshot.schemaVersion === 6
             ? persisted.snapshot.history.branches.find(
               item => item.id === branchId
             )
@@ -2047,6 +2062,14 @@ const selectActions = (s: ThreadState) => ({
 });
 export function useThreadStoreActions() {
   return useStore(useThreadStoreApi(), useShallow(selectActions));
+}
+
+function _runLimitFailure(
+  session: StoredRuntimeSession | undefined,
+  runId: string
+): ThreadRunLimitFailure | undefined {
+  if (session?.snapshot.schemaVersion !== 6) { return undefined; }
+  return session.snapshot.runs.find(run => run.id === runId)?.failure;
 }
 
 function _preserveSandboxAttachmentAuthority(

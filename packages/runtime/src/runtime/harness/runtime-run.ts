@@ -30,6 +30,16 @@ export interface RuntimeStructuredOutputResult<
   readonly value: TValue;
 }
 
+export interface RuntimeRunLimitExceededFailure {
+  readonly axis: "modelCalls";
+  readonly attempted: number;
+  readonly code: "runLimitExceeded";
+  readonly consumed: number;
+  readonly limit: number;
+}
+
+export type RuntimeRunFailure = RuntimeRunLimitExceededFailure;
+
 export interface RuntimeRunCheckpointSnapshot {
   readonly continuationFingerprint: string;
   readonly order: number;
@@ -45,6 +55,7 @@ export interface RuntimeRunSnapshot {
   readonly configurationId: string;
   readonly state: RuntimeRunState;
   readonly checkpoint?: RuntimeRunCheckpointSnapshot;
+  readonly failure?: RuntimeRunFailure;
   readonly structuredOutput?: RuntimeStructuredOutputResult;
 }
 

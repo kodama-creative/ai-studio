@@ -45,6 +45,7 @@ import {
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { useModels } from "@/components/model-provider";
 import { ThreadPlayground } from "@/components/thread-playground";
+import { ModelCallLimitSummary } from "@/components/thread-playground/model-call-limit-summary";
 import { RuntimeProfileControl } from "@/components/thread-playground/runtime-profile-control";
 import { SessionBudgetSummary } from "@/components/thread-playground/session-budget-summary";
 import { getRuntimeExecutionMode } from "@/components/thread-playground/stores/run-mode";
@@ -849,6 +850,7 @@ const _ProjectThreadPane = function ProjectThreadPane({
               status={runtimeStatus}
             />
             <SessionBudgetSummary limits={record.syncedDefinition.limits} />
+            <ModelCallLimitSummary limits={record.syncedDefinition.limits} />
             {runtimeStatus.message
               && (runtimeStatus.state === "stale"
                 || runtimeStatus.state === "unavailable")

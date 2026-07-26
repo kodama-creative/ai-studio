@@ -154,6 +154,7 @@ describe("loadAgentProject", () => {
     expect(snapshot.definition).toEqual({
       model: { provider: "fake", id: "models/codex" },
       reasoning: "off",
+      limits: { maxModelCallsPerRun: 25 },
       environment: {
         LOG_LEVEL: {
           kind: "config",
@@ -1093,10 +1094,12 @@ describe("loadAgentProject", () => {
     const second = await loadAgentProject(root);
 
     expect(first.definition).toEqual({
-      model: { provider: "fake", id: "model-one" }
+      model: { provider: "fake", id: "model-one" },
+      limits: { maxModelCallsPerRun: 25 }
     });
     expect(second.definition).toEqual({
       model: { provider: "fake", id: "model-two" },
+      limits: { maxModelCallsPerRun: 25 },
       reasoning: "xhigh"
     });
     expect(second.fingerprint).not.toBe(first.fingerprint);

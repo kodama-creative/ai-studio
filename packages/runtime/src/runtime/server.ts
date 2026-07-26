@@ -22,6 +22,7 @@ export { createHostCapabilityPolicy } from "./capabilities/create-host-capabilit
 export { ExecutionEnvUnavailableError } from "./execution-env/execution-env-unavailable-error";
 export { DurableOperationOutcomeUnknownError } from "./harness/durable-operation-outcome-unknown-error";
 export { RuntimeToolApprovalStaleError } from "./harness/runtime-tool-approval-stale-error";
+export { RuntimeRunLimitExceededError } from "./limits/runtime-run-limit-exceeded-error";
 export { StructuredOutputError } from "./outputs/structured-output-error";
 export {
   DEFAULT_MAX_STRUCTURED_OUTPUT_BYTES,

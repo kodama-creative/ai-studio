@@ -721,7 +721,7 @@ export class ServerSessionRepository implements SessionStore {
         });
       } else if (runtimeRun.state !== input.outcome) {
         throw new Error("Runtime Run terminal does not match Server terminal");
-      } else if (!runtimeRun.checkpoint) {
+      } else if (runtimeRun.checkpoint?.state !== runtimeRun.state) {
         const runtimeStore = new InMemorySessionStore([currentRuntime]);
         runtime = await runtimeStore.commit({
           sessionId: input.sessionId,
@@ -851,6 +851,33 @@ export class ServerSessionRepository implements SessionStore {
     return [...this._sessions.keys()];
   }
 
+  pendingRuntimeTerminals(sessionId: string): ReadonlyArray<{
+    readonly code?: string;
+    readonly outcome: ServerRunTerminalOutcome;
+    readonly runId: string;
+  }> {
+    const current = this._required(sessionId);
+    return current.runs.flatMap(record => {
+      if (record.terminal !== null) { return []; }
+      const runtimeRun = current.runtime?.snapshot.runs.find(
+        run => run.id === record.id
+      );
+      const outcome = runtimeRun
+        ? _serverTerminalOutcome(runtimeRun.state)
+        : null;
+      if (!runtimeRun || !outcome) { return []; }
+      return [{
+        runId: runtimeRun.id,
+        outcome,
+        ...(runtimeRun.failure
+          ? { code: runtimeRun.failure.code }
+          : outcome === "outcomeUnknown"
+            ? { code: "process_interrupted" }
+            : {})
+      }];
+    });
+  }
+
   recoverableRun(sessionId: string, runId: string): CreatedServerRun {
     const current = this._required(sessionId);
     const run = current.runs.find(item => item.id === runId);
@@ -899,23 +926,25 @@ export class ServerSessionRepository implements SessionStore {
       for (const runtimeRun of runtime.snapshot.runs) {
         const outcome = _serverTerminalOutcome(runtimeRun.state);
         const record = runs.find(run => run.id === runtimeRun.id);
-        if (!outcome || record?.terminal !== null) {
+        const runtimeProjection = _terminalRuntimeProjection(runtime, runtimeRun);
+        if (!outcome || record?.terminal !== null || !runtimeProjection) {
           continue;
         }
         const runEvents = events[runtimeRun.id] ?? [];
-        const runtimeProjection = _terminalRuntimeProjection(runtime, runtimeRun);
         const terminal: PersistedServerEvent = _snapshot({
           event: "control" as const,
           data: {
             type: "runTerminal" as const,
             outcome,
-            ...(outcome === "outcomeUnknown"
-              ? { code: "process_interrupted" }
-              : {}),
+            ...(runtimeRun.failure
+              ? { code: runtimeRun.failure.code }
+              : outcome === "outcomeUnknown"
+                ? { code: "process_interrupted" }
+                : {}),
             ...(runtimeRun.structuredOutput
               ? { structuredOutput: runtimeRun.structuredOutput }
               : {}),
-            ...(runtimeProjection ? { runtime: runtimeProjection } : {})
+            runtime: runtimeProjection
           },
           sequence: runEvents.length + 1
         });
@@ -1314,6 +1343,7 @@ function _validPersistedPiEvent(value: unknown): boolean {
 }
 
 function _validPersistedTerminal(value: unknown): value is {
+  readonly code?: string;
   readonly outcome: ServerRunTerminalOutcome;
   readonly runtime?: AgentServerRuntimeProjection;
   readonly structuredOutput?: RuntimeStructuredOutputResult;
@@ -1424,13 +1454,18 @@ function _assertTerminalAuthority(envelope: ServerSessionEnvelope): void {
         terminal.data.structuredOutput,
         runtimeRun.structuredOutput
       )
-      || (runtimeProjection !== undefined && (
-        runtimeProjection.session.snapshot.id !== envelope.sessionId
+      || (
+        runtimeRun.failure?.code === "runLimitExceeded"
+          ? terminal.data.code !== runtimeRun.failure.code
+          : terminal.data.code === "runLimitExceeded"
+      )
+      || (
+        runtimeProjection?.session.snapshot.id !== envelope.sessionId
         || projectedCheckpoint?.runId !== run.id
-        || projectedCheckpoint.state !== terminal.data.outcome
+        || projectedCheckpoint?.state !== terminal.data.outcome
         || projectedRun?.id !== run.id
-        || projectedRun.state !== terminal.data.outcome
-      ))
+        || projectedRun?.state !== terminal.data.outcome
+      )
     ) {
       throw new Error(
         `Server Run ${run.id} terminal does not match Runtime authority`
@@ -1643,7 +1678,7 @@ function _terminalRuntimeProjection(
   run: StoredRuntimeSession["snapshot"]["runs"][number]
 ): AgentServerRuntimeProjection | null {
   const checkpoint = session.snapshot.history.checkpoints
-    .filter(item => item.runId === run.id)
+    .filter(item => item.runId === run.id && item.state === run.state)
     .at(-1);
   if (!checkpoint) { return null; }
   return {

@@ -44,6 +44,7 @@ export interface RuntimeDurableOperationSnapshot {
   readonly stepId: string;
   readonly toolCallId?: string;
   readonly provider?: string;
+  readonly providerSlot?: string;
   readonly replay?: RuntimeDurableOperationReplayEnvelope;
   readonly park?: RuntimeDurableOperationPark;
 }

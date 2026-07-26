@@ -14,6 +14,7 @@ import type {
 } from "./runtime-history";
 import type {
   RuntimeJsonValue,
+  RuntimeRunFailure,
   RuntimeRunSnapshot,
   RuntimeRunState,
   RuntimeStructuredOutputResult
@@ -27,7 +28,7 @@ import type {
 } from "../../shared/agent-definition";
 import type { RuntimeExecutionMode } from "../../shared/runtime-execution-mode";
 
-export const RUNTIME_SESSION_SCHEMA_VERSION = 5 as const;
+export const RUNTIME_SESSION_SCHEMA_VERSION = 6 as const;
 export const RUNTIME_SESSION_STATE_SCHEMA_VERSION = 1 as const;
 export const RUNTIME_SESSION_BUDGET_SCHEMA_VERSION = 1 as const;
 export const MAX_SESSION_STATE_SLOTS = 64;
@@ -253,6 +254,15 @@ export type RuntimeRunJournalEntry =
     readonly type: "toolApprovalDecided";
   }
   | {
+    readonly failure?: RuntimeRunFailure;
+    readonly from: RuntimeRunState;
+    readonly runId: string;
+    readonly sequence: number;
+    readonly sessionVersion: number;
+    readonly to: RuntimeRunState;
+    readonly type: "runStateChanged";
+  }
+  | {
     readonly fingerprint: string;
     readonly sequence: number;
     readonly sessionVersion: number;
@@ -265,14 +275,6 @@ export type RuntimeRunJournalEntry =
     readonly sessionVersion: number;
     readonly turnId: string;
     readonly type: "turnInstructionsRecorded";
-  }
-  | {
-    readonly from: RuntimeRunState;
-    readonly runId: string;
-    readonly sequence: number;
-    readonly sessionVersion: number;
-    readonly to: RuntimeRunState;
-    readonly type: "runStateChanged";
   }
   | {
     readonly input: number;
@@ -418,10 +420,18 @@ export type RuntimeSessionMutation =
     readonly type: "decideSessionBudget";
   }
   | {
+    readonly failure?: RuntimeRunFailure;
+    readonly runId: string;
+    readonly structuredOutput?: RuntimeStructuredOutputResult;
+    readonly to: RuntimeRunState;
+    readonly type: "transitionRun";
+  }
+  | {
     readonly kind: "provider" | "tool";
     readonly operationId: string;
     readonly park?: Omit<RuntimeDurableOperationPark, "parkedSessionVersion">;
     readonly provider?: string;
+    readonly providerSlot?: string;
     readonly requestFingerprint: string;
     readonly runId: string;
     readonly stepId: string;
@@ -460,12 +470,6 @@ export type RuntimeSessionMutation =
     readonly runId: string;
     readonly stepId: string;
     readonly type: "checkpointOperationStep";
-  }
-  | {
-    readonly runId: string;
-    readonly structuredOutput?: RuntimeStructuredOutputResult;
-    readonly to: RuntimeRunState;
-    readonly type: "transitionRun";
   }
   | {
     readonly runId: string;

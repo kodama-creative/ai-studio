@@ -698,9 +698,97 @@ function _validRunTerminal(
     )
     && (value.code === undefined || typeof value.code === "string")
     && (
+      value.code !== "runLimitExceeded"
+      || (
+        value.outcome === "failed"
+        && _validRunLimitProjection(value.runtime)
+      )
+    )
+    && (
       value.structuredOutput === undefined
       || _validStructuredOutput(value.structuredOutput)
     );
+}
+
+function _validRunLimitProjection(value: unknown): boolean {
+  if (
+    !_record(value)
+    || typeof value.branchId !== "string"
+    || typeof value.checkpointId !== "string"
+    || !_record(value.session)
+    || !_record(value.session.snapshot)
+    || value.session.snapshot.schemaVersion !== 6
+    || !Array.isArray(value.session.configurations)
+    || !Array.isArray(value.session.snapshot.runs)
+    || !_record(value.session.snapshot.history)
+    || !Array.isArray(value.session.snapshot.history.checkpoints)
+  ) {
+    return false;
+  }
+  const checkpoint = value.session.snapshot.history.checkpoints.find(item =>
+    _record(item)
+    && item.id === value.checkpointId
+    && item.branchId === value.branchId
+    && item.state === "failed");
+  if (!_record(checkpoint) || typeof checkpoint.runId !== "string") {
+    return false;
+  }
+  const run = value.session.snapshot.runs.find(item =>
+    _record(item) && item.id === checkpoint.runId);
+  if (
+    !_record(run)
+    || run.state !== "failed"
+    || run.sessionId !== value.session.snapshot.id
+    || typeof run.configurationId !== "string"
+    || !_record(run.failure)
+  ) {
+    return false;
+  }
+  const failure = run.failure;
+  if (
+    failure.code !== "runLimitExceeded"
+    || failure.axis !== "modelCalls"
+    || !Number.isSafeInteger(failure.limit)
+    || (failure.limit as number) <= 0
+    || failure.consumed !== failure.limit
+    || !Number.isSafeInteger(failure.attempted)
+    || failure.attempted !== (failure.consumed as number) + 1
+  ) {
+    return false;
+  }
+  const configuration = value.session.configurations.find(item =>
+    _record(item) && item.id === run.configurationId);
+  if (
+    !_record(configuration)
+    || !_record(configuration.limits)
+    || configuration.limits.maxModelCallsPerRun !== failure.limit
+  ) {
+    return false;
+  }
+  const ledger = value.session.snapshot.operationLedger;
+  let consumed = 0;
+  if (_record(ledger) && Array.isArray(ledger.steps)) {
+    for (const step of ledger.steps) {
+      if (
+        !_record(step)
+        || step.runId !== run.id
+        || !Array.isArray(step.operations)
+      ) {
+        continue;
+      }
+      for (const operation of step.operations) {
+        if (
+          _record(operation)
+          && operation.kind === "provider"
+          && operation.providerSlot === undefined
+          && operation.state !== "cancelled"
+        ) {
+          consumed += 1;
+        }
+      }
+    }
+  }
+  return consumed === failure.consumed;
 }
 
 function _validToolApprovalRequired(value: unknown): boolean {

@@ -3,6 +3,7 @@ import {
   type RuntimeBranchSnapshot,
   type RuntimeCompactionSnapshot,
   runtimeHistoryMessages,
+  type RuntimeRunFailure,
   type RuntimeSessionBudgetWaitSnapshot,
   runtimeToolApprovalViews,
   type StoredRuntimeSession
@@ -732,6 +733,7 @@ interface RuntimeRunView {
   readonly checkpoints: readonly RuntimeCheckpointView[];
   readonly compactions: readonly RuntimeCompactionSnapshot[];
   readonly id: string;
+  readonly failure?: RuntimeRunFailure;
   readonly state: ThreadRuntimeRunState;
 }
 
@@ -754,7 +756,7 @@ function _runtimeTree(
 ): RuntimeTreeView | null {
   try {
     const session = persisted as StoredRuntimeSession | undefined;
-    if (session?.snapshot.schemaVersion !== 5) { return null; }
+    if (session?.snapshot.schemaVersion !== 6) { return null; }
     const history = session.snapshot.history;
     const savedByCheckpoint = new Map(
       savedRuns.flatMap(run => (run.runtime?.checkpointId
@@ -799,6 +801,7 @@ function _runtimeTree(
         .filter(run => run.branchId === branch.id)
         .map(run => ({
           id: run.id,
+          ...(run.failure ? { failure: run.failure } : {}),
           state: run.state,
           budgetWaits: session.snapshot.budget?.waits.filter(
             wait => wait.runId === run.id
@@ -1055,10 +1058,17 @@ const RuntimeBranchSection = memo(({
                   Run {run.id.replace(/^run-/, "").slice(0, 8)}
                 </span>
                 <span aria-hidden>·</span>
-                <span className="truncate">
-                  {run.state === "waitingForApproval"
-                    ? `Waiting for approval · ${pendingApprovalCounts.get(run.id) ?? 0} pending`
-                    : RUNTIME_STATE_LABELS[run.state]}
+                <span
+                  className={cn(
+                    "truncate",
+                    run.failure && "text-destructive"
+                  )}
+                >
+                  {run.failure
+                    ? `Model limit reached · ${run.failure.consumed}/${run.failure.limit}`
+                    : run.state === "waitingForApproval"
+                      ? `Waiting for approval · ${pendingApprovalCounts.get(run.id) ?? 0} pending`
+                      : RUNTIME_STATE_LABELS[run.state]}
                 </span>
                 {run.state === "waitingForApproval" && (
                   <Button

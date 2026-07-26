@@ -114,6 +114,155 @@ test("recovers a completed provider operation from its durable transcript bounda
   await restarted.close();
 });
 
+test("publishes a Runtime-owned limit terminal after repository restart", async () => {
+  const root = await mkdtemp(join(tmpdir(), "llm-space-server-limit-terminal-"));
+  roots.push(root);
+  const artifactFingerprint = "a".repeat(64);
+  const continuationToken = Buffer.alloc(32, 13).toString("base64url");
+  const owner = {
+    issuer: "test",
+    principalId: "principal-one",
+    principalType: "user" as const
+  };
+  const first = await ServerSessionRepository.open({
+    artifactFingerprint,
+    root
+  });
+  const created = await first.createSession({
+    continuationToken,
+    idempotencyKey: "limit-session",
+    owner
+  });
+  const userMessage = _user("loop", 1);
+  const run = await first.createRun({
+    configuration: {
+      ..._configuration("configuration-limit", artifactFingerprint),
+      limits: { maxModelCallsPerRun: 1 }
+    },
+    continuationToken,
+    idempotencyKey: "limit-run",
+    inputText: "loop",
+    owner,
+    sessionId: created.sessionId,
+    userMessage
+  });
+  const initial = await first.load(created.sessionId);
+  if (!initial) { throw new Error("Expected Runtime Session"); }
+  const checkpointed = await first.commit({
+    sessionId: created.sessionId,
+    expectedVersion: initial.version,
+    mutations: [
+      {
+        type: "transitionRun",
+        runId: run.runId,
+        to: "runningTools"
+      },
+      {
+        type: "transitionRun",
+        runId: run.runId,
+        to: "waitingForContinue"
+      },
+      {
+        type: "recordCheckpoint",
+        runId: run.runId,
+        messages: [userMessage],
+        continuationFingerprint: "waiting-boundary"
+      }
+    ]
+  });
+  const resumed = await first.commit({
+    sessionId: created.sessionId,
+    expectedVersion: checkpointed.version,
+    mutations: [{
+      type: "transitionRun",
+      runId: run.runId,
+      to: "runningModel"
+    }]
+  });
+  const operationId = `${run.runId}:step:1:provider:fake`;
+  const started = await first.commit({
+    sessionId: created.sessionId,
+    expectedVersion: resumed.version,
+    mutations: [{
+      type: "startOperation",
+      runId: run.runId,
+      stepId: `${run.runId}:step:1`,
+      stepSequence: 1,
+      transcriptMessageCount: 1,
+      operationId,
+      kind: "provider",
+      provider: "fake",
+      requestFingerprint: "d".repeat(64)
+    }]
+  });
+  await first.commit({
+    sessionId: created.sessionId,
+    expectedVersion: started.version,
+    mutations: [
+      {
+        type: "settleOperation",
+        runId: run.runId,
+        operationId,
+        requestFingerprint: "d".repeat(64),
+        state: "completed",
+        replay: {
+          byteLength: 4,
+          resultFingerprint: createHash("sha256").update("null").digest("hex"),
+          value: null
+        }
+      },
+      {
+        type: "transitionRun",
+        runId: run.runId,
+        to: "failed",
+        failure: {
+          axis: "modelCalls",
+          attempted: 2,
+          code: "runLimitExceeded",
+          consumed: 1,
+          limit: 1
+        }
+      }
+    ]
+  });
+  expect(first.pendingRuntimeTerminals(created.sessionId)).toEqual([{
+    code: "runLimitExceeded",
+    outcome: "failed",
+    runId: run.runId
+  }]);
+  await first.close();
+
+  const restarted = await ServerSessionRepository.open({
+    artifactFingerprint,
+    root
+  });
+  const [pending] = restarted.pendingRuntimeTerminals(created.sessionId);
+  if (!pending) { throw new Error("Expected pending Runtime terminal"); }
+  const terminal = await restarted.completeRun({
+    sessionId: created.sessionId,
+    runId: pending.runId,
+    outcome: pending.outcome,
+    ...(pending.code ? { code: pending.code } : {})
+  });
+
+  expect(terminal).toMatchObject({
+    data: {
+      type: "runTerminal",
+      code: "runLimitExceeded",
+      outcome: "failed",
+      runtime: {
+        session: {
+          snapshot: {
+            runs: [{ failure: { consumed: 1, limit: 1 } }]
+          }
+        }
+      }
+    }
+  });
+  expect(restarted.pendingRuntimeTerminals(created.sessionId)).toEqual([]);
+  await restarted.close();
+});
+
 test("forks from an authenticated working base and persists authoritative rename", async () => {
   const root = await mkdtemp(join(tmpdir(), "llm-space-server-branch-"));
   roots.push(root);

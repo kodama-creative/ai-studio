@@ -57,8 +57,11 @@ export type AgentEnvironmentRequirements = Readonly<
   Record<string, AgentEnvironmentRequirement>
 >;
 
+export const DEFAULT_MAX_MODEL_CALLS_PER_RUN = 25;
+
 export interface AgentSessionLimitsDefinition {
   readonly maxInputTokensPerSession?: false | number;
+  readonly maxModelCallsPerRun?: false | number;
   readonly maxOutputTokensPerSession?: false | number;
 }
 

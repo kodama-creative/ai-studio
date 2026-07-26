@@ -9,6 +9,7 @@ import type {
   ThreadEvaluationRubric,
   ThreadEvaluationRubricSnapshot,
   ThreadEvaluationRunScores,
+  ThreadRunLimitFailure,
   ThreadRunSnapshot,
   ThreadRuntimeCheckpoint,
   ThreadRuntimeRunState,
@@ -126,6 +127,7 @@ export function normalizeRunHistory(
         ? run.usage
         : undefined;
     const runtime = _normalizeRuntimeCheckpoint(run.runtime);
+    const runLimitFailure = _normalizeRunLimitFailure(run.runLimitFailure);
     const structuredOutput = _normalizeStructuredOutput(run.structuredOutput);
     const structuredOutputFailure = _normalizeStructuredOutputFailure(
       run.structuredOutputFailure
@@ -137,6 +139,7 @@ export function normalizeRunHistory(
         thread: snapshotThread(run.thread),
         ...(usage ? { usage } : {}),
         ...(runtime ? { runtime } : {}),
+        ...(runLimitFailure ? { runLimitFailure } : {}),
         ...(structuredOutput ? { structuredOutput } : {}),
         ...(structuredOutputFailure ? { structuredOutputFailure } : {})
       }
@@ -593,6 +596,7 @@ export function recordRun(
   timestamp: number = Date.now(),
   options: {
     id?: string;
+    runLimitFailure?: ThreadRunLimitFailure;
     runtime?: ThreadRuntimeCheckpoint;
     structuredOutput?: ThreadStructuredOutput;
     structuredOutputFailure?: ThreadStructuredOutputFailure;
@@ -608,6 +612,9 @@ export function recordRun(
       timestamp,
       usage,
       ...(options.runtime ? { runtime: options.runtime } : {}),
+      ...(options.runLimitFailure
+        ? { runLimitFailure: options.runLimitFailure }
+        : {}),
       ...(options.structuredOutput
         ? { structuredOutput: options.structuredOutput }
         : {}),
@@ -736,6 +743,28 @@ function _normalizeStructuredOutputFailure(
     return null;
   }
   return { contract, schemaFingerprint, code };
+}
+
+function _normalizeRunLimitFailure(value: unknown): ThreadRunLimitFailure | null {
+  const record = _asRecord(value);
+  if (
+    record?.code !== "runLimitExceeded"
+    || record.axis !== "modelCalls"
+    || !Number.isSafeInteger(record.limit)
+    || (record.limit as number) < 1
+    || record.consumed !== record.limit
+    || !Number.isSafeInteger(record.attempted)
+    || record.attempted !== (record.consumed as number) + 1
+  ) {
+    return null;
+  }
+  return {
+    axis: "modelCalls",
+    attempted: record.attempted,
+    code: "runLimitExceeded",
+    consumed: record.consumed as number,
+    limit: record.limit as number
+  };
 }
 
 function _isJsonValue(value: unknown, ancestors: WeakSet<object>): boolean {

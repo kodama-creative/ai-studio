@@ -8,7 +8,8 @@ import {
   createAssistantMessageEventStream,
   createModels,
   createProvider,
-  type Model
+  type Model,
+  type Models
 } from "@earendil-works/pi-ai";
 import {
   type AgentServerStreamEvent,
@@ -18,16 +19,16 @@ import { afterEach, describe, expect, test } from "bun:test";
 
 import type { CompiledAgentProjectSnapshot } from "@llm-space/runtime/node";
 
-import { createStaticBearerAuthenticator } from "../../src/auth/server-authenticator";
 import {
+  createStaticBearerAuthenticator,
   startAgentServer,
   type StartedAgentServer
-} from "../../src/server/start-agent-server";
+} from "../../src";
 
+const SERVERS: StartedAgentServer[] = [];
+const ROOTS: string[] = [];
 const AUTH_TOKEN = "auth-token-with-at-least-thirty-two-bytes";
 const OTHER_AUTH_TOKEN = "second-auth-token-with-at-least-thirty-two";
-const ROOTS: string[] = [];
-const SERVERS: StartedAgentServer[] = [];
 
 afterEach(async () => {
   await Promise.all(SERVERS.splice(0).map(async server => server.stop()));
@@ -39,11 +40,11 @@ afterEach(async () => {
 
 describe("protected Session budget decisions", () => {
   test("keeps the wait open and resumes the same Run once", async () => {
-    const root = await _root();
+    const root = await _budgetRoot();
     let providerCalls = 0;
-    const server = await _server(root, () => { providerCalls += 1; });
+    const server = await _budgetServer(root, () => { providerCalls += 1; });
     SERVERS.push(server);
-    const client = _client(server);
+    const client = _budgetClient(server);
     const session = await client.createSession({
       continuationToken: _continuationToken(51),
       idempotencyKey: "budget-session"
@@ -111,11 +112,11 @@ describe("protected Session budget decisions", () => {
   }, 15_000);
 
   test("restores a wait and hides Stop from another principal", async () => {
-    const root = await _root();
+    const root = await _budgetRoot();
     let providerCalls = 0;
     const countProvider = () => { providerCalls += 1; };
-    const first = await _server(root, countProvider);
-    const firstClient = _client(first);
+    const first = await _budgetServer(root, countProvider);
+    const firstClient = _budgetClient(first);
     const session = await firstClient.createSession({
       continuationToken: _continuationToken(52),
       idempotencyKey: "budget-restart-session"
@@ -136,9 +137,9 @@ describe("protected Session budget decisions", () => {
     await firstIterator.return?.();
     await first.stop();
 
-    const restarted = await _server(root, countProvider);
+    const restarted = await _budgetServer(root, countProvider);
     SERVERS.push(restarted);
-    const client = _client(restarted);
+    const client = _budgetClient(restarted);
     const iterator = client.streamRun({
       sessionId: session.sessionId,
       runId: run.runId,
@@ -181,6 +182,75 @@ describe("protected Session budget decisions", () => {
   }, 15_000);
 });
 
+test("fails before the first forbidden model dispatch with durable attribution", async () => {
+  const root = await mkdtemp(join(tmpdir(), "llm-space-server-limit-"));
+  ROOTS.push(root);
+  const fingerprint = "6".repeat(64);
+  let providerCalls = 0;
+  const server = await startAgentServer({
+    artifactFingerprint: fingerprint,
+    authenticator: createStaticBearerAuthenticator([{
+      issuer: "test",
+      principalId: "principal-one",
+      principalType: "user",
+      token: "auth-token-with-at-least-thirty-two-bytes"
+    }]),
+    hostname: "127.0.0.1",
+    localDev: true,
+    models: _models(() => { providerCalls += 1; }),
+    port: 0,
+    project: _project(fingerprint),
+    repositoryRoot: root
+  });
+  SERVERS.push(server);
+  const client = createAgentServerClient({
+    baseUrl: server.url,
+    authorization: "auth-token-with-at-least-thirty-two-bytes"
+  });
+  const session = await client.createSession({
+    continuationToken: Buffer.alloc(32, 41).toString("base64url"),
+    idempotencyKey: "limit-session"
+  });
+  const run = await client.createRun({
+    sessionId: session.sessionId,
+    continuationToken: session.continuationToken,
+    idempotencyKey: "limit-run",
+    text: "limit-loop"
+  });
+  let terminal: AgentServerStreamEvent | undefined;
+  for await (const event of client.streamRun({
+    sessionId: session.sessionId,
+    runId: run.runId,
+    continuationToken: session.continuationToken
+  })) {
+    terminal = event;
+  }
+
+  expect(providerCalls).toBe(1);
+  expect(terminal).toMatchObject({
+    event: "control",
+    data: {
+      type: "runTerminal",
+      code: "runLimitExceeded",
+      outcome: "failed",
+      runtime: {
+        session: {
+          snapshot: {
+            runs: [{
+              failure: {
+                code: "runLimitExceeded",
+                consumed: 1,
+                attempted: 2,
+                limit: 1
+              }
+            }]
+          }
+        }
+      }
+    }
+  });
+});
+
 async function _waitForBudget(
   iterator: AsyncIterator<AgentServerStreamEvent>
 ): Promise<void> {
@@ -196,13 +266,13 @@ async function _waitForBudget(
   }
 }
 
-async function _root(): Promise<string> {
+async function _budgetRoot(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "llm-space-server-budget-"));
   ROOTS.push(root);
   return root;
 }
 
-async function _server(
+async function _budgetServer(
   root: string,
   onStream: () => void
 ): Promise<StartedAgentServer> {
@@ -225,14 +295,14 @@ async function _server(
     ]),
     hostname: "127.0.0.1",
     localDev: true,
-    models: _models(onStream),
+    models: _budgetModels(onStream),
     port: 0,
-    project: _project(fingerprint),
+    project: _budgetProject(fingerprint),
     repositoryRoot: root
   });
 }
 
-function _client(server: StartedAgentServer) {
+function _budgetClient(server: StartedAgentServer) {
   return createAgentServerClient({
     baseUrl: server.url,
     authorization: AUTH_TOKEN
@@ -243,7 +313,7 @@ function _continuationToken(seed: number): string {
   return Buffer.from(new Uint8Array(32).fill(seed)).toString("base64url");
 }
 
-function _models(onStream: () => void) {
+function _budgetModels(onStream: () => void): Models {
   const model: Model<"fake"> = {
     id: "fake-model",
     name: "Fake Model",
@@ -269,22 +339,22 @@ function _models(onStream: () => void) {
     api: {
       stream: (_model: Model<Api>, context: Context) => {
         onStream();
-        return _stream(context);
+        return _budgetStream(context);
       },
       streamSimple: (_model: Model<Api>, context: Context) => {
         onStream();
-        return _stream(context);
+        return _budgetStream(context);
       }
     }
   }));
   return models;
 }
 
-function _stream(context: Context) {
+function _budgetStream(context: Context) {
   const hasToolResult = context.messages.at(-1)?.role === "toolResult";
   const message: AssistantMessage = hasToolResult
-    ? _message([{ type: "text", text: "done" }], "stop")
-    : _message([{
+    ? _budgetMessage([{ type: "text", text: "done" }], "stop")
+    : _budgetMessage([{
       type: "toolCall",
       id: `budget-${crypto.randomUUID()}`,
       name: "budgetTool",
@@ -298,7 +368,7 @@ function _stream(context: Context) {
   return stream;
 }
 
-function _message(
+function _budgetMessage(
   content: AssistantMessage["content"],
   stopReason: AssistantMessage["stopReason"]
 ): AssistantMessage {
@@ -321,7 +391,7 @@ function _message(
   };
 }
 
-function _project(fingerprint: string): CompiledAgentProjectSnapshot {
+function _budgetProject(fingerprint: string): CompiledAgentProjectSnapshot {
   const section = { fingerprint, entries: [] };
   return {
     artifact: {
@@ -341,7 +411,8 @@ function _project(fingerprint: string): CompiledAgentProjectSnapshot {
       model: { provider: "fake", id: "fake-model" },
       limits: {
         maxInputTokensPerSession: 1,
-        maxOutputTokensPerSession: 1
+        maxOutputTokensPerSession: 1,
+        maxModelCallsPerRun: 25
       }
     },
     instructions: "Answer briefly.",
@@ -354,6 +425,110 @@ function _project(fingerprint: string): CompiledAgentProjectSnapshot {
         return {
           content: [{ type: "text" as const, text: "complete" }],
           details: { completed: true }
+        };
+      }
+    }],
+    connections: [],
+    resources: { skills: [] },
+    diagnostics: [],
+    fingerprint
+  };
+}
+
+function _models(onStream: () => void): Models {
+  const model: Model<"fake"> = {
+    id: "fake-model",
+    name: "Fake Model",
+    api: "fake",
+    provider: "fake",
+    baseUrl: "http://localhost.invalid",
+    reasoning: false,
+    input: ["text"],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 128_000,
+    maxTokens: 4_096
+  };
+  const provider = createProvider({
+    id: "fake",
+    auth: { apiKey: { name: "Fake", resolve: async () => ({ auth: {} }) } },
+    models: [model],
+    api: {
+      stream: (_model: Model<Api>, context: Context) => {
+        onStream();
+        return _stream(context);
+      },
+      streamSimple: (_model: Model<Api>, context: Context) => {
+        onStream();
+        return _stream(context);
+      }
+    }
+  });
+  const models = createModels();
+  models.setProvider(provider);
+  return models;
+}
+
+function _stream(_context: Context) {
+  const stream = createAssistantMessageEventStream();
+  const message: AssistantMessage = {
+    role: "assistant",
+    content: [{
+      type: "toolCall",
+      id: "limit-loop-call",
+      name: "loop",
+      arguments: {}
+    }],
+    api: "fake",
+    provider: "fake",
+    model: "fake-model",
+    usage: {
+      input: 1,
+      output: 1,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 2,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
+    },
+    stopReason: "toolUse",
+    timestamp: Date.now()
+  };
+  queueMicrotask(() => {
+    stream.push({ type: "start", partial: message });
+    stream.push({ type: "done", reason: "toolUse", message });
+  });
+  return stream;
+}
+
+function _project(fingerprint: string): CompiledAgentProjectSnapshot {
+  const section = { fingerprint, entries: [] };
+  return {
+    artifact: {
+      schemaVersion: 1,
+      fingerprint,
+      fingerprints: {
+        sources: section,
+        dependencies: section,
+        capabilities: section,
+        schemas: section,
+        runtime: section,
+        environmentRequirements: section
+      }
+    },
+    root: "/test-agent",
+    definition: {
+      model: { provider: "fake", id: "fake-model" },
+      limits: { maxModelCallsPerRun: 1 }
+    },
+    instructions: "Use the loop tool.",
+    tools: [{
+      name: "loop",
+      label: "Loop",
+      description: "Request one more model turn.",
+      parameters: { type: "object", properties: {} },
+      async execute() {
+        return {
+          content: [{ type: "text" as const, text: "continue" }],
+          details: {}
         };
       }
     }],

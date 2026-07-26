@@ -15,6 +15,7 @@ import {
   resumeDurableOperation
 } from "../harness/durable-operation-resume";
 import { sha256 } from "../harness/sha256";
+import { RuntimeRunLimitExceededError } from "../limits/runtime-run-limit-exceeded-error";
 
 import type { PreparedAgentTool } from "../agent/prepared-agent-tool";
 import type { RuntimeJsonValue } from "../harness/runtime-run";
@@ -688,6 +689,43 @@ export class DurableOperationCoordinator {
     ) {
       throw new DurableOperationFingerprintMismatchError(operationId);
     }
+    if (input.kind === "provider" && input.providerSlot === undefined) {
+      const run = current.snapshot.runs.find(item => item.id === this._runId);
+      const configuration = current.configurations.find(
+        item => item.id === run?.configurationId
+      );
+      const limit = configuration?.limits?.maxModelCallsPerRun;
+      if (typeof limit === "number") {
+        const consumed = current.snapshot.operationLedger?.steps
+          .filter(item => item.runId === this._runId)
+          .flatMap(item => item.operations)
+          .filter(operation =>
+            operation.kind === "provider"
+            && operation.providerSlot === undefined
+            && operation.state !== "cancelled").length ?? 0;
+        if (consumed >= limit) {
+          const failure = {
+            axis: "modelCalls" as const,
+            attempted: consumed + 1,
+            code: "runLimitExceeded" as const,
+            consumed,
+            limit
+          };
+          const failed = await store.commit({
+            sessionId: this._sessionId,
+            expectedVersion: current.version,
+            mutations: [{
+              type: "transitionRun",
+              runId: this._runId,
+              to: "failed",
+              failure
+            }]
+          });
+          await this._onCommitted?.(failed);
+          throw new RuntimeRunLimitExceededError(failure);
+        }
+      }
+    }
     const committed = await store.commit({
       sessionId: this._sessionId,
       expectedVersion: current.version,
@@ -701,7 +739,10 @@ export class DurableOperationCoordinator {
         kind: input.kind,
         requestFingerprint: input.requestFingerprint,
         ...(input.kind === "provider"
-          ? { provider: input.provider }
+          ? {
+            provider: input.provider,
+            ...(input.providerSlot ? { providerSlot: input.providerSlot } : {})
+          }
           : { toolCallId: input.toolCallId })
       }]
     });

@@ -2,18 +2,20 @@ import { describe, expect, test } from "bun:test";
 
 import { defineAgent } from "../../../src/public/definitions/agent";
 
-describe("defineAgent Session limits", () => {
-  test("preserves authored token-budget values", () => {
+describe("defineAgent limits", () => {
+  test("preserves authored model-call and token-budget values", () => {
     const definition = defineAgent({
       model: "openai/gpt-5.3-codex",
       limits: {
         maxInputTokensPerSession: 200_000,
+        maxModelCallsPerRun: 25,
         maxOutputTokensPerSession: false
       }
     });
 
     expect(definition.limits).toEqual({
       maxInputTokensPerSession: 200_000,
+      maxModelCallsPerRun: 25,
       maxOutputTokensPerSession: false
     });
   });

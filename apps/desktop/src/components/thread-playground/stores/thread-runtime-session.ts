@@ -6,6 +6,7 @@ import {
 import {
   claimRuntimeRunResume,
   InMemorySessionStore,
+  isTerminalRuntimeRunState,
   recoverRuntimeSession,
   type RuntimeJsonValue,
   type RuntimeRunConfigurationSnapshot,
@@ -296,9 +297,24 @@ export class ThreadRuntimeSession {
   ): Promise<SettledThreadRuntimeRun> {
     this._assertLoaded();
     const current = await this._store.load(this._sessionId);
-    if (current?.snapshot.activeRunId !== input.runId) {
+    const currentRun = current?.snapshot.runs.find(run => run.id === input.runId);
+    const alreadyTerminal = currentRun
+      ? isTerminalRuntimeRunState(currentRun.state)
+      : false;
+    if (
+      !current
+      || (
+        current.snapshot.activeRunId !== input.runId
+        && !alreadyTerminal
+      )
+    ) {
       throw new SessionStoreInvariantError(
         `Runtime Run ${input.runId} is not active in Session ${this._sessionId}`
+      );
+    }
+    if (alreadyTerminal && currentRun?.state !== input.outcome) {
+      throw new SessionStoreInvariantError(
+        `Runtime Run ${input.runId} terminal does not match ${input.outcome}`
       );
     }
     const mutations = _settleMutations(input, current);
@@ -486,6 +502,9 @@ function _settleMutations(
   session: StoredRuntimeSession
 ): RuntimeSessionMutation[] {
   const runtimeRun = session.snapshot.runs.find(run => run.id === input.runId);
+  if (runtimeRun && isTerminalRuntimeRunState(runtimeRun.state)) {
+    return [];
+  }
   if (runtimeRun?.state === "waitingForBudget") {
     return [];
   }

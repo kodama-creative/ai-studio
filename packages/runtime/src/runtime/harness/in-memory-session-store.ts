@@ -658,11 +658,19 @@ function _startOperation({
         "Provider operation cannot contain a tool-call identity"
       );
     }
+    if (mutation.providerSlot !== undefined) {
+      _assertId("Operation provider slot", mutation.providerSlot);
+    }
   } else {
     _assertId("Operation tool call", mutation.toolCallId ?? "");
     if (mutation.provider !== undefined) {
       throw new SessionStoreInvariantError(
         "Tool operation cannot contain a provider identity"
+      );
+    }
+    if (mutation.providerSlot !== undefined) {
+      throw new SessionStoreInvariantError(
+        "Tool operation cannot contain a provider slot"
       );
     }
   }
@@ -734,6 +742,7 @@ function _startOperation({
     state: mutation.park ? "parked" : "preCall",
     stepId: mutation.stepId,
     ...(mutation.provider ? { provider: mutation.provider } : {}),
+    ...(mutation.providerSlot ? { providerSlot: mutation.providerSlot } : {}),
     ...(mutation.toolCallId ? { toolCallId: mutation.toolCallId } : {}),
     ...(mutation.park
       ? {
@@ -1604,6 +1613,14 @@ function _transitionRun({
     );
   }
   const next = transitionRuntimeRun(run, mutation.to);
+  if (mutation.failure && mutation.to !== "failed") {
+    throw new SessionStoreInvariantError(
+      "Runtime Run failure can be stored only on a failed Runtime Run"
+    );
+  }
+  if (mutation.failure) {
+    _assertRunFailure(mutation.failure);
+  }
   if (mutation.structuredOutput && mutation.to !== "completed") {
     throw new SessionStoreInvariantError(
       "Structured output can be stored only on a completed Runtime Run"
@@ -1612,9 +1629,15 @@ function _transitionRun({
   if (mutation.structuredOutput) {
     _assertStructuredOutput(mutation.structuredOutput);
   }
-  (snapshot.runs as RuntimeRunSnapshot[])[runIndex] = mutation.structuredOutput
-    ? { ...next, structuredOutput: structuredClone(mutation.structuredOutput) }
-    : next;
+  (snapshot.runs as RuntimeRunSnapshot[])[runIndex] = {
+    ...next,
+    ...(mutation.failure
+      ? { failure: structuredClone(mutation.failure) }
+      : {}),
+    ...(mutation.structuredOutput
+      ? { structuredOutput: structuredClone(mutation.structuredOutput) }
+      : {})
+  };
   if (isTerminalRuntimeRunState(next.state)) {
     _settleInterruptedOperationsForTerminal({
       journal,
@@ -1637,7 +1660,10 @@ function _transitionRun({
     sessionVersion,
     runId: run.id,
     from: run.state,
-    to: next.state
+    to: next.state,
+    ...(mutation.failure
+      ? { failure: structuredClone(mutation.failure) }
+      : {})
   });
 }
 
@@ -1991,6 +2017,7 @@ function _assertConfiguration(
     const keys = Object.keys(configuration.limits);
     if (keys.some(key =>
       key !== "maxInputTokensPerSession"
+      && key !== "maxModelCallsPerRun"
       && key !== "maxOutputTokensPerSession")) {
       throw new SessionStoreInvariantError(
         "Run Configuration Snapshot has invalid Session limit fields"
@@ -2038,6 +2065,25 @@ function _assertStructuredOutput(
   }
   if (!_isJsonValue(result.value, new WeakSet())) {
     throw new SessionStoreInvariantError("Structured output must be JSON data");
+  }
+}
+
+function _assertRunFailure(
+  failure: NonNullable<RuntimeRunSnapshot["failure"]>
+): void {
+  if (
+    failure.code !== "runLimitExceeded"
+    || failure.axis !== "modelCalls"
+    || !Number.isSafeInteger(failure.limit)
+    || failure.limit <= 0
+    || !Number.isSafeInteger(failure.consumed)
+    || failure.consumed !== failure.limit
+    || !Number.isSafeInteger(failure.attempted)
+    || failure.attempted !== failure.consumed + 1
+  ) {
+    throw new SessionStoreInvariantError(
+      "Runtime Run has invalid model-call limit failure attribution"
+    );
   }
 }
 
@@ -2510,11 +2556,19 @@ function _assertOperationSnapshot(
         `Provider operation ${operation.id} has a tool-call identity`
       );
     }
+    if (operation.providerSlot !== undefined) {
+      _assertId("Operation provider slot", operation.providerSlot);
+    }
   } else if (operation.kind === "tool") {
     _assertId("Operation tool call", operation.toolCallId ?? "");
     if (operation.provider !== undefined) {
       throw new SessionStoreInvariantError(
         `Tool operation ${operation.id} has a provider identity`
+      );
+    }
+    if (operation.providerSlot !== undefined) {
+      throw new SessionStoreInvariantError(
+        `Tool operation ${operation.id} has a provider slot`
       );
     }
   } else {
@@ -3280,11 +3334,38 @@ function _assertStoredSession(session: StoredRuntimeSession): void {
       }
       _assertStructuredOutput(run.structuredOutput);
     }
+    if (run.failure) {
+      if (run.state !== "failed") {
+        throw new SessionStoreInvariantError(
+          `Runtime Run ${run.id} has failure attribution before failure`
+        );
+      }
+      _assertRunFailure(run.failure);
+    }
     const configuration = configurations.get(run.configurationId);
     if (!configuration) {
       throw new SessionStoreInvariantError(
         `Runtime Run ${run.id} references missing configuration ${run.configurationId}`
       );
+    }
+    if (run.failure) {
+      if (configuration.limits?.maxModelCallsPerRun !== run.failure.limit) {
+        throw new SessionStoreInvariantError(
+          `Runtime Run ${run.id} limit failure does not match its configuration`
+        );
+      }
+      const consumed = (session.snapshot.operationLedger?.steps ?? [])
+        .filter(step => step.runId === run.id)
+        .flatMap(step => step.operations)
+        .filter(operation =>
+          operation.kind === "provider"
+          && operation.providerSlot === undefined
+          && operation.state !== "cancelled").length;
+      if (consumed !== run.failure.consumed) {
+        throw new SessionStoreInvariantError(
+          `Runtime Run ${run.id} limit failure does not match durable operations`
+        );
+      }
     }
     if (run.structuredOutput) {
       if (
@@ -3491,6 +3572,7 @@ function _assertJournalReconstructsSnapshot(
     branchId: string;
     checkpoint?: RuntimeRunSnapshot["checkpoint"];
     configurationId: string;
+    failure?: RuntimeRunSnapshot["failure"];
     inputHeadEntryId: string | null;
     state: RuntimeRunState;
   }>();
@@ -3565,6 +3647,7 @@ function _assertJournalReconstructsSnapshot(
         );
       }
       current.state = entry.to;
+      current.failure = entry.failure;
       continue;
     }
     if (entry.state !== current.state) {
@@ -3602,6 +3685,8 @@ function _assertJournalReconstructsSnapshot(
       || reconstructed.baseCheckpointId !== run.baseCheckpointId
       || reconstructed.inputHeadEntryId !== run.inputHeadEntryId
       || reconstructed.state !== run.state
+      || JSON.stringify(reconstructed.failure ?? null)
+      !== JSON.stringify(run.failure ?? null)
       || !_sameCheckpoint(reconstructed.checkpoint, run.checkpoint)
     ) {
       throw new SessionStoreInvariantError(

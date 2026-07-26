@@ -405,7 +405,7 @@ function _compactionBoundaryMessageIndex(input: {
     const session = input.runtimeSession as StoredRuntimeSession | undefined;
     const base = input.runtimeWorkingBase;
     if (
-      session?.snapshot.schemaVersion !== 5
+      session?.snapshot.schemaVersion !== 6
       || base?.sessionId !== session.snapshot.id
     ) {
       return null;

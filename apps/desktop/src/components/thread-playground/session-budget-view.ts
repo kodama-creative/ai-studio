@@ -27,7 +27,7 @@ export function sessionBudgetPresentation(
 ): SessionBudgetPresentation | null {
   try {
     const session = persisted as StoredRuntimeSession | undefined;
-    if (session?.snapshot.schemaVersion !== 5) {
+    if (session?.snapshot.schemaVersion !== 6) {
       return sourceLimits ? {
         inputBaseline: 0,
         inputTokens: 0,
@@ -81,7 +81,7 @@ export function pendingSessionBudgetWait(
 ): RuntimeSessionBudgetWaitSnapshot | null {
   try {
     const session = persisted as StoredRuntimeSession | undefined;
-    if (session?.snapshot.schemaVersion !== 5) { return null; }
+    if (session?.snapshot.schemaVersion !== 6) { return null; }
     const wait = session.snapshot.budget?.waits.at(-1);
     return wait?.status === "waiting" ? wait : null;
   } catch {
