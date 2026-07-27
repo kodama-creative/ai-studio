@@ -611,6 +611,22 @@ export class DurableOperationCoordinator {
     this._activeStepId = null;
   }
 
+  async checkpointDeferredToolStep(): Promise<void> {
+    if (!this._sessionStore) { return; }
+    const current = await this._sessionStore.load(this._sessionId);
+    if (current?.snapshot.activeRunId !== this._runId) {
+      return;
+    }
+    const step = _activeStep(current, this._runId);
+    if (!step) { return; }
+    await this._commit([{
+      type: "checkpointOperationStep",
+      runId: this._runId,
+      stepId: step.id
+    }]);
+    this._activeStepId = null;
+  }
+
   async commitProviderOnlyStepWith(
     mutations: readonly RuntimeSessionMutation[]
   ): Promise<StoredRuntimeSession> {

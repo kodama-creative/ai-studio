@@ -141,6 +141,17 @@ describe("createAgentProjectBundle", () => {
     expect(project.resources.skills?.map(skill => skill.name)).toEqual([
       "bundle-proof"
     ]);
+    expect(project.subagents?.map(subagent => ({
+      id: subagent.id,
+      description: subagent.description,
+      model: subagent.project.definition?.model,
+      tools: subagent.project.tools.map(tool => tool.name)
+    }))).toEqual([{
+      id: "researcher",
+      description: "Research one bundled question.",
+      model: { provider: "openai", id: "gpt-5.3-codex" },
+      tools: ["lookup"]
+    }]);
     expect((await _executeInScope(
       async () => project.tools[0]!.execute("call", { value: "hello" })
     )).details)
@@ -326,6 +337,31 @@ async function _fixture(): Promise<string> {
   await writeFile(
     join(root, "skills", "bundle-proof", "SKILL.md"),
     `---\nname: bundle-proof\ndescription: Proves skill bytes survive bundling.\n---\n\nProof.\n`
+  );
+  await mkdir(join(root, "subagents", "researcher", "tools"), {
+    recursive: true
+  });
+  await writeFile(
+    join(root, "subagents", "researcher", "agent.ts"),
+    `import { defineAgent } from "@llm-space/runtime";
+    export default defineAgent({
+      description: "Research one bundled question.",
+      model: "openai/gpt-5.3-codex"
+    });`
+  );
+  await writeFile(
+    join(root, "subagents", "researcher", "instructions.md"),
+    "Return evidence.\n"
+  );
+  await writeFile(
+    join(root, "subagents", "researcher", "tools", "lookup.ts"),
+    `import { defineTool } from "@llm-space/runtime/tools";
+    import { Type } from "typebox";
+    export default defineTool({
+      description: "Look up evidence.",
+      inputSchema: Type.Object({ query: Type.String() }),
+      execute({ query }) { return query; }
+    });`
   );
   return root;
 }

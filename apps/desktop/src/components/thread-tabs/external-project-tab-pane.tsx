@@ -1,6 +1,10 @@
 import { getThreadRuntimeProfile } from "@llm-space/core";
 import { agentModelMatchesDefinition } from "@llm-space/runtime";
 import {
+  runtimeToolApprovalViews,
+  type StoredRuntimeSession
+} from "@llm-space/runtime/harness";
+import {
   AlertTriangleIcon,
   BotIcon,
   CableIcon,
@@ -34,7 +38,6 @@ import type {
   ThreadRuntimeProfileType,
   ThreadServerRunLineage
 } from "@llm-space/core";
-import type { StoredRuntimeSession } from "@llm-space/runtime/harness";
 
 import {
   createRpcTransport,
@@ -75,6 +78,7 @@ import {
   type ExternalAgentProjectRunBlockReason,
   type ExternalAgentProjectRuntimeStatus,
   type ExternalAgentProjectStatus,
+  type ExternalAgentProjectSubagentRun,
   type ExternalAgentProjectThreadRecord,
   type ExternalAgentProjectView,
   getExternalAgentProjectRunBlockReason,
@@ -750,10 +754,23 @@ const _ProjectThreadPane = function ProjectThreadPane({
   const awaitingToolResult = record
     ? hasPendingExternalAgentProjectToolResult(record)
     : false;
-  const runBlockReason: ExternalAgentProjectRunBlockReason | null =
+  const baseRunBlockReason: ExternalAgentProjectRunBlockReason | null =
     project && record
       ? (localServer ? null : getExternalAgentProjectRunBlockReason(project, record))
       : "sourceUnavailable";
+  const parentRuntimeSession = record?.thread.runtimeSession as
+    | StoredRuntimeSession
+    | undefined;
+  const resumableSubagent = parentRuntimeSession?.snapshot.activeRunId
+    ? [...(record?.subagentRuns ?? [])].findLast(run =>
+      run.parent.sessionId === parentRuntimeSession.snapshot.id
+      && run.parent.runId === parentRuntimeSession.snapshot.activeRunId)
+    : undefined;
+  const runBlockReason = baseRunBlockReason === "pendingToolResult"
+    && resumableSubagent
+    && _subagentReadyToResume(resumableSubagent)
+    ? null
+    : baseRunBlockReason;
   const savedModelAvailable = useMemo(() => {
     if (localServer) { return true; }
     const model = record?.thread.model;
@@ -1021,6 +1038,7 @@ const _ProjectThreadPane = function ProjectThreadPane({
         runtimeOwnsToolLoop
         sessionLimits={record.syncedDefinition.limits}
         stageSandboxFiles={desktopSandbox ? stageSandboxFiles : undefined}
+        subagentRuns={record.subagentRuns}
         subscribeCommittedRuntimeSession={subscribeCommittedRuntimeSession}
         subscribeRuntimePhase={subscribeRuntimePhase}
         title={record.thread.title ?? "untitled"}
@@ -1684,6 +1702,21 @@ function _isLocalServerDraftReady(thread: Thread): boolean {
     && message.content[0]?.type === "text"
     && message.content[0].text.trim()
   );
+}
+
+function _subagentReadyToResume(
+  run: ExternalAgentProjectSubagentRun
+): boolean {
+  if (run.terminal) { return true; }
+  if (run.status === "waitingForApproval") {
+    return !runtimeToolApprovalViews(run.runtimeSession)
+      .some(approval => approval.state === "pending");
+  }
+  if (run.status === "waitingForBudget") {
+    return !run.runtimeSession.snapshot.budget?.waits
+      .some(wait => wait.status === "waiting");
+  }
+  return run.status === "waitingForContinue";
 }
 
 export const ExternalProjectTabPane = memo(_ExternalProjectTabPane);

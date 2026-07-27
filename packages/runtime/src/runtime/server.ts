@@ -7,6 +7,7 @@ export type {
   CompiledAgentOutputDefinition,
   CompiledAgentProjectSnapshot,
   CompiledAgentStateDefinition,
+  CompiledAgentSubagent,
   CompiledMcpConnection,
   CompiledProjectTool,
   CompiledSandboxRequirement,
@@ -17,6 +18,17 @@ export {
   type AgentRuntimeOptions,
   type CreateAgentSessionOptions
 } from "./agent/agent-runtime";
+export type {
+  AgentSubagentHost,
+  AgentSubagentRunIdentity,
+  AgentSubagentRunStart,
+  AgentSubagentRunTerminal,
+  AgentSubagentRunWait,
+  AgentSubagentSandboxMode,
+  AgentSubagentSessionResources
+} from "./agent/agent-subagent-host";
+export { createAgentSubagentTool } from "./agent/create-agent-subagent-tool";
+export type { PreparedAgentTool } from "./agent/prepared-agent-tool";
 export { AgentHostPolicyChangedError } from "./capabilities/agent-session-capabilities";
 export { createHostCapabilityPolicy } from "./capabilities/create-host-capability-policy";
 export { ExecutionEnvUnavailableError } from "./execution-env/execution-env-unavailable-error";

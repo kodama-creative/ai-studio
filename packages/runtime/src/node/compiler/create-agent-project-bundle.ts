@@ -88,10 +88,19 @@ export async function createAgentProjectBundle(
       authoredRoot: bundleRoot,
       bundlePath,
       entryPath,
-      instructionEntryPaths: dynamicInstructionSources.map(
-        source => source.absolutePath
-      ),
-      toolEntryPaths: discovered.tools.map(source => source.absolutePath)
+      instructionEntryPaths: [
+        ...dynamicInstructionSources,
+        ...discovered.subagents.flatMap(candidate =>
+          _dynamicInstructionSources(
+            candidate.project,
+            project.subagents?.find(subagent => subagent.id === candidate.id)
+              ?.project
+          ))
+      ].map(source => source.absolutePath),
+      toolEntryPaths: [
+        ...discovered.tools,
+        ...discovered.subagents.flatMap(candidate => candidate.project.tools)
+      ].map(source => source.absolutePath)
     });
     const bundle = await readFile(bundlePath, "utf8");
     _assertClosedBundle(bundle);
@@ -114,6 +123,7 @@ export async function createAgentProjectBundle(
           schemaFingerprint: string;
         }>;
         sandbox?: {
+          revalidationFingerprint: string;
           sourcePath: string;
           workspace: ReadonlyArray<{
             contentBase64: string;
@@ -126,6 +136,10 @@ export async function createAgentProjectBundle(
           name: string;
           schemaFingerprint: string;
           version: number;
+        }>;
+        subagents?: ReadonlyArray<{
+          id: string;
+          project: { artifact: AgentProjectArtifact; };
         }>;
         tools: ReadonlyArray<{ name: string; }>;
       };
@@ -151,6 +165,13 @@ export async function createAgentProjectBundle(
       !== JSON.stringify(project.sandbox)
       || JSON.stringify(bundledProject.tools.map(tool => tool.name))
       !== JSON.stringify(project.tools.map(tool => tool.name))
+      || JSON.stringify(bundledProject.subagents?.map(subagent => ({
+        id: subagent.id,
+        artifact: subagent.project.artifact
+      }))) !== JSON.stringify(project.subagents?.map(subagent => ({
+        id: subagent.id,
+        artifact: subagent.project.artifact
+      })))
       || JSON.stringify(bundledProject.dynamicToolResolvers?.map(
         resolver => resolver.sourcePath
       )) !== JSON.stringify(project.dynamicToolResolvers?.map(
@@ -232,6 +253,7 @@ function _entrySource(
 ): string {
   const definitionPath = discovered.definition?.absolutePath;
   if (!definitionPath) { throw new Error("Agent definition is unavailable"); }
+  const subagentParts = _subagentEntryParts(discovered, project);
   const imports = [
     `import { createBundledAgentProject } from ${JSON.stringify(helperPath)};`,
     `import definition from ${JSON.stringify(definitionPath)};`,
@@ -255,7 +277,8 @@ function _entrySource(
     ...discovered.outputs.map((source, index) =>
       `import output${index} from ${JSON.stringify(source.absolutePath)};`),
     ...dynamicInstructionSources.map((source, index) =>
-      `import dynamicInstruction${index} from ${JSON.stringify(source.absolutePath)};`)
+      `import dynamicInstruction${index} from ${JSON.stringify(source.absolutePath)};`),
+    ...subagentParts.imports
   ];
   const tools = discovered.tools.map((source, index) => ({
     kind: project.dynamicToolResolvers?.some(
@@ -285,7 +308,7 @@ function _entrySource(
     filePath: path.posix.join("skills", skill.name, "SKILL.md")
   }));
   const sandbox = project.sandbox
-    ? `{ definition: sandboxDefinition, sourcePath: ${JSON.stringify(project.sandbox.sourcePath)}, workspace: ${JSON.stringify(project.sandbox.workspace)} }`
+    ? `{ definition: sandboxDefinition, revalidationFingerprint: ${JSON.stringify(project.sandbox.revalidationFingerprint)}, sourcePath: ${JSON.stringify(project.sandbox.sourcePath)}, workspace: ${JSON.stringify(project.sandbox.workspace)} }`
     : "undefined";
   let dynamicIndex = 0;
   const instructionEntries = (project.instructionEntries ?? []).map(entry =>
@@ -293,6 +316,7 @@ function _entrySource(
       ? `{ kind: "static", sourcePath: ${JSON.stringify(entry.sourcePath)}, markdown: ${JSON.stringify(entry.markdown)} }`
       : `{ kind: "dynamic", sourcePath: ${JSON.stringify(entry.sourcePath)}, definition: dynamicInstruction${dynamicIndex++} }`));
   return `${imports.join("\n")}
+${subagentParts.declarations.join("\n")}
 const INPUT = {
   definition,
   instructions: ${JSON.stringify(project.instructions)},
@@ -302,7 +326,8 @@ const INPUT = {
   states: [${states.map(state => `{ sourcePath: ${JSON.stringify(state.sourcePath)}, definition: ${state.definition} }`).join(",")}],
   outputs: [${outputs.map(output => `{ name: ${JSON.stringify(output.name)}, sourcePath: ${JSON.stringify(output.sourcePath)}, definition: ${output.definition} }`).join(",")}],
   sandbox: ${sandbox},
-  skills: ${JSON.stringify(skills)}
+  skills: ${JSON.stringify(skills)},
+  subagents: [${subagentParts.entries.join(",")}]
 };
 const EXPECTED_ARTIFACT = Object.freeze(${JSON.stringify(project.artifact)});
 export const createAgentProject = artifact => {
@@ -314,10 +339,113 @@ export const createAgentProject = artifact => {
 `;
 }
 
-function _dynamicInstructionSources(
+function _subagentEntryParts(
   discovered: Awaited<ReturnType<typeof discoverAgentProject>>,
   project: Awaited<ReturnType<typeof loadAgentProject>>
+): {
+  readonly declarations: string[];
+  readonly entries: string[];
+  readonly imports: string[];
+} {
+  const imports: string[] = [];
+  const declarations: string[] = [];
+  const entries: string[] = [];
+  for (const [index, candidate] of discovered.subagents.entries()) {
+    const subagent = project.subagents?.find(item => item.id === candidate.id);
+    if (!subagent) {
+      throw new Error(`Compiled Subagent is unavailable: ${candidate.id}`);
+    }
+    const prefix = `subagent${index}`;
+    const child = candidate.project;
+    const childProject = subagent.project;
+    if (!child.definition) {
+      throw new Error(`Subagent definition is unavailable: ${candidate.id}`);
+    }
+    imports.push(
+      `import ${prefix}Definition from ${JSON.stringify(child.definition.absolutePath)};`
+    );
+    if (child.sandbox?.definition) {
+      imports.push(
+        `import ${prefix}SandboxDefinition from ${JSON.stringify(child.sandbox.definition.absolutePath)};`
+      );
+    }
+    for (const [toolIndex, source] of child.tools.entries()) {
+      const dynamic = childProject.dynamicToolResolvers?.some(
+        resolver => resolver.sourcePath === source.logicalPath
+      );
+      imports.push(dynamic
+        ? `import ${prefix}Tool${toolIndex}, { __llmSpaceDynamicToolSteps as ${prefix}Tool${toolIndex}Steps } from ${JSON.stringify(source.absolutePath)};`
+        : `import ${prefix}Tool${toolIndex} from ${JSON.stringify(source.absolutePath)};`);
+    }
+    for (const [connectionIndex, source] of child.connections.entries()) {
+      imports.push(
+        `import ${prefix}Connection${connectionIndex} from ${JSON.stringify(source.absolutePath)};`
+      );
+    }
+    for (const [stateIndex, source] of child.states.entries()) {
+      imports.push(
+        `import ${prefix}State${stateIndex} from ${JSON.stringify(source.absolutePath)};`
+      );
+    }
+    const dynamicInstructions = _dynamicInstructionSources(child, childProject);
+    for (const [instructionIndex, source] of dynamicInstructions.entries()) {
+      imports.push(
+        `import ${prefix}DynamicInstruction${instructionIndex} from ${JSON.stringify(source.absolutePath)};`
+      );
+    }
+    let dynamicInstructionIndex = 0;
+    const instructionEntries = (childProject.instructionEntries ?? []).map(entry =>
+      (entry.kind === "static"
+        ? `{ kind: "static", sourcePath: ${JSON.stringify(entry.sourcePath)}, markdown: ${JSON.stringify(entry.markdown)} }`
+        : `{ kind: "dynamic", sourcePath: ${JSON.stringify(entry.sourcePath)}, definition: ${prefix}DynamicInstruction${dynamicInstructionIndex++} }`));
+    const tools = child.tools.map((source, toolIndex) => {
+      const dynamic = childProject.dynamicToolResolvers?.some(
+        resolver => resolver.sourcePath === source.logicalPath
+      );
+      const name = path.basename(source.absolutePath, path.extname(source.absolutePath));
+      return `{ kind: ${JSON.stringify(dynamic ? "dynamic" : "static")}, name: ${JSON.stringify(name)}, sourcePath: ${JSON.stringify(source.logicalPath)}, definition: ${prefix}Tool${toolIndex}${dynamic ? `, steps: ${prefix}Tool${toolIndex}Steps` : ""} }`;
+    });
+    const connections = child.connections.map((source, connectionIndex) =>
+      `{ name: ${JSON.stringify(path.basename(source.absolutePath, path.extname(source.absolutePath)))}, logicalPath: ${JSON.stringify(source.logicalPath)}, definition: ${prefix}Connection${connectionIndex} }`);
+    const states = child.states.map((source, stateIndex) =>
+      `{ sourcePath: ${JSON.stringify(source.logicalPath)}, definition: ${prefix}State${stateIndex} }`);
+    const skills = (childProject.resources.skills ?? []).map(skill => ({
+      ...skill,
+      filePath: path.posix.join("skills", skill.name, "SKILL.md")
+    }));
+    const sandbox = childProject.sandbox
+      ? `{ definition: ${prefix}SandboxDefinition, revalidationFingerprint: ${JSON.stringify(childProject.sandbox.revalidationFingerprint)}, sourcePath: ${JSON.stringify(childProject.sandbox.sourcePath)}, workspace: ${JSON.stringify(childProject.sandbox.workspace)} }`
+      : "undefined";
+    declarations.push(`const ${prefix}Input = {
+  definition: ${prefix}Definition,
+  instructions: ${JSON.stringify(childProject.instructions)},
+  instructionEntries: [${instructionEntries.join(",")}],
+  tools: [${tools.join(",")}],
+  connections: [${connections.join(",")}],
+  states: [${states.join(",")}],
+  outputs: [],
+  sandbox: ${sandbox},
+  skills: ${JSON.stringify(skills)},
+  subagents: []
+};
+const ${prefix}Project = createBundledAgentProject(
+  ${prefix}Input,
+  Object.freeze(${JSON.stringify(childProject.artifact)})
+);`);
+    entries.push(`{
+      id: ${JSON.stringify(subagent.id)},
+      description: ${JSON.stringify(subagent.description)},
+      project: ${prefix}Project
+    }`);
+  }
+  return { declarations, entries, imports };
+}
+
+function _dynamicInstructionSources(
+  discovered: Awaited<ReturnType<typeof discoverAgentProject>>,
+  project: Awaited<ReturnType<typeof loadAgentProject>> | undefined
 ): readonly AgentProjectSourceRef[] {
+  if (!project) { return []; }
   return (project.instructionEntries ?? [])
     .filter(entry => entry.kind === "dynamic")
     .map(entry => {

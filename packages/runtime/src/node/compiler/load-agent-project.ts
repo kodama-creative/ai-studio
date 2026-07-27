@@ -51,6 +51,7 @@ import type {
   CompiledAgentOutputDefinition,
   CompiledAgentProjectSnapshot,
   CompiledAgentStateDefinition,
+  CompiledAgentSubagent,
   CompiledDynamicToolResolver,
   CompiledMcpConnection,
   CompiledProjectTool,
@@ -67,7 +68,8 @@ export async function loadAgentProject(
 }
 
 async function _compileAgentProject(
-  discovered: DiscoveredAgentProject
+  discovered: DiscoveredAgentProject,
+  options: { readonly subagent?: boolean; } = {}
 ): Promise<CompiledAgentProjectSnapshot> {
   const diagnostics = [...discovered.diagnostics];
   const dependencies: AgentProjectArtifactDependencyInput[] = [];
@@ -79,6 +81,14 @@ async function _compileAgentProject(
     discovered.root,
     sources
   );
+  if (options.subagent && !definition?.description) {
+    diagnostics.push({
+      severity: "error",
+      code: "subagent_description_missing",
+      message: "A Subagent agent.ts must define a non-empty description",
+      path: discovered.definition?.absolutePath ?? discovered.root
+    });
+  }
   const instructionEntries = await _compileInstructions(
     discovered.instructions,
     discovered.instructionEntries,
@@ -106,13 +116,23 @@ async function _compileAgentProject(
     discovered.root,
     sources
   );
-  const outputDefinitions = await _compileOutputDefinitions(
-    discovered.outputs,
-    diagnostics,
-    dependencies,
-    discovered.root,
-    sources
-  );
+  if (options.subagent && discovered.outputs.length > 0) {
+    diagnostics.push(...discovered.outputs.map(output => ({
+      severity: "error" as const,
+      code: "subagent_output_unsupported" as const,
+      message: "Subagent outputs are not supported in V1",
+      path: output.absolutePath
+    })));
+  }
+  const outputDefinitions = options.subagent
+    ? []
+    : await _compileOutputDefinitions(
+      discovered.outputs,
+      diagnostics,
+      dependencies,
+      discovered.root,
+      sources
+    );
   const sandbox = await _compileSandbox(
     discovered.sandbox,
     diagnostics,
@@ -128,20 +148,38 @@ async function _compileAgentProject(
     sources
   );
   const { dynamicToolResolvers, tools } = compiledTools;
-  const connections = await _compileConnections(
-    discovered.connections,
-    diagnostics,
-    dependencies,
-    discovered.root,
-    sources,
-    new Map(
-      tools.map(tool => [
-        tool.name,
-        tool.sourcePath ?? `tools/${tool.name}.ts`
-      ])
-    )
+  const occupiedToolNames = new Map(
+    tools.map(tool => [
+      tool.name,
+      tool.sourcePath ?? `tools/${tool.name}.ts`
+    ])
   );
+  if (options.subagent && discovered.connections.length > 0) {
+    diagnostics.push(...discovered.connections.map(connection => ({
+      severity: "error" as const,
+      code: "subagent_connection_unsupported" as const,
+      message: "Subagent connections are not supported in V1",
+      path: connection.absolutePath
+    })));
+  }
+  const connections = options.subagent
+    ? []
+    : await _compileConnections(
+      discovered.connections,
+      diagnostics,
+      dependencies,
+      discovered.root,
+      sources,
+      occupiedToolNames
+    );
   const skills = await _compileSkills(discovered, diagnostics, sources);
+  const subagents = options.subagent
+    ? []
+    : await _compileSubagents(
+      discovered,
+      diagnostics,
+      occupiedToolNames
+    );
   const artifact = createAgentProjectArtifact({
     connections,
     definition,
@@ -154,6 +192,7 @@ async function _compileAgentProject(
     outputDefinitions,
     sandbox,
     sources,
+    subagents,
     tools
   });
   return createImmutableAgentProjectSnapshot({
@@ -169,9 +208,52 @@ async function _compileAgentProject(
     stateDefinitions,
     outputDefinitions,
     sandbox,
+    subagents,
     diagnostics,
     fingerprint: artifact.fingerprint
   });
+}
+
+async function _compileSubagents(
+  discovered: DiscoveredAgentProject,
+  diagnostics: AgentProjectDiagnostic[],
+  occupiedToolNames: Map<string, string>
+): Promise<CompiledAgentSubagent[]> {
+  const compiled: CompiledAgentSubagent[] = [];
+  for (const candidate of discovered.subagents) {
+    const sourcePath = path.posix.join(
+      "subagents",
+      candidate.id,
+      "agent.ts"
+    );
+    const project = await _compileAgentProject(candidate.project, {
+      subagent: true
+    });
+    diagnostics.push(...project.diagnostics);
+    const previous = occupiedToolNames.get(candidate.id);
+    if (previous) {
+      diagnostics.push({
+        severity: "error",
+        code: "tool_name_duplicate",
+        message: `Subagent name "${candidate.id}" collides with the model-visible tool exported by ${path.basename(previous)}`,
+        path: candidate.project.definition?.absolutePath ?? candidate.project.root
+      });
+      continue;
+    }
+    if (
+      !project.definition?.description
+      || project.diagnostics.some(diagnostic => diagnostic.severity === "error")
+    ) {
+      continue;
+    }
+    occupiedToolNames.set(candidate.id, sourcePath);
+    compiled.push({
+      id: candidate.id,
+      description: project.definition.description,
+      project
+    });
+  }
+  return compiled;
 }
 
 async function _compileSandbox(
@@ -232,6 +314,14 @@ async function _compileSandbox(
       });
     }
     return {
+      revalidationFingerprint: createHash("sha256").update(JSON.stringify({
+        schemaVersion: 1,
+        workspace: workspace.map(file => ({
+          fingerprint: file.fingerprint,
+          path: file.path,
+          size: file.size
+        }))
+      })).digest("hex"),
       sourcePath: sourceRef.logicalPath,
       workspace
     };

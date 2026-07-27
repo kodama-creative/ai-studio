@@ -4,6 +4,8 @@ import { memo } from "react";
 import { format } from "timeago.js";
 
 import { cn } from "@/lib/utils";
+import { useAgentSubagentRunsForParentRun } from "./agent-subagent-runs-context";
+import { AgentSubagentRunCard } from "./message/agent-subagent-run-card";
 import { SnapshotMessageListView } from "./message/message-list-view";
 import { TokenUsageSummary } from "./message/token-usage-summary";
 import { StructuredOutputCard } from "./output/structured-output-card";
@@ -13,6 +15,7 @@ import {
   runRuntimeProfileLabel,
   summarizeRun
 } from "./run-history-utils";
+import { formatCost } from "./token-usage";
 
 const _RunTraceView = function RunTraceView({
   className,
@@ -21,6 +24,7 @@ const _RunTraceView = function RunTraceView({
   readonly className?: string;
   readonly run: RunSnapshot | null;
 }) {
+  const subagentRuns = useAgentSubagentRunsForParentRun(run?.runtime?.runId);
   if (!run) {
     return (
       <div className="text-muted-foreground px-4 py-8 text-center text-xs">
@@ -36,6 +40,22 @@ const _RunTraceView = function RunTraceView({
   const server = run.runtime?.server;
   const runtimeProfileLabel = runRuntimeProfileLabel(run.runtime);
   const modelCallLimit = run.runLimitFailure;
+  const childUsage = subagentRuns.reduce((total, child) => {
+    total.modelCalls += child.runtimeSession.snapshot.operationLedger?.steps
+      .flatMap(step => step.operations)
+      .filter(operation =>
+        operation.kind === "provider"
+        && operation.providerSlot === undefined
+        && operation.state !== "cancelled").length ?? 0;
+    for (const message of child.messages) {
+      if (message.role !== "assistant") { continue; }
+      total.cost += message.usage?.cost.total ?? 0;
+      total.input += message.usage?.input ?? 0;
+      total.output += message.usage?.output ?? 0;
+    }
+    return total;
+  }, { cost: 0, input: 0, modelCalls: 0, output: 0 });
+  const childCost = formatCost(childUsage.cost);
 
   return (
     <div className={cn("flex min-h-0 flex-col", className)}>
@@ -83,6 +103,18 @@ const _RunTraceView = function RunTraceView({
           )
           : null}
         {usage ? <TokenUsageSummary className="mt-2" usage={usage} /> : null}
+        {subagentRuns.length > 0
+          ? (
+            <div className="text-muted-foreground mt-2 text-[0.625rem]">
+              Delegation · {subagentRuns.length} child{subagentRuns.length === 1
+                ? ""
+                : "ren"} · {childUsage.modelCalls.toLocaleString()} model calls ·{" "}
+              {childUsage.input.toLocaleString()} in ·{" "}
+              {childUsage.output.toLocaleString()} out
+              {childCost ? ` · ${childCost}` : null}
+            </div>
+          )
+          : null}
         {modelCallLimit
           ? (
             <div className="border-destructive/30 bg-destructive/8 text-destructive mt-2 rounded-md border px-2 py-1.5 text-[0.625rem]">
@@ -113,6 +145,18 @@ const _RunTraceView = function RunTraceView({
           {systemPrompt}
         </pre>
       </details>
+      {subagentRuns.length > 0
+        ? (
+          <section className="flex shrink-0 flex-col gap-2 border-b px-3 py-2">
+            <div className="text-muted-foreground text-[0.625rem] font-medium">
+              Child runs
+            </div>
+            {subagentRuns.map(child => (
+              <AgentSubagentRunCard key={child.child.runId} run={child} />
+            ))}
+          </section>
+        )
+        : null}
       <SnapshotMessageListView
         className="min-h-0 flex-1"
         context={run.thread.context}

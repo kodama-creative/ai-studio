@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+  claimRuntimeRunResume,
   runtimeRunHasParkedToolApprovals,
   runtimeSessionBudgetView,
   type RuntimeStructuredOutputResult
@@ -10,12 +11,14 @@ import {
   AgentRuntime,
   AgentStateCommitUnknownError,
   type CompiledAgentProjectSnapshot,
+  createAgentSubagentTool,
   createHostCapabilityPolicy,
   DurableOperationOutcomeUnknownError,
   ExecutionEnvUnavailableError,
   RuntimeRunLimitExceededError,
   RuntimeToolApprovalStaleError,
   type SandboxProvider,
+  type SandboxTurnEnvironment,
   SandboxUnavailableError,
   SandboxWorkspaceLostError,
   StructuredOutputError
@@ -26,6 +29,7 @@ import type { Models, UserMessage } from "@earendil-works/pi-ai";
 import type { AgentCapabilityPolicy } from "@llm-space/runtime";
 import type { RuntimeWorkingBase } from "@llm-space/runtime/harness";
 
+import { createServerAgentSubagentHost } from "./server-agent-subagent-host";
 import { ServerCapacityError } from "./server-capacity-error";
 import { serializePiAgentEvent } from "../protocol/pi-event-serializer";
 import { ServerEventTooLargeError } from "../repository/server-event-too-large-error";
@@ -34,7 +38,8 @@ import type { ServerPrincipal } from "../auth/server-authenticator";
 import type {
   CreatedServerRun,
   ServerRunTerminalOutcome,
-  ServerSessionRepository
+  ServerSessionRepository,
+  ServerSubagentRunRecord
 } from "../repository/server-session-repository";
 
 export interface ServerRunControllerOptions {
@@ -53,6 +58,7 @@ export class ServerRunController {
   private readonly _approvalPolicy?: AgentHostApprovalPolicy;
   private readonly _repository: ServerSessionRepository;
   private readonly _sandboxProvider?: SandboxProvider;
+  private readonly _subagentHost: ReturnType<typeof createServerAgentSubagentHost>;
   private readonly _active = new Map<string, { abort(): void; }>();
   private readonly _abortedRuns = new Set<string>();
   private readonly _pendingRuns = new Set<string>();
@@ -93,6 +99,15 @@ export class ServerRunController {
       throw new Error("Compiled Agent default model is unavailable");
     }
     this._repository = options.repository;
+    this._subagentHost = createServerAgentSubagentHost({
+      ...(options.approvalPolicy
+        ? { approvalPolicy: options.approvalPolicy }
+        : {}),
+      models: options.models,
+      project: options.project,
+      repository: options.repository,
+      sandboxProvider: options.sandboxProvider
+    });
     this._maxActiveRuns = options.maxActiveRuns ?? 4;
     if (
       !Number.isInteger(this._maxActiveRuns)
@@ -256,8 +271,9 @@ export class ServerRunController {
     let structuredOutput: RuntimeStructuredOutputResult | undefined;
     let parkedForApproval = false;
     let parkedForBudget = false;
+    let parkedForSubagent = false;
     try {
-      const persistedRuntime = await this._repository.load(run.sessionId);
+      let persistedRuntime = await this._repository.load(run.sessionId);
       const sandboxSession = this._runtime.project.sandbox
         && this._sandboxProvider
         ? await this._sandboxProvider.acquire({
@@ -271,9 +287,36 @@ export class ServerRunController {
       const sandbox = sandboxSession
         ? {
           executionEnv: sandboxSession.executionEnv,
+          revalidationFingerprint:
+            this._runtime.project.sandbox?.revalidationFingerprint,
           workspaceManifest: await sandboxSession.workspaceManifest()
         }
         : undefined;
+      const child = this._repository.subagentRunForParent(
+        run.sessionId,
+        run.runId
+      );
+      const childOutcome = child
+        ? await this._resumeSubagent(run, child, sandbox)
+        : null;
+      if (childOutcome?.type === "deferred") {
+        parkedForSubagent = true;
+        return;
+      }
+      const parentRun = persistedRuntime?.snapshot.runs.find(
+        candidate => candidate.id === run.runId
+      );
+      if (
+        childOutcome
+        && persistedRuntime
+        && parentRun?.state === "waitingForToolResults"
+      ) {
+        persistedRuntime = await claimRuntimeRunResume(this._repository, {
+          expectedVersion: persistedRuntime.version,
+          runId: run.runId,
+          sessionId: run.sessionId
+        });
+      }
       const session = await this._runtime.createSession({
         ...(this._approvalPolicy
           ? { approvalPolicy: this._approvalPolicy }
@@ -301,7 +344,8 @@ export class ServerRunController {
               await this._repository.replaceTranscript(run.sessionId, messages);
             }
           }
-        }
+        },
+        subagentHost: this._subagentHost
       });
       this._active.set(run.runId, session);
       if (this._abortedRuns.has(run.runId)) {
@@ -320,7 +364,19 @@ export class ServerRunController {
                 && request.state === "pending"
             ) ?? false;
             if (!pending) {
-              throw new Error("Server ReAct mode cannot defer tool calls");
+              const child = this._repository.subagentRunForParent(
+                run.sessionId,
+                run.runId
+              );
+              const childPending = child?.runtime.snapshot.approvalLedger
+                ?.requests.some(request =>
+                  request.runId === child.child.runId
+                  && request.state === "pending") ?? false;
+              if (!childPending) {
+                throw new Error("Server ReAct mode cannot defer tool calls");
+              }
+              parkedForSubagent = true;
+              return;
             }
             parkedForApproval = true;
             return;
@@ -343,7 +399,21 @@ export class ServerRunController {
         const resumesApproval = persistedRuntime
           ? runtimeRunHasParkedToolApprovals(persistedRuntime, run.runId)
           : false;
-        if (resumesApproval) {
+        if (childOutcome?.type === "completed") {
+          if (!child) {
+            throw new Error("Completed Subagent outcome has no parent record");
+          }
+          await session.resolveToolResults([{
+            role: "toolResult",
+            toolCallId: child.parent.toolCallId,
+            toolName: child.subagentId,
+            content: childOutcome.result.content,
+            details: childOutcome.result.details,
+            isError: childOutcome.result.isError ?? false,
+            timestamp: Date.now()
+          }]);
+          await session.continue();
+        } else if (resumesApproval) {
           await session.resumeApprovedTools();
         } else {
           await session.continue();
@@ -407,7 +477,9 @@ export class ServerRunController {
       }
     } finally {
       try {
-        if (!this._detached && parkedForApproval) {
+        if (!this._detached && parkedForSubagent) {
+          await this._publishSubagentWait(run);
+        } else if (!this._detached && parkedForApproval) {
           await this._parkRunForApproval(run);
         } else if (!this._detached && parkedForBudget) {
           await this._publishBudgetWait(run);
@@ -428,6 +500,95 @@ export class ServerRunController {
         this._drainRecoveryQueue();
       }
     }
+  }
+
+  private async _resumeSubagent(
+    run: CreatedServerRun,
+    child: ServerSubagentRunRecord,
+    parentSandbox?: SandboxTurnEnvironment
+  ) {
+    const subagent = this._runtime.project.subagents?.find(candidate =>
+      candidate.id === child.subagentId
+      && candidate.project.artifact.fingerprint === child.artifactFingerprint);
+    if (!subagent) {
+      throw new Error("The frozen Server Subagent artifact is unavailable");
+    }
+    const tool = createAgentSubagentTool({
+      context: {
+        id: run.sessionId,
+        auth: { initiator: run.initiator, current: run.owner },
+        ...(run.owner.tenant ? { tenant: run.owner.tenant } : {}),
+        channel: { kind: "http" },
+        turn: { id: run.runId, sequence: run.turnSequence }
+      },
+      host: this._subagentHost,
+      models: this._runtime.models,
+      parentSandbox,
+      subagent
+    });
+    if (tool.kind !== "executable") {
+      throw new Error("Server Subagent tool is not executable");
+    }
+    return tool.execute(
+      child.parent.toolCallId,
+      { message: child.message }
+    );
+  }
+
+  private async _publishSubagentWait(run: CreatedServerRun): Promise<void> {
+    const child = this._repository.subagentRunForParent(
+      run.sessionId,
+      run.runId
+    );
+    const approvals = child?.runtime.snapshot.approvalLedger?.requests
+      .filter(request =>
+        request.runId === child.child.runId && request.state === "pending")
+      .map(request => ({
+        id: request.id,
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        scope: request.scope,
+        ...(request.reason ? { reason: request.reason } : {})
+      })) ?? [];
+    if (!child || approvals.length === 0) {
+      throw new Error("Server Subagent wait has no pending approval");
+    }
+    const current = await this._repository.load(run.sessionId);
+    const runtimeRun = current?.snapshot.runs.find(item => item.id === run.runId);
+    if (!current || !runtimeRun) {
+      throw new Error("Parent Runtime Run disappeared while parking Subagent");
+    }
+    const mutations = runtimeRun.state === "runningModel"
+      ? [
+        {
+          type: "transitionRun" as const,
+          runId: run.runId,
+          to: "runningTools" as const
+        },
+        {
+          type: "transitionRun" as const,
+          runId: run.runId,
+          to: "waitingForToolResults" as const
+        }
+      ]
+      : runtimeRun.state === "runningTools"
+        ? [{
+          type: "transitionRun" as const,
+          runId: run.runId,
+          to: "waitingForToolResults" as const
+        }]
+        : [];
+    if (mutations.length > 0) {
+      await this._repository.commit({
+        sessionId: run.sessionId,
+        expectedVersion: current.version,
+        mutations
+      });
+    }
+    await this._repository.appendEvent(run.sessionId, run.runId, {
+      event: "control",
+      data: { type: "toolApprovalRequired", approvals }
+    });
   }
 
   private async _parkRunForApproval(run: CreatedServerRun): Promise<void> {

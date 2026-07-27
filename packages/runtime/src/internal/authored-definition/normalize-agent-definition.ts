@@ -9,6 +9,7 @@ import type {
 } from "../../public/definitions/agent";
 
 const AGENT_DEFINITION_KEYS = new Set([
+  "description",
   "environment",
   "limits",
   "model",
@@ -73,8 +74,17 @@ export function normalizeAgentDefinition(
     throw new TypeError(errorMessage);
   }
   if (
-    candidate.reasoning !== undefined
-    && !AGENT_REASONING_VALUES.has(candidate.reasoning)
+    (
+      candidate.description !== undefined
+      && (
+        typeof candidate.description !== "string"
+        || candidate.description.trim().length === 0
+      )
+    )
+    || (
+      candidate.reasoning !== undefined
+      && !AGENT_REASONING_VALUES.has(candidate.reasoning)
+    )
   ) {
     throw new TypeError(errorMessage);
   }
@@ -86,6 +96,9 @@ export function normalizeAgentDefinition(
   );
   return {
     model: candidate.model,
+    ...(typeof candidate.description === "string"
+      ? { description: candidate.description.trim() }
+      : {}),
     ...(limits ? { limits } : {}),
     ...(modelOptions ? { modelOptions } : {}),
     ...(candidate.reasoning ? { reasoning: candidate.reasoning } : {}),

@@ -425,10 +425,16 @@ export class AgentSession {
         "Cannot resolve tool results while the session is running"
       );
     }
-    this._agent.state.messages = this._toolPolicy.replaceDeferredResults(
+    const messages = this._toolPolicy.restoreDeferredPlaceholders(
       this._agent.state.messages,
+      this._executionMode,
+      true
+    );
+    this._agent.state.messages = this._toolPolicy.replaceDeferredResults(
+      messages,
       results
     );
+    await this._durableOperations.checkpointDeferredToolStep();
     await this._eventProjector.handleToolResultsResolved();
   }
 

@@ -428,11 +428,36 @@
 - Explicit non-goals: in-app source authoring, capability Add/Create/Rename/Delete, source templates after initial scaffolding, visual graph builder, AI-generated source, dependency/package manager, Git client, arbitrary terminal, runtime plugin install, hosted control plane, or claiming unsupported Eve ecosystem slots through UI templates.
 - Visible gaps: independent core source gaps remain local Subagents and portable Eval suites; most remaining Eve differences are integration/ecosystem layers rather than prerequisites for an Agent Studio author-debug-evaluate loop. The large combined Project Thread/inspector module is a future extraction candidate, not a V1 behavior gap.
 
+## Static Local Subagents
+
+- Status: shipped V1 on `develop`
+- Freshness: confirmed
+- Last checked: 2026-07-27
+- Evidence:
+  - Pre-implementation discovery found `CompiledAgentProjectSnapshot` limited to root definition, instructions, outputs, Sandbox, tools, connections, skills, state, and dynamic tool resolvers, with no child artifact or parent/child lineage.
+  - Pre-implementation discovery/compiler paths recognized only root Agent source slots; `agent/subagents/<id>/` was absent from capability/schema fingerprints and Desktop's artifact summary.
+  - Pre-implementation `AgentSession` owned one Pi `Agent`, one Runtime Session context, one capability/instruction snapshot stream, one ExecutionEnv, and one Runtime budget coordinator, with no nested Session coordinator or child approval projection.
+  - Pre-implementation Desktop persistence and Run History could show the current Runtime Run plus Local Server lineage but could not inspect or link a child Session/Run.
+  - A schema-only `agent` function in seeded ordinary Thread examples had no Bun executor, compiled specialist, independent Session, or child lineage and was not a shipped delegation capability.
+  - The initial isolated Electrobun CEF discovery run on 2026-07-27 reported six capabilities—Instructions, two tools, state, skill, and connection—with no Subagent surface; it established the before-state at 1280×800.
+  - Historical `back` commit `907f933` contains a one-level Specialist prototype and audit record from before the current Runtime Harness, recovery ledger, Sandbox, durable approvals, Session budgets, and per-Run model-call fuse. It is useful product evidence but is not current code and is not safe to cherry-pick as the implementation.
+  - Eve at `632605f097c583e6667578a9b296c334f69e9121` treats every declared `agent/subagents/<id>/` as an independently discovered Agent, lowers it to a model-visible tool, starts a child Session with fresh history/state, exposes child stream identity, proxies interactive waits, rejects tool-name collisions, and cascades cancellation. OpenAI Agents JS at `070b395d279c0b9828ee50c8196db374c48ce904` separately confirms manager/agent-as-tool versus handoff as the two primary composition patterns.
+- Boundary: today one compiled Agent Project produces one root Runtime Session. The selected V1 direction is a static, one-level, local manager pattern: a source-declared child becomes an explicit parent tool, receives only its explicit task input, runs in an independent child Runtime Session under non-escalating Host/approval policy, and returns its terminal result while the parent retains the user conversation. Sandbox data-plane ownership is explicit: an absent child Sandbox declaration shares the parent's effective Sandbox/workspace; a declared child Sandbox shares only when its compiler/Host-derived revalidation fingerprint matches the parent's, otherwise it is isolated. Source remains zero-configuration.
+- Explicit non-goals: root-copy built-in Agent, nested Subagents, handoff, dynamic Agent generation, arbitrary project loading, remote Agent, ACP/A2A, Workflow programs, background or shared long-lived children, caller-supplied arbitrary output schemas, automatic retry of ambiguous effects, new tool/cost/time quota axes, or child Threads/tabs created implicitly.
+- Shipped evidence:
+  - Direct `agent/subagents/<id>/` discovery compiles a complete frozen child artifact, requires a non-empty description, exposes a fixed `{ message: string }` bare-name tool, and rejects collisions, nesting, and child outputs.
+  - Runtime creates an independent child Session/Run/Turn with child-owned prompt, model, state, tools/skills, approvals, budget ledger, and default model-call limit 25. It passes only trusted auth/tenant/channel plus the explicit task; parent transcript, attachments, model override, registries, and secret values do not transfer. Child connections are rejected at compile time until Hosts can supply an executable connection boundary.
+  - Stable artifact/parent/tool-call lineage resumes safe waits without re-executing completed child effects. Child terminal persists before parent backfill; unknown outcomes do not retry automatically.
+  - Desktop Direct/Sandbox and protected Server persist matching child lineage and terminals. Server Host approval policy also tightens child tools. Desktop provides delegation cards, approval-capable child inspection, explicit manual invocation, and Run History child count/model-call/token/provider-cost aggregation without creating or selecting a child Thread.
+  - Sandbox delivery follows the approved Eve-informed rule: absent child Sandbox shares the effective parent Sandbox; a declared child shares only on equal frozen revalidation fingerprint; all other declared cases isolate and fail closed without Host authority.
+  - `apps/example-agent` includes the deterministic `weather-writer` child, and ADR 0016 documents the public contract and exclusions.
+- Remaining extensions: child token-budget decision UX/API, explicit retry UX/API, complete restart recovery for several simultaneously parked siblings, cancellation propagation while resuming a parked child, unmetered/duration/Server aggregate views, child connections, nested/remote Agents, handoff, Workflow, structured child outputs, child-specific cancellation UI, tree-wide quotas, and public plugin contribution of Subagents remain explicitly outside V1.
+
 ## Agent Project Activation
 
 - Status: shipped V1; packaged Desktop regression repaired
 - Freshness: confirmed
-- Last checked: 2026-07-26
+- Last checked: 2026-07-27
 - Evidence:
   - The 2026-07-26 prerequisite repair replaces rebased `import.meta.url`
     compiler-source lookup with the Runtime-owned
@@ -467,7 +492,7 @@
     document/body overflow and the console has no application error.
   - Historical discovery evidence in `audits/2026-07-26-103139-general-limits-v2-discovery/02-agent-project-bundle-regression.png` records the repaired failure: both the workspace and explicitly opened `apps/example-agent` were `invalid` because packaged `createAgentProjectBundle()` resolved an unshipped `validate-authored-source.ts` beside `Resources/app/bun/index.js`.
   - `packages/cli` exposes mandatory-destination `llm-space init <directory>` over the shared Runtime Node scaffolder, with repeatable `--preset`, empty-preset `--blank` compatibility, and explicit MCP URL/tool inputs.
-  - Desktop exposes New Agent Project through Welcome, the Agents sidebar, and Command Palette. It asks for a parent folder, creates only an absent kebab-case child, then auto-trusts it, creates the existing default Project Thread under `LLM_SPACE_HOME`, switches to Agents, and opens Build.
+  - Desktop exposes New Agent Project through Welcome, the Agents sidebar, and Command Palette. It asks for a parent folder, creates only an absent kebab-case child, then auto-trusts it, switches to Agents, and opens the read-only Project inspector without creating or selecting a Thread.
   - Current CEF audit `audits/2026-07-17-175010-canonical-agent-project/` proves default and conditional MCP dialog states, keyboard/focus behavior, 1280×800 and 900×700 reflow, real Bun RPC creation, source inspection in Build, separated source/registry/Thread ownership, and no application console errors.
   - `packages/runtime/src/manifest.ts` and `src/node/project-manifest.ts` define and safely resolve the V1 `llm-space.json` contract while rejecting traversal, absolute Agent paths, and source-root symlinks.
   - Desktop `ExternalAgentProjectManager` keeps registry/trust and project Threads under `LLM_SPACE_HOME`, validates before trust without importing tools, recursively watches trusted source, retains frozen snapshots, and executes project tools in Bun through typed RPC.
@@ -504,7 +529,7 @@
   - The scaffolder canonicalizes an existing parent, validates a strict kebab-case child and preset input, renders in a sibling private stage, loads the complete project through Runtime, atomically reserves the absent destination, and publishes the whole root with one rename. Failures remove staging and never merge with or recursively delete a raced target.
   - The canonical base always emits manifest, instructions, Agent model/reasoning, and an environment requirement. Independent `echo`, `concise-response`, and explicit HTTP(S) MCP contributions compose in canonical order without secrets or network validation.
   - Repository-owned tests exhaust all eight preset combinations and prove Runtime load, local-tool execution, MCP/skill shape, and deterministic OCI context creation without source repair. Focused final acceptance passes 32 tests with 187 assertions.
-  - CLI parsing tests prove mandatory destination, default local-tool + skill, `--blank`, repeated explicit presets, MCP inputs, and invalid combinations. Desktop manager tests prove successful source/trust/default-Thread ownership and source cleanup when Desktop activation cannot commit.
+  - CLI parsing tests prove mandatory destination, default local-tool + skill, `--blank`, repeated explicit presets, MCP inputs, and invalid combinations. Desktop manager tests prove successful source/trust ownership without an implicit Thread and source cleanup when Desktop activation cannot commit.
   - Real Electrobun evidence under `audits/2026-07-17-175010-canonical-agent-project/` verifies the three creation entry points, dialog states and accessibility, conditional MCP fields, real RPC generation, and Build landing at both target sizes.
   - Current source inspection confirms V1 still exposes only `local-tool`, `skill`, and `mcp-connection`; neither the scaffolder nor `apps/example-agent` teaches `defineSandbox({})`, `agent/sandbox/workspace/**`, canonical read/write/bash helpers, or Sandbox attachments.
 - Boundary: CLI and Studio create the same canonical portable source into a wholly absent user-owned directory. V1 composes only `local-tool`, `skill`, and `mcp-connection`; defaults are local tool plus skill, and MCP requires an HTTP(S) URL plus one or more exact allowlisted names. Generated projects intentionally carry no repository-specific test/Eval protocol.
@@ -513,9 +538,9 @@
 
 ## Thread-To-Agent Project Promotion
 
-- Status: contract accepted; blocked on item 17 acceptance; V1 not implemented
+- Status: contract accepted and dependency-unblocked; V1 not implemented
 - Freshness: confirmed
-- Last checked: 2026-07-20
+- Last checked: 2026-07-27
 - Evidence:
   - A current isolated Electrobun CEF run at 1280×800 created a real blank standalone Thread. The Thread surface exposes model, tools, variables, system prompt, editable messages, run history, and evaluations, but Welcome, Thread toolbar, menus, Command Palette metadata, typed RPC, and Bun managers contain no promotion command, preview, or materializer.
   - Core `Thread` stores optional model/reasoning parameters, system-prompt and message templates, built-in/custom variable state, four distinct tool kinds, Runtime snapshots, run history, reusable rubrics, and manual evaluations. These are Desktop development/session records rather than portable Agent source.
@@ -527,7 +552,7 @@
   - ADR 0006 and the Eve state research fix the future contract: promotion is preview-first and atomic; Agent Variables, Turn context, Session State, transcript, and external memory remain distinct; local tool and stdio MCP authority is Sandbox-only; exact literals require visible confirmation; evaluation intent is non-executable; and conversation examples defer to item 29.
 - Boundary: today a standalone Thread and an Agent Project remain independent product objects. The accepted implementation will classify every field, resolve all blockers in a temporary preview tab, publish only into an absent user-owned target, and create a fresh independent Project Thread with no transcript, Run, evaluation, state, or Session identity inheritance.
 - Explicit non-goals: no hidden promotion metadata, live Thread/source synchronization, secret-store or Session-state copying, implicit Desktop built-in authority, generated fake tool implementations, Host fallback for Sandbox requirements, source overwrite/merge, transcript migration, Eve compatibility promise, conversation-example format before item 29, or premature executable Eval protocol.
-- Visible gaps: items 12, 13, and 16 are shipped, while item 17 passes local deterministic real-Docker acceptance but awaits the deferred current-head CI gate under existing shipment policy. Product code still lacks the planner, variable/evaluation-intent source slots, preview interaction, atomic coordinator, acceptance matrix, and real CEF audit evidence defined by ADR 0006.
+- Visible gaps: items 12, 13, 16, and 17 are shipped under the owner-approved local acceptance policy, so promotion is no longer dependency-blocked. Product code still lacks the planner, variable/evaluation-intent source slots, preview interaction, atomic coordinator, acceptance matrix, and real CEF audit evidence defined by ADR 0006; it is deferred behind the larger missing Subagent composition capability.
 
 ## Agent And Thread Workbench Navigation
 
@@ -770,7 +795,7 @@
 
 - Status: shipped V2 with Structured Evaluation Rubrics V1
 - Freshness: confirmed
-- Last checked: 2026-07-10
+- Last checked: 2026-07-27
 - Evidence:
   - Current CEF screenshot `audits/2026-07-10-145713-evaluation-rubrics-discovery/01-current-run-history.png` shows two durable run cards, comparison selection, inspect/restore actions, and one saved evaluation in the 1280x800 desktop renderer.
   - Current CEF screenshot `audits/2026-07-10-145713-evaluation-rubrics-discovery/02-current-evaluation-dialog.png` shows the comparison dialog with Run A/Run B evidence, five fixed overall verdicts, and one unstructured evaluation note; there is no criterion/rubric configuration or per-side structured score.
@@ -789,9 +814,10 @@
   - Twenty-four focused Bun tests cover schema bounds, malformed/duplicate normalization, rubric CRUD/revisions/caps, immutable snapshots, unordered run-pair orientation, score completeness/aggregation, cross-rubric isolation, and saved-snapshot score restoration.
   - `packages/core/src/types/threads/thread.ts` models legacy and structured evaluations as a compatible union with bounded rubric/snapshot/score data.
   - `apps/desktop/src/components/thread-playground/run-evaluation-dialog.tsx`, `run-evaluation-scorecard.tsx`, and `evaluation-rubric-editor.tsx` implement the comparison, scoring, and rubric-management surfaces.
+  - Current Runtime discovery, artifact, bundle, CLI, and example Agent source have no `evals/` slot, case/assertion/judge contract, executor-neutral runner, threshold outcome, or portable report. Existing evaluations remain Desktop Thread records and never write into or travel with Agent Project source.
 - Boundary: two durable runs in one thread can be compared and inspected, labeled with the existing overall verdict/note, or scored against a reusable thread-owned rubric with 2-6 ordered criteria and complete integer 1-5 scores. One evaluation per unordered pair persists immutable rubric evidence, per-run scores, unweighted averages, and B-minus-A delta; editing or deleting the reusable definition does not alter history, and legacy verdict-only evaluations remain valid.
 - Explicit non-goals: dataset/experiment runner, automated or model judge, weighted/formula criteria, thresholds, global rubric library, multiple evaluations per run pair, CI/export, cloud sync, evaluation telemetry, and raw side-by-side trace diff.
-- Visible gaps: rubric weights and mixed criterion types, reusable cross-thread libraries, aggregate experiment tables, evaluation cost comparison, dataset execution, automated judges, and side-by-side trace/timing diff remain unimplemented. The 80% rubric-backed completion target still needs a ten-comparison maintainer dogfood set after merge.
+- Visible gaps: portable source Eval suites remain wholly missing even though interactive Thread comparison is shipped. Rubric weights and mixed criterion types, reusable cross-thread libraries, aggregate experiment tables, evaluation cost comparison, dataset execution, automated judges, CI/export, and side-by-side trace/timing diff remain unimplemented. The 80% rubric-backed completion target still needs a ten-comparison maintainer dogfood set after merge.
 
 ## Trace Inspection
 

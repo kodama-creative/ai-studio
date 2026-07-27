@@ -19,6 +19,8 @@ import {
   AgentRuntime,
   type AgentSession,
   AgentStateCommitUnknownError,
+  type AgentSubagentRunStart,
+  type CompiledAgentProjectSnapshot,
   createHostCapabilityPolicy,
   DurableOperationOutcomeUnknownError,
   ExecutionEnvUnavailableError,
@@ -43,6 +45,10 @@ import type {
 import { createDesktopThreadRuntimeAuthority } from "./desktop-thread-runtime-authority";
 import { agentDefinitionFingerprint } from "../external-projects/agent-definition-fingerprint";
 
+import type {
+  ExternalAgentProjectSubagentRun,
+  RemoteToolCallAttempt
+} from "../../shared/external-agent-project";
 import type {
   AbortStreamThreadPayload,
   StreamThreadRequestPayload,
@@ -130,6 +136,58 @@ export class StreamThreadController {
         return { session: authority.session, store: authority.sessionStore };
       }
     );
+  }
+
+  registerAgentProjectSubagentApprovals(
+    projectId: string,
+    threadId: string,
+    runs: readonly ExternalAgentProjectSubagentRun[]
+  ): void {
+    for (const run of runs) {
+      this._registerAgentProjectSubagentSession(
+        projectId,
+        threadId,
+        run.child,
+        run.runtimeSession
+      );
+    }
+  }
+
+  async callExternalAgentProjectTool(input: {
+    readonly arguments: Record<string, unknown>;
+    readonly attempt?: RemoteToolCallAttempt;
+    readonly callId: string;
+    readonly name: string;
+    readonly projectId: string;
+    readonly snapshot: string;
+    readonly threadId?: string;
+  }) {
+    if (!this._externalAgentProjects) {
+      throw new Error("Agent Project manager is unavailable");
+    }
+    const models = await this._modelManager.getAvailableModels();
+    const subagent = await this._externalAgentProjects.callAgentSubagent(
+      input,
+      {
+        models,
+        onSessionCommitted: (identity, session) => {
+          if (!input.threadId) { return; }
+          this._registerAgentProjectSubagentSession(
+            input.projectId,
+            input.threadId,
+            identity,
+            session
+          );
+        },
+        prepareParentSandbox: async parent => this._prepareSandboxTurn({
+          projectId: input.projectId,
+          ...parent
+        }),
+        prepareSandbox: async (start, project) =>
+          this._prepareSubagentSandbox(start, project)
+      }
+    );
+    return subagent ?? this._externalAgentProjects.callTool(input);
   }
 
   async decideToolApproval(input: {
@@ -220,6 +278,36 @@ export class StreamThreadController {
       this._registerApprovalAuthorities(key, committed, resolve);
       return committed;
     });
+  }
+
+  private _registerAgentProjectSubagentSession(
+    projectId: string,
+    threadId: string,
+    identity: { readonly runId: string; readonly sessionId: string; },
+    runtimeSession: StoredRuntimeSession
+  ): void {
+    const key = [
+      "project-subagent",
+      projectId,
+      threadId,
+      identity.sessionId
+    ].join(":");
+    this._registerApprovalAuthorities(
+      key,
+      runtimeSession,
+      async () => {
+        const authority = await this._externalAgentProjects!
+          .createAgentSubagentRuntimeSessionStore(
+            projectId,
+            threadId,
+            identity
+          );
+        return {
+          session: authority.session,
+          store: authority.sessionStore
+        };
+      }
+    );
   }
 
   private _registerBudgetAuthority(
@@ -743,6 +831,36 @@ export class StreamThreadController {
         runtimeSession
       });
     };
+    const models = await this._modelManager.getAvailableModels();
+    const registerChildSession = (
+      identity: { readonly runId: string; readonly sessionId: string; },
+      runtimeSession: StoredRuntimeSession
+    ) => {
+      this._registerAgentProjectSubagentSession(
+        runtimePayload.projectId,
+        runtimePayload.threadId,
+        identity,
+        runtimeSession
+      );
+    };
+    const prepareChildSandbox = async (
+      start: AgentSubagentRunStart,
+      project: CompiledAgentProjectSnapshot
+    ) => this._prepareSubagentSandbox(start, project);
+    const createSubagentHost = this._externalAgentProjects
+      .createAgentSubagentHost?.bind(this._externalAgentProjects);
+    const subagentHost = createSubagentHost
+      ? createSubagentHost(
+        payload.runtime.projectId,
+        payload.runtime.threadId,
+        {
+          models,
+          onSessionCommitted: registerChildSession,
+          prepareSandbox: prepareChildSandbox,
+          streamFn: this._streamFn(payload, false)
+        }
+      )
+      : undefined;
     const session = await this._externalAgentProjects.createRuntimeSession(
       payload.runtime.projectId,
       {
@@ -804,6 +922,7 @@ export class StreamThreadController {
         onPhase: phase => {
           send({ streamId: payload.streamId, type: "runtimePhase", phase });
         },
+        ...(subagentHost ? { subagentHost } : {}),
         ...(sandbox ? { sandbox } : {})
       }
     );
@@ -830,6 +949,11 @@ export class StreamThreadController {
     const resumesApproval = runtimeState && activeRunId
       ? runtimeRunHasParkedToolApprovals(runtimeState.session, activeRunId)
       : false;
+    const resumableSubagent = activeRunId
+      ? [...(threadRecord.subagentRuns ?? [])].findLast(run =>
+        run.parent.sessionId === sessionId
+        && run.parent.runId === activeRunId)
+      : undefined;
     await this._streamSession(
       payload.streamId,
       session,
@@ -839,7 +963,36 @@ export class StreamThreadController {
         ? async () => { await session.compactContext(); }
         : resumesApproval
           ? async () => session.resumeApprovedTools()
-          : async () => session.continue()
+          : resumableSubagent
+            ? async () => {
+              const outcome = await this._externalAgentProjects!
+                .resumeAgentSubagent(
+                  runtimePayload.projectId,
+                  runtimePayload.threadId,
+                  resumableSubagent.child,
+                  {
+                    models,
+                    onSessionCommitted: registerChildSession,
+                    parentSandbox: sandbox,
+                    prepareSandbox: prepareChildSandbox,
+                    streamFn: this._streamFn(payload, false)
+                  }
+                );
+              if (outcome.type === "deferred") { return; }
+              await session.resolveToolResults([{
+                role: "toolResult",
+                toolCallId: resumableSubagent.parent.toolCallId,
+                toolName: resumableSubagent.subagentId,
+                content: outcome.result.content,
+                details: outcome.result.details,
+                isError: outcome.result.isError ?? false,
+                timestamp: Date.now()
+              }]);
+              if (runtimePayload.executionMode !== "manual") {
+                await session.continue();
+              }
+            }
+            : async () => session.continue()
     );
   }
 
@@ -857,11 +1010,40 @@ export class StreamThreadController {
       )
       : null;
     if (!project) { throw new SandboxUnavailableError(); }
-    return this._sandboxes.prepareTurn({
+    const environment = await this._sandboxes.prepareTurn({
       sessionId: input.sessionId,
       turnId: input.turnId,
       seed: project.sandbox?.workspace ?? []
     });
+    return {
+      ...environment,
+      ...(project.sandbox?.revalidationFingerprint
+        ? {
+          revalidationFingerprint:
+            project.sandbox.revalidationFingerprint
+        }
+        : {})
+    };
+  }
+
+  private async _prepareSubagentSandbox(
+    start: AgentSubagentRunStart,
+    project: CompiledAgentProjectSnapshot
+  ) {
+    if (!this._sandboxes) { throw new SandboxUnavailableError(); }
+    const environment = await this._sandboxes.prepareTurn({
+      seed: project.sandbox?.workspace ?? [],
+      sessionId: start.child.sessionId,
+      turnId: start.child.runId
+    });
+    return {
+      ...environment,
+      ...(start.sandbox.revalidationFingerprint
+        ? {
+          revalidationFingerprint: start.sandbox.revalidationFingerprint
+        }
+        : {})
+    };
   }
 
   private async _streamSession(
@@ -889,12 +1071,17 @@ export class StreamThreadController {
     }
   }
 
-  private _streamFn(payload: StreamThreadRequestPayload): StreamFn {
+  private _streamFn(
+    payload: StreamThreadRequestPayload,
+    useThreadModelConfig = true
+  ): StreamFn {
     return async (model, context, options) => {
       const models = await this._modelManager.getAvailableModels();
       const baseUrl = this._modelManager.getBaseUrl(model.provider);
       const headers = this._modelManager.getHeaders(model.provider);
-      const config = payload.request.config?.model;
+      const config = useThreadModelConfig
+        ? payload.request.config?.model
+        : undefined;
       return models.streamSimple(
         baseUrl ? { ...model, baseUrl } : model,
         context,

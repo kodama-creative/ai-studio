@@ -6,6 +6,7 @@ import type {
 
 export interface SandboxTurnEnvironment {
   readonly executionEnv: ExecutionEnv;
+  readonly revalidationFingerprint?: string;
   readonly workspaceManifest: readonly string[];
 }
 

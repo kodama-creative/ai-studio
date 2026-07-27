@@ -2,7 +2,10 @@ import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runtimeHistoryMessages } from "@llm-space/runtime/harness";
+import {
+  InMemorySessionStore,
+  runtimeHistoryMessages
+} from "@llm-space/runtime/harness";
 import { afterEach, expect, test } from "bun:test";
 
 import type { AssistantMessage, UserMessage } from "@earendil-works/pi-ai";
@@ -19,6 +22,92 @@ afterEach(async () => {
     force: true,
     recursive: true
   })));
+});
+
+test("persists an independent Subagent Runtime Session inside its parent envelope", async () => {
+  const root = await mkdtemp(join(tmpdir(), "llm-space-server-subagent-"));
+  roots.push(root);
+  const artifactFingerprint = "a".repeat(64);
+  const continuationToken = Buffer.alloc(32, 9).toString("base64url");
+  const owner = {
+    issuer: "test",
+    principalId: "principal-one",
+    principalType: "user" as const
+  };
+  const repository = await ServerSessionRepository.open({
+    artifactFingerprint,
+    root
+  });
+  const parent = await repository.createSession({
+    continuationToken,
+    idempotencyKey: "parent-session",
+    owner
+  });
+  const childSessionId = `subagent-session-${"b".repeat(64)}`;
+  const childRunId = `subagent-run-${"b".repeat(64)}`;
+  const memory = new InMemorySessionStore();
+  const childRuntime = await memory.commit({
+    sessionId: childSessionId,
+    expectedVersion: null,
+    mutations: [{
+      type: "startRun",
+      runId: childRunId,
+      messages: [],
+      configuration: _configuration("configuration-child", "c".repeat(64))
+    }]
+  });
+  await repository.createSubagentRun(parent.sessionId, async () => ({
+    artifactFingerprint: "c".repeat(64),
+    child: { runId: childRunId, sessionId: childSessionId },
+    description: "Research one question.",
+    message: "Research this.",
+    parent: {
+      runId: "run-parent",
+      sessionId: parent.sessionId,
+      toolCallId: "call-researcher"
+    },
+    runtime: childRuntime,
+    sandbox: { mode: "direct" },
+    status: "running",
+    subagentId: "researcher",
+    transcript: []
+  }));
+  await repository.replaceSubagentTranscript(
+    childSessionId,
+    [_assistant("child result", 1)]
+  );
+  await repository.commit({
+    sessionId: childSessionId,
+    expectedVersion: childRuntime.version,
+    mutations: [{
+      type: "transitionRun",
+      runId: childRunId,
+      to: "completed"
+    }]
+  });
+  await repository.finishSubagentRun(childSessionId, {
+    status: "completed",
+    result: "child result"
+  });
+  await repository.close();
+
+  const restarted = await ServerSessionRepository.open({
+    artifactFingerprint,
+    root
+  });
+  expect(await restarted.load(childSessionId)).toMatchObject({
+    snapshot: {
+      id: childSessionId,
+      runs: [expect.objectContaining({ id: childRunId, state: "completed" })]
+    }
+  });
+  expect(await restarted.loadSubagentRun(parent.sessionId, childSessionId))
+    .toMatchObject({
+      status: "completed",
+      terminal: { status: "completed", result: "child result" },
+      transcript: [expect.objectContaining({ role: "assistant" })]
+    });
+  await restarted.close();
 });
 
 test("recovers a completed provider operation from its durable transcript boundary", async () => {

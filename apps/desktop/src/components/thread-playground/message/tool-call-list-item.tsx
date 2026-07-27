@@ -27,6 +27,7 @@ import { useRenderingFidelity } from "@/components/theme-provider";
 import { Tooltip } from "@/components/tooltip";
 import { Marker, MarkerContent } from "@/components/ui/marker";
 import { cn } from "@/lib/utils";
+import { AgentSubagentRunCard } from "./agent-subagent-run-card";
 import { ToolCallInputView } from "./tool-call-input-view";
 import {
   getToolCallOutputText,
@@ -40,6 +41,7 @@ import {
 import { CodeEditor, type CodeEditorProps } from "../../code-editor";
 import { Button } from "../../ui/button";
 import { Input } from "../../ui/input";
+import { useAgentSubagentRun } from "../agent-subagent-runs-context";
 import { useThreadStore, useThreadStoreActions } from "../stores";
 import { getRuntimeExecutionMode } from "../stores/run-mode";
 import { usePromptVariableExtensionForContext } from "../variable/use-prompt-variable-extension";
@@ -66,6 +68,7 @@ const _ToolCallListItem = function ToolCallListItem({
   readonly toolCall: ToolCall;
 }) {
   const { fidelity } = useRenderingFidelity();
+  const subagentRun = useAgentSubagentRun(toolCall.id);
   const status = useThreadStore(state => state.status);
   const runtimeSessionId = useThreadStore(state => (
     state.thread.runtimeSession as { snapshot?: { id?: string; }; } | undefined
@@ -238,138 +241,140 @@ const _ToolCallListItem = function ToolCallListItem({
         </div>
       </div>
       <hr />
-      {approval && !toolCall.output
-        ? (
-          <div
-            className="flex flex-col gap-2 outline-none"
-            data-runtime-session-id={runtimeSessionId}
-            data-tool-approval-state={approval.state}
-            ref={approvalRef}
-            role="status"
-            tabIndex={-1}
-          >
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <div className="text-xs font-medium">
-                  {_approvalLabel(approval)}
-                </div>
-                <div className="text-muted-foreground text-[11px]">
-                  {approval.reason ?? "Agent policy requires human approval"}
-                </div>
-              </div>
-              {approval.state === "pending"
-                ? (
-                  <div className="flex shrink-0 items-center gap-2">
-                    <Button
-                      disabled={deciding}
-                      onClick={() => { setApprovalConfirmation("approved"); }}
-                      size="sm"
-                    >
-                      {getRuntimeExecutionMode() === "manual"
-                        ? "Approve & run"
-                        : "Approve"}
-                    </Button>
-                    <Button
-                      disabled={deciding}
-                      onClick={() => { setApprovalConfirmation("denied"); }}
-                      size="sm"
-                      variant="outline"
-                    >
-                      Deny
-                    </Button>
+      {subagentRun
+        ? <AgentSubagentRunCard run={subagentRun} />
+        : approval && !toolCall.output
+          ? (
+            <div
+              className="flex flex-col gap-2 outline-none"
+              data-runtime-session-id={runtimeSessionId}
+              data-tool-approval-state={approval.state}
+              ref={approvalRef}
+              role="status"
+              tabIndex={-1}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-xs font-medium">
+                    {_approvalLabel(approval)}
                   </div>
-                )
-                : null}
-            </div>
-            <div className="text-muted-foreground flex flex-wrap gap-x-4 gap-y-1 text-[10px]">
-              <span>
-                Policy: Source {_approvalRequirementLabel(
-                  approval.sourceRequirement
-                )} · Host {_approvalRequirementLabel(
-                  approval.hostRequirement
-                )}
-              </span>
-              <span>
-                Scope: {approval.scope === "session"
-                  ? "Once per session"
-                  : "This call"}
-              </span>
-              <span>
-                Execution: {runtimeProfileType === "desktopSandbox"
-                  ? "Sandbox"
-                  : runtimeProfileType === "localServer"
-                    ? "Local Server"
-                    : "Direct"}
-              </span>
-            </div>
-          </div>
-        )
-        : (
-          <div className="flex w-full flex-col gap-1">
-            <div className="text-muted-foreground flex min-w-0 items-center justify-between gap-2 text-xs">
-              <Marker className="gap-1" role="status">
-                <MarkerContent className="flex items-center text-xs">
-                  {outcomeUnknown
-                    ? "Outcome unknown"
-                    : approval?.state === "denied"
-                      ? "Denied · not run"
-                      : "Response"}
-                  <Tooltip content="Preview response">
-                    <Button
-                      className="invisible shrink-0 group-hover/message:visible"
-                      disabled={outputText === ""}
-                      onClick={() => { setPreviewOpen(true); }}
-                      size="xs"
-                      variant="ghost"
-                    >
-                      <EyeIcon className="size-3" />
-                    </Button>
-                  </Tooltip>
-                </MarkerContent>
-              </Marker>
-              <div className="flex items-center">
-                {outcomeUnknown && executable
+                  <div className="text-muted-foreground text-[11px]">
+                    {approval.reason ?? "Agent policy requires human approval"}
+                  </div>
+                </div>
+                {approval.state === "pending"
                   ? (
-                    <Button
-                      disabled={managedReadonly || calling}
-                      onClick={() => { setRetryOpen(true); }}
-                      size="xs"
-                      variant="outline"
-                    >
-                      <RotateCcwIcon />
-                      Retry
-                    </Button>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <Button
+                        disabled={deciding}
+                        onClick={() => { setApprovalConfirmation("approved"); }}
+                        size="sm"
+                      >
+                        {getRuntimeExecutionMode() === "manual"
+                          ? "Approve & run"
+                          : "Approve"}
+                      </Button>
+                      <Button
+                        disabled={deciding}
+                        onClick={() => { setApprovalConfirmation("denied"); }}
+                        size="sm"
+                        variant="outline"
+                      >
+                        Deny
+                      </Button>
+                    </div>
                   )
                   : null}
-                <Button
-                  className="invisible shrink-0 group-hover/message:visible"
-                  disabled={managedReadonly}
-                  onClick={toggleError}
-                  size="xs"
-                  variant={isError ? "destructive" : "ghost"}
-                >
-                  <AlertCircleIcon />
-                  {isError ? "Clear error" : "Mark as error"}
-                </Button>
+              </div>
+              <div className="text-muted-foreground flex flex-wrap gap-x-4 gap-y-1 text-[10px]">
+                <span>
+                  Policy: Source {_approvalRequirementLabel(
+                    approval.sourceRequirement
+                  )} · Host {_approvalRequirementLabel(
+                    approval.hostRequirement
+                  )}
+                </span>
+                <span>
+                  Scope: {approval.scope === "session"
+                    ? "Once per session"
+                    : "This call"}
+                </span>
+                <span>
+                  Execution: {runtimeProfileType === "desktopSandbox"
+                    ? "Sandbox"
+                    : runtimeProfileType === "localServer"
+                      ? "Local Server"
+                      : "Direct"}
+                </span>
               </div>
             </div>
-            <PreviewDialog
-              onOpenChange={setPreviewOpen}
-              open={previewOpen}
-              title={`Response of ${toolCall.input.name}()`}
-              value={outputText}
-            />
-            <ToolCallResponseEditor
-              extraExtensions={variableExtension}
-              input={toolCall.input}
-              onChange={handleOutputChange}
-              onKeyDown={handleKeyDown}
-              plain={fidelity === "lite"}
-              readonly={managedReadonly}
-              value={outputText}
-            />
-          </div>
-        )}
+          )
+          : (
+            <div className="flex w-full flex-col gap-1">
+              <div className="text-muted-foreground flex min-w-0 items-center justify-between gap-2 text-xs">
+                <Marker className="gap-1" role="status">
+                  <MarkerContent className="flex items-center text-xs">
+                    {outcomeUnknown
+                      ? "Outcome unknown"
+                      : approval?.state === "denied"
+                        ? "Denied · not run"
+                        : "Response"}
+                    <Tooltip content="Preview response">
+                      <Button
+                        className="invisible shrink-0 group-hover/message:visible"
+                        disabled={outputText === ""}
+                        onClick={() => { setPreviewOpen(true); }}
+                        size="xs"
+                        variant="ghost"
+                      >
+                        <EyeIcon className="size-3" />
+                      </Button>
+                    </Tooltip>
+                  </MarkerContent>
+                </Marker>
+                <div className="flex items-center">
+                  {outcomeUnknown && executable
+                    ? (
+                      <Button
+                        disabled={managedReadonly || calling}
+                        onClick={() => { setRetryOpen(true); }}
+                        size="xs"
+                        variant="outline"
+                      >
+                        <RotateCcwIcon />
+                        Retry
+                      </Button>
+                    )
+                    : null}
+                  <Button
+                    className="invisible shrink-0 group-hover/message:visible"
+                    disabled={managedReadonly}
+                    onClick={toggleError}
+                    size="xs"
+                    variant={isError ? "destructive" : "ghost"}
+                  >
+                    <AlertCircleIcon />
+                    {isError ? "Clear error" : "Mark as error"}
+                  </Button>
+                </div>
+              </div>
+              <PreviewDialog
+                onOpenChange={setPreviewOpen}
+                open={previewOpen}
+                title={`Response of ${toolCall.input.name}()`}
+                value={outputText}
+              />
+              <ToolCallResponseEditor
+                extraExtensions={variableExtension}
+                input={toolCall.input}
+                onChange={handleOutputChange}
+                onKeyDown={handleKeyDown}
+                plain={fidelity === "lite"}
+                readonly={managedReadonly}
+                value={outputText}
+              />
+            </div>
+          )}
       <ConfirmDialog
         confirmLabel={approvalConfirmation === "approved"
           ? getRuntimeExecutionMode() === "manual"

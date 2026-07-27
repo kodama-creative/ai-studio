@@ -2,7 +2,7 @@
 
 A portable LLM Space Agent Project for validating the definition, manifest,
 local tool, durable typed Session state, source-declared MCP connection, skill,
-and desktop import workflow.
+static local Subagent, and desktop import workflow.
 Its weather data and optional MCP fixture are deterministic and use no
 credentials or live model.
 
@@ -17,8 +17,10 @@ credentials or live model.
 4. Select this `apps/example-agent` directory.
 5. Review the warning, then choose **Trust and open**. Agent Project tools are
    local code and run with your user permissions.
-6. Open the default Thread. Confirm `get-weather`, `remember-city`, and
-   `fixture__remote_echo`, then inspect their source chips and explicit calls.
+6. Create or open a Project Thread. Confirm `get-weather`, `remember-city`,
+   `fixture__remote_echo`, and `weather-writer`, then inspect their source chips
+   and explicit calls. A `weather-writer` delegation creates an independent
+   child Session without creating or selecting another Thread.
 
 LLM Space watches the files under `agent/`. Project Threads, messages, tool
 results, and trust settings are stored under `LLM_SPACE_HOME`, not in this
@@ -36,13 +38,30 @@ The test loads this exact project through `@llm-space/runtime`, resolves the
 model/reasoning defaults from `agent.ts`, discovers the `weather-brief` skill,
 compiles the source-owned `fixture__remote_echo` allowlist without connecting,
 verifies the named/versioned `example.weather-session` definition across all
-six inspectable compiled-artifact fingerprint sections, and checks that
+six inspectable compiled-artifact fingerprint sections, verifies the
+`weather-writer` child artifact and explicit-message contract, and checks that
 `get-weather({ city: "Shanghai" })` returns structured, JSON-compatible weather
 data. `remember-city` demonstrates step-atomic state updates when run through a
 Runtime Session.
 
 This project is example code for local development. It does not provide live
 weather data, sandbox tool execution, or production deployment guarantees.
+
+## Static local Subagents
+
+A direct child lives at `agent/subagents/<id>/`. Its `agent.ts` must define a
+non-empty `description`; the directory name is the parent-visible tool name.
+The tool input is always `{ message: string }`. The child receives that message
+in a fresh Session and never receives the parent transcript, attachments,
+model override, or secret values.
+
+If a child does not declare `sandbox.ts`, it shares the parent's effective
+Sandbox. A child that declares Sandbox shares only when its frozen internal
+revalidation fingerprint matches the parent's; otherwise Desktop uses an
+isolated child Sandbox. Children declare their own tools, skills, state, model,
+reasoning, environment names, and limits. Child connections,
+nested Subagents, and child structured outputs are intentionally unsupported in
+V1.
 
 ## Build an OCI context
 

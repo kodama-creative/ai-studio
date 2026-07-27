@@ -7,6 +7,7 @@ import type {
 import type { Models } from "@earendil-works/pi-ai";
 
 import { assertValidAgentProject } from "./assert-valid-agent-project";
+import { createAgentSubagentTool } from "./create-agent-subagent-tool";
 import { createImmutableAgentProjectSnapshot } from "./create-immutable-agent-project-snapshot";
 import { prepareProjectTool } from "./prepare-project-tool";
 import { resolveAgentRuntimeModel } from "./resolve-model";
@@ -24,6 +25,7 @@ import {
 import type {
   AgentProjectSnapshot
 } from "./agent-project-snapshot";
+import type { AgentSubagentHost } from "./agent-subagent-host";
 import type { PreparedAgentTool } from "./prepared-agent-tool";
 import type { AgentHostApprovalPolicy } from "../../shared/agent-approval-policy";
 import type { AgentCapabilityPolicy } from "../../shared/agent-capability-policy";
@@ -66,6 +68,7 @@ export interface CreateAgentSessionOptions {
   outputContract?: string;
   executionEnv?: ExecutionEnv;
   sandbox?: SandboxTurnEnvironment;
+  subagentHost?: AgentSubagentHost;
 }
 
 export class AgentRuntime {
@@ -150,6 +153,23 @@ export class AgentRuntime {
         undefined,
         executionEnv
       )),
+      ...(this._project.subagents ?? []).map(subagent => {
+        if (!options.subagentHost) {
+          throw new Error(
+            "Agent Projects with Subagents require a Host delegation boundary"
+          );
+        }
+        return createAgentSubagentTool({
+          context: options.context,
+          host: options.subagentHost,
+          models: this._models,
+          parentSandbox: options.sandbox,
+          parentSandboxFingerprint:
+            this._project.sandbox?.revalidationFingerprint,
+          streamFn: options.streamFn,
+          subagent
+        });
+      }),
       ...(options.extraTools ?? [])
     ];
     if (allTools.some(tool =>

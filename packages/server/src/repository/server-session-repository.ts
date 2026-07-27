@@ -87,6 +87,40 @@ interface ServerRunRecord {
   readonly outputContract?: string;
 }
 
+export interface ServerSubagentRunRecord {
+  readonly artifactFingerprint: string;
+  readonly child: { readonly runId: string; readonly sessionId: string; };
+  readonly description: string;
+  readonly message: string;
+  readonly parent: {
+    readonly runId: string;
+    readonly sessionId: string;
+    readonly toolCallId: string;
+  };
+  readonly runtime: StoredRuntimeSession;
+  readonly sandbox: {
+    readonly mode: "direct" | "isolated" | "shared";
+    readonly revalidationFingerprint?: string;
+  };
+  readonly status:
+    | "cancelled"
+    | "completed"
+    | "failed"
+    | "outcomeUnknown"
+    | "running"
+    | "waitingForApproval"
+    | "waitingForBudget"
+    | "waitingForContinue"
+    | "waitingForToolResults";
+  readonly subagentId: string;
+  readonly terminal?: {
+    readonly error?: { readonly code: string; readonly message: string; };
+    readonly result?: string;
+    readonly status: "cancelled" | "completed" | "failed" | "outcomeUnknown";
+  };
+  readonly transcript: readonly AgentMessage[];
+}
+
 interface ServerRotationRecord {
   readonly expiresAt: string;
   readonly generation: number;
@@ -113,6 +147,7 @@ interface ServerSessionEnvelope {
   readonly runs: readonly ServerRunRecord[];
   readonly rotations: readonly ServerRotationRecord[];
   readonly events: Readonly<Record<string, readonly PersistedServerEvent[]>>;
+  readonly subagentRuns: readonly ServerSubagentRunRecord[];
 }
 
 export interface CreatedServerSession {
@@ -221,6 +256,11 @@ export class ServerSessionRepository implements SessionStore {
             envelope.sessionId
           );
         }
+        for (const child of envelope.subagentRuns) {
+          await new InMemorySessionStore([child.runtime]).load(
+            child.child.sessionId
+          );
+        }
         _assertTerminalAuthority(envelope);
         repository._sessions.set(envelope.sessionId, envelope);
       }
@@ -273,7 +313,8 @@ export class ServerSessionRepository implements SessionStore {
         transcript: [],
         runs: [],
         rotations: [],
-        events: {}
+        events: {},
+        subagentRuns: []
       };
       await this._save(envelope);
       return _createdSession(envelope, expiresAt);
@@ -755,7 +796,8 @@ export class ServerSessionRepository implements SessionStore {
       const events = current.events[input.runId] ?? [];
       const runtimeProjection = _terminalRuntimeProjection(
         runtime,
-        authoritativeRun
+        authoritativeRun,
+        current.subagentRuns
       );
       if (!runtimeProjection) {
         throw new Error(
@@ -843,8 +885,86 @@ export class ServerSessionRepository implements SessionStore {
   }
 
   async load(sessionId: string): Promise<StoredRuntimeSession | null> {
-    const runtime = this._sessions.get(sessionId)?.runtime ?? null;
+    const runtime = this._sessions.get(sessionId)?.runtime
+      ?? this._subagent(sessionId)?.record.runtime
+      ?? null;
     return runtime ? _snapshot(runtime) : null;
+  }
+
+  async createSubagentRun(
+    parentSessionId: string,
+    create: () => Promise<ServerSubagentRunRecord>
+  ): Promise<{ readonly created: boolean; readonly record: ServerSubagentRunRecord; }> {
+    return this._exclusive(async () => {
+      const current = this._required(parentSessionId);
+      const candidate = await create();
+      const existing = current.subagentRuns.find(run =>
+        run.child.sessionId === candidate.child.sessionId
+        && run.child.runId === candidate.child.runId);
+      if (existing) { return { created: false, record: _snapshot(existing) }; }
+      const next = {
+        ...current,
+        subagentRuns: [...current.subagentRuns, candidate]
+      };
+      await this._save(next);
+      return { created: true, record: _snapshot(candidate) };
+    });
+  }
+
+  async loadSubagentRun(
+    parentSessionId: string,
+    childSessionId: string
+  ): Promise<ServerSubagentRunRecord | null> {
+    const current = this._required(parentSessionId);
+    const record = current.subagentRuns.find(
+      run => run.child.sessionId === childSessionId
+    );
+    return record ? _snapshot(record) : null;
+  }
+
+  subagentRuns(parentSessionId: string): readonly ServerSubagentRunRecord[] {
+    return _snapshot(this._required(parentSessionId).subagentRuns);
+  }
+
+  subagentRunForParent(
+    parentSessionId: string,
+    parentRunId: string
+  ): ServerSubagentRunRecord | null {
+    const record = this._required(parentSessionId).subagentRuns.findLast(
+      run => run.parent.runId === parentRunId
+    );
+    return record ? _snapshot(record) : null;
+  }
+
+  async replaceSubagentTranscript(
+    childSessionId: string,
+    transcript: readonly AgentMessage[]
+  ): Promise<void> {
+    await this._updateSubagent(childSessionId, record => ({
+      ...record,
+      transcript: _snapshot(transcript)
+    }));
+  }
+
+  async finishSubagentRun(
+    childSessionId: string,
+    terminal: NonNullable<ServerSubagentRunRecord["terminal"]>
+  ): Promise<void> {
+    await this._updateSubagent(childSessionId, record => ({
+      ...record,
+      status: terminal.status,
+      terminal
+    }));
+  }
+
+  async parkSubagentRun(
+    childSessionId: string,
+    status: Extract<ServerSubagentRunRecord["status"], `waiting${string}`>
+  ): Promise<void> {
+    await this._updateSubagent(childSessionId, record => ({
+      ...record,
+      status
+    }));
   }
 
   sessionIds(): readonly string[] {
@@ -915,6 +1035,24 @@ export class ServerSessionRepository implements SessionStore {
 
   async commit(input: SessionStoreCommit): Promise<StoredRuntimeSession> {
     return this._exclusive(async () => {
+      const child = this._subagent(input.sessionId);
+      if (child) {
+        const store = new InMemorySessionStore([child.record.runtime]);
+        const runtime = await store.commit(input);
+        const next = {
+          ...child.envelope,
+          subagentRuns: child.envelope.subagentRuns.map(record => (
+            record.child.sessionId === input.sessionId
+              ? {
+                ...record,
+                runtime,
+                status: _subagentStatus(runtime, record.child.runId)
+              }
+              : record))
+        };
+        await this._save(next);
+        return runtime;
+      }
       const current = this._required(input.sessionId);
       const store = new InMemorySessionStore(
         current.runtime ? [current.runtime] : []
@@ -926,7 +1064,11 @@ export class ServerSessionRepository implements SessionStore {
       for (const runtimeRun of runtime.snapshot.runs) {
         const outcome = _serverTerminalOutcome(runtimeRun.state);
         const record = runs.find(run => run.id === runtimeRun.id);
-        const runtimeProjection = _terminalRuntimeProjection(runtime, runtimeRun);
+        const runtimeProjection = _terminalRuntimeProjection(
+          runtime,
+          runtimeRun,
+          current.subagentRuns
+        );
         if (!outcome || record?.terminal !== null || !runtimeProjection) {
           continue;
         }
@@ -1007,6 +1149,34 @@ export class ServerSessionRepository implements SessionStore {
       throw new Error("Server Session disappeared from its repository");
     }
     return current;
+  }
+
+  private _subagent(childSessionId: string): {
+    readonly envelope: ServerSessionEnvelope;
+    readonly record: ServerSubagentRunRecord;
+  } | null {
+    for (const envelope of this._sessions.values()) {
+      const record = envelope.subagentRuns.find(
+        run => run.child.sessionId === childSessionId
+      );
+      if (record) { return { envelope, record }; }
+    }
+    return null;
+  }
+
+  private async _updateSubagent(
+    childSessionId: string,
+    update: (record: ServerSubagentRunRecord) => ServerSubagentRunRecord
+  ): Promise<void> {
+    await this._exclusive(async () => {
+      const child = this._subagent(childSessionId);
+      if (!child) { throw new Error("Server Subagent Run disappeared"); }
+      await this._save({
+        ...child.envelope,
+        subagentRuns: child.envelope.subagentRuns.map(record => (
+          record.child.sessionId === childSessionId ? update(record) : record))
+      });
+    });
   }
 
   private _requiredRun(
@@ -1162,11 +1332,18 @@ function _parseEnvelope(source: string, fileName: string): ServerSessionEnvelope
     || !value.runs.every(_validRunRecord)
     || !Array.isArray(value.rotations)
     || !value.rotations.every(_validRotationRecord)
+    || (value.subagentRuns !== undefined && (
+      !Array.isArray(value.subagentRuns)
+      || !value.subagentRuns.every(_validSubagentRunRecord)
+    ))
     || !_validEventMap(value.events, value.runs)
   ) {
     throw new Error("Stored Server Session does not match schema version 1");
   }
-  return value as unknown as ServerSessionEnvelope;
+  return {
+    ...(value as unknown as ServerSessionEnvelope),
+    subagentRuns: value.subagentRuns ?? []
+  };
 }
 
 function _validPrincipal(value: unknown): value is ServerPrincipal {
@@ -1252,6 +1429,55 @@ function _validRunRecord(value: unknown): value is ServerRunRecord {
       || value.terminal === "failed"
       || value.terminal === "outcomeUnknown"
     );
+}
+
+function _validSubagentRunRecord(
+  value: unknown
+): value is ServerSubagentRunRecord {
+  if (
+    !_isRecord(value)
+    || !_isRecord(value.child)
+    || !/^subagent-session-[0-9a-f]{64}$/.test(String(value.child.sessionId))
+    || !/^subagent-run-[0-9a-f]{64}$/.test(String(value.child.runId))
+    || !_isRecord(value.parent)
+    || typeof value.parent.sessionId !== "string"
+    || typeof value.parent.runId !== "string"
+    || typeof value.parent.toolCallId !== "string"
+    || typeof value.artifactFingerprint !== "string"
+    || typeof value.description !== "string"
+    || typeof value.message !== "string"
+    || typeof value.subagentId !== "string"
+    || !_isRecord(value.sandbox)
+    || !["direct", "isolated", "shared"].includes(String(value.sandbox.mode))
+    || !_isRecord(value.runtime)
+    || !Array.isArray(value.transcript)
+    || !value.transcript.every(_validTranscriptMessage)
+    || ![
+      "cancelled",
+      "completed",
+      "failed",
+      "outcomeUnknown",
+      "running",
+      "waitingForApproval",
+      "waitingForBudget",
+      "waitingForContinue",
+      "waitingForToolResults"
+    ].includes(String(value.status))
+  ) {
+    return false;
+  }
+  try {
+    const runtime = value.runtime as unknown as StoredRuntimeSession;
+    const store = new InMemorySessionStore([runtime]);
+    void store;
+  } catch {
+    return false;
+  }
+  return value.terminal === undefined || (
+    _isRecord(value.terminal)
+    && ["cancelled", "completed", "failed", "outcomeUnknown"]
+      .includes(String(value.terminal.status))
+  );
 }
 
 function _validRotationRecord(value: unknown): value is ServerRotationRecord {
@@ -1378,6 +1604,10 @@ function _validRuntimeProjection(
     || typeof value.checkpointId !== "string"
     || value.checkpointId.length === 0
     || !_isRecord(value.session)
+    || (value.subagents !== undefined && (
+      !Array.isArray(value.subagents)
+      || !value.subagents.every(_validServerSubagentProjection)
+    ))
   ) {
     return false;
   }
@@ -1400,6 +1630,23 @@ function _validRuntimeProjection(
     && session.snapshot.history.currentBranchId === value.branchId
     && session.snapshot.history.currentCheckpointId === value.checkpointId
   );
+}
+
+function _validServerSubagentProjection(value: unknown): boolean {
+  return _isRecord(value)
+    && typeof value.artifactFingerprint === "string"
+    && _isRecord(value.child)
+    && typeof value.child.sessionId === "string"
+    && typeof value.child.runId === "string"
+    && typeof value.message === "string"
+    && _isRecord(value.parent)
+    && typeof value.parent.sessionId === "string"
+    && typeof value.parent.runId === "string"
+    && typeof value.parent.toolCallId === "string"
+    && _isRecord(value.sandbox)
+    && ["direct", "isolated", "shared"].includes(String(value.sandbox.mode))
+    && typeof value.status === "string"
+    && typeof value.subagentId === "string";
 }
 
 function _validPersistedToolApprovalRequired(value: unknown): boolean {
@@ -1540,6 +1787,16 @@ function _serverTerminalOutcome(
     : null;
 }
 
+function _subagentStatus(
+  session: StoredRuntimeSession,
+  runId: string
+): ServerSubagentRunRecord["status"] {
+  const state = session.snapshot.runs.find(run => run.id === runId)?.state;
+  if (!state) { throw new Error("Server Subagent Runtime Run disappeared"); }
+  if (state === "runningModel" || state === "runningTools") { return "running"; }
+  return state === "superseded" ? "cancelled" : state;
+}
+
 function _isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
@@ -1675,7 +1932,8 @@ function _transcriptAtWorkingBase(
 
 function _terminalRuntimeProjection(
   session: StoredRuntimeSession,
-  run: StoredRuntimeSession["snapshot"]["runs"][number]
+  run: StoredRuntimeSession["snapshot"]["runs"][number],
+  subagents: readonly ServerSubagentRunRecord[]
 ): AgentServerRuntimeProjection | null {
   const checkpoint = session.snapshot.history.checkpoints
     .filter(item => item.runId === run.id && item.state === run.state)
@@ -1684,7 +1942,23 @@ function _terminalRuntimeProjection(
   return {
     branchId: checkpoint.branchId,
     checkpointId: checkpoint.id,
-    session
+    session,
+    ...(subagents.some(child => child.parent.runId === run.id)
+      ? {
+        subagents: subagents
+          .filter(child => child.parent.runId === run.id)
+          .map(child => ({
+            artifactFingerprint: child.artifactFingerprint,
+            child: child.child,
+            message: child.message,
+            parent: child.parent,
+            sandbox: child.sandbox,
+            status: child.status,
+            subagentId: child.subagentId,
+            ...(child.terminal ? { terminal: child.terminal } : {})
+          }))
+      }
+      : {})
   };
 }
 
@@ -1696,6 +1970,10 @@ function _recoverableTranscript(
   session: ServerSessionEnvelope,
   runId: string
 ): readonly AgentMessage[] {
+  const runtimeRun = session.runtime?.snapshot.runs.find(run => run.id === runId);
+  if (runtimeRun?.state === "waitingForToolResults") {
+    return session.transcript;
+  }
   const activeStep = session.runtime?.snapshot.operationLedger?.steps.find(
     step => step.runId === runId && step.state === "active"
   );

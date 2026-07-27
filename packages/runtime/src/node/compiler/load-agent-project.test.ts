@@ -22,6 +22,208 @@ afterEach(async () => {
 });
 
 describe("loadAgentProject", () => {
+  test("compiles a one-level declared Subagent as an immutable artifact capability", async () => {
+    const root = await _fixture();
+    await writeFile(join(root, "instructions.md"), "Delegate research.\n");
+    await mkdir(join(root, "subagents", "researcher", "tools"), {
+      recursive: true
+    });
+    await writeFile(
+      join(root, "subagents", "researcher", "agent.ts"),
+      `import { defineAgent } from "@llm-space/runtime";
+      export default defineAgent({
+        description: "Research one bounded question.",
+        model: "fake/research-model",
+        reasoning: "high"
+      });`
+    );
+    await writeFile(
+      join(root, "subagents", "researcher", "instructions.md"),
+      "Return evidence only.\n"
+    );
+    await writeFile(
+      join(root, "subagents", "researcher", "tools", "lookup.ts"),
+      `import { defineTool } from "@llm-space/runtime/tools";
+      import { Type } from "typebox";
+      export default defineTool({
+        description: "Look up one fact.",
+        inputSchema: Type.Object({ query: Type.String() }),
+        execute: ({ query }) => query
+      });`
+    );
+
+    const snapshot = await loadAgentProject(root);
+
+    expect(snapshot.diagnostics).toEqual([]);
+    expect(snapshot.subagents).toHaveLength(1);
+    expect(snapshot.subagents?.[0]).toMatchObject({
+      id: "researcher",
+      description: "Research one bounded question.",
+      project: {
+        instructions: "Return evidence only.\n",
+        definition: {
+          description: "Research one bounded question.",
+          model: { provider: "fake", id: "research-model" },
+          limits: { maxModelCallsPerRun: 25 },
+          reasoning: "high"
+        }
+      }
+    });
+    expect(snapshot.subagents?.[0]?.project.tools.map(tool => tool.name))
+      .toEqual(["lookup"]);
+    expect(Object.isFrozen(snapshot.subagents?.[0]?.project)).toBe(true);
+    expect(snapshot.artifact.fingerprints.capabilities.entries)
+      .toContainEqual(expect.objectContaining({ id: "subagent:researcher" }));
+  });
+
+  test("rejects unsupported or ambiguous Subagent source at build time", async () => {
+    const root = await _fixture();
+    await writeFile(join(root, "instructions.md"), "Delegate carefully.\n");
+    await mkdir(join(root, "tools"));
+    await writeFile(
+      join(root, "tools", "researcher.ts"),
+      `import { defineTool } from "@llm-space/runtime/tools";
+      import { Type } from "typebox";
+      export default defineTool({
+        description: "Conflicting root tool.",
+        inputSchema: Type.Object({}),
+        execute: () => "root"
+      });`
+    );
+    await mkdir(
+      join(root, "subagents", "researcher", "outputs"),
+      { recursive: true }
+    );
+    await mkdir(
+      join(root, "subagents", "researcher", "subagents", "nested"),
+      { recursive: true }
+    );
+    await writeFile(
+      join(root, "subagents", "researcher", "agent.ts"),
+      `export default { model: "fake/research-model" };`
+    );
+    await writeFile(
+      join(root, "subagents", "researcher", "instructions.md"),
+      "Research.\n"
+    );
+    await writeFile(
+      join(root, "subagents", "researcher", "outputs", "answer.ts"),
+      "export default {};"
+    );
+
+    const snapshot = await loadAgentProject(root);
+
+    expect(snapshot.subagents).toEqual([]);
+    expect(snapshot.diagnostics.map(diagnostic => diagnostic.code))
+      .toEqual(expect.arrayContaining([
+        "subagent_nested_unsupported",
+        "tool_name_duplicate"
+      ]));
+  });
+
+  test("requires a description and rejects outputs inside an otherwise valid Subagent", async () => {
+    const root = await _fixture();
+    await writeFile(join(root, "instructions.md"), "Delegate carefully.\n");
+    await mkdir(join(root, "subagents", "worker", "outputs"), {
+      recursive: true
+    });
+    await writeFile(
+      join(root, "subagents", "worker", "agent.ts"),
+      `export default { model: "fake/worker" };`
+    );
+    await writeFile(
+      join(root, "subagents", "worker", "instructions.md"),
+      "Work.\n"
+    );
+    await writeFile(
+      join(root, "subagents", "worker", "outputs", "answer.ts"),
+      "export default {};"
+    );
+
+    const snapshot = await loadAgentProject(root);
+
+    expect(snapshot.subagents).toEqual([]);
+    expect(snapshot.diagnostics.map(diagnostic => diagnostic.code))
+      .toEqual(expect.arrayContaining([
+        "subagent_description_missing",
+        "subagent_output_unsupported"
+      ]));
+  });
+
+  test("rejects connections inside a Subagent until Hosts can execute them", async () => {
+    const root = await _fixture();
+    await writeFile(join(root, "instructions.md"), "Delegate carefully.\n");
+    await mkdir(join(root, "subagents", "worker", "connections"), {
+      recursive: true
+    });
+    await writeFile(
+      join(root, "subagents", "worker", "agent.ts"),
+      `export default {
+        description: "Work without inherited connections.",
+        model: "fake/worker"
+      };`
+    );
+    await writeFile(
+      join(root, "subagents", "worker", "instructions.md"),
+      "Work.\n"
+    );
+    await writeFile(
+      join(root, "subagents", "worker", "connections", "remote.ts"),
+      "export default {};"
+    );
+
+    const snapshot = await loadAgentProject(root);
+
+    expect(snapshot.subagents).toEqual([]);
+    expect(snapshot.diagnostics).toContainEqual(expect.objectContaining({
+      code: "subagent_connection_unsupported",
+      message: "Subagent connections are not supported in V1"
+    }));
+  });
+
+  test("derives Sandbox revalidation fingerprints from the abstract requirement and seed", async () => {
+    const root = await _fixture();
+    await writeFile(join(root, "instructions.md"), "Delegate in Sandbox.\n");
+    for (const agentRoot of [root, join(root, "subagents", "worker")]) {
+      await mkdir(join(agentRoot, "sandbox", "workspace"), {
+        recursive: true
+      });
+      await writeFile(
+        join(agentRoot, "sandbox", "sandbox.ts"),
+        `import { defineSandbox } from "@llm-space/runtime/sandbox";
+        export default defineSandbox({});`
+      );
+      await writeFile(
+        join(agentRoot, "sandbox", "workspace", "seed.txt"),
+        "same seed\n"
+      );
+    }
+    await writeFile(
+      join(root, "subagents", "worker", "agent.ts"),
+      `export default {
+        description: "Work in the same Sandbox shape.",
+        model: "fake/worker"
+      };`
+    );
+    await writeFile(
+      join(root, "subagents", "worker", "instructions.md"),
+      "Work.\n"
+    );
+
+    const first = await loadAgentProject(root);
+    await writeFile(
+      join(root, "subagents", "worker", "sandbox", "workspace", "seed.txt"),
+      "different seed\n"
+    );
+    const second = await loadAgentProject(root);
+
+    expect(first.sandbox?.revalidationFingerprint).toMatch(/^[a-f0-9]{64}$/);
+    expect(first.subagents?.[0]?.project.sandbox?.revalidationFingerprint)
+      .toBe(first.sandbox?.revalidationFingerprint);
+    expect(second.subagents?.[0]?.project.sandbox?.revalidationFingerprint)
+      .not.toBe(second.sandbox?.revalidationFingerprint);
+  });
+
   test("compiles a Sandbox requirement and immutable workspace seed", async () => {
     const root = await _fixture();
     await writeFile(join(root, "instructions.md"), "Inspect the workspace.\n");
@@ -46,6 +248,8 @@ describe("loadAgentProject", () => {
 
     expect(snapshot.diagnostics).toEqual([]);
     expect(snapshot.sandbox).toEqual({
+      revalidationFingerprint:
+        "5790dea47ce2eeaf14c19c89f5d18ead8bbe2fc73898114d3d6e0609798c7abe",
       sourcePath: "sandbox/sandbox.ts",
       workspace: [
         {

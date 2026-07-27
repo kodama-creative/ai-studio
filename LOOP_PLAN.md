@@ -225,12 +225,13 @@ Runtime architecture follows [ADR 0001](./docs/adr/0001-runtime-harness-over-pi-
 
 ## Orchestration, Evaluation, And Ecosystem
 
-- [ ] **27 — Static local Subagents**
+- [x] **27 — Static local Subagents**
   - Depends on: 12, 14, 18, and 19.
   - Run: `$kaizen-loop Add statically authored local Subagents with explicit delegation and parent-child lineage.`
   - Done when: `subagents/<id>/` produces independent child Sessions; permissions only narrow; Trace and budget/cost aggregate to the parent.
   - Boundary: no dynamic Agent generation, arbitrary project loading, Remote Agent, ACP, or A2A.
   - Metric: delegated outcome with complete authority/resource lineage.
+  - Shipped evidence (2026-07-27): direct `agent/subagents/<id>/` children compile into frozen bare-name tools with required descriptions, fixed explicit-message input, collision/nesting/output/connection diagnostics, independent child Runtime Sessions, stable parent/tool lineage, Host-tightened child approvals and independent limits, safe approval recovery, and no ambiguous automatic retry. Desktop Direct/Sandbox and protected Server persist the same secret-free child record and terminal; Desktop adds delegation cards, child inspection, manual invocation, Run History child count/non-cancelled-main-model-call/token/provider-cost aggregation, and no implicit Thread lifecycle. Sandbox selection matches the approved Eve-informed rule: absent child declaration shares parent, equal declared revalidation fingerprint shares, otherwise child isolation fails closed. The checked-in example now includes `weather-writer`; ADR 0016 records the contract and V1 defers child token-budget decisions, explicit retry UX/API, complete multi-sibling restart recovery, cancellation while resuming a parked child, unmetered/duration/Server aggregate views, and child connections. Local acceptance covers focused compiler/runtime/Desktop/Server suites, real Docker, 1280×800 Electrobun CEF, all TypeScript projects, lint, Vite build, diff checks, and fixed-point review; Actions, packaging, signing, and release remain intentionally out of scope.
 
 - [ ] **28 — Schedules**
   - Depends on: 06, 12, 18, 22, and 26.

@@ -17,6 +17,7 @@ import type {
   CompiledAgentOutputDefinition,
   CompiledAgentSkill,
   CompiledAgentStateDefinition,
+  CompiledAgentSubagent,
   CompiledDynamicToolResolver,
   CompiledMcpConnection,
   CompiledProjectTool,
@@ -62,6 +63,7 @@ export function createAgentProjectArtifact({
   outputDefinitions = [],
   sandbox,
   sources,
+  subagents = [],
   tools
 }: {
   connections: readonly CompiledMcpConnection[];
@@ -75,6 +77,7 @@ export function createAgentProjectArtifact({
   skills: readonly CompiledAgentSkill[];
   sources: readonly AgentProjectArtifactSourceInput[];
   stateDefinitions?: readonly CompiledAgentStateDefinition[];
+  subagents?: readonly CompiledAgentSubagent[];
   tools: readonly CompiledProjectTool[];
 }): AgentProjectArtifact {
   const fingerprints = {
@@ -89,6 +92,7 @@ export function createAgentProjectArtifact({
       ...(definition ? [{
         id: "agent",
         content: {
+          description: definition.description ?? null,
           model: definition.model,
           modelOptions: definition.modelOptions ?? null,
           limits: definition.limits ?? null,
@@ -102,6 +106,7 @@ export function createAgentProjectArtifact({
       ...(sandbox ? [{
         id: "sandbox",
         content: {
+          revalidationFingerprint: sandbox.revalidationFingerprint,
           sourcePath: sandbox.sourcePath,
           workspace: sandbox.workspace.map(file => ({
             path: file.path,
@@ -165,6 +170,14 @@ export function createAgentProjectArtifact({
         content: {
           name: output.name,
           description: output.description
+        }
+      })),
+      ...subagents.map(subagent => ({
+        id: `subagent:${subagent.id}`,
+        content: {
+          id: subagent.id,
+          description: subagent.description,
+          artifactFingerprint: subagent.project.artifact.fingerprint
         }
       }))
     ]),

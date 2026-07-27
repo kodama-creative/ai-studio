@@ -22,6 +22,12 @@ export type AgentProjectDiagnosticCode =
   | "state_export_invalid"
   | "state_import_failed"
   | "state_name_duplicate"
+  | "subagent_connection_unsupported"
+  | "subagent_description_missing"
+  | "subagent_import_failed"
+  | "subagent_invalid"
+  | "subagent_nested_unsupported"
+  | "subagent_output_unsupported"
   | "tool_export_invalid"
   | "tool_import_failed"
   | "tool_name_duplicate";

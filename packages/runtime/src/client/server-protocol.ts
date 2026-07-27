@@ -36,6 +36,29 @@ export interface AgentServerRuntimeProjection {
   readonly branchId: string;
   readonly checkpointId: string;
   readonly session: StoredRuntimeSession;
+  readonly subagents?: readonly AgentServerSubagentProjection[];
+}
+
+export interface AgentServerSubagentProjection {
+  readonly artifactFingerprint: string;
+  readonly child: { readonly runId: string; readonly sessionId: string; };
+  readonly message: string;
+  readonly parent: {
+    readonly runId: string;
+    readonly sessionId: string;
+    readonly toolCallId: string;
+  };
+  readonly sandbox: {
+    readonly mode: "direct" | "isolated" | "shared";
+    readonly revalidationFingerprint?: string;
+  };
+  readonly status: string;
+  readonly subagentId: string;
+  readonly terminal?: {
+    readonly error?: { readonly code: string; readonly message: string; };
+    readonly result?: string;
+    readonly status: ServerRunTerminalOutcome;
+  };
 }
 
 export type ServerControlEvent<TValue extends JsonValue = JsonValue> =

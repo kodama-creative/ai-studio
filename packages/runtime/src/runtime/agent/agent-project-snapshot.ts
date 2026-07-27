@@ -58,6 +58,7 @@ export interface CompiledSandboxWorkspaceFile {
 }
 
 export interface CompiledSandboxRequirement {
+  readonly revalidationFingerprint: string;
   readonly sourcePath: string;
   readonly workspace: readonly CompiledSandboxWorkspaceFile[];
 }
@@ -82,6 +83,12 @@ export interface CompiledAgentSkill {
   readonly disableModelInvocation?: boolean;
 }
 
+export interface CompiledAgentSubagent {
+  readonly description: string;
+  readonly id: string;
+  readonly project: CompiledAgentProjectSnapshot;
+}
+
 export interface AgentProjectResources {
   readonly skills?: readonly CompiledAgentSkill[];
 }
@@ -98,6 +105,7 @@ export interface AgentProjectSnapshot {
   readonly connections: readonly CompiledMcpConnection[];
   readonly resources: Readonly<AgentProjectResources>;
   readonly stateDefinitions?: readonly CompiledAgentStateDefinition[];
+  readonly subagents?: readonly CompiledAgentSubagent[];
   readonly diagnostics: readonly AgentProjectDiagnostic[];
   readonly dynamicToolResolvers?: readonly CompiledDynamicToolResolver[];
   readonly fingerprint: string;

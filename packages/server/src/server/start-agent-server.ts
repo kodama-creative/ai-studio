@@ -854,6 +854,38 @@ async function _decideToolApproval(
     return _error(400, "invalid_json");
   }
   try {
+    const child = context.repository.subagentRuns(sessionId).find(candidate =>
+      candidate.parent.runId === runId
+      && candidate.runtime.snapshot.approvalLedger?.requests.some(
+        request => request.id === requestId
+      ));
+    if (child) {
+      const current = await context.repository.load(child.child.sessionId);
+      if (!current) { return _error(404, "not_found"); }
+      const decided = await decideRuntimeToolApproval(context.repository, {
+        actor: { current: principal, initiator: principal },
+        decision,
+        expectedVersion: current.version,
+        requestId,
+        runId: child.child.runId,
+        sessionId: child.child.sessionId
+      });
+      const pending = decided.snapshot.approvalLedger?.requests.some(
+        approval => approval.runId === child.child.runId
+          && approval.state === "pending"
+      ) ?? false;
+      if (!pending) {
+        context.runs.resumeRun(
+          context.repository.recoverableRun(sessionId, runId)
+        );
+      }
+      return _json({
+        schemaVersion: 1,
+        requestId,
+        decision,
+        status: pending ? "waitingForApproval" : "resuming"
+      }, 202);
+    }
     const current = await context.repository.load(sessionId);
     if (!current) { return _error(404, "not_found"); }
     const decided = await decideRuntimeToolApproval(context.repository, {

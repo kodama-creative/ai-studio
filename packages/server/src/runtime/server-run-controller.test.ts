@@ -31,6 +31,7 @@ test("terminalizes a continued Turn when Host capability policy changed", async 
       transcript: [],
       turnSequence: 1
     }),
+    subagentRunForParent: () => null,
     load: async () => Promise.resolve({
       version: 1,
       snapshot: {
@@ -95,7 +96,11 @@ test("fails closed when a required Sandbox has no Host provider", () => {
     models: _models(),
     project: {
       ..._project(),
-      sandbox: { sourcePath: "sandbox.ts", workspace: [] }
+      sandbox: {
+        revalidationFingerprint: "sandbox-test",
+        sourcePath: "sandbox.ts",
+        workspace: []
+      }
     },
     repository: {} as ServerSessionRepository
   })).toThrow("this Server Host has no SandboxProvider");
@@ -136,7 +141,11 @@ test("does not reconnect a Sandbox after an uncommitted first seed", async () =>
     models: _models(),
     project: {
       ..._project(),
-      sandbox: { sourcePath: "sandbox.ts", workspace: [] }
+      sandbox: {
+        revalidationFingerprint: "sandbox-test",
+        sourcePath: "sandbox.ts",
+        workspace: []
+      }
     },
     repository,
     sandboxProvider: {
@@ -198,7 +207,11 @@ test("reconnects a Sandbox after the Turn snapshot commits durably", async () =>
     models: _models(),
     project: {
       ..._project(),
-      sandbox: { sourcePath: "sandbox.ts", workspace: [] }
+      sandbox: {
+        revalidationFingerprint: "sandbox-test",
+        sourcePath: "sandbox.ts",
+        workspace: []
+      }
     },
     repository,
     sandboxProvider: {

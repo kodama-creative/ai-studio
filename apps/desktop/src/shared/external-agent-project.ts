@@ -1,7 +1,8 @@
 import { getThreadRuntimeProfile } from "@llm-space/core";
 
-import type { ProjectTool, Thread } from "@llm-space/core";
+import type { Message, ProjectTool, Thread } from "@llm-space/core";
 import type { CompiledAgentDefinition } from "@llm-space/runtime";
+import type { StoredRuntimeSession } from "@llm-space/runtime/harness";
 
 import type { SkillInfo } from "./skills";
 
@@ -25,6 +26,7 @@ export type ExternalAgentProjectCapabilityKind =
   | "output"
   | "skill"
   | "state"
+  | "subagent"
   | "tool";
 
 export interface ExternalAgentProjectCapabilitySummary {
@@ -136,12 +138,66 @@ export type ExternalAgentProjectToolCallResponse =
   | { contentText: string; isError: boolean; }
   | { message: string; rejected: true; };
 
+export interface ExternalAgentProjectSubagentRun {
+  readonly artifactFingerprint: string;
+  readonly capabilities: ReadonlyArray<{
+    readonly kind: "skill" | "tool";
+    readonly name: string;
+    readonly sourcePath: string;
+  }>;
+  readonly child: {
+    readonly runId: string;
+    readonly sessionId: string;
+  };
+  readonly createdAt: string;
+  readonly description: string;
+  readonly instructions: string;
+  readonly message: string;
+  readonly messages: readonly Message[];
+  readonly model: CompiledAgentDefinition["model"];
+  readonly limits: CompiledAgentDefinition["limits"] | null;
+  readonly parent: {
+    readonly runId: string;
+    readonly sessionId: string;
+    readonly toolCallId: string;
+  };
+  readonly retryOf?: {
+    readonly runId: string;
+    readonly sessionId: string;
+  };
+  readonly runtimeSession: StoredRuntimeSession;
+  readonly sandbox: {
+    readonly mode: "direct" | "isolated" | "shared";
+    readonly revalidationFingerprint?: string;
+  };
+  readonly schemaVersion: 1;
+  readonly status:
+    | "cancelled"
+    | "completed"
+    | "failed"
+    | "outcomeUnknown"
+    | "preparing"
+    | "running"
+    | "waitingForApproval"
+    | "waitingForBudget"
+    | "waitingForContinue"
+    | "waitingForToolResults";
+  readonly subagentId: string;
+  readonly terminal?: {
+    readonly error?: { readonly code: string; readonly message: string; };
+    readonly result?: string;
+    readonly status: "cancelled" | "completed" | "failed" | "outcomeUnknown";
+  };
+  readonly updatedAt: string;
+}
+
 export interface ExternalAgentProjectThreadRecord {
-  thread: Thread;
-  promptFingerprint: string;
-  syncedPrompt: string;
-  definitionFingerprint: string;
-  syncedDefinition: CompiledAgentDefinition;
+  readonly definitionFingerprint: string;
+  readonly promptFingerprint: string;
+  readonly subagentRuns?: readonly ExternalAgentProjectSubagentRun[];
+  readonly syncedDefinition: CompiledAgentDefinition;
+  readonly syncedPrompt: string;
+  readonly thread: Thread;
 }
 
 export interface ExternalAgentProjectChangedPayload {

@@ -14,6 +14,7 @@ import { Type } from "typebox";
 import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
 
 import { AgentRuntime } from "./agent-runtime";
+import { createAgentSubagentTool } from "./create-agent-subagent-tool";
 import { defineState } from "../../public/definitions/state";
 import {
   defineDynamic as defineDynamicInstructions,
@@ -22,17 +23,487 @@ import {
 import { defineDynamic as defineDynamicModel } from "../../public/models/define-dynamic";
 import { defineDynamic as defineDynamicTools } from "../../public/tools/define-dynamic";
 import { InMemorySessionStore } from "../harness/in-memory-session-store";
+import { decideRuntimeToolApproval } from "../harness/runtime-tool-approval-decision";
 import { SandboxUnavailableError } from "../sandbox/sandbox-unavailable-error";
 
-import type { AgentProjectSnapshot } from "./agent-project-snapshot";
+import type {
+  AgentProjectSnapshot,
+  CompiledAgentProjectSnapshot
+} from "./agent-project-snapshot";
 
 describe("AgentRuntime", () => {
+  test("runs a declared Subagent as an explicit-message child Session and returns final text", async () => {
+    const starts: unknown[] = [];
+    const terminals: unknown[] = [];
+    const childProject = {
+      ..._project(),
+      definition: {
+        description: "Research one bounded question.",
+        model: { provider: "fake", id: "fake-model" }
+      },
+      instructions: "Child only.",
+      fingerprint: "child-snapshot",
+      artifact: {
+        schemaVersion: 1,
+        fingerprint: "child-artifact",
+        fingerprints: {} as never
+      }
+    } as CompiledAgentProjectSnapshot;
+    const runtime = new AgentRuntime({
+      models: _reactModels(),
+      project: {
+        ..._project(),
+        instructions: "Parent only.",
+        subagents: [{
+          id: "researcher",
+          description: "Research one bounded question.",
+          project: childProject
+        }]
+      }
+    });
+    const streamFn = async (_model: Model<Api>, context: Context) =>
+      _delegationStream(context);
+    const session = await runtime.createSession({
+      capabilityPolicy: {
+        ..._policy(),
+        toolContributions: [
+          ..._policy().toolContributions,
+          "subagent:researcher"
+        ]
+      },
+      context: _context("parent-session"),
+      executionMode: "react",
+      streamFn,
+      subagentHost: {
+        prepare(start) {
+          starts.push(start);
+          return {
+            capabilityPolicy: _policy(),
+            streamFn
+          };
+        },
+        finish(_identity, terminal) {
+          terminals.push(terminal);
+        }
+      }
+    });
+
+    await session.prompt("research this");
+
+    expect(starts).toHaveLength(1);
+    expect(starts[0]).toMatchObject({
+      message: "bounded task",
+      parent: {
+        sessionId: "parent-session",
+        runId: "turn-parent-session",
+        toolCallId: "call-researcher"
+      },
+      subagent: {
+        id: "researcher",
+        artifactFingerprint: "child-artifact"
+      }
+    });
+    expect(terminals).toEqual([expect.objectContaining({
+      status: "completed",
+      result: "child result"
+    })]);
+    const toolResult = session.messages.find(message =>
+      message.role === "toolResult");
+    expect(toolResult?.content).toEqual([
+      { type: "text", text: "child result" }
+    ]);
+    expect(session.messages.at(-1)).toMatchObject({
+      role: "assistant",
+      content: [{ type: "text", text: "parent result" }]
+    });
+  });
+
+  test("parks the parent delegation while a child-owned approval waits", async () => {
+    const childStore = new InMemorySessionStore();
+    let childSessionId = "";
+    const waits: unknown[] = [];
+    const terminals: unknown[] = [];
+    const childProject = {
+      ..._project(),
+      definition: {
+        description: "Use one approval-bound action.",
+        model: { provider: "fake", id: "fake-model" }
+      },
+      instructions: "Child approval.",
+      tools: [{ ..._tool("approval_action"), approval: "always" }],
+      fingerprint: "approval-child",
+      artifact: {
+        schemaVersion: 1,
+        fingerprint: "approval-child-artifact",
+        fingerprints: {} as never
+      }
+    } as CompiledAgentProjectSnapshot;
+    const runtime = new AgentRuntime({
+      models: _reactModels(),
+      project: {
+        ..._project(),
+        instructions: "Approval parent.",
+        subagents: [{
+          id: "approver",
+          description: "Use one approval-bound action.",
+          project: childProject
+        }]
+      }
+    });
+    const streamFn = async (_model: Model<Api>, context: Context) =>
+      _approvalDelegationStream(context);
+    const session = await runtime.createSession({
+      capabilityPolicy: {
+        ..._policy(),
+        toolContributions: ["subagent:approver"]
+      },
+      context: _context("approval-parent"),
+      executionMode: "react",
+      sessionStore: new InMemorySessionStore(),
+      streamFn,
+      subagentHost: {
+        async prepare(start) {
+          childSessionId = start.child.sessionId;
+          await childStore.commit({
+            sessionId: start.child.sessionId,
+            expectedVersion: null,
+            mutations: [{
+              type: "startRun",
+              runId: start.child.runId,
+              messages: [],
+              configuration: {
+                id: `configuration-${start.child.runId}`,
+                agentSnapshotFingerprint:
+                  start.subagent.artifactFingerprint,
+                contextFingerprint: "child-context",
+                executionMode: "react",
+                model: { provider: "fake", id: "fake-model" },
+                toolConfigurationFingerprint: "child-tools"
+              }
+            }]
+          });
+          return {
+            capabilityPolicy: {
+              ..._policy(),
+              toolContributions: ["tool:approval_action"]
+            },
+            sessionStore: childStore,
+            streamFn
+          };
+        },
+        park(_identity, wait) { waits.push(wait); },
+        finish(_identity, terminal) { terminals.push(terminal); }
+      }
+    });
+
+    await session.prompt("delegate approval");
+
+    const stored = await childStore.load(childSessionId);
+    expect({
+      waits,
+      approval: stored?.snapshot.approvalLedger?.requests[0]
+    }).toEqual({
+      waits: [{ state: "waitingForApproval" }],
+      approval: expect.objectContaining({
+        state: "pending",
+        toolName: "approval_action"
+      })
+    });
+    expect(terminals).toEqual([]);
+    expect(session.messages.at(-1)).toMatchObject({
+      role: "assistant",
+      content: [expect.objectContaining({
+        type: "toolCall",
+        name: "approver"
+      })]
+    });
+  });
+
+  test("resumes the same persisted child after approval without rerunning it", async () => {
+    const childStore = new InMemorySessionStore();
+    const starts: Array<{ child: { runId: string; sessionId: string; }; }> = [];
+    let childMessages: AgentMessage[] = [];
+    let executions = 0;
+    const childProject = {
+      ..._project(),
+      definition: {
+        description: "Use one approval-bound action.",
+        model: { provider: "fake", id: "fake-model" }
+      },
+      instructions: "Child approval.",
+      tools: [{
+        ..._tool("approval_action"),
+        approval: "always" as const,
+        async execute() {
+          executions += 1;
+          return {
+            content: [{ type: "text" as const, text: "approved" }],
+            details: {}
+          };
+        }
+      }],
+      fingerprint: "approval-child",
+      artifact: {
+        schemaVersion: 1,
+        fingerprint: "approval-child-artifact",
+        fingerprints: {} as never
+      }
+    } as CompiledAgentProjectSnapshot;
+    const streamFn = async (_model: Model<Api>, context: Context) =>
+      _approvalDelegationStream(context);
+    const tool = createAgentSubagentTool({
+      context: _context("approval-parent-resume"),
+      host: {
+        async prepare(start) {
+          starts.push(start);
+          const current = await childStore.load(start.child.sessionId);
+          if (!current) {
+            await childStore.commit({
+              sessionId: start.child.sessionId,
+              expectedVersion: null,
+              mutations: [{
+                type: "startRun",
+                runId: start.child.runId,
+                messages: [],
+                configuration: {
+                  id: `configuration-${start.child.runId}`,
+                  agentSnapshotFingerprint: start.subagent.artifactFingerprint,
+                  contextFingerprint: "child-context",
+                  executionMode: "react",
+                  model: { provider: "fake", id: "fake-model" },
+                  toolConfigurationFingerprint: "child-tools"
+                }
+              }]
+            });
+          }
+          return {
+            capabilityPolicy: {
+              ..._policy(),
+              toolContributions: ["tool:approval_action"]
+            },
+            initialMessages: current ? childMessages : [],
+            persistence: {
+              replaceMessages(messages) {
+                childMessages = structuredClone(messages);
+              }
+            },
+            resume: current
+              ? { type: "resumeApprovedTools" as const }
+              : { type: "prompt" as const },
+            sessionStore: childStore,
+            streamFn
+          };
+        }
+      },
+      models: _reactModels(),
+      streamFn,
+      subagent: {
+        id: "approver",
+        description: "Use one approval-bound action.",
+        project: childProject
+      }
+    });
+    if (tool.kind !== "executable") {
+      throw new Error("Expected executable Subagent tool");
+    }
+
+    const first = await tool.execute(
+      "call-approver",
+      { message: "approve this" }
+    );
+    const parked = await childStore.load(starts[0]!.child.sessionId);
+    const request = parked?.snapshot.approvalLedger?.requests[0];
+    if (!parked || !request) { throw new Error("Expected child approval"); }
+    await decideRuntimeToolApproval(childStore, {
+      actor: _context("approval-parent-resume").auth,
+      decision: "approved",
+      expectedVersion: parked.version,
+      requestId: request.id,
+      runId: starts[0]!.child.runId,
+      sessionId: starts[0]!.child.sessionId
+    });
+    const resumed = await tool.execute(
+      "call-approver",
+      { message: "approve this" }
+    );
+
+    expect(first).toEqual({ type: "deferred" });
+    expect(starts[1]?.child).toEqual(starts[0]?.child);
+    expect(executions).toBe(1);
+    expect(resumed).toMatchObject({
+      type: "completed",
+      result: {
+        content: [{ type: "text", text: "child approved result" }],
+        details: {
+          childSessionId: starts[0]!.child.sessionId,
+          childRunId: starts[0]!.child.runId,
+          terminalStatus: "completed"
+        }
+      }
+    });
+  });
+
+  test("backfills a persisted child terminal without calling the model", async () => {
+    let modelCalls = 0;
+    const childProject = {
+      ..._project(),
+      definition: {
+        description: "Return one cached answer.",
+        model: { provider: "fake", id: "fake-model" }
+      },
+      artifact: {
+        schemaVersion: 1,
+        fingerprint: "cached-child-artifact",
+        fingerprints: {} as never
+      }
+    } as CompiledAgentProjectSnapshot;
+    const tool = createAgentSubagentTool({
+      context: _context("cached-parent"),
+      host: {
+        prepare() {
+          return {
+            capabilityPolicy: _policy(),
+            resume: {
+              type: "terminal",
+              terminal: { status: "completed", result: "cached child" }
+            }
+          };
+        }
+      },
+      models: _reactModels(),
+      streamFn: async (_model, context) => {
+        modelCalls += 1;
+        return _stream(context);
+      },
+      subagent: {
+        id: "cached",
+        description: "Return one cached answer.",
+        project: childProject
+      }
+    });
+    if (tool.kind !== "executable") {
+      throw new Error("Expected executable Subagent tool");
+    }
+
+    const outcome = await tool.execute("call-cached", { message: "answer" });
+
+    expect(modelCalls).toBe(0);
+    expect(outcome).toMatchObject({
+      type: "completed",
+      result: {
+        content: [{ type: "text", text: "cached child" }],
+        details: { terminalStatus: "completed" }
+      }
+    });
+  });
+
+  test("selects shared or isolated child Sandbox from declared fingerprints", async () => {
+    const parentSandbox = {
+      executionEnv: {} as never,
+      revalidationFingerprint: "shared-fingerprint",
+      workspaceManifest: ["parent.txt"]
+    };
+    const cases = [
+      {
+        name: "undeclared child shares parent",
+        childFingerprint: undefined,
+        parentSandbox,
+        expected: { mode: "shared", fingerprint: "shared-fingerprint" }
+      },
+      {
+        name: "matching declaration shares parent",
+        childFingerprint: "shared-fingerprint",
+        parentSandbox,
+        expected: { mode: "shared", fingerprint: "shared-fingerprint" }
+      },
+      {
+        name: "different declaration is isolated",
+        childFingerprint: "isolated-fingerprint",
+        parentSandbox,
+        expected: { mode: "isolated", fingerprint: "isolated-fingerprint" }
+      },
+      {
+        name: "declared child under direct parent is isolated",
+        childFingerprint: "isolated-fingerprint",
+        parentSandbox: undefined,
+        expected: { mode: "isolated", fingerprint: "isolated-fingerprint" }
+      }
+    ] as const;
+
+    for (const item of cases) {
+      const starts: unknown[] = [];
+      const childProject = {
+        ..._project(),
+        definition: {
+          description: item.name,
+          model: { provider: "fake", id: "fake-model" }
+        },
+        instructions: "Child only.",
+        ...(item.childFingerprint
+          ? {
+            sandbox: {
+              revalidationFingerprint: item.childFingerprint,
+              sourcePath: "sandbox.ts",
+              workspace: []
+            }
+          }
+          : {}),
+        artifact: {
+          schemaVersion: 1,
+          fingerprint: `artifact-${item.name}`,
+          fingerprints: {} as never
+        }
+      } as CompiledAgentProjectSnapshot;
+      const tool = createAgentSubagentTool({
+        context: _context(`sandbox-${item.name}`),
+        host: {
+          prepare(start) {
+            starts.push(start);
+            return {
+              capabilityPolicy: _policy(),
+              sandbox: {
+                executionEnv: {} as never,
+                revalidationFingerprint: item.childFingerprint,
+                workspaceManifest: ["child.txt"]
+              }
+            };
+          }
+        },
+        models: _reactModels(),
+        parentSandbox: item.parentSandbox,
+        streamFn: async (_model, context) => _delegationStream(context),
+        subagent: {
+          id: "sandbox_child",
+          description: item.name,
+          project: childProject
+        }
+      });
+      if (tool.kind !== "executable") {
+        throw new Error("Expected executable Subagent tool");
+      }
+
+      const outcome = await tool.execute(
+        `call-${item.name}`,
+        { message: "inspect sandbox" }
+      );
+
+      expect(starts).toEqual([expect.objectContaining({
+        sandbox: {
+          mode: item.expected.mode,
+          revalidationFingerprint: item.expected.fingerprint
+        }
+      })]);
+      expect(outcome).toMatchObject({ type: "completed" });
+    }
+  });
+
   test("requires a real Sandbox and snapshots its workspace manifest", async () => {
     const runtime = new AgentRuntime({
       models: _models(),
       project: {
         ..._project(),
         sandbox: {
+          revalidationFingerprint: "a".repeat(64),
           sourcePath: "sandbox.ts",
           workspace: []
         }
@@ -1045,6 +1516,94 @@ function _stream(context: Context) {
           arguments: { text: "hello" }
         }
       ],
+    api: "fake",
+    provider: "fake",
+    model: "fake-model",
+    usage: {
+      input: 1,
+      output: 1,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 2,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
+    },
+    stopReason: hasToolResult ? "stop" : "toolUse",
+    timestamp: Date.now()
+  };
+  queueMicrotask(() => {
+    stream.push({ type: "start", partial: message });
+    stream.push({
+      type: "done",
+      reason: hasToolResult ? "stop" : "toolUse",
+      message
+    });
+  });
+  return stream;
+}
+
+function _delegationStream(context: Context) {
+  const stream = createAssistantMessageEventStream();
+  const isChild = context.systemPrompt === "Child only.";
+  const hasToolResult = context.messages.at(-1)?.role === "toolResult";
+  const content: AssistantMessage["content"] = isChild
+    ? [{ type: "text", text: "child result" }]
+    : hasToolResult
+      ? [{ type: "text", text: "parent result" }]
+      : [{
+        type: "toolCall",
+        id: "call-researcher",
+        name: "researcher",
+        arguments: { message: "bounded task" }
+      }];
+  const stopReason = isChild || hasToolResult ? "stop" : "toolUse";
+  const message: AssistantMessage = {
+    role: "assistant",
+    content,
+    api: "fake",
+    provider: "fake",
+    model: "fake-model",
+    usage: {
+      input: 1,
+      output: 1,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 2,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
+    },
+    stopReason,
+    timestamp: Date.now()
+  };
+  queueMicrotask(() => {
+    stream.push({ type: "start", partial: message });
+    stream.push({ type: "done", reason: stopReason, message });
+  });
+  return stream;
+}
+
+function _approvalDelegationStream(context: Context) {
+  const stream = createAssistantMessageEventStream();
+  const isChild = context.systemPrompt === "Child approval.";
+  const hasToolResult = context.messages.at(-1)?.role === "toolResult";
+  const content: AssistantMessage["content"] = isChild
+    ? hasToolResult
+      ? [{ type: "text", text: "child approved result" }]
+      : [{
+        type: "toolCall",
+        id: "call-approval-action",
+        name: "approval_action",
+        arguments: {}
+      }]
+    : hasToolResult
+      ? [{ type: "text", text: "parent handled child failure" }]
+      : [{
+        type: "toolCall",
+        id: "call-approver",
+        name: "approver",
+        arguments: { message: "approve this" }
+      }];
+  const message: AssistantMessage = {
+    role: "assistant",
+    content,
     api: "fake",
     provider: "fake",
     model: "fake-model",

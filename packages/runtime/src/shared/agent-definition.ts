@@ -66,6 +66,7 @@ export interface AgentSessionLimitsDefinition {
 }
 
 export interface AgentDefinition {
+  readonly description?: string;
   readonly environment?: AgentEnvironmentRequirements;
   readonly limits?: AgentSessionLimitsDefinition;
   readonly model: AgentDynamicModelDefinition | AgentModelDefinition;
@@ -79,6 +80,7 @@ export interface AgentModelSelector {
 }
 
 export interface CompiledAgentDefinition {
+  readonly description?: string;
   readonly dynamicModel?: AgentDynamicModelDefinition;
   readonly environment?: AgentEnvironmentRequirements;
   readonly limits?: AgentSessionLimitsDefinition;

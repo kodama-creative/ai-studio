@@ -39,6 +39,9 @@ export function createHostCapabilityPolicy(input: {
       ...input.project.tools.map(
         tool => `tool:${tool.sourcePath ?? tool.name}`
       ),
+      ...(input.project.subagents ?? []).map(
+        subagent => `subagent:${subagent.id}`
+      ),
       ...(input.project.dynamicToolResolvers ?? []).map(
         resolver => resolver.contributionId
       ),

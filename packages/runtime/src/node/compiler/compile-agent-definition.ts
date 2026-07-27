@@ -18,6 +18,9 @@ export function compileAgentDefinition(
     reasoning = undefined;
   }
   return {
+    ...(definition.description
+      ? { description: definition.description }
+      : {}),
     model: {
       provider: model.slice(0, separator),
       id: model.slice(separator + 1)

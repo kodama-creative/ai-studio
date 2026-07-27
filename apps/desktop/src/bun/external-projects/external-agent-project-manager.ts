@@ -37,9 +37,13 @@ import {
   type AgentProjectSnapshot,
   AgentRuntime,
   type AgentSession,
+  type AgentSubagentHost,
+  type AgentSubagentRunIdentity,
+  type AgentSubagentRunStart,
   type CompiledAgentProjectSnapshot,
   createAgentProjectBundle,
   type CreateAgentSessionOptions,
+  createAgentSubagentTool,
   createHostCapabilityPolicy,
   loadAgentProject,
   loadAgentProjectBundle,
@@ -49,13 +53,21 @@ import {
   ProjectMcpSession,
   ProjectMcpToolCallRejectedError,
   type ResolvedAgentProjectManifest,
+  type SandboxTurnEnvironment,
   scaffoldAgentProject,
   type StagedSandboxAttachment
 } from "@llm-space/runtime/node";
 
+import type { StreamFn } from "@earendil-works/pi-agent-core";
 import type { Models } from "@earendil-works/pi-ai";
+import type { StoredRuntimeSession } from "@llm-space/runtime/harness";
 
 import { agentDefinitionFingerprint } from "./agent-definition-fingerprint";
+import {
+  createDesktopAgentSubagentHost,
+  createDesktopAgentSubagentSessionStore,
+  type DesktopAgentSubagentRecordAdapter
+} from "./desktop-agent-subagent-host";
 import { createDesktopThreadRuntimeAuthority } from "../streaming/desktop-thread-runtime-authority";
 
 import type {
@@ -63,6 +75,7 @@ import type {
   ExternalAgentProjectConnectionActivation,
   ExternalAgentProjectPreview,
   ExternalAgentProjectStatus,
+  ExternalAgentProjectSubagentRun,
   ExternalAgentProjectSummary,
   ExternalAgentProjectThreadRecord,
   ExternalAgentProjectThreadSummary,
@@ -130,6 +143,7 @@ interface ThreadFile {
   definitionFingerprint: string;
   syncedDefinition: CompiledAgentDefinition;
   modelSource?: NonNullable<Thread["agentRuntime"]>["modelSource"];
+  subagentRuns?: ExternalAgentProjectThreadRecord["subagentRuns"];
 }
 
 export class ExternalAgentProjectManager {
@@ -143,6 +157,7 @@ export class ExternalAgentProjectManager {
   private readonly _registry = new Map<string, RegistryEntry>();
   private readonly _loaded = new Map<string, LoadedProject>();
   private readonly _reloadTails = new Map<string, Promise<void>>();
+  private readonly _subagentMutationTails = new Map<string, Promise<void>>();
   private _loadedRegistry = false;
   private _onChange: ((projectId: string) => void) | null = null;
 
@@ -420,7 +435,8 @@ export class ExternalAgentProjectManager {
       promptFingerprint: view.promptFingerprint,
       syncedPrompt: view.instructions,
       definitionFingerprint: view.definitionFingerprint,
-      syncedDefinition: view.definition
+      syncedDefinition: view.definition,
+      subagentRuns: []
     };
     await this._writeThreadFile(projectId, id, record);
     this._notify(projectId);
@@ -438,6 +454,7 @@ export class ExternalAgentProjectManager {
       syncedPrompt: stored.syncedPrompt,
       definitionFingerprint: stored.definitionFingerprint,
       syncedDefinition: stored.syncedDefinition,
+      subagentRuns: stored.subagentRuns ?? [],
       thread: {
         ...ensureThreadVariableState(normalizeThread(stored.thread)),
         context: {
@@ -510,7 +527,8 @@ export class ExternalAgentProjectManager {
       promptFingerprint: record.promptFingerprint,
       syncedPrompt: record.syncedPrompt,
       definitionFingerprint: record.definitionFingerprint,
-      syncedDefinition: record.syncedDefinition
+      syncedDefinition: record.syncedDefinition,
+      subagentRuns: existing.subagentRuns ?? []
     });
     this._notify(projectId);
   }
@@ -581,6 +599,7 @@ export class ExternalAgentProjectManager {
     const id = randomUUID();
     const record = {
       ...source,
+      subagentRuns: [],
       thread: duplicateExternalAgentProjectThreadState(source.thread)
     };
     await this._writeThreadFile(projectId, id, record);
@@ -628,7 +647,8 @@ export class ExternalAgentProjectManager {
       promptFingerprint: next.promptFingerprint,
       syncedPrompt: next.syncedPrompt,
       definitionFingerprint: next.definitionFingerprint,
-      syncedDefinition: next.syncedDefinition
+      syncedDefinition: next.syncedDefinition,
+      subagentRuns: next.subagentRuns
     });
     this._notify(projectId);
     return next;
@@ -805,6 +825,100 @@ export class ExternalAgentProjectManager {
       .map(item => item.text)
       .join("\n");
     return { contentText: text, isError: false };
+  }
+
+  async callAgentSubagent(
+    input: {
+      arguments: Record<string, unknown>;
+      callId: string;
+      name: string;
+      projectId: string;
+      snapshot: string;
+      threadId?: string;
+    },
+    options: {
+      readonly models: Models;
+      readonly onSessionCommitted?: Parameters<
+        typeof createDesktopAgentSubagentHost
+      >[0]["onSessionCommitted"];
+      readonly prepareParentSandbox?: (input: {
+        readonly sessionId: string;
+        readonly snapshot: string;
+        readonly turnId: string;
+      }) => Promise<SandboxTurnEnvironment>;
+      readonly prepareSandbox?: Parameters<
+        typeof createDesktopAgentSubagentHost
+      >[0]["prepareSandbox"];
+      readonly streamFn?: StreamFn;
+    }
+  ): Promise<ExternalAgentProjectToolCallResponse | null> {
+    await this._ensureProject(input.projectId);
+    const root = this._state(input.projectId).snapshots.get(input.snapshot);
+    if (!root) { return null; }
+    const subagent = root.subagents?.find(candidate => candidate.id === input.name);
+    if (!subagent) { return null; }
+    if (!input.threadId) {
+      return _rejectedToolCall("Subagent calls require an Agent Project Thread.");
+    }
+    const record = await this._readThreadFile(input.projectId, input.threadId);
+    const runtimeSession = record.thread.runtimeSession as
+      | StoredRuntimeSession
+      | undefined;
+    const parentRunId = runtimeSession?.snapshot.activeRunId;
+    if (!runtimeSession || !parentRunId) {
+      return _rejectedToolCall(
+        "Subagent calls require the active parent Runtime Run. Run the Thread again."
+      );
+    }
+    const profile = getThreadRuntimeProfile(record.thread);
+    const parentSandbox = profile.type === "desktopSandbox"
+      ? await options.prepareParentSandbox?.({
+        sessionId: runtimeSession.snapshot.id,
+        snapshot: input.snapshot,
+        turnId: parentRunId
+      })
+      : undefined;
+    if (profile.type === "desktopSandbox" && !parentSandbox) {
+      return _rejectedToolCall("The parent Sandbox is unavailable.");
+    }
+    const host = this.createAgentSubagentHost(
+      input.projectId,
+      input.threadId,
+      options
+    );
+    const principal = {
+      issuer: "llm-space-desktop",
+      principalId: "local-user",
+      principalType: "user" as const
+    };
+    const tool = createAgentSubagentTool({
+      context: {
+        id: runtimeSession.snapshot.id,
+        auth: { current: principal, initiator: principal },
+        channel: { kind: "desktop", id: input.threadId },
+        turn: { id: parentRunId, sequence: 1 }
+      },
+      host,
+      models: options.models,
+      parentSandbox,
+      parentSandboxFingerprint: root.sandbox?.revalidationFingerprint,
+      streamFn: options.streamFn,
+      subagent
+    });
+    if (tool.kind !== "executable") {
+      return _rejectedToolCall("Subagent tool is not executable.");
+    }
+    const outcome = await tool.execute(input.callId, input.arguments);
+    if (outcome.type === "deferred") {
+      return { contentText: "", isError: false };
+    }
+    return {
+      contentText: outcome.result.content
+        .filter(item => item.type === "text")
+        .map(item => item.text)
+        .join("\n"),
+      isError: outcome.result.isError ?? false
+    };
   }
 
   async activateConnections(
@@ -1042,6 +1156,220 @@ export class ExternalAgentProjectManager {
           project
         })
     });
+  }
+
+  createAgentSubagentHost(
+    projectId: string,
+    threadId: string,
+    options: {
+      readonly models: Models;
+      readonly onSessionCommitted?: Parameters<
+        typeof createDesktopAgentSubagentHost
+      >[0]["onSessionCommitted"];
+      readonly prepareSandbox?: Parameters<
+        typeof createDesktopAgentSubagentHost
+      >[0]["prepareSandbox"];
+      readonly streamFn?: StreamFn;
+    }
+  ): AgentSubagentHost {
+    return createDesktopAgentSubagentHost({
+      models: options.models,
+      onSessionCommitted: options.onSessionCommitted,
+      prepareSandbox: options.prepareSandbox,
+      records: this._subagentRecords(projectId, threadId),
+      resolveProject: async start =>
+        this._resolveSubagentProject(projectId, threadId, start),
+      streamFn: options.streamFn
+    });
+  }
+
+  async createAgentSubagentRuntimeSessionStore(
+    projectId: string,
+    threadId: string,
+    identity: AgentSubagentRunIdentity
+  ) {
+    const records = this._subagentRecords(projectId, threadId);
+    const record = await records.load(identity);
+    if (!record) { throw new Error("Subagent run record is missing."); }
+    return {
+      session: record.runtimeSession,
+      sessionStore: createDesktopAgentSubagentSessionStore(records, identity)
+    };
+  }
+
+  async resumeAgentSubagent(
+    projectId: string,
+    threadId: string,
+    identity: AgentSubagentRunIdentity,
+    options: {
+      readonly models: Models;
+      readonly onSessionCommitted?: Parameters<
+        typeof createDesktopAgentSubagentHost
+      >[0]["onSessionCommitted"];
+      readonly parentSandbox?: SandboxTurnEnvironment;
+      readonly prepareSandbox?: Parameters<
+        typeof createDesktopAgentSubagentHost
+      >[0]["prepareSandbox"];
+      readonly signal?: AbortSignal;
+      readonly streamFn?: StreamFn;
+    }
+  ) {
+    const records = this._subagentRecords(projectId, threadId);
+    const record = await records.load(identity);
+    if (!record) { throw new Error("Subagent run record is missing."); }
+    const start: AgentSubagentRunStart = {
+      child: record.child,
+      message: record.message,
+      parent: record.parent,
+      ...(record.retryOf ? { retryOf: record.retryOf } : {}),
+      sandbox: record.sandbox,
+      subagent: {
+        artifactFingerprint: record.artifactFingerprint,
+        description: record.description,
+        id: record.subagentId
+      }
+    };
+    const project = await this._resolveSubagentProject(
+      projectId,
+      threadId,
+      start
+    );
+    const host = this.createAgentSubagentHost(projectId, threadId, options);
+    const principal = {
+      issuer: "llm-space-desktop",
+      principalId: "local-user",
+      principalType: "user" as const
+    };
+    const tool = createAgentSubagentTool({
+      context: {
+        id: record.parent.sessionId,
+        auth: { current: principal, initiator: principal },
+        channel: { kind: "desktop", id: threadId },
+        turn: { id: record.parent.runId, sequence: 1 }
+      },
+      host,
+      models: options.models,
+      parentSandbox: options.parentSandbox,
+      streamFn: options.streamFn,
+      subagent: {
+        description: record.description,
+        id: record.subagentId,
+        project
+      }
+    });
+    if (tool.kind !== "executable") {
+      throw new Error("Subagent tool is not executable.");
+    }
+    return tool.execute(
+      record.parent.toolCallId,
+      { message: record.message },
+      options.signal
+    );
+  }
+
+  private _subagentRecords(
+    projectId: string,
+    threadId: string
+  ): DesktopAgentSubagentRecordAdapter {
+    return {
+      create: async (identity, create) => this._mutateSubagentRuns<{
+        readonly created: boolean;
+        readonly record: ExternalAgentProjectSubagentRun;
+      }>(
+        projectId,
+        threadId,
+        async runs => {
+          const existing = runs.find(run => _sameIdentity(run.child, identity));
+          if (existing) {
+            return { runs, value: { created: false, record: existing } };
+          }
+          const record = await create();
+          return {
+            runs: [...runs, record],
+            value: { created: true, record }
+          };
+        }
+      ),
+      load: async identity => {
+        const current = await this._readThreadFile(projectId, threadId);
+        return current.subagentRuns?.find(
+          run => _sameIdentity(run.child, identity)
+        ) ?? null;
+      },
+      update: async (identity, update) => this._mutateSubagentRuns(
+        projectId,
+        threadId,
+        async runs => {
+          const index = runs.findIndex(
+            run => _sameIdentity(run.child, identity)
+          );
+          const current = runs[index];
+          if (!current) { throw new Error("Subagent run record is missing."); }
+          const record = await update(current);
+          return {
+            runs: runs.map((run, candidate) =>
+              (candidate === index ? record : run)),
+            value: record
+          };
+        }
+      )
+    };
+  }
+
+  private async _resolveSubagentProject(
+    projectId: string,
+    threadId: string,
+    start: AgentSubagentRunStart
+  ): Promise<CompiledAgentProjectSnapshot> {
+    const stored = await this._readThreadFile(projectId, threadId);
+    const rootFingerprint = stored.thread.agentRuntime?.snapshot;
+    const root = rootFingerprint
+      ? await this._resolveSnapshot(projectId, rootFingerprint)
+      : null;
+    const subagent = root?.subagents?.find(candidate =>
+      candidate.id === start.subagent.id
+      && candidate.project.artifact?.fingerprint
+      === start.subagent.artifactFingerprint);
+    if (!subagent?.project.artifact) {
+      throw new Error("The frozen Subagent artifact is no longer available.");
+    }
+    return subagent.project;
+  }
+
+  private async _mutateSubagentRuns<T>(
+    projectId: string,
+    threadId: string,
+    mutate: (
+      runs: readonly ExternalAgentProjectSubagentRun[]
+    ) => {
+      readonly runs: readonly ExternalAgentProjectSubagentRun[];
+      readonly value: T;
+    } | Promise<{
+      readonly runs: readonly ExternalAgentProjectSubagentRun[];
+      readonly value: T;
+    }>
+  ): Promise<T> {
+    const key = `${projectId}:${threadId}`;
+    const previous = this._subagentMutationTails.get(key) ?? Promise.resolve();
+    const operation = previous.catch(() => undefined).then(async () => {
+      const current = await this._readThreadFile(projectId, threadId);
+      const result = await mutate(current.subagentRuns ?? []);
+      await this._writeThreadFile(projectId, threadId, {
+        ...current,
+        subagentRuns: [...result.runs]
+      });
+      this._notify(projectId);
+      return result.value;
+    });
+    const tail = operation.then(() => undefined, () => undefined);
+    this._subagentMutationTails.set(key, tail);
+    try {
+      return await operation;
+    } finally {
+      if (this._subagentMutationTails.get(key) === tail) {
+        this._subagentMutationTails.delete(key);
+      }
+    }
   }
 
   async createRuntimeSessionStore(
@@ -1476,6 +1804,7 @@ export class ExternalAgentProjectManager {
           : (parsed.thread.context?.systemPrompt ?? ""),
       definitionFingerprint,
       syncedDefinition,
+      subagentRuns: parsed.subagentRuns ?? [],
       modelSource
     };
     if (
@@ -1718,6 +2047,16 @@ function _artifactSummary(
       name: connection.name,
       sourcePath: connection.logicalPath,
       detail: `${connection.definition.tools.allow.length} allowlisted tools`
+    })),
+    ...(snapshot.subagents ?? []).map(subagent => ({
+      kind: "subagent" as const,
+      name: subagent.id,
+      sourcePath: `subagents/${subagent.id}/agent.ts`,
+      detail: [
+        `${subagent.project.definition?.model.provider ?? "unknown"
+        }/${subagent.project.definition?.model.id ?? "unknown"}`,
+        subagent.project.sandbox ? "Sandbox" : "Shares parent Sandbox"
+      ].join(" · ")
     }))
   ];
   return {
@@ -1781,15 +2120,36 @@ function _projectTools(
   projectId: string,
   snapshot: AgentProjectSnapshot
 ): ProjectTool[] {
-  return snapshot.tools.map(tool => ({
-    type: "project",
-    projectId,
-    snapshot: snapshot.fingerprint,
-    name: tool.name,
-    description: tool.description,
-    parameters: tool.parameters,
-    sourcePath: tool.sourcePath ?? `tools/${tool.name}.ts`
-  }));
+  return [
+    ...snapshot.tools.map(tool => ({
+      type: "project" as const,
+      projectId,
+      snapshot: snapshot.fingerprint,
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.parameters,
+      sourcePath: tool.sourcePath ?? `tools/${tool.name}.ts`
+    })),
+    ...(snapshot.subagents ?? []).map(subagent => ({
+      type: "project" as const,
+      projectId,
+      snapshot: snapshot.fingerprint,
+      name: subagent.id,
+      description: subagent.description,
+      parameters: {
+        type: "object" as const,
+        properties: {
+          message: {
+            type: "string" as const,
+            description: "Everything the child needs; it cannot see parent history."
+          }
+        },
+        required: ["message"],
+        additionalProperties: false
+      },
+      sourcePath: `subagents/${subagent.id}/agent.ts`
+    }))
+  ];
 }
 
 function _remoteProjectTools(
@@ -2130,6 +2490,13 @@ function _assertRuntimeProfileWrite(current: Thread, next: Thread): void {
 
 function _hasCode(error: unknown, code: string): boolean {
   return error instanceof Error && "code" in error && error.code === code;
+}
+
+function _sameIdentity(
+  left: AgentSubagentRunIdentity,
+  right: AgentSubagentRunIdentity
+): boolean {
+  return left.runId === right.runId && left.sessionId === right.sessionId;
 }
 
 async function _exists(target: string): Promise<boolean> {

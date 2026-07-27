@@ -11,6 +11,7 @@ export {
   type CompiledAgentOutputDefinition,
   type CompiledAgentProjectSnapshot,
   type CompiledAgentStateDefinition,
+  type CompiledAgentSubagent,
   type CompiledMcpConnection,
   type CompiledProjectTool,
   type CompiledSandboxRequirement,
@@ -22,6 +23,16 @@ export {
   type CreateAgentSessionOptions
 } from "../runtime/agent/agent-runtime";
 export { AgentRuntimeModelUnavailableError } from "../runtime/agent/agent-runtime-model-unavailable-error";
+export type {
+  AgentSubagentHost,
+  AgentSubagentRunIdentity,
+  AgentSubagentRunStart,
+  AgentSubagentRunTerminal,
+  AgentSubagentRunWait,
+  AgentSubagentSandboxMode,
+  AgentSubagentSessionResources
+} from "../runtime/agent/agent-subagent-host";
+export { createAgentSubagentTool } from "../runtime/agent/create-agent-subagent-tool";
 export type { PreparedAgentTool } from "../runtime/agent/prepared-agent-tool";
 export { AgentHostPolicyChangedError } from "../runtime/capabilities/agent-session-capabilities";
 export { createHostCapabilityPolicy } from "../runtime/capabilities/create-host-capability-policy";

@@ -312,6 +312,11 @@ export function createMainWindowRPC({
             threadId,
             record.thread
           );
+          streaming.registerAgentProjectSubagentApprovals(
+            projectId,
+            threadId,
+            record.subagentRuns ?? []
+          );
           return record;
         },
         externalAgentProjectRuntimeStatus: async ({ projectId, threadId }) => {
@@ -453,8 +458,17 @@ export function createMainWindowRPC({
         externalAgentProjectDuplicateThread: async ({ projectId, threadId }) =>
           externalAgentProjects.duplicateThread(projectId, threadId),
         externalAgentProjectDeleteThread: async ({ projectId, threadId }) => {
+          const record = await externalAgentProjects.readThread(
+            projectId,
+            threadId
+          );
           await localServers.detachThread(projectId, threadId);
-          await sandboxes.delete(threadId);
+          await Promise.all([
+            sandboxes.delete(threadId),
+            ...(record.subagentRuns ?? [])
+              .filter(run => run.sandbox.mode === "isolated")
+              .map(async run => sandboxes.delete(run.child.sessionId))
+          ]);
           await externalAgentProjects.deleteThread(projectId, threadId);
           return null;
         },
@@ -472,7 +486,7 @@ export function createMainWindowRPC({
           editorId
         ),
         externalAgentProjectCallTool: async input =>
-          externalAgentProjects.callTool(input),
+          streaming.callExternalAgentProjectTool(input),
         mcpListServers: () => mcpManager.listServers(),
         mcpAddServer: ({ server }) => {
           const servers = mcpManager.addServer(server);

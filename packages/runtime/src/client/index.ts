@@ -13,6 +13,7 @@ export {
   type AgentServerRuntimeWorkingBase,
   type AgentServerSession,
   type AgentServerStreamEvent,
+  type AgentServerSubagentProjection,
   isRuntimeSessionBudgetWaitSnapshot,
   type ServerControlEvent,
   type ServerRunTerminalOutcome

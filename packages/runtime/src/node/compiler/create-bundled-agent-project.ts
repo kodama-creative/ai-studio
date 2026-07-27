@@ -25,6 +25,7 @@ import type {
   CompiledAgentProjectSnapshot,
   CompiledAgentSkill,
   CompiledAgentStateDefinition,
+  CompiledAgentSubagent,
   CompiledDynamicToolResolver,
   CompiledMcpConnection,
   CompiledProjectTool
@@ -59,9 +60,11 @@ export interface BundledAgentProjectInput {
   readonly skills: readonly CompiledAgentSkill[];
   readonly sandbox?: {
     readonly definition: unknown;
+    readonly revalidationFingerprint: string;
     readonly sourcePath: string;
     readonly workspace: NonNullable<CompiledAgentProjectSnapshot["sandbox"]>["workspace"];
   };
+  readonly subagents?: readonly CompiledAgentSubagent[];
   readonly states: ReadonlyArray<{
     readonly definition: unknown;
     readonly sourcePath: string;
@@ -122,6 +125,7 @@ export function createBundledAgentProject(
     stateDefinitions,
     outputDefinitions,
     sandbox,
+    subagents: input.subagents ?? [],
     diagnostics: [],
     fingerprint: artifact.fingerprint
   });
@@ -134,7 +138,11 @@ function _compileSandbox(
   if (!isSandboxDefinition(input.definition)) {
     throw new TypeError("Bundled Sandbox definition is invalid");
   }
+  if (!/^[a-f0-9]{64}$/.test(input.revalidationFingerprint)) {
+    throw new TypeError("Bundled Sandbox revalidation fingerprint is invalid");
+  }
   return {
+    revalidationFingerprint: input.revalidationFingerprint,
     sourcePath: input.sourcePath,
     workspace: input.workspace
   };

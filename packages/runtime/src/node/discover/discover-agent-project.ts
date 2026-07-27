@@ -2,6 +2,7 @@ import { lstat, readdir } from "node:fs/promises";
 import path from "node:path";
 
 import { discoverAgentSandbox } from "./discover-agent-sandbox";
+import { isAgentToolName } from "../../shared/is-agent-tool-name";
 
 import type { AgentProjectDiagnostic } from "../../shared/agent-project";
 
@@ -13,6 +14,11 @@ export interface AgentProjectSourceRef {
   readonly logicalPath: string;
 }
 
+export interface DiscoveredAgentSubagent {
+  readonly id: string;
+  readonly project: DiscoveredAgentProject;
+}
+
 export interface DiscoveredAgentProject {
   readonly root: string;
   readonly definition?: AgentProjectSourceRef;
@@ -21,6 +27,7 @@ export interface DiscoveredAgentProject {
   readonly outputs: readonly AgentProjectSourceRef[];
   readonly sandbox?: Awaited<ReturnType<typeof discoverAgentSandbox>>;
   readonly states: readonly AgentProjectSourceRef[];
+  readonly subagents: readonly DiscoveredAgentSubagent[];
   readonly tools: readonly AgentProjectSourceRef[];
   readonly connections: readonly AgentProjectSourceRef[];
   readonly skillsRoot?: string;
@@ -28,7 +35,8 @@ export interface DiscoveredAgentProject {
 }
 
 export async function discoverAgentProject(
-  agentRoot: string
+  agentRoot: string,
+  options: { readonly allowSubagents?: boolean; } = {}
 ): Promise<DiscoveredAgentProject> {
   const root = path.resolve(agentRoot);
   const diagnostics: AgentProjectDiagnostic[] = [];
@@ -55,6 +63,9 @@ export async function discoverAgentProject(
   const states = await _discoverStates(root, diagnostics);
   const connections = await _discoverConnections(root, diagnostics);
   const sandbox = await discoverAgentSandbox(root, diagnostics);
+  const subagents = options.allowSubagents === false
+    ? await _rejectNestedSubagents(root, diagnostics)
+    : await _discoverSubagents(root, diagnostics);
   const skillsRootCandidate = path.join(root, "skills");
   let skillsRoot: string | undefined = skillsRootCandidate;
   try {
@@ -94,11 +105,90 @@ export async function discoverAgentProject(
     outputs,
     sandbox,
     states,
+    subagents,
     tools,
     connections,
     skillsRoot,
     diagnostics
   };
+}
+
+async function _rejectNestedSubagents(
+  root: string,
+  diagnostics: AgentProjectDiagnostic[]
+): Promise<DiscoveredAgentSubagent[]> {
+  const nestedRoot = path.join(root, "subagents");
+  try {
+    await lstat(nestedRoot);
+    diagnostics.push({
+      severity: "error",
+      code: "subagent_nested_unsupported",
+      message: "Nested Subagents are not supported in V1",
+      path: nestedRoot
+    });
+  } catch (error) {
+    if (!_hasCode(error, "ENOENT")) {
+      diagnostics.push({
+        severity: "error",
+        code: "subagent_import_failed",
+        message: `Unable to inspect nested Subagents: ${_errorMessage(error)}`,
+        path: nestedRoot
+      });
+    }
+  }
+  return [];
+}
+
+async function _discoverSubagents(
+  root: string,
+  diagnostics: AgentProjectDiagnostic[]
+): Promise<DiscoveredAgentSubagent[]> {
+  const subagentsRoot = path.join(root, "subagents");
+  let entries;
+  try {
+    if (await _isSymlink(subagentsRoot)) {
+      diagnostics.push({
+        severity: "error",
+        code: "subagent_invalid",
+        message: "The subagents source directory cannot be a symbolic link",
+        path: subagentsRoot
+      });
+      return [];
+    }
+    entries = await readdir(subagentsRoot, { withFileTypes: true });
+  } catch (error) {
+    if (_hasCode(error, "ENOENT")) { return []; }
+    diagnostics.push({
+      severity: "error",
+      code: "subagent_import_failed",
+      message: `Unable to list Subagents: ${_errorMessage(error)}`,
+      path: subagentsRoot
+    });
+    return [];
+  }
+  const subagents: DiscoveredAgentSubagent[] = [];
+  for (const entry of entries.sort((left, right) =>
+    (left.name < right.name ? -1 : left.name > right.name ? 1 : 0))) {
+    const childRoot = path.join(subagentsRoot, entry.name);
+    if (
+      entry.isSymbolicLink()
+      || !entry.isDirectory()
+      || !isAgentToolName(entry.name)
+    ) {
+      diagnostics.push({
+        severity: "error",
+        code: "subagent_invalid",
+        message: `Subagent source must be a regular directory with a valid model-visible name: ${entry.name}`,
+        path: childRoot
+      });
+      continue;
+    }
+    subagents.push({
+      id: entry.name,
+      project: await discoverAgentProject(childRoot, { allowSubagents: false })
+    });
+  }
+  return subagents;
 }
 
 async function _discoverOutputs(

@@ -42,6 +42,9 @@ import {
 } from "@/components/model-provider";
 import { threadTitleFromPath } from "@/lib/thread-file";
 import { cn } from "@/lib/utils";
+import { AgentSubagentRunsContext } from "./agent-subagent-runs-context";
+
+const EMPTY_SUBAGENT_RUNS: readonly ExternalAgentProjectSubagentRun[] = [];
 import { MessageListView } from "./message/message-list-view";
 import { ThreadPlaygroundSkeleton } from "./misc/skeleton";
 import { TitleEditor, type TitleValidator } from "./misc/title-editor";
@@ -97,9 +100,13 @@ import {
 import { Spinner } from "../ui/spinner";
 import { Switch } from "../ui/switch";
 
+import type {
+  ExternalAgentProjectSubagentRun
+} from "@/shared/external-agent-project";
 import type { ThreadRuntimePhase } from "./stores/thread-store";
 
 export interface ThreadPlaygroundProps {
+  readonly subagentRuns?: readonly ExternalAgentProjectSubagentRun[];
   readonly className?: string;
   readonly path: string;
   readonly title?: string;
@@ -269,6 +276,7 @@ const _ThreadPlayground = function ThreadPlayground({
   sessionLimits,
   loadPromptSkills,
   externalUpdate,
+  subagentRuns = EMPTY_SUBAGENT_RUNS,
   onChange,
   onStreamingStart,
   onStreamingEnd,
@@ -368,11 +376,13 @@ const _ThreadPlayground = function ThreadPlayground({
     <PromptSkillsProvider loader={loadPromptSkills}>
       <ToolExecutionProvider execute={toolExecutor}>
         <ThreadStoreContext.Provider value={store}>
-          <ThreadPlaygroundContent
-            compactNowAvailable={!transportOwnsRuntimeRun}
-            {...props}
-            preserveSavedModel={preserveSavedModel}
-          />
+          <AgentSubagentRunsContext.Provider value={subagentRuns}>
+            <ThreadPlaygroundContent
+              compactNowAvailable={!transportOwnsRuntimeRun}
+              {...props}
+              preserveSavedModel={preserveSavedModel}
+            />
+          </AgentSubagentRunsContext.Provider>
         </ThreadStoreContext.Provider>
       </ToolExecutionProvider>
     </PromptSkillsProvider>
@@ -411,6 +421,7 @@ function ThreadPlaygroundContent({
   | "onChange"
   | "onStreamingEnd"
   | "onStreamingStart"
+  | "subagentRuns"
   | "transport"
 >) {
   const containerRef = useRef<HTMLDivElement>(null);

@@ -255,6 +255,100 @@ describe("StreamThreadController Agent Project runtime", () => {
     expect(lockedMessageIds).toEqual([["message-selected"]]);
   });
 
+  test("persists a declared Subagent child run and returns it to the parent", async () => {
+    const { manager, models, opened, threadId } = await _fixture({
+      instructions: "Delegate research.\n",
+      subagent: true
+    });
+    await _beginProjectRun(manager, opened.id, threadId);
+    const controller = new StreamThreadController(
+      _modelManager(models),
+      { capture: () => undefined } as never,
+      manager
+    );
+    const responses: Array<{
+      readonly message?: string;
+      readonly type: string;
+    }> = [];
+
+    await controller.run({
+      streamId: "stream-subagent-project",
+      runtime: {
+        type: "agentProject",
+        sandboxAttachmentMessageIds: [],
+        projectId: opened.id,
+        threadId,
+        executionMode: "react",
+        modelSource: "agent"
+      },
+      request: {
+        model: { provider: "fake", id: "fake-model" },
+        context: {
+          systemPrompt: opened.instructions,
+          messages: [{
+            role: "user",
+            content: [{ type: "text", text: "research" }],
+            timestamp: Date.now()
+          }],
+          tools: opened.tools,
+          sourceTools: opened.tools
+        }
+      }
+    }, message => { responses.push(message); });
+
+    const record = await manager.readThread(opened.id, threadId);
+    expect(responses.filter(message => message.type === "error")).toEqual([]);
+    expect(record.subagentRuns).toHaveLength(1);
+    expect(record.subagentRuns?.[0]).toMatchObject({
+      message: "Research this bounded task.",
+      status: "completed",
+      subagentId: "researcher",
+      terminal: { status: "completed", result: "child research result" }
+    });
+    expect(record.subagentRuns?.[0]?.messages.at(-1)).toMatchObject({
+      role: "assistant",
+      content: [{ type: "text", text: "child research result" }]
+    });
+    expect(record.thread.context?.messages?.at(-1)).toMatchObject({
+      role: "assistant",
+      content: [{ type: "text", text: "parent used child result" }]
+    });
+  });
+
+  test("runs a declared Subagent from the manual tool action", async () => {
+    const { manager, models, opened, threadId } = await _fixture({
+      instructions: "Delegate research.\n",
+      subagent: true
+    });
+    const parent = await _beginProjectRun(manager, opened.id, threadId);
+
+    const response = await manager.callAgentSubagent({
+      arguments: { message: "Research this manual task." },
+      callId: "call-manual-researcher",
+      name: "researcher",
+      projectId: opened.id,
+      snapshot: opened.snapshot,
+      threadId
+    }, { models });
+
+    expect(response).toEqual({
+      contentText: "child research result",
+      isError: false
+    });
+    const record = await manager.readThread(opened.id, threadId);
+    expect(record.subagentRuns).toEqual([
+      expect.objectContaining({
+        message: "Research this manual task.",
+        parent: expect.objectContaining({
+          runId: parent.snapshot.activeRunId,
+          toolCallId: "call-manual-researcher"
+        }),
+        status: "completed",
+        subagentId: "researcher"
+      })
+    ]);
+  });
+
   test("persists dynamic Turn instructions before Desktop Project execution and reopens them", async () => {
     const { home, models, manager, opened, project, threadId, workspace } =
       await _fixture({
@@ -1173,12 +1267,14 @@ async function _fixture({
   instructions,
   toolCall,
   projectTool = false,
+  subagent = false,
   stateful = false
 }: {
   dynamicInstructions?: boolean;
   instructions: string;
   projectTool?: boolean;
   stateful?: boolean;
+  subagent?: boolean;
   toolCall?: { arguments: Record<string, unknown>; name: string; };
 }) {
   const root = await mkdtemp(path.join(tmpdir(), "llm-space-stream-runtime-"));
@@ -1200,6 +1296,21 @@ async function _fixture({
     `export default { model: "fake/fake-model", reasoning: "high" };`
   );
   await writeFile(path.join(agent, "instructions.md"), instructions);
+  if (subagent) {
+    const child = path.join(agent, "subagents", "researcher");
+    await mkdir(child, { recursive: true });
+    await writeFile(
+      path.join(child, "agent.ts"),
+      `export default {
+        description: "Research one bounded question.",
+        model: "fake/fake-model"
+      };`
+    );
+    await writeFile(
+      path.join(child, "instructions.md"),
+      "Child researcher instructions."
+    );
+  }
   if (dynamicInstructions) {
     await mkdir(path.join(agent, "instructions"));
     await writeFile(
@@ -1261,7 +1372,7 @@ async function _fixture({
       });`
     );
   }
-  const models = _models(toolCall);
+  const models = subagent ? _subagentModels() : _models(toolCall);
   const manager = new ExternalAgentProjectManager({
     homePath: home,
     workspaceRoot: workspace,
@@ -1427,6 +1538,78 @@ function _models(
     },
     models: [model, debugModel],
     api
+  });
+  const models = createModels();
+  models.setProvider(provider);
+  return models;
+}
+
+function _subagentModels() {
+  const model: Model<"fake"> = {
+    id: "fake-model",
+    name: "Fake Model",
+    api: "fake",
+    provider: "fake",
+    baseUrl: "http://localhost.invalid",
+    reasoning: true,
+    input: ["text"],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 128_000,
+    maxTokens: 4_096
+  };
+  const stream = (_model: Model<Api>, context: Context) => {
+    const events = createAssistantMessageEventStream();
+    const child = context.systemPrompt?.includes(
+      "Child researcher instructions."
+    ) === true;
+    const hasResult = context.messages.at(-1)?.role === "toolResult";
+    const content: AssistantMessage["content"] = child
+      ? [{ type: "text", text: "child research result" }]
+      : hasResult
+        ? [{ type: "text", text: "parent used child result" }]
+        : [{
+          type: "toolCall",
+          id: "call-researcher",
+          name: "researcher",
+          arguments: { message: "Research this bounded task." }
+        }];
+    const message: AssistantMessage = {
+      role: "assistant",
+      content,
+      api: "fake",
+      provider: "fake",
+      model: "fake-model",
+      usage: {
+        input: 1,
+        output: 1,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 2,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
+      },
+      stopReason: child || hasResult ? "stop" : "toolUse",
+      timestamp: Date.now()
+    };
+    queueMicrotask(() => {
+      events.push({ type: "start", partial: message });
+      events.push({
+        type: "done",
+        reason: child || hasResult ? "stop" : "toolUse",
+        message
+      });
+    });
+    return events;
+  };
+  const provider = createProvider({
+    id: "fake",
+    auth: {
+      apiKey: {
+        name: "Fake",
+        resolve: async () => Promise.resolve({ auth: {} })
+      }
+    },
+    models: [model],
+    api: { stream, streamSimple: stream }
   });
   const models = createModels();
   models.setProvider(provider);

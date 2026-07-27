@@ -54,6 +54,7 @@ describe("example Agent Project", () => {
       "instructions",
       "skill:weather-brief",
       "state:example.weather-session",
+      "subagent:weather-writer",
       "tool:get-weather",
       "tool:remember-city"
     ]);
@@ -71,6 +72,18 @@ describe("example Agent Project", () => {
         entry => entry.id
       )
     ).toEqual(["agent-env:OPENAI_API_KEY", "bun@>=1.3.14"]);
+    expect(snapshot.subagents).toHaveLength(1);
+    expect(snapshot.subagents?.[0]).toMatchObject({
+      description: "Turn bounded weather facts into a concise simulated forecast.",
+      id: "weather-writer"
+    });
+    expect(snapshot.subagents?.[0]?.project.definition).toMatchObject({
+      model: { provider: "openai", id: "gpt-5.3-codex" },
+      reasoning: "medium"
+    });
+    expect(snapshot.subagents?.[0]?.project.instructions).toContain(
+      "parent conversation"
+    );
 
     const result = await snapshot.tools[0]!.execute("example-test", {
       city: "Shanghai"
