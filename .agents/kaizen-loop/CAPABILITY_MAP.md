@@ -359,6 +359,21 @@
 - Explicit non-goals: no project stdio, OAuth browser/refresh/account lifecycle, dynamic connection search, blocklists, `tools/listChanged`, automatic project-MCP calls, OpenAPI connections, MCP resources/prompts, sandbox, or public plugin SDK.
 - Visible gaps: no live third-party authenticated service audit, no dynamic remote tool-list subscription, and no automatic test harness for the CEF workflow yet.
 
+## Live Project MCP Tool Freshness
+
+- Status: deferred by owner; no active implementation plan
+- Freshness: confirmed
+- Last checked: 2026-07-26
+- Evidence:
+  - `packages/runtime/src/node/connections/remote-mcp-client.ts` lists tools once after connection and registers no `notifications/tools/list_changed` handler, even though the installed MCP SDK 1.29.0 exposes negotiated list-change handlers and automatic refresh support.
+  - `ProjectMcpSession` freezes the initial allowlisted descriptors and active call map for its lifetime. A remote name or schema change is detected only after Desktop explicitly creates a new activation.
+  - `ExternalAgentProjectManager` already compares persisted descriptor fingerprints on activation, blocks drifted calls before dispatch, and projects `Remote actions changed` plus explicit `Sync from Agent`; this is a safe recovery surface but it is not notified while a connection remains active.
+  - Fresh real CEF evidence in `audits/2026-07-26-223657-advanced-mcp-lifecycle-discovery/` shows the checked-in Project Thread exposing only `Retry connections` when its fixture endpoint is unavailable. At 1280×800 there is no document/body overflow and the console contains only Vite/React development information.
+  - MCP specification 2025-11-25 requires servers to advertise `tools.listChanged` and defines `notifications/tools/list_changed` followed by `tools/list`; the current client ignores that negotiated lifecycle.
+- Boundary: active Project connections retain their activation-time exact allowlist and descriptor fingerprints. A later explicit activation detects drift and reuses the existing blocked Sync/unavailable Retry interaction; live protocol notifications are intentionally not implemented.
+- Explicit non-goals: no automatic retry of `tools/call`, cancellation claim for an already-dispatched call, model-side `connection_search`, blocklists or newly exposed unknown tools, OAuth, OpenAPI, MCP resources/prompts, background polling for servers without `listChanged`, or protected-Server connection hosting.
+- Visible gaps: current remote descriptors can remain stale for the lifetime of an active Project Thread. On 2026-07-26 the owner classified this as a protocol-boundary issue and deferred it together with broader MCP lifecycle expansion.
+
 ## Portable Execution Tools
 
 - Status: shipped V1
@@ -376,9 +391,9 @@
 
 ## Sandbox Workspace And Attachment Delivery
 
-- Status: implemented V1; local real-Docker gate passed, shipment CI deferred
+- Status: shipped V1 under owner-approved local acceptance policy
 - Freshness: confirmed
-- Last checked: 2026-07-23
+- Last checked: 2026-07-26
 - Evidence:
   - `defineSandbox({})`, discovery, compiler, artifact, and bundle fixtures preserve only an abstract source minimum plus a bounded immutable `agent/sandbox/workspace/**` seed. Host policy may tighten but never weaken it; unavailable required-Sandbox projects open Build without silently creating or downgrading a Thread.
   - `SandboxProvider` and `DockerSandboxProvider` supply one Thread/Session-scoped Pi `ExecutionEnv`, one LLM Space-owned named volume mounted at `/workspace`, a fixed non-root/read-only/no-capabilities/no-network container, a deterministic bounded manifest, stop/reconnect/reconstruct/delete lifecycle, and no Host bind, login environment, provider secret, or dynamic connection surface.
@@ -393,7 +408,25 @@
   - Current ADR/runtime inspection for item 19 reconfirms the separation: Sandbox and `ExecutionEnv` decide where an already-authorized call can run, while no Sandbox declaration, provider readiness state, attachment descriptor, or environment handle is an approval decision.
 - Boundary: an Agent may require abstract Sandbox execution, while the Host exclusively selects and owns the provider, isolation arguments, Session identity, workspace, approved attachment bytes/descriptors, retention, and cleanup. Canonical tools continue to use Pi `ExecutionEnv`, and attachments remain Pi-native user text/image content plus workspace paths rather than a new message protocol.
 - Explicit non-goals: Vercel Sandbox, Firecracker fleet, Apple-container V1 adapter, arbitrary host paths, project source write-back, silent Desktop Direct/Node fallback, approval policy, numeric CPU/memory/PID/disk quotas, workspace explorer/export, dynamic provider connections, generic container orchestration, cloud control plane, or source-owned engine credentials.
-- Visible gaps: run the corrected trigger once on current-head GitHub Actions when CI work resumes, then close item 17 under the existing shipment policy. Until then item 10 remains dependency-blocked. Numeric quotas, export/adoption, additional providers, approvals, and fleet operations remain later capabilities.
+- Visible gaps: current-head Actions remain optional deferred evidence, not a capability or Item 10 blocker, under the owner's local-first policy. Numeric quotas, export/adoption, additional providers, and fleet operations require separate product evidence.
+
+## Agent Project Debug Workbench
+
+- Status: shipped V1
+- Freshness: confirmed
+- Last checked: 2026-07-27
+- Evidence:
+  - The trusted compiler can already build static/dynamic models, model options, reasoning, environment declarations, input/output Session budgets, the default-25 per-Run model-call fuse, composed static/dynamic instructions, static/dynamic typed tools, durable typed state, named structured outputs, markdown skills, MCP exact allowlists, required Sandbox/workspace seeds, canonical ExecutionEnv tools, and tool approvals.
+  - The Project inspector is read-only and exposes fixed VS Code/Zed/Cursor project/file handoff, remembered editor preference, explicit unavailable-editor states, watcher-driven Building/Ready/Invalid feedback, path-specific compiler diagnostics, and a secret-safe compiled artifact summary over model, limits, environment names, Sandbox, and capabilities.
+  - Source writes, dirty-buffer ownership, overwrite/conflict actions, and dirty tab/quit guards were removed from renderer, RPC, and Bun composition. Missing required source remains a confined non-existing editor target, while internal reads continue to require an existing regular non-symlink file.
+  - Imported and scaffolded Projects begin with no Desktop Thread. Opening a Project selects the inspector, creating a Thread is explicit, watched source never creates or repositions one, and frozen Thread prompts/tools/connections remain unchanged until explicit Sync from Agent.
+  - Watch reload revisions keep Building visible until the newest observed edit settles; older reloads cannot publish stale Ready/Invalid state.
+  - CLI supports `init`, OCI-only `build`, and `serve`; it has no checkout-independent `validate`/`info` command and no Eval command. The user guide documents Thread debugging and OCI deployment but does not document Agent Project source authoring.
+  - Current audit evidence under `audits/2026-07-27-122712-agent-project-debug-workbench-v1/` covers Ready artifact, Invalid diagnostics, and 1280×800/900×700 layouts. A final isolated real-CEF regression proves no initial Thread, explicit New Thread with model selector, missing `instructions.md` handoff to Zed, Invalid→Ready recovery, one retained Thread, no document overflow, and no application console error.
+  - Eve `main@e40cce456284d901c73860c8e464b645d656bc01` exposes a broader authored project surface: agent config/compaction, static and dynamic instructions/tools/skills, state, MCP/OpenAPI connections and search, sandbox backends/policy, hooks, local/remote subagents, schedules, Evals, extensions, channels, and instrumentation. LLM Space matches the foundational execution subset but not the whole source surface.
+- Boundary: Agent Project development belongs in VS Code, Zed, Cursor, or another external editor. Desktop may create the initial canonical scaffold, but imported/created source is thereafter read-only in LLM Space. Desktop owns source watching, compiler diagnostics, artifact inspection, and explicit user-directed Thread debugging; source changes never create, clear, sync, or move a Thread automatically.
+- Explicit non-goals: in-app source authoring, capability Add/Create/Rename/Delete, source templates after initial scaffolding, visual graph builder, AI-generated source, dependency/package manager, Git client, arbitrary terminal, runtime plugin install, hosted control plane, or claiming unsupported Eve ecosystem slots through UI templates.
+- Visible gaps: independent core source gaps remain local Subagents and portable Eval suites; most remaining Eve differences are integration/ecosystem layers rather than prerequisites for an Agent Studio author-debug-evaluate loop. The large combined Project Thread/inspector module is a future extraction candidate, not a V1 behavior gap.
 
 ## Agent Project Activation
 
@@ -559,7 +592,7 @@
 
 ## General Runtime Limits
 
-- Status: shipped model-call V1; broader roadmap Item 22 remains open
+- Status: shipped model-call V1; broader policy expansion deferred
 - Freshness: confirmed
 - Last checked: 2026-07-26
 - Evidence:
@@ -570,10 +603,10 @@
   - Desktop Direct, Sandbox, embedded Local Server, and protected Server propagate the same Runtime-owned terminal. Desktop shows read-only `Model calls n/limit`, hides explicit `false`, uses `Run limit reached` for the terminal toast, and persists `Model limit reached · n/limit` in Run History and inspector.
   - Real Electrobun CEF evidence in `audits/2026-07-26-205500-per-run-model-call-limit-v1/` uses an isolated temporary `LLM_SPACE_HOME`. It confirms default `Model calls 0/25`, explicit-unlimited hiding, frozen A before sync, reached `1/1` error styling, Run History and inspector attribution at 1280×800 and 900×700, exact viewport dimensions without page overflow, and no application console error.
   - Primary-source market review on 2026-07-26 found OpenAI Agents `maxTurns`, Pydantic AI request/tool/token limits, Claude Agent SDK `maxTurns`/`maxBudgetUsd`, AI SDK `stopWhen` with a default `isStepCount(20)` runaway-loop safety measure, and LangGraph `recursionLimit`. These establish per-run request/step fuses as table stakes, but not one universal durable continuation model.
-  - Roadmap Item 22 still combines future cost/tool/time and Host policy with schedules and parent-child aggregation even though schedules belong to Item 28 and inheritance requires Item 27.
+  - Roadmap Item 22 still combines future cost/tool/time and Host policy with schedules and parent-child aggregation even though schedules belong to Item 28 and inheritance requires Item 27. On 2026-07-26 the owner closed active quota work at the model-call V1 and deferred tool quotas plus the broader boundary matrix.
 - Boundary: an Agent author can bound each Runtime Run's main-model dispatches. Reaching the limit fails the same Run before the first forbidden dispatch and leaves the user to choose the next normal execution point; it never grants, continues, retries, creates, resets, or clears a Thread or Session.
 - Explicit non-goals: no tool-call quota, cost, duration, concurrency, schedule, Host/organization tightening, provider quota guarantee, or child-policy aggregation. Auxiliary compaction remains outside the model-call count.
-- Visible gaps: cost, tool, duration, Host policy, production migration, and parent-child aggregation remain future slices. Schedules remain Item 28 and child inheritance remains Item 27.
+- Visible gaps: cost, tool, duration, Host policy, production migration, and parent-child aggregation are not active product gaps. Reopen them only with concrete user evidence; schedules and child composition must be judged independently as product capabilities rather than quota extensions.
 
 ## Tool Step Orchestration
 

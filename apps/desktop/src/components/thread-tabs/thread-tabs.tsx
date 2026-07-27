@@ -428,7 +428,6 @@ export function ThreadTabs({
                 active={tab.id === activeId}
                 projectId={tab.projectId}
                 refreshNonce={tab.refreshNonce ?? 0}
-                tabId={tab.id}
                 threadId={tab.threadId}
               />
             </Suspense>

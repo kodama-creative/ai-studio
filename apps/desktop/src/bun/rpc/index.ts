@@ -13,6 +13,7 @@ import { moveToTrash, revealInFileManager } from "../fs";
 import type { Command } from "../../shared/commands";
 import type { DesktopRPCType } from "../../shared/rpc";
 import type { Analytics } from "../analytics";
+import type { ExternalEditorManager } from "../external-editor";
 import type { ExternalAgentProjectManager } from "../external-projects";
 import type { EmbeddedLocalServerManager } from "../local-server";
 import type { McpManager } from "../mcp";
@@ -57,11 +58,7 @@ export type MainWindowRPC = ReturnType<
 export interface MainWindowRPCDependencies {
   analytics: Analytics;
   externalAgentProjects: ExternalAgentProjectManager;
-  onAgentSourceDirtyStateChanged: (dirty: boolean) => void;
-  onDiscardDirtyAgentSourcesResolved: (
-    requestId: string,
-    discard: boolean
-  ) => void;
+  externalEditor: ExternalEditorManager;
   executeCommand: (command: Command) => void;
   getMainWindow: () => BrowserWindow;
   homePath: string;
@@ -83,8 +80,7 @@ const MAX_REQUEST_TIME_MS = (5 * 60_000) + 10_000;
 export function createMainWindowRPC({
   analytics,
   externalAgentProjects,
-  onAgentSourceDirtyStateChanged,
-  onDiscardDirtyAgentSourcesResolved,
+  externalEditor,
   executeCommand,
   getMainWindow,
   homePath,
@@ -289,6 +285,7 @@ export function createMainWindowRPC({
         externalAgentProjectList: async () => externalAgentProjects.list(),
         externalAgentProjectInspect: async ({ projectId }) =>
           externalAgentProjects.inspect(projectId),
+        externalAgentProjectEditorStatus: async () => externalEditor.status(),
         externalAgentProjectRemove: async ({ projectId }) => {
           await externalAgentProjects.remove(projectId);
           return null;
@@ -466,10 +463,14 @@ export function createMainWindowRPC({
         externalAgentProjectReadSource: async ({ projectId, path }) => ({
           text: await externalAgentProjects.readSource(projectId, path)
         }),
-        externalAgentProjectWriteSource: async ({ projectId, path, text }) => {
-          await externalAgentProjects.writeSource(projectId, path, text);
-          return null;
-        },
+        externalAgentProjectOpenInEditor: async ({
+          editorId,
+          projectId,
+          sourcePath
+        }) => externalEditor.open(
+          await externalAgentProjects.editorTarget(projectId, sourcePath),
+          editorId
+        ),
         externalAgentProjectCallTool: async input =>
           externalAgentProjects.callTool(input),
         mcpListServers: () => mcpManager.listServers(),
@@ -557,8 +558,6 @@ export function createMainWindowRPC({
           });
         },
         abortStreamThread: payload => { streaming.abort(payload); },
-        agentSourceDirtyStateChanged: ({ dirty }) => { onAgentSourceDirtyStateChanged(dirty); },
-        resolveDiscardDirtyAgentSources: ({ requestId, discard }) => { onDiscardDirtyAgentSourcesResolved(requestId, discard); },
         captureAnalyticsEvent: ({ event, properties }) => { analytics.capture(event, properties); },
         executeCommand: command => { executeCommand(command); }
       }

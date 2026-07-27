@@ -17,6 +17,7 @@ const PROJECT = {
   threads: [],
   agentPath: "/tmp/project/agent",
   artifactFingerprint: "artifact-one",
+  artifactSummary: null,
   instructions: "Test",
   definition: {
     model: { provider: "openai", id: "gpt-5.3-codex" },

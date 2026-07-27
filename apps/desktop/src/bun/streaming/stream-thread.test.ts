@@ -567,7 +567,11 @@ describe("StreamThreadController Agent Project runtime", () => {
     expect(abortedOutcome).toBe("cancelled");
 
     await restarted.shutdown();
-    await manager.writeSource(opened.id, "instructions.md", "Changed source.\n");
+    await writeFile(
+      path.join(opened.agentPath!, "instructions.md"),
+      "Changed source.\n",
+      "utf8"
+    );
     const changed = await manager.refresh(opened.id);
     expect(changed.artifactFingerprint).not.toBe(opened.artifactFingerprint);
     await manager.shutdown();
@@ -1265,13 +1269,14 @@ async function _fixture({
   });
   managers.push(manager);
   const opened = await manager.trustAndOpen(project);
+  const { id: threadId } = await manager.createThread(opened.id);
   return {
     home,
     manager,
     models,
     opened,
     project,
-    threadId: opened.threads[0].id,
+    threadId,
     workspace
   };
 }

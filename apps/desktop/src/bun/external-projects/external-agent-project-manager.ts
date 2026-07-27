@@ -59,13 +59,16 @@ import { agentDefinitionFingerprint } from "./agent-definition-fingerprint";
 import { createDesktopThreadRuntimeAuthority } from "../streaming/desktop-thread-runtime-authority";
 
 import type {
+  ExternalAgentProjectArtifactSummary,
   ExternalAgentProjectConnectionActivation,
   ExternalAgentProjectPreview,
+  ExternalAgentProjectStatus,
   ExternalAgentProjectSummary,
   ExternalAgentProjectThreadRecord,
   ExternalAgentProjectThreadSummary,
   ExternalAgentProjectToolCallResponse,
   ExternalAgentProjectView,
+  ExternalAgentProjectDiagnostic as ExternalDiagnostic,
   RemoteToolCallAttempt
 } from "../../shared/external-agent-project";
 
@@ -87,6 +90,8 @@ interface SandboxReadiness {
 interface LoadedProject {
   resolved: ResolvedAgentProjectManifest | null;
   snapshot: AgentProjectSnapshot | null;
+  building: boolean;
+  diagnostics: LoadedDiagnostic[];
   error: string | null;
   missing: boolean;
   watcher: FSWatcher | null;
@@ -98,6 +103,14 @@ interface LoadedProject {
   connectionActivationEpochs: Map<string, number>;
   connectionActivationTails: Map<string, Promise<void>>;
   connectionReloadCount: number;
+  revision: number;
+}
+
+interface LoadedDiagnostic {
+  readonly code: string;
+  readonly message: string;
+  readonly path: string;
+  readonly severity: "error" | "warning";
 }
 
 interface ProjectConnectionSession {
@@ -129,6 +142,7 @@ export class ExternalAgentProjectManager {
   private readonly _sandboxReadiness?: () => Promise<SandboxReadiness>;
   private readonly _registry = new Map<string, RegistryEntry>();
   private readonly _loaded = new Map<string, LoadedProject>();
+  private readonly _reloadTails = new Map<string, Promise<void>>();
   private _loadedRegistry = false;
   private _onChange: ((projectId: string) => void) | null = null;
 
@@ -197,9 +211,9 @@ export class ExternalAgentProjectManager {
     });
     try {
       const project = await this.trustAndOpen(created.directory);
-      if (project.status !== "ready" || project.threads.length === 0) {
+      if (project.status !== "ready") {
         throw new Error(
-          project.error ?? "Created Agent Project did not open with a default Thread."
+          project.error ?? "Created Agent Project did not open successfully."
         );
       }
       return project;
@@ -259,9 +273,6 @@ export class ExternalAgentProjectManager {
     });
     if (!inWorkspace) { await this._saveRegistry(); }
     await this._reload(id, { resolved });
-    const view = await this.inspect(id);
-    if (view.status !== "ready") { return view; }
-    await this._ensureDefaultThread(id);
     return this.inspect(id);
   }
 
@@ -287,11 +298,14 @@ export class ExternalAgentProjectManager {
       name: path.basename(entry.path),
       path: entry.path,
       removable: entry.origin === "registered",
-      status: loaded.missing ? "missing" : loaded.error ? "invalid" : "ready",
+      status: _projectStatus(loaded),
       ...(loaded.error ? { error: loaded.error } : {}),
       threads,
       agentPath: loaded.resolved?.agentRoot ?? null,
       artifactFingerprint: snapshot?.artifact?.fingerprint ?? "",
+      artifactSummary: snapshot && !loaded.error
+        ? _artifactSummary(snapshot)
+        : null,
       instructions: snapshot?.instructions ?? "",
       definition: snapshot?.definition ?? null,
       definitionFingerprint: snapshot?.definition
@@ -317,7 +331,10 @@ export class ExternalAgentProjectManager {
           enabled: true
         }))
         : [],
-      diagnostics: snapshot ? [...snapshot.diagnostics] : [],
+      diagnostics: _diagnosticViews(
+        loaded.resolved?.agentRoot ?? null,
+        loaded.diagnostics
+      ),
       sourceFiles: loaded.resolved
         ? await _listSourceFiles(loaded.resolved.agentRoot)
         : []
@@ -662,7 +679,17 @@ export class ExternalAgentProjectManager {
     const active = this._state(projectId).connectionSessions.get(threadId);
     active?.driftConnections.clear();
     active?.blockedToolNames.clear();
-    const tools = this._toolsForThread(projectId, threadId, record.thread);
+    const storedRemote = _remoteProjectToolsInThread(record.thread);
+    const currentSnapshot = this._state(projectId).snapshot;
+    if (!currentSnapshot) {
+      throw new Error("Agent Project has no current snapshot.");
+    }
+    const tools = [
+      ..._projectTools(projectId, currentSnapshot),
+      ...(active && active.snapshot === record.thread.agentRuntime?.snapshot
+        ? active.tools
+        : storedRemote)
+    ];
     const next = {
       promptFingerprint: project.promptFingerprint,
       syncedPrompt: project.instructions,
@@ -693,14 +720,14 @@ export class ExternalAgentProjectManager {
     return readFile(await _safeExistingSource(root, relativePath), "utf8");
   }
 
-  async writeSource(
+  async editorTarget(
     projectId: string,
-    relativePath: string,
-    text: string
-  ): Promise<void> {
+    relativePath?: string
+  ): Promise<string> {
+    await this._ensureProject(projectId);
+    if (!relativePath) { return this._entry(projectId).path; }
     const root = await this._agentRoot(projectId);
-    const target = await _safeExistingSource(root, relativePath);
-    await writeFile(target, text, "utf8");
+    return _safeEditorTarget(root, relativePath);
   }
 
   async callTool(
@@ -828,9 +855,13 @@ export class ExternalAgentProjectManager {
     loaded: LoadedProject,
     activationEpoch: number
   ): Promise<ExternalAgentProjectConnectionActivation> {
-    const snapshot = loaded.snapshot;
-    if (loaded.error || !snapshot) {
-      throw new Error(loaded.error ?? "Agent Project is unavailable.");
+    const stored = await this._readThreadFile(projectId, threadId);
+    const frozenSnapshot = stored.thread.agentRuntime?.snapshot;
+    const snapshot = frozenSnapshot
+      ? await this._resolveSnapshot(projectId, frozenSnapshot)
+      : loaded.snapshot;
+    if (!snapshot) {
+      throw new Error("The Thread's frozen Agent snapshot is unavailable.");
     }
     const previous = loaded.connectionSessions.get(threadId);
     loaded.connectionSessions.delete(threadId);
@@ -840,22 +871,22 @@ export class ExternalAgentProjectManager {
     });
     const activationIsCurrent = () =>
       this._loaded.get(projectId) === loaded
-      && loaded.snapshot?.fingerprint === snapshot.fingerprint
       && loaded.connectionActivationEpochs.get(threadId) === activationEpoch;
     if (!activationIsCurrent()) {
       await session.close();
       return _emptyConnectionActivation();
     }
     const tools = _remoteProjectTools(projectId, snapshot, session.tools);
-    const stored = await this._readThreadFile(projectId, threadId);
+    const latestStored = await this._readThreadFile(projectId, threadId);
     if (!activationIsCurrent()) {
       await session.close();
       return _emptyConnectionActivation();
     }
-    const storedRemote = (stored.thread.context?.tools ?? []).filter(
-      (tool): tool is ProjectTool =>
-        tool.type === "project" && Boolean(tool.connectionName)
-    );
+    if (latestStored.thread.agentRuntime?.snapshot !== snapshot.fingerprint) {
+      await session.close();
+      return _emptyConnectionActivation();
+    }
+    const storedRemote = _remoteProjectToolsInThread(latestStored.thread);
     const readyConnections = new Set(
       session.statuses
         .filter(status => status.state === "ready")
@@ -874,7 +905,7 @@ export class ExternalAgentProjectManager {
       tools,
       readyConnections,
       connectionNames,
-      stored.thread.agentRuntime?.snapshot === snapshot.fingerprint
+      latestStored.thread.agentRuntime?.snapshot === snapshot.fingerprint
     );
     const blockedToolNames = new Set(
       storedRemote
@@ -894,16 +925,20 @@ export class ExternalAgentProjectManager {
       driftConnections,
       blockedToolNames
     });
-    const reconciled = this._toolsForThread(projectId, threadId, stored.thread);
+    const reconciled = this._toolsForThread(
+      projectId,
+      threadId,
+      latestStored.thread
+    );
     if (
       JSON.stringify(reconciled)
-      !== JSON.stringify(stored.thread.context?.tools ?? [])
+      !== JSON.stringify(latestStored.thread.context?.tools ?? [])
     ) {
       await this._writeThreadFile(projectId, threadId, {
-        ...stored,
+        ...latestStored,
         thread: {
-          ...stored.thread,
-          context: { ...stored.thread.context, tools: reconciled }
+          ...latestStored.thread,
+          context: { ...latestStored.thread.context, tools: reconciled }
         }
       });
     }
@@ -1111,7 +1146,31 @@ export class ExternalAgentProjectManager {
 
   private async _reload(
     projectId: string,
-    options: { resolved?: ResolvedAgentProjectManifest; } = {}
+    options: {
+      resolved?: ResolvedAgentProjectManifest;
+      revision?: number;
+    } = {}
+  ): Promise<void> {
+    const previous = this._reloadTails.get(projectId) ?? Promise.resolve();
+    const current = previous
+      .catch(() => undefined)
+      .then(async () => this._reloadNow(projectId, options));
+    this._reloadTails.set(projectId, current);
+    try {
+      await current;
+    } finally {
+      if (this._reloadTails.get(projectId) === current) {
+        this._reloadTails.delete(projectId);
+      }
+    }
+  }
+
+  private async _reloadNow(
+    projectId: string,
+    options: {
+      resolved?: ResolvedAgentProjectManifest;
+      revision?: number;
+    } = {}
   ): Promise<void> {
     const entry = this._entry(projectId);
     let state = this._loaded.get(projectId);
@@ -1119,6 +1178,8 @@ export class ExternalAgentProjectManager {
       state = {
         resolved: null,
         snapshot: null,
+        building: false,
+        diagnostics: [],
         error: null,
         missing: false,
         watcher: null,
@@ -1129,10 +1190,12 @@ export class ExternalAgentProjectManager {
         connectionSessions: new Map(),
         connectionActivationEpochs: new Map(),
         connectionActivationTails: new Map(),
-        connectionReloadCount: 0
+        connectionReloadCount: 0,
+        revision: 0
       };
       this._loaded.set(projectId, state);
     }
+    const reloadRevision = options.revision ?? state.revision;
     let releaseConnectionReload: (() => void) | undefined;
     try {
       await lstat(entry.path);
@@ -1166,6 +1229,7 @@ export class ExternalAgentProjectManager {
       }
       state.resolved = resolved;
       state.snapshot = snapshot;
+      state.diagnostics = [...snapshot.diagnostics];
       releaseConnectionReload?.();
       state.missing = false;
       state.error = snapshot.diagnostics.some(
@@ -1190,6 +1254,12 @@ export class ExternalAgentProjectManager {
     } catch (error) {
       releaseConnectionReload?.();
       state.error = _message(error);
+      state.diagnostics = [{
+        severity: "error",
+        code: "project_load_failed",
+        message: state.error,
+        path: entry.path
+      }];
       state.missing = _hasCode(error, "ENOENT");
       if (_hasCode(error, "ENOENT")) {
         state.resolved = null;
@@ -1197,7 +1267,10 @@ export class ExternalAgentProjectManager {
         state.watcher = null;
       }
     }
-    this._notify(projectId);
+    if (reloadRevision === state.revision) {
+      state.building = false;
+      this._notify(projectId);
+    }
   }
 
   private async _resolveSnapshot(
@@ -1271,9 +1344,13 @@ export class ExternalAgentProjectManager {
     if (state.watcher) { return; }
     state.watcher = watch(projectRoot, { recursive: true }, () => {
       if (state.reloadTimer) { clearTimeout(state.reloadTimer); }
+      state.revision += 1;
+      const revision = state.revision;
+      state.building = true;
+      this._notify(projectId);
       state.reloadTimer = setTimeout(() => {
         state.reloadTimer = null;
-        void this._reload(projectId);
+        void this._reload(projectId, { revision });
       }, 150);
     });
     state.watcher.on("error", error => {
@@ -1292,13 +1369,7 @@ export class ExternalAgentProjectManager {
       name: path.basename(entry.path),
       path: entry.path,
       removable: entry.origin === "registered",
-      status: loaded.resolved
-        ? loaded.error
-          ? "invalid"
-          : "ready"
-        : loaded.missing
-          ? "missing"
-          : "invalid",
+      status: _projectStatus(loaded),
       ...(loaded.error ? { error: loaded.error } : {}),
       threads: await this._listThreads(projectId)
     };
@@ -1335,16 +1406,6 @@ export class ExternalAgentProjectManager {
       .sort((a, b) => a.title.localeCompare(b.title));
   }
 
-  private async _ensureDefaultThread(projectId: string): Promise<void> {
-    if ((await this._listThreads(projectId)).length === 0) {
-      const project = this._state(projectId).snapshot;
-      if (project?.sandbox && !await this._sandboxReady()) {
-        return;
-      }
-      await this.createThread(projectId);
-    }
-  }
-
   private async _assertSandboxReady(): Promise<void> {
     const readiness = await this._sandboxReadiness?.();
     if (readiness?.state !== "ready") {
@@ -1352,10 +1413,6 @@ export class ExternalAgentProjectManager {
         readiness?.message ?? "The Desktop Host has no SandboxProvider."
       );
     }
-  }
-
-  private async _sandboxReady(): Promise<boolean> {
-    return (await this._sandboxReadiness?.())?.state === "ready";
   }
 
   private async _readThreadFile(
@@ -1502,20 +1559,12 @@ export class ExternalAgentProjectManager {
     thread: Thread
   ): ProjectTool[] {
     const loaded = this._state(projectId);
-    const snapshot = loaded.snapshot;
-    if (!snapshot) {
-      return (thread.context?.tools ?? []).filter(
-        (tool): tool is ProjectTool => tool.type === "project"
-      );
-    }
-    const local = _projectTools(projectId, snapshot);
+    const stored = _projectToolsInThread(thread);
+    const local = stored.filter(tool => !tool.connectionName);
     const active = loaded.connectionSessions.get(threadId);
-    const storedRemote = (thread.context?.tools ?? []).filter(
-      (tool): tool is ProjectTool =>
-        tool.type === "project" && Boolean(tool.connectionName)
-    );
-    if (active?.snapshot !== snapshot.fingerprint) {
-      return [...local, ...storedRemote];
+    const storedRemote = stored.filter(tool => Boolean(tool.connectionName));
+    if (!active || active.snapshot !== thread.agentRuntime?.snapshot) {
+      return stored;
     }
     const remote: ProjectTool[] = [];
     const connectionNames = new Set([
@@ -1606,6 +1655,126 @@ export function duplicateExternalAgentProjectThreadState(
     runtimeProfile,
     ...(context ? { context } : {})
   };
+}
+
+function _projectStatus(loaded: LoadedProject): ExternalAgentProjectStatus {
+  if (loaded.missing) { return "missing"; }
+  if (loaded.building) { return "building"; }
+  return loaded.error ? "invalid" : "ready";
+}
+
+function _projectToolsInThread(thread: Thread): ProjectTool[] {
+  return (thread.context?.tools ?? []).filter(
+    (tool): tool is ProjectTool => tool.type === "project"
+  );
+}
+
+function _remoteProjectToolsInThread(thread: Thread): ProjectTool[] {
+  return _projectToolsInThread(thread).filter(tool => Boolean(tool.connectionName));
+}
+
+function _artifactSummary(
+  snapshot: AgentProjectSnapshot
+): ExternalAgentProjectArtifactSummary {
+  const definition = snapshot.definition;
+  const capabilities: ExternalAgentProjectArtifactSummary["capabilities"] = [
+    ...(snapshot.instructionEntries ?? []).map(entry => ({
+      kind: "instructions" as const,
+      name: entry.kind === "dynamic" ? "Dynamic instructions" : "Instructions",
+      sourcePath: entry.sourcePath,
+      detail: entry.kind
+    })),
+    ...snapshot.tools.map(tool => ({
+      kind: "tool" as const,
+      name: tool.name,
+      sourcePath: tool.sourcePath ?? `tools/${tool.name}.ts`,
+      ...(tool.executionEnvToolKind
+        ? { detail: `ExecutionEnv · ${tool.executionEnvToolKind}` }
+        : {})
+    })),
+    ...(snapshot.dynamicToolResolvers ?? []).map(resolver => ({
+      kind: "dynamicTools" as const,
+      name: "Dynamic tools",
+      sourcePath: resolver.sourcePath
+    })),
+    ...(snapshot.stateDefinitions ?? []).map(state => ({
+      kind: "state" as const,
+      name: state.name,
+      sourcePath: state.sourcePath,
+      detail: `Version ${state.version}`
+    })),
+    ...(snapshot.outputDefinitions ?? []).map(output => ({
+      kind: "output" as const,
+      name: output.name,
+      sourcePath: output.sourcePath
+    })),
+    ...(snapshot.resources.skills ?? []).map(skill => ({
+      kind: "skill" as const,
+      name: skill.name,
+      sourcePath: `skills/${skill.name}/SKILL.md`
+    })),
+    ...snapshot.connections.map(connection => ({
+      kind: "connection" as const,
+      name: connection.name,
+      sourcePath: connection.logicalPath,
+      detail: `${connection.definition.tools.allow.length} allowlisted tools`
+    }))
+  ];
+  return {
+    fingerprint: snapshot.artifact?.fingerprint ?? snapshot.fingerprint,
+    model: {
+      id: definition
+        ? `${definition.model.provider}/${definition.model.id}`
+        : "Unavailable",
+      dynamic: Boolean(definition?.dynamicModel),
+      reasoning: definition?.reasoning ?? null
+    },
+    limits: definition?.limits ? structuredClone(definition.limits) : null,
+    environment: Object.entries(definition?.environment ?? {})
+      .map(([name, requirement]) => ({
+        name,
+        kind: requirement.kind,
+        required: requirement.required
+      }))
+      .toSorted((left, right) => left.name.localeCompare(right.name)),
+    capabilities,
+    sandbox: snapshot.sandbox
+      ? {
+        sourcePath: snapshot.sandbox.sourcePath,
+        workspaceFileCount: snapshot.sandbox.workspace.length
+      }
+      : null
+  };
+}
+
+function _diagnosticViews(
+  agentRoot: string | null,
+  diagnostics: readonly LoadedDiagnostic[]
+): ExternalDiagnostic[] {
+  return diagnostics.map(diagnostic => ({
+    code: diagnostic.code,
+    message: diagnostic.message,
+    severity: diagnostic.severity,
+    sourcePath: agentRoot
+      ? _relativeSourcePath(agentRoot, diagnostic.path)
+      : null
+  }));
+}
+
+function _relativeSourcePath(root: string, sourcePath: string): string | null {
+  if (!path.isAbsolute(sourcePath)) {
+    return sourcePath.split(path.sep).join(path.posix.sep);
+  }
+  const relative = path.relative(root, sourcePath);
+  if (
+    relative === ""
+    || relative === ".."
+    || relative.startsWith(`..${path.sep}`)
+    || path.isAbsolute(relative)
+  ) {
+    return null;
+  }
+  return relative.split(path.sep).join(path.posix.sep);
 }
 
 function _projectTools(
@@ -1759,22 +1928,62 @@ async function _safeExistingSource(
   root: string,
   relativePath: string
 ): Promise<string> {
-  if (path.isAbsolute(relativePath) || relativePath.includes("\0")) {
-    throw new Error("Source path must be relative.");
-  }
-  const candidate = path.resolve(root, relativePath);
-  if (candidate !== root && !candidate.startsWith(root + path.sep)) {
-    throw new Error("Source path escapes the Agent root.");
-  }
+  const candidate = _confinedSourceCandidate(root, relativePath);
   const info = await lstat(candidate);
   if (info.isSymbolicLink() || !info.isFile()) {
     throw new Error("Source path must be a regular non-symlink file.");
   }
   const canonical = await realpath(candidate);
-  if (canonical !== root && !canonical.startsWith(root + path.sep)) {
+  _assertWithinAgentRoot(root, canonical);
+  return canonical;
+}
+
+async function _safeEditorTarget(
+  root: string,
+  relativePath: string
+): Promise<string> {
+  const candidate = _confinedSourceCandidate(root, relativePath);
+  try {
+    return await _safeExistingSource(root, relativePath);
+  } catch (error) {
+    if (!_hasCode(error, "ENOENT")) { throw error; }
+  }
+
+  let ancestor = path.dirname(candidate);
+  while (true) {
+    try {
+      const info = await lstat(ancestor);
+      if (info.isSymbolicLink() || !info.isDirectory()) {
+        throw new Error(
+          "Source path parent must be a regular non-symlink directory."
+        );
+      }
+      _assertWithinAgentRoot(root, await realpath(ancestor));
+      return candidate;
+    } catch (error) {
+      if (!_hasCode(error, "ENOENT")) { throw error; }
+    }
+    const parent = path.dirname(ancestor);
+    if (parent === ancestor) {
+      throw new Error("Source path has no existing Agent parent directory.");
+    }
+    ancestor = parent;
+  }
+}
+
+function _confinedSourceCandidate(root: string, relativePath: string): string {
+  if (path.isAbsolute(relativePath) || relativePath.includes("\0")) {
+    throw new Error("Source path must be relative.");
+  }
+  const candidate = path.resolve(root, relativePath);
+  _assertWithinAgentRoot(root, candidate);
+  return candidate;
+}
+
+function _assertWithinAgentRoot(root: string, candidate: string): void {
+  if (candidate !== root && !candidate.startsWith(root + path.sep)) {
     throw new Error("Source path escapes the Agent root.");
   }
-  return canonical;
 }
 
 async function _atomicJsonWrite(target: string, value: unknown): Promise<void> {

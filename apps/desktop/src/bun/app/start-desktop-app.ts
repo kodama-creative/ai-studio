@@ -10,12 +10,12 @@ import Electrobun, {
   type ElectrobunEvent
 } from "electrobun/bun";
 
-import { createDirtyAgentSourceCoordinator } from "./dirty-agent-source-coordinator";
 import { getAgentBundleCompilerSupportPath } from "./get-agent-bundle-compiler-support-path";
 import { createShutdownCoordinator } from "./shutdown-coordinator";
 import { createMainWindow } from "./window";
 import { Analytics } from "../analytics";
 import { executeCommandInBun } from "../commands";
+import { ExternalEditorManager } from "../external-editor";
 import { ExternalAgentProjectManager } from "../external-projects";
 import { DesktopHost } from "../host/desktop-host";
 import {
@@ -58,6 +58,7 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
     sandboxReadiness: async () => sandboxes.readiness(),
     compilerSupportPath
   });
+  const externalEditor = new ExternalEditorManager({ homePath });
   const localServers = new EmbeddedLocalServerManager({
     externalAgentProjects,
     homePath,
@@ -105,9 +106,6 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
     }
     return mainWindow;
   };
-  const dirtyAgentSources = createDirtyAgentSourceCoordinator({
-    sendRequest: request => { getRpc().send.requestDiscardDirtyAgentSources(request); }
-  });
   const updater = new UpdaterService(message => {
     getRpc().send.updateStatusChanged(message);
   });
@@ -117,12 +115,6 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
     workspacePath
   };
   const executeCommand = (command: Command, window: BrowserWindow): void => {
-    if (command.type === "reload" && dirtyAgentSources.dirty) {
-      dirtyAgentSources.request("reload", () => {
-        executeCommandInBun(command, window, commandDependencies);
-      });
-      return;
-    }
     executeCommandInBun(command, window, commandDependencies);
   };
 
@@ -146,10 +138,7 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
     rpc = createMainWindowRPC({
       analytics,
       externalAgentProjects,
-      onAgentSourceDirtyStateChanged: dirty => {
-        dirtyAgentSources.setDirty(dirty);
-      },
-      onDiscardDirtyAgentSourcesResolved: (requestId, discard) => { dirtyAgentSources.resolve(requestId, discard); },
+      externalEditor,
       executeCommand: command => { executeCommand(command, getMainWindow()); },
       getMainWindow,
       homePath,
@@ -177,13 +166,6 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
     Electrobun.events.on(
       "before-quit",
       (event: ElectrobunEvent<Record<string, never>, { allow: boolean; }>) => {
-        if (dirtyAgentSources.dirty) {
-          event.response = { allow: false };
-          dirtyAgentSources.request("quit", () => {
-            app.quit();
-          });
-          return;
-        }
         handleBeforeQuit(event);
       }
     );

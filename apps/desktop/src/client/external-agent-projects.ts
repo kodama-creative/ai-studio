@@ -18,6 +18,10 @@ import type {
   ExternalAgentProjectThreadRecord,
   ExternalAgentProjectView
 } from "@/shared/external-agent-project";
+import type {
+  ExternalEditorId,
+  ExternalEditorStatus
+} from "@/shared/external-editor";
 
 function _rpc() {
   if (!electrobun.rpc) {
@@ -49,6 +53,21 @@ export const externalAgentProjects = {
   },
   async inspect(projectId: string): Promise<ExternalAgentProjectView> {
     return _rpc().request.externalAgentProjectInspect({ projectId });
+  },
+  async editorStatus(): Promise<ExternalEditorStatus> {
+    return _rpc().request.externalAgentProjectEditorStatus({});
+  },
+  async openInEditor(
+    projectId: string,
+    options: {
+      editorId?: ExternalEditorId;
+      sourcePath?: string;
+    } = {}
+  ): Promise<ExternalEditorStatus> {
+    return _rpc().request.externalAgentProjectOpenInEditor({
+      projectId,
+      ...options
+    });
   },
   async remove(projectId: string): Promise<null> {
     return _rpc().request.externalAgentProjectRemove({ projectId });
@@ -174,12 +193,5 @@ export const externalAgentProjects = {
   },
   async readSource(projectId: string, path: string): Promise<{ text: string; }> {
     return _rpc().request.externalAgentProjectReadSource({ projectId, path });
-  },
-  async writeSource(projectId: string, path: string, text: string): Promise<null> {
-    return _rpc().request.externalAgentProjectWriteSource({
-      projectId,
-      path,
-      text
-    });
   }
 };

@@ -9,6 +9,7 @@
 
 import type { ThreadRuntimeProfileType } from "@llm-space/core";
 
+import type { ExternalEditorId } from "./external-editor";
 import type { TraceConnectedProjectInput, TraceImportFile } from "./traces";
 
 /** Base shape for every command: a string `type` and typed `args`. */
@@ -141,7 +142,7 @@ export interface StageSandboxAttachmentsCommand extends GenericCommand<
   { messageId: string; }
 > {}
 
-/** Open the Build tab and focus the source that owns a project action. */
+/** Open the Project inspector and focus the source that owns an action. */
 export interface OpenExternalAgentProjectSourceCommand extends GenericCommand<
   "openExternalAgentProjectSource",
   {
@@ -152,10 +153,14 @@ export interface OpenExternalAgentProjectSourceCommand extends GenericCommand<
   }
 > {}
 
-/** Save an Agent Project source file through the trusted Bun-side boundary. */
-export interface SaveExternalAgentProjectSourceCommand extends GenericCommand<
-  "saveExternalAgentProjectSource",
-  { overwrite?: boolean; path: string; projectId: string; text: string; }
+/** Open one trusted Agent Project target in a fixed external editor. */
+export interface OpenExternalAgentProjectInEditorCommand extends GenericCommand<
+  "openExternalAgentProjectInEditor",
+  {
+    editorId?: ExternalEditorId;
+    projectId: string;
+    sourcePath?: string;
+  }
 > {}
 
 /** Create a new folder (with in-place rename). `parent` defaults to the root. */
@@ -404,6 +409,7 @@ export type Command =
   | OpenCommandPaletteCommand
   | OpenDocumentCommand
   | OpenExternalAgentProjectCommand
+  | OpenExternalAgentProjectInEditorCommand
   | OpenExternalAgentProjectSourceCommand
   | OpenLinkCommand
   | OpenModelSettingsCommand
@@ -426,7 +432,6 @@ export type Command =
   | RevealExternalAgentProjectCommand
   | RevealFileCommand
   | RunThreadCommand
-  | SaveExternalAgentProjectSourceCommand
   | SelectNextTabCommand
   | SelectPreviousTabCommand
   | SetExternalAgentProjectRuntimeProfileCommand
@@ -527,8 +532,8 @@ export const COMMAND_META = {
     label: "Open Agent Project Source",
     target: "webview"
   },
-  saveExternalAgentProjectSource: {
-    label: "Save Agent Project Source",
+  openExternalAgentProjectInEditor: {
+    label: "Open Agent Project in Editor",
     target: "webview"
   },
   newFolder: { label: "New Folder", target: "webview" },

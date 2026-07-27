@@ -13,7 +13,6 @@ import { toast } from "sonner";
 
 import { externalAgentProjects } from "@/client";
 import { CommandProvider, useCommands, useRegisterCommands } from "@/commands";
-import { ConfirmDialog } from "@/components/confirm-dialog";
 import { useExperimental } from "@/components/experimental-provider";
 import { ExternalAgentProjectTrustDialog } from "@/components/external-agent-project-trust-dialog";
 import { ExternalAgentProjectsPanel } from "@/components/external-agent-projects-panel";
@@ -22,7 +21,6 @@ import { FirecrawlLimitDialog } from "@/components/firecrawl-limit-dialog";
 import { useModels } from "@/components/model-provider";
 import { ThreadTabs, useThreadTabs } from "@/components/thread-tabs";
 import { requestExternalProjectSource } from "@/components/thread-tabs/external-project-source-navigation";
-import { canCloseTabs } from "@/components/thread-tabs/tab-close-guards";
 import { TracePanel } from "@/components/trace-panel";
 import { Button } from "@/components/ui/button";
 import {
@@ -199,7 +197,7 @@ const COMMAND_PALETTE_BLACKLIST = [
   "deleteExternalAgentProjectThread",
   "syncExternalAgentProjectThreadFromAgent",
   "enableExternalAgentProjectTools",
-  "saveExternalAgentProjectSource",
+  "openExternalAgentProjectInEditor",
   // Only meaningful from the "ready to install" toast; a bare palette
   // invocation would silently no-op (or restart mid-work).
   "applyUpdateAndRestart"
@@ -248,10 +246,6 @@ function PageInner() {
   const [externalProjectsRefresh, setExternalProjectsRefresh] = useState(0);
   const [pendingTrust, setPendingTrust] =
     useState<ExternalAgentProjectPreview | null>(null);
-  const [discardAgentSourcesRequest, setDiscardAgentSourcesRequest] = useState<{
-    reason: "quit" | "reload";
-    requestId: string;
-  } | null>(null);
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>(_loadSidebarMode);
   useEffect(() => {
     const next =
@@ -309,16 +303,13 @@ function PageInner() {
     async (path: string) => {
       const project = await externalAgentProjects.trustAndOpen(path);
       setExternalProjectsRefresh(value => value + 1);
-      const first = project.threads[0];
-      if (first) { openExternalProjectThread(project, first); } else {
-        tabs.openExternalProject({
-          projectId: project.id,
-          path: project.path,
-          projectName: project.name
-        });
-      }
+      tabs.openExternalProject({
+        projectId: project.id,
+        path: project.path,
+        projectName: project.name
+      });
     },
-    [openExternalProjectThread, tabs]
+    [tabs]
   );
   const browseExternalProject = useCallback(async () => {
     try {
@@ -387,6 +378,18 @@ function PageInner() {
   // settings). `newFile` / `newFolder` / the tree ops are registered by the
   // file tree, which owns that state.
   useRegisterCommands({
+    openExternalAgentProjectInEditor: ({
+      editorId,
+      projectId,
+      sourcePath
+    }) => void externalAgentProjects.openInEditor(projectId, {
+      ...(editorId ? { editorId } : {}),
+      ...(sourcePath ? { sourcePath } : {})
+    }).catch(error => {
+      toast.error("Unable to open external editor", {
+        description: error instanceof Error ? error.message : String(error)
+      });
+    }),
     openExternalAgentProjectSource: ({
       projectId,
       projectPath,
@@ -396,20 +399,15 @@ function PageInner() {
       tabs.openExternalProject({ projectId, path: projectPath, projectName });
       requestExternalProjectSource(projectId, sourcePath);
     },
-    closeTab: async ({ id, path }) => {
+    closeTab: ({ id, path }) => {
       const target = id ?? (path ? `thread:${path}` : tabs.activeId);
-      if (target && (await canCloseTabs([target]))) { close(target); }
+      if (target) { close(target); }
     },
-    closeOtherTabs: async ({ id, path }) => {
+    closeOtherTabs: ({ id, path }) => {
       const target = id ?? (path ? `thread:${path}` : tabs.activeId);
-      const closing = tabs.tabs
-        .filter(tab => tab.id !== target)
-        .map(tab => tab.id);
-      if (target && (await canCloseTabs(closing))) { closeOthers(target); }
+      if (target) { closeOthers(target); }
     },
-    closeAllTabs: async () => {
-      if (await canCloseTabs(tabs.tabs.map(tab => tab.id))) { closeAll(); }
-    },
+    closeAllTabs: () => { closeAll(); },
     reopenClosedTab: () => { void reopenClosed(); },
     selectNextTab: () => { activateNext(); },
     selectPreviousTab: () => { activatePrevious(); },
@@ -451,17 +449,8 @@ function PageInner() {
     const rpc = electrobun.rpc;
     if (!rpc) { return; }
     rpc.addMessageListener("executeCommand", executeCommand);
-    const requestDiscard = (request: {
-      reason: "quit" | "reload";
-      requestId: string;
-    }) => { setDiscardAgentSourcesRequest(request); };
-    rpc.addMessageListener("requestDiscardDirtyAgentSources", requestDiscard);
     return () => {
       rpc.removeMessageListener("executeCommand", executeCommand);
-      rpc.removeMessageListener(
-        "requestDiscardDirtyAgentSources",
-        requestDiscard
-      );
     };
   }, [executeCommand]);
 
@@ -481,8 +470,8 @@ function PageInner() {
     [executeCommand]
   );
   const handleRefreshTab = useCallback(
-    async (id: string) => {
-      if (await canCloseTabs([id])) { tabs.refresh(id); }
+    (id: string) => {
+      tabs.refresh(id);
     },
     [tabs]
   );
@@ -640,7 +629,7 @@ function PageInner() {
                   onNewFile={handleNewFile}
                   onToggleSidebar={handleToggleSidebar}
                   onTraceTitleChange={tabs.handleTraceTitleChange}
-                  refresh={id => void handleRefreshTab(id)}
+                  refresh={handleRefreshTab}
                   reorder={tabs.reorder}
                   reveal={handleRevealFile}
                   sidebarOpen={sidebarOpen}
@@ -652,38 +641,6 @@ function PageInner() {
         </ResizablePanelGroup>
       </main>
       <FirecrawlLimitDialog />
-      <ConfirmDialog
-        confirmLabel={
-          discardAgentSourcesRequest?.reason === "quit"
-            ? "Discard and quit"
-            : "Discard and reload"
-        }
-        description="One or more open source files have unsaved changes."
-        onConfirm={() => {
-          const request = discardAgentSourcesRequest;
-          setDiscardAgentSourcesRequest(null);
-          if (request) {
-            electrobun.rpc?.send.resolveDiscardDirtyAgentSources({
-              requestId: request.requestId,
-              discard: true
-            });
-          }
-        }}
-        onOpenChange={open => {
-          if (open || !discardAgentSourcesRequest) { return; }
-          electrobun.rpc?.send.resolveDiscardDirtyAgentSources({
-            requestId: discardAgentSourcesRequest.requestId,
-            discard: false
-          });
-          setDiscardAgentSourcesRequest(null);
-        }}
-        open={discardAgentSourcesRequest !== null}
-        title={
-          discardAgentSourcesRequest?.reason === "quit"
-            ? "Quit and discard unsaved Agent source changes?"
-            : "Reload and discard unsaved Agent source changes?"
-        }
-      />
       <LazyOverlay open={settingsOpen}>
         <SettingsDialog
           onOpenChange={setSettingsOpen}

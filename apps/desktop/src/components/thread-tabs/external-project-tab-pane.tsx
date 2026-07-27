@@ -4,11 +4,21 @@ import {
   AlertTriangleIcon,
   BotIcon,
   CableIcon,
+  CheckCircle2Icon,
+  ChevronDownIcon,
+  CircleAlertIcon,
+  Code2Icon,
+  ExternalLinkIcon,
+  FileCode2Icon,
+  FolderOpenIcon,
+  LoaderCircleIcon,
+  PackageCheckIcon,
   RefreshCwIcon,
   XIcon
 } from "lucide-react";
 import {
   memo,
+  type ReactNode,
   useCallback,
   useEffect,
   useMemo,
@@ -39,7 +49,6 @@ import {
 import { useCommands, useRegisterCommands } from "@/commands";
 import {
   CodeEditor,
-  type CodeEditorHandle,
   type CodeEditorLanguage
 } from "@/components/code-editor";
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -49,13 +58,23 @@ import { ModelCallLimitSummary } from "@/components/thread-playground/model-call
 import { RuntimeProfileControl } from "@/components/thread-playground/runtime-profile-control";
 import { SessionBudgetSummary } from "@/components/thread-playground/session-budget-summary";
 import { getRuntimeExecutionMode } from "@/components/thread-playground/stores/run-mode";
+import { Tooltip } from "@/components/tooltip";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger
+} from "@/components/ui/dropdown-menu";
 import { electrobun } from "@/lib/electrobun";
 import { cn } from "@/lib/utils";
 import {
+  type ExternalAgentProjectArtifactSummary,
   type ExternalAgentProjectConnectionActivation,
   type ExternalAgentProjectRunBlockReason,
   type ExternalAgentProjectRuntimeStatus,
+  type ExternalAgentProjectStatus,
   type ExternalAgentProjectThreadRecord,
   type ExternalAgentProjectView,
   getExternalAgentProjectRunBlockReason,
@@ -66,10 +85,13 @@ import {
   subscribeExternalProjectSource
 } from "./external-project-source-navigation";
 import { reconcileExternalProjectThreadModel } from "./external-project-thread-model";
-import { registerTabCloseGuard, setTabDirty } from "./tab-close-guards";
+
+import type {
+  ExternalEditorId,
+  ExternalEditorStatus
+} from "@/shared/external-editor";
 
 const _ExternalProjectTabPane = function ExternalProjectTabPane({
-  tabId,
   projectId,
   threadId,
   active,
@@ -78,7 +100,6 @@ const _ExternalProjectTabPane = function ExternalProjectTabPane({
   readonly active: boolean;
   readonly projectId: string;
   readonly refreshNonce: number;
-  readonly tabId: string;
   readonly threadId?: string;
 }) {
   return (
@@ -93,11 +114,9 @@ const _ExternalProjectTabPane = function ExternalProjectTabPane({
           />
         )
         : (
-          <_ProjectBuildPane
-            active={active}
+          <ProjectDebugPane
             projectId={projectId}
             refreshNonce={refreshNonce}
-            tabId={tabId}
           />
         )}
     </section>
@@ -1028,31 +1047,24 @@ const _ProjectThreadPane = function ProjectThreadPane({
   );
 };
 
-const _ProjectBuildPane = function ProjectBuildPane({
-  tabId,
+const ProjectDebugPane = function ProjectDebugPane({
   projectId,
-  active,
   refreshNonce
 }: {
-  readonly active: boolean;
   readonly projectId: string;
   readonly refreshNonce: number;
-  readonly tabId: string;
 }) {
   const [project, setProject] = useState<ExternalAgentProjectView | null>(null);
+  const [editorStatus, setEditorStatus] = useState<ExternalEditorStatus | null>(
+    null
+  );
   const [openFiles, setOpenFiles] = useState<string[]>([]);
   const [activeFile, setActiveFile] = useState<string | null>(null);
   const [buffers, setBuffers] = useState<Map<string, SourceBuffer>>(new Map());
-  const [pendingClose, setPendingClose] = useState<string | null>(null);
-  const [closeResolver, setCloseResolver] = useState<
-    ((allow: boolean) => void) | null
-  >(null);
   const buffersRef = useRef(buffers);
   buffersRef.current = buffers;
   const openFilesRef = useRef(openFiles);
   openFilesRef.current = openFiles;
-  const draftsRef = useRef(new Map<string, string>());
-  const editorRef = useRef<CodeEditorHandle>(null);
   const initializedRef = useRef(false);
   const { executeCommand } = useCommands();
   const updateBuffer = useCallback(
@@ -1082,10 +1094,6 @@ const _ProjectBuildPane = function ProjectBuildPane({
         next.set(path, {
           path,
           text: "",
-          savedText: "",
-          diskText: "",
-          dirty: false,
-          conflict: false,
           loading: true,
           revision: 0
         });
@@ -1096,13 +1104,11 @@ const _ProjectBuildPane = function ProjectBuildPane({
           projectId,
           path
         );
-        draftsRef.current.set(path, text);
         updateBuffer(path, buffer => ({
           ...buffer,
           text,
-          savedText: text,
-          diskText: text,
-          loading: false
+          loading: false,
+          error: undefined
         }));
       } catch (error) {
         updateBuffer(path, buffer => ({
@@ -1129,51 +1135,51 @@ const _ProjectBuildPane = function ProjectBuildPane({
   );
 
   const loadProject = useCallback(async () => {
-    const next = await externalAgentProjects.inspect(projectId);
+    const [next, nextEditorStatus] = await Promise.all([
+      externalAgentProjects.inspect(projectId),
+      editorStatus
+        ? Promise.resolve(editorStatus)
+        : externalAgentProjects.editorStatus()
+    ]);
     setProject(next);
+    setEditorStatus(nextEditorStatus);
     if (!initializedRef.current) {
       initializedRef.current = true;
-      if (next.sourceFiles.includes("instructions.md")) {
-        void openSource("instructions.md");
-      }
+      return;
     }
     const paths = openFilesRef.current.filter(path =>
       next.sourceFiles.includes(path));
+    const removed = openFilesRef.current.filter(path =>
+      !next.sourceFiles.includes(path));
+    if (removed.length > 0) {
+      setOpenFiles(paths);
+      setActiveFile(current => (current && paths.includes(current)
+        ? current
+        : null));
+      setBuffers(current => {
+        const nextBuffers = new Map(current);
+        for (const path of removed) { nextBuffers.delete(path); }
+        return nextBuffers;
+      });
+    }
     await Promise.all(
       paths.map(async path => {
-        const { text: diskText } = await externalAgentProjects.readSource(
+        const { text } = await externalAgentProjects.readSource(
           projectId,
           path
         );
         const buffer = buffersRef.current.get(path);
-        if (!buffer || buffer.loading) { return; }
-        const draft = draftsRef.current.get(path) ?? buffer.text;
-        if (buffer.dirty) {
-          if (diskText !== buffer.diskText) {
-            updateBuffer(path, current => ({
-              ...current,
-              diskText,
-              conflict: true
-            }));
-          }
-        } else if (diskText !== buffer.diskText) {
-          draftsRef.current.set(path, diskText);
+        if (buffer && text !== buffer.text) {
           updateBuffer(path, current => ({
             ...current,
-            text: diskText,
-            savedText: diskText,
-            diskText,
-            dirty: false,
-            conflict: false,
+            text,
             error: undefined,
             revision: current.revision + 1
           }));
-        } else if (draft !== buffer.text) {
-          draftsRef.current.set(path, buffer.text);
         }
       })
     );
-  }, [openSource, projectId, updateBuffer]);
+  }, [editorStatus, projectId, updateBuffer]);
 
   useEffect(() => {
     void loadProject();
@@ -1189,82 +1195,6 @@ const _ProjectBuildPane = function ProjectBuildPane({
     return () => { rpc.removeMessageListener("externalAgentProjectChanged", listener); };
   }, [loadProject, projectId]);
 
-  const hasDirtyBuffers = [...buffers.values()].some(buffer => buffer.dirty);
-  useEffect(() => {
-    setTabDirty(tabId, hasDirtyBuffers);
-  }, [hasDirtyBuffers, tabId]);
-
-  const discardAll = useCallback(() => {
-    setBuffers(current => {
-      const next = new Map(current);
-      for (const [path, buffer] of current) {
-        if (!buffer.dirty && !buffer.conflict) { continue; }
-        draftsRef.current.set(path, buffer.diskText);
-        next.set(path, {
-          ...buffer,
-          text: buffer.diskText,
-          savedText: buffer.diskText,
-          dirty: false,
-          conflict: false,
-          error: undefined,
-          revision: buffer.revision + 1
-        });
-      }
-      return next;
-    });
-  }, []);
-
-  useEffect(
-    () =>
-      registerTabCloseGuard(tabId, async () => {
-        if (![...buffersRef.current.values()].some(buffer => buffer.dirty)) {
-          return Promise.resolve(true);
-        }
-        return new Promise<boolean>(resolve => { setCloseResolver(() => resolve); });
-      }),
-    [tabId]
-  );
-
-  const saveSource = useCallback(
-    async (path: string, nextText: string, overwrite = false) => {
-      const buffer = buffersRef.current.get(path);
-      if (!buffer || (buffer.conflict && !overwrite)) { return; }
-      try {
-        await externalAgentProjects.writeSource(projectId, path, nextText);
-        draftsRef.current.set(path, nextText);
-        updateBuffer(path, current => ({
-          ...current,
-          text: nextText,
-          savedText: nextText,
-          diskText: nextText,
-          dirty: false,
-          conflict: false,
-          error: undefined
-        }));
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        updateBuffer(path, current => ({ ...current, error: message }));
-        toast.error("Unable to save Agent source", { description: message });
-      }
-    },
-    [projectId, updateBuffer]
-  );
-
-  useRegisterCommands(
-    {
-      saveExternalAgentProjectSource: async ({
-        projectId: commandProjectId,
-        path,
-        text: nextText,
-        overwrite
-      }) => {
-        if (commandProjectId !== projectId) { return; }
-        await saveSource(path, nextText, overwrite);
-      }
-    },
-    active
-  );
-
   const closeSource = useCallback((path: string) => {
     const current = openFilesRef.current;
     const index = current.indexOf(path);
@@ -1275,7 +1205,6 @@ const _ProjectBuildPane = function ProjectBuildPane({
       (activePath === path
         ? (next[index] ?? next[index - 1] ?? null)
         : activePath));
-    draftsRef.current.delete(path);
     setBuffers(currentBuffers => {
       const nextBuffers = new Map(currentBuffers);
       nextBuffers.delete(path);
@@ -1283,68 +1212,187 @@ const _ProjectBuildPane = function ProjectBuildPane({
     });
   }, []);
 
-  const requestCloseSource = useCallback(
-    (path: string) => {
-      if (buffersRef.current.get(path)?.dirty) { setPendingClose(path); } else { closeSource(path); }
-    },
-    [closeSource]
-  );
-
   const activeBuffer = activeFile ? buffers.get(activeFile) : undefined;
-  const activeText = activeFile
-    ? (draftsRef.current.get(activeFile) ?? activeBuffer?.text ?? "")
-    : "";
+  const activeText = activeBuffer?.text ?? "";
+  const preferredEditor = editorStatus?.editors.find(
+    editor => editor.id === editorStatus.preferredEditorId
+  ) ?? null;
+  const openInEditor = useCallback(
+    (editorId?: ExternalEditorId, sourcePath?: string) => {
+      if (editorId) {
+        setEditorStatus(current => {
+          return current ? { ...current, preferredEditorId: editorId } : current;
+        });
+      }
+      executeCommand({
+        type: "openExternalAgentProjectInEditor",
+        args: {
+          projectId,
+          ...(editorId ? { editorId } : {}),
+          ...(sourcePath ? { sourcePath } : {})
+        }
+      });
+    },
+    [executeCommand, projectId]
+  );
+  const handleOpenSource = useCallback(
+    (path: string) => { void openSource(path); },
+    [openSource]
+  );
 
   if (!project) { return null; }
   return (
     <div
       className="flex size-full min-h-0 flex-col"
       data-agent-build={projectId}
+      data-agent-project-debug={projectId}
     >
       <header className="flex h-11 shrink-0 items-center gap-2 border-b px-3">
         <BotIcon className="text-primary size-4" />
         <span className="text-sm font-medium">{project.name}</span>
-        {project.status === "ready"
-          ? null
-          : (
-            <span className="text-destructive ml-auto text-xs">
-              {project.status}
-            </span>
-          )}
+        <ProjectStatus status={project.status} />
         <Button
-          className={cn(project.status === "ready" && "ml-auto")}
-          disabled={
-            !activeFile || !activeBuffer?.dirty || activeBuffer.conflict
-          }
-          onClick={() => {
-            if (activeFile) {
-              executeCommand({
-                type: "saveExternalAgentProjectSource",
-                args: {
-                  projectId,
-                  path: activeFile,
-                  text: editorRef.current?.getValue() ?? activeText
-                }
-              });
-            }
-          }}
+          className="ml-auto"
+          onClick={() => { openInEditor(); }}
           size="sm"
           variant="outline"
         >
-          Save
+          <Code2Icon />
+          {preferredEditor ? `Open in ${preferredEditor.label}` : "Open in editor"}
         </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              aria-label="Choose external editor"
+              size="icon-sm"
+              variant="outline"
+            >
+              <ChevronDownIcon />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            {editorStatus?.editors.map(editor => (
+              <DropdownMenuItem
+                disabled={!editor.available}
+                key={editor.id}
+                onSelect={() => { openInEditor(editor.id); }}
+              >
+                <Code2Icon /> Open in {editor.label}
+                {!editor.available ? " — Not installed" : null}
+              </DropdownMenuItem>
+            ))}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onSelect={() => {
+                executeCommand({
+                  type: "revealExternalAgentProject",
+                  args: { path: project.path }
+                });
+              }}
+            >
+              <FolderOpenIcon /> Reveal in Finder
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </header>
-      {project.error
+      {project.error && project.diagnostics.length === 0
         ? (
           <div className="border-destructive/40 bg-destructive/5 text-destructive border-b px-3 py-2 text-xs whitespace-pre-wrap">
             {project.error}
           </div>
         )
         : null}
-      <div className="grid min-h-0 flex-1 grid-cols-[14rem_minmax(0,1fr)]">
+      <div className="grid min-h-0 flex-1 grid-cols-[18rem_minmax(0,1fr)]">
         <aside className="overflow-y-auto border-r p-2">
+          <button
+            className={cn(
+              "focus-visible:ring-ring/30 mb-2 flex w-full items-center gap-2 rounded px-2 py-2 text-left text-xs outline-none focus-visible:ring-2",
+              activeFile === null
+                ? "bg-primary/10 text-primary"
+                : "text-muted-foreground hover:bg-muted"
+            )}
+            onClick={() => { setActiveFile(null); }}
+            type="button"
+          >
+            <PackageCheckIcon className="size-3.5" />
+            Artifact summary
+          </button>
+          {project.diagnostics.length > 0
+            ? (
+              <section aria-label="Build diagnostics" className="mb-3">
+                <p className="text-muted-foreground px-2 py-1 text-[10px] font-medium tracking-wide uppercase">
+                  Diagnostics · {project.diagnostics.length}
+                </p>
+                <div className="grid gap-1">
+                  {project.diagnostics.map((diagnostic, index) => (
+                    <div
+                      className="border-border/60 bg-muted/30 grid grid-cols-[minmax(0,1fr)_auto] items-start rounded border"
+                      key={`${diagnostic.code}:${diagnostic.sourcePath ?? "project"}:${index}`}
+                    >
+                      <button
+                        className="min-w-0 px-2 py-1.5 text-left"
+                        disabled={!diagnostic.sourcePath}
+                        onClick={() => {
+                          if (diagnostic.sourcePath) {
+                            if (project.sourceFiles.includes(
+                              diagnostic.sourcePath
+                            )) {
+                              void openSource(diagnostic.sourcePath);
+                            } else {
+                              openInEditor(undefined, diagnostic.sourcePath);
+                            }
+                          }
+                        }}
+                        title={diagnostic.message}
+                        type="button"
+                      >
+                        <span
+                          className={cn(
+                            "flex items-center gap-1 text-[10px] font-medium uppercase",
+                            diagnostic.severity === "error"
+                              ? "text-destructive"
+                              : "text-warning"
+                          )}
+                        >
+                          <CircleAlertIcon className="size-3" />
+                          {diagnostic.severity}
+                        </span>
+                        <span className="mt-0.5 line-clamp-2 block text-xs">
+                          {diagnostic.message}
+                        </span>
+                        <span className="text-muted-foreground mt-1 block truncate font-mono text-[10px]">
+                          {diagnostic.sourcePath ?? "Project"}
+                        </span>
+                      </button>
+                      {diagnostic.sourcePath
+                        ? (
+                          <Tooltip content="Open diagnostic source in editor">
+                            <Button
+                              aria-label={`Open ${diagnostic.sourcePath} in external editor`}
+                              className="m-1 size-6"
+                              disabled={!preferredEditor?.available}
+                              onClick={() => {
+                                openInEditor(
+                                  undefined,
+                                  diagnostic.sourcePath ?? undefined
+                                );
+                              }}
+                              size="icon-sm"
+                              variant="ghost"
+                            >
+                              <ExternalLinkIcon className="size-3" />
+                            </Button>
+                          </Tooltip>
+                        )
+                        : null}
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )
+            : null}
           <p className="text-muted-foreground px-2 py-1 text-[10px] font-medium tracking-wide uppercase">
-            Agent source
+            Source · read only
           </p>
           {project.sourceFiles.map(file => (
             <button
@@ -1372,7 +1420,6 @@ const _ProjectBuildPane = function ProjectBuildPane({
                 role="tablist"
               >
                 {openFiles.map(file => {
-                  const buffer = buffers.get(file);
                   return (
                     <div
                       className={cn(
@@ -1390,21 +1437,23 @@ const _ProjectBuildPane = function ProjectBuildPane({
                         type="button"
                       >
                         <span>{file}</span>
-                        {buffer?.dirty
-                          ? (
-                            <span
-                              aria-label="Unsaved changes"
-                              className="text-primary"
-                            >
-                              ●
-                            </span>
-                          )
-                          : null}
                       </button>
+                      <Tooltip content={`Open ${file} in external editor`}>
+                        <Button
+                          aria-label={`Open ${file} in external editor`}
+                          className="size-5 opacity-70 group-hover:opacity-100"
+                          disabled={!preferredEditor?.available}
+                          onClick={() => { openInEditor(undefined, file); }}
+                          size="icon-sm"
+                          variant="ghost"
+                        >
+                          <ExternalLinkIcon className="size-3" />
+                        </Button>
+                      </Tooltip>
                       <Button
                         aria-label={`Close ${file}`}
                         className="mr-1 size-5 opacity-70 group-hover:opacity-100"
-                        onClick={() => { requestCloseSource(file); }}
+                        onClick={() => { closeSource(file); }}
                         size="icon-sm"
                         variant="ghost"
                       >
@@ -1419,48 +1468,6 @@ const _ProjectBuildPane = function ProjectBuildPane({
           {activeFile && activeBuffer
             ? (
               <>
-                {activeBuffer.conflict
-                  ? (
-                    <div className="border-warning/40 bg-warning/5 flex items-center gap-2 border-b px-3 py-2 text-xs">
-                      <span className="mr-auto">Changed on disk</span>
-                      <Button
-                        onClick={() => {
-                          draftsRef.current.set(activeFile, activeBuffer.diskText);
-                          updateBuffer(activeFile, buffer => ({
-                            ...buffer,
-                            text: buffer.diskText,
-                            savedText: buffer.diskText,
-                            dirty: false,
-                            conflict: false,
-                            error: undefined,
-                            revision: buffer.revision + 1
-                          }));
-                        }}
-                        size="sm"
-                        variant="ghost"
-                      >
-                        Reload from disk
-                      </Button>
-                      <Button
-                        onClick={() => {
-                          executeCommand({
-                            type: "saveExternalAgentProjectSource",
-                            args: {
-                              projectId,
-                              path: activeFile,
-                              text: editorRef.current?.getValue() ?? activeText,
-                              overwrite: true
-                            }
-                          });
-                        }}
-                        size="sm"
-                        variant="destructive"
-                      >
-                        Overwrite
-                      </Button>
-                    </div>
-                  )
-                  : null}
                 {activeBuffer.error
                   ? (
                     <div className="border-destructive/40 bg-destructive/5 text-destructive border-b px-3 py-2 text-xs">
@@ -1479,85 +1486,21 @@ const _ProjectBuildPane = function ProjectBuildPane({
                       className="min-h-0 flex-1 rounded-none border-0"
                       key={`${activeFile}:${activeBuffer.revision}`}
                       language={_sourceLanguage(activeFile)}
-                      onChange={next => {
-                        draftsRef.current.set(activeFile, next);
-                        updateBuffer(activeFile, buffer => ({
-                          ...buffer,
-                          text: next,
-                          dirty: next !== buffer.savedText
-                        }));
-                      }}
-                      onDraftChange={next => {
-                        draftsRef.current.set(activeFile, next);
-                        updateBuffer(activeFile, buffer => {
-                          const dirty = next !== buffer.savedText;
-                          return dirty === buffer.dirty
-                            ? buffer
-                            : { ...buffer, dirty };
-                        });
-                      }}
-                      onKeyDown={event => {
-                        if (
-                          event.key.toLowerCase() === "s"
-                          && (event.metaKey || event.ctrlKey)
-                        ) {
-                          event.preventDefault();
-                          executeCommand({
-                            type: "saveExternalAgentProjectSource",
-                            args: {
-                              projectId,
-                              path: activeFile,
-                              text: editorRef.current?.getValue() ?? activeText
-                            }
-                          });
-                        }
-                      }}
-                      ref={editorRef}
+                      readonly
                       value={activeText}
                     />
                   )}
               </>
             )
             : (
-              <div className="text-muted-foreground flex flex-1 items-center justify-center text-sm">
-                Select an Agent source file to edit.
-              </div>
+              <ArtifactSummary
+                onOpenSource={handleOpenSource}
+                status={project.status}
+                summary={project.artifactSummary}
+              />
             )}
         </main>
       </div>
-      <ConfirmDialog
-        confirmLabel="Discard changes"
-        description="Your unsaved changes will be lost."
-        onConfirm={() => {
-          const path = pendingClose;
-          setPendingClose(null);
-          if (path) { closeSource(path); }
-        }}
-        onOpenChange={open => {
-          if (!open) { setPendingClose(null); }
-        }}
-        open={pendingClose !== null}
-        title={`Discard changes to ${pendingClose ?? "source"}?`}
-      />
-      <ConfirmDialog
-        confirmLabel="Discard changes"
-        description="One or more open source files have unsaved changes."
-        onConfirm={() => {
-          const resolve = closeResolver;
-          discardAll();
-          setCloseResolver(null);
-          resolve?.(true);
-        }}
-        onOpenChange={open => {
-          if (!open && closeResolver) {
-            const resolve = closeResolver;
-            setCloseResolver(null);
-            resolve(false);
-          }
-        }}
-        open={closeResolver !== null}
-        title="Discard unsaved Agent source changes?"
-      />
     </div>
   );
 };
@@ -1565,13 +1508,166 @@ const _ProjectBuildPane = function ProjectBuildPane({
 interface SourceBuffer {
   path: string;
   text: string;
-  savedText: string;
-  diskText: string;
-  dirty: boolean;
-  conflict: boolean;
   loading: boolean;
   revision: number;
   error?: string;
+}
+
+function ProjectStatus({ status }: { readonly status: ExternalAgentProjectStatus; }) {
+  const content = status === "ready"
+    ? { icon: CheckCircle2Icon, label: "Ready", className: "text-success" }
+    : status === "building"
+      ? { icon: LoaderCircleIcon, label: "Building", className: "text-primary" }
+      : status === "missing"
+        ? { icon: CircleAlertIcon, label: "Missing", className: "text-destructive" }
+        : { icon: CircleAlertIcon, label: "Invalid", className: "text-destructive" };
+  const Icon = content.icon;
+  return (
+    <span className={cn("flex items-center gap-1 text-xs", content.className)}>
+      <Icon className={cn("size-3.5", status === "building" && "animate-spin")} />
+      {content.label}
+    </span>
+  );
+}
+
+const ArtifactSummary = memo(({
+  onOpenSource,
+  status,
+  summary
+}: {
+  readonly onOpenSource: (path: string) => void;
+  readonly status: ExternalAgentProjectStatus;
+  readonly summary: ExternalAgentProjectArtifactSummary | null;
+}) => {
+  if (!summary) {
+    const message = status === "building"
+      ? "Building the latest source…"
+      : status === "missing"
+        ? "The Agent Project source is unavailable."
+        : "Fix the compiler diagnostics in your external editor to produce a valid artifact.";
+    return (
+      <div className="text-muted-foreground flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center text-sm">
+        {status === "building"
+          ? <LoaderCircleIcon className="text-primary size-5 animate-spin" />
+          : <CircleAlertIcon className="size-5" />}
+        <p>{message}</p>
+      </div>
+    );
+  }
+  const limits = Object.entries(summary.limits ?? {});
+  const sandbox = summary.sandbox;
+  return (
+    <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto p-5">
+      <div className="mx-auto grid min-w-0 max-w-4xl gap-5">
+        <header className="min-w-0">
+          <div className="flex items-center gap-2">
+            <PackageCheckIcon className="text-primary size-4" />
+            <h2 className="text-sm font-medium">Compiled artifact</h2>
+          </div>
+          <p
+            className="text-muted-foreground mt-1 block min-w-0 max-w-full truncate font-mono text-[10px]"
+            title={summary.fingerprint}
+          >
+            {summary.fingerprint}
+          </p>
+        </header>
+        <div className="grid gap-3 xl:grid-cols-2">
+          <SummaryCard label="Model">
+            <p className="font-mono text-xs">{summary.model.id}</p>
+            <p className="text-muted-foreground text-xs">
+              {summary.model.dynamic ? "Dynamic selection" : "Static selection"}
+              {summary.model.reasoning ? ` · ${summary.model.reasoning}` : ""}
+            </p>
+          </SummaryCard>
+          <SummaryCard label="Run limits">
+            {limits.length > 0
+              ? limits.map(([name, value]) => (
+                <p className="flex justify-between gap-3 text-xs" key={name}>
+                  <span className="text-muted-foreground truncate">{name}</span>
+                  <span>{value === false ? "Unlimited" : value}</span>
+                </p>
+              ))
+              : <p className="text-muted-foreground text-xs">Runtime defaults</p>}
+          </SummaryCard>
+          <SummaryCard label="Environment">
+            {summary.environment.length > 0
+              ? summary.environment.map(requirement => (
+                <p className="flex justify-between gap-3 text-xs" key={requirement.name}>
+                  <span className="truncate font-mono">{requirement.name}</span>
+                  <span className="text-muted-foreground">
+                    {requirement.kind} · {requirement.required ? "required" : "optional"}
+                  </span>
+                </p>
+              ))
+              : <p className="text-muted-foreground text-xs">No requirements</p>}
+          </SummaryCard>
+          <SummaryCard label="Sandbox">
+            {sandbox
+              ? (
+                <button
+                  className="hover:text-primary flex w-full items-center justify-between gap-3 text-left text-xs"
+                  onClick={() => { onOpenSource(sandbox.sourcePath); }}
+                  type="button"
+                >
+                  <span className="truncate font-mono">{sandbox.sourcePath}</span>
+                  <span className="text-muted-foreground">
+                    {sandbox.workspaceFileCount} workspace files
+                  </span>
+                </button>
+              )
+              : <p className="text-muted-foreground text-xs">Direct allowed</p>}
+          </SummaryCard>
+        </div>
+        <section>
+          <h3 className="text-muted-foreground mb-2 text-[10px] font-medium tracking-wide uppercase">
+            Capabilities · {summary.capabilities.length}
+          </h3>
+          {summary.capabilities.length > 0
+            ? (
+              <div className="grid gap-2 xl:grid-cols-2">
+                {summary.capabilities.map(capability => (
+                  <button
+                    className="border-border hover:bg-muted/60 flex min-w-0 items-center gap-2 rounded border px-3 py-2 text-left"
+                    key={`${capability.kind}:${capability.sourcePath}:${capability.name}`}
+                    onClick={() => { onOpenSource(capability.sourcePath); }}
+                    type="button"
+                  >
+                    <FileCode2Icon className="text-muted-foreground size-3.5 shrink-0" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-xs">{capability.name}</span>
+                      <span className="text-muted-foreground block truncate font-mono text-[10px]">
+                        {capability.sourcePath}
+                      </span>
+                    </span>
+                    <span className="text-muted-foreground shrink-0 text-[10px]">
+                      {capability.detail ?? capability.kind}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )
+            : <p className="text-muted-foreground text-xs">No optional capabilities.</p>}
+        </section>
+      </div>
+    </div>
+  );
+});
+
+function SummaryCard({
+  children,
+  label
+}: {
+  readonly children: ReactNode;
+  readonly label: string;
+}) {
+  return (
+    <section className="border-border rounded border p-3">
+      <h3 className="text-muted-foreground mb-2 text-[10px] font-medium tracking-wide uppercase">
+        {label}
+      </h3>
+      <div className="grid gap-1">{children}</div>
+    </section>
+  );
 }
 
 function _sourceLanguage(path: string): CodeEditorLanguage {

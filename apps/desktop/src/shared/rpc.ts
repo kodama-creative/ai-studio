@@ -34,6 +34,10 @@ import type {
   RemoteToolCallAttempt
 } from "./external-agent-project";
 import type {
+  ExternalEditorId,
+  ExternalEditorStatus
+} from "./external-editor";
+import type {
   McpCallToolResponse,
   McpServerDraft,
   McpServerToolsResponse,
@@ -137,17 +141,12 @@ export interface DesktopRPCType {
     // Messages the webview SENDS and the bun side handles.
     messages: {
       abortStreamThread: AbortStreamThreadPayload;
-      agentSourceDirtyStateChanged: { dirty: boolean; };
       // Fire-and-forget: a renderer-only, anonymous analytics event. The bun
       // side is the single network egress for telemetry. See `shared/analytics.ts`.
       captureAnalyticsEvent: AnalyticsEvent;
       // A unified command dispatched from the webview to run in the bun process
       // (e.g. window zoom / reload). See `shared/commands.ts`.
       executeCommand: Command;
-      resolveDiscardDirtyAgentSources: {
-        discard: boolean;
-        requestId: string;
-      };
       sendStreamThreadRequest: StreamThreadRequestPayload;
     };
     requests: {
@@ -260,6 +259,10 @@ export interface DesktopRPCType {
         params: { projectId: string; threadId: string; };
         response: { id: string; record: ExternalAgentProjectThreadRecord; };
       };
+      externalAgentProjectEditorStatus: {
+        params: Record<string, never>;
+        response: ExternalEditorStatus;
+      };
       externalAgentProjectInspect: {
         params: { projectId: string; };
         response: ExternalAgentProjectView;
@@ -267,6 +270,14 @@ export interface DesktopRPCType {
       externalAgentProjectList: {
         params: Record<string, never>;
         response: ExternalAgentProjectSummary[];
+      };
+      externalAgentProjectOpenInEditor: {
+        params: {
+          editorId?: ExternalEditorId;
+          projectId: string;
+          sourcePath?: string;
+        };
+        response: ExternalEditorStatus;
       };
       externalAgentProjectReadSource: {
         params: { path: string; projectId: string; };
@@ -320,10 +331,6 @@ export interface DesktopRPCType {
       externalAgentProjectTrustAndOpen: {
         params: { path: string; };
         response: ExternalAgentProjectView;
-      };
-      externalAgentProjectWriteSource: {
-        params: { path: string; projectId: string; text: string; };
-        response: null;
       };
       externalAgentProjectWriteThread: {
         params: {
@@ -595,10 +602,6 @@ export interface DesktopRPCType {
       // OS-level fullscreen state changed (entered/exited).
       fullScreenChanged: { fullScreen: boolean; };
       receiveStreamThreadResponse: StreamThreadResponsePayload;
-      requestDiscardDirtyAgentSources: {
-        reason: "quit" | "reload";
-        requestId: string;
-      };
       // App-update flow progress from the bun-side updater service.
       updateStatusChanged: UpdateStatusChangedPayload;
     };

@@ -1,14 +1,58 @@
 import { getThreadRuntimeProfile } from "@llm-space/core";
 
 import type { ProjectTool, Thread } from "@llm-space/core";
-import type {
-  AgentProjectDiagnostic,
-  CompiledAgentDefinition
-} from "@llm-space/runtime";
+import type { CompiledAgentDefinition } from "@llm-space/runtime";
 
 import type { SkillInfo } from "./skills";
 
-export type ExternalAgentProjectStatus = "invalid" | "missing" | "ready";
+export type ExternalAgentProjectStatus =
+  | "building"
+  | "invalid"
+  | "missing"
+  | "ready";
+
+export interface ExternalAgentProjectDiagnostic {
+  code: string;
+  message: string;
+  severity: "error" | "warning";
+  sourcePath: string | null;
+}
+
+export type ExternalAgentProjectCapabilityKind =
+  | "connection"
+  | "dynamicTools"
+  | "instructions"
+  | "output"
+  | "skill"
+  | "state"
+  | "tool";
+
+export interface ExternalAgentProjectCapabilitySummary {
+  detail?: string;
+  kind: ExternalAgentProjectCapabilityKind;
+  name: string;
+  sourcePath: string;
+}
+
+export interface ExternalAgentProjectArtifactSummary {
+  capabilities: ExternalAgentProjectCapabilitySummary[];
+  environment: Array<{
+    kind: "config" | "secret";
+    name: string;
+    required: boolean;
+  }>;
+  fingerprint: string;
+  limits: CompiledAgentDefinition["limits"] | null;
+  model: {
+    dynamic: boolean;
+    id: string;
+    reasoning: string | null;
+  };
+  sandbox: {
+    sourcePath: string;
+    workspaceFileCount: number;
+  } | null;
+}
 
 export interface ExternalAgentProjectPreview {
   id: string;
@@ -35,6 +79,7 @@ export interface ExternalAgentProjectSummary {
 export interface ExternalAgentProjectView extends ExternalAgentProjectSummary {
   agentPath: string | null;
   artifactFingerprint: string;
+  artifactSummary: ExternalAgentProjectArtifactSummary | null;
   instructions: string;
   definition: CompiledAgentDefinition | null;
   definitionFingerprint: string;
@@ -49,7 +94,7 @@ export interface ExternalAgentProjectView extends ExternalAgentProjectSummary {
     schemaFingerprint: string;
   }>;
   skills: SkillInfo[];
-  diagnostics: AgentProjectDiagnostic[];
+  diagnostics: ExternalAgentProjectDiagnostic[];
   sourceFiles: string[];
 }
 

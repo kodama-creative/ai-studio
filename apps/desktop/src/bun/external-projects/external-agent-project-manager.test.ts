@@ -73,6 +73,21 @@ export default defineTool({
   return { home, manager, marker, project, root, workspace };
 }
 
+async function _trustAndCreateThread(
+  manager: ExternalAgentProjectManager,
+  project: string
+) {
+  const opened = await manager.trustAndOpen(project);
+  const created = await manager.createThread(opened.id);
+  return {
+    ...opened,
+    threads: [{
+      id: created.id,
+      title: created.record.thread.title ?? "untitled"
+    }]
+  };
+}
+
 describe("ExternalAgentProjectManager", () => {
   test("defaults a required Agent to Desktop Sandbox and never permits Direct", async () => {
     const { manager, project } = await _fixture();
@@ -89,7 +104,7 @@ describe("ExternalAgentProjectManager", () => {
       "seed\n"
     );
 
-    const opened = await manager.trustAndOpen(project);
+    const opened = await _trustAndCreateThread(manager, project);
     expect(opened.sandboxRequired).toBe(true);
     const defaultThread = await manager.readThread(
       opened.id,
@@ -138,7 +153,7 @@ describe("ExternalAgentProjectManager", () => {
       `import { defineSandbox } from "@llm-space/runtime/sandbox";
       export default defineSandbox({});`
     );
-    const opened = await manager.trustAndOpen(project);
+    const opened = await _trustAndCreateThread(manager, project);
     const threadId = opened.threads[0]!.id;
     const initial = await manager.readThread(opened.id, threadId);
     const messageId = "message-one";
@@ -233,21 +248,13 @@ describe("ExternalAgentProjectManager", () => {
     expect(created.skills.map(skill => skill.name)).toEqual([
       "concise-response"
     ]);
-    expect(created.threads).toHaveLength(1);
+    expect(created.threads).toEqual([]);
     expect(
       await Bun.file(path.join(created.path, "llm-space.json")).exists()
     ).toBe(true);
     expect(
-      await Bun.file(
-        path.join(
-          home,
-          "projects",
-          created.id,
-          "threads",
-          `${created.threads[0]!.id}.json`
-        )
-      ).exists()
-    ).toBe(true);
+      await Bun.file(path.join(home, "projects", created.id, "threads")).exists()
+    ).toBe(false);
   });
 
   test("removes generated source when Desktop activation cannot commit", async () => {
@@ -269,7 +276,7 @@ describe("ExternalAgentProjectManager", () => {
 
   test("keeps Local Server session binding Bun-owned when duplicating", async () => {
     const { manager, project } = await _fixture();
-    const opened = await manager.trustAndOpen(project);
+    const opened = await _trustAndCreateThread(manager, project);
     const created = await manager.createThread(
       opened.id,
       "Server Thread",
@@ -331,7 +338,7 @@ describe("ExternalAgentProjectManager", () => {
 
   test("switches Runtime Profiles in one Thread without clearing debug state", async () => {
     const { manager, project } = await _fixture();
-    const opened = await manager.trustAndOpen(project);
+    const opened = await _trustAndCreateThread(manager, project);
     const threadId = opened.threads[0]!.id;
     const initial = await manager.readThread(opened.id, threadId);
     const runtimeSession = { retained: "runtime-session" };
@@ -423,7 +430,7 @@ describe("ExternalAgentProjectManager", () => {
       .toEqual([threadId]);
   });
 
-  test("does not import tools before trust, then creates desktop-owned Threads", async () => {
+  test("does not import tools or create Threads before explicit user action", async () => {
     const { home, manager, marker, project } = await _fixture();
     const preview = await manager.preview(project);
     expect(preview.trusted).toBe(false);
@@ -432,9 +439,9 @@ describe("ExternalAgentProjectManager", () => {
     const opened = await manager.trustAndOpen(project);
     expect(opened.status).toBe("ready");
     expect(await Bun.file(marker).exists()).toBe(true);
-    expect(opened.threads).toHaveLength(1);
+    expect(opened.threads).toEqual([]);
 
-    const threadId = opened.threads[0].id;
+    const { id: threadId } = await manager.createThread(opened.id);
     const record = await manager.readThread(opened.id, threadId);
     expect(record.thread.model).toEqual({
       provider: "openai",
@@ -518,7 +525,7 @@ export default defineTool({
 
   test("marks prompt copies out of sync until explicit sync", async () => {
     const { manager, project } = await _fixture();
-    const opened = await manager.trustAndOpen(project);
+    const opened = await _trustAndCreateThread(manager, project);
     const threadId = opened.threads[0].id;
     const before = await manager.readThread(opened.id, threadId);
     expect(before.syncedPrompt).toBe("Use echo for every request.\n");
@@ -558,6 +565,12 @@ export default defineTool({
     expect(refreshed.promptFingerprint).not.toBe(before.promptFingerprint);
     const outOfSync = await manager.readThread(opened.id, threadId);
     expect(outOfSync.syncedPrompt).toBe(before.syncedPrompt);
+    expect(outOfSync.thread.context?.systemPrompt).toBe(
+      before.thread.context?.systemPrompt
+    );
+    expect(outOfSync.thread.context?.tools).toEqual(
+      before.thread.context?.tools
+    );
 
     const synced = await manager.syncThreadFromAgent(opened.id, threadId);
     expect(synced.promptFingerprint).toBe(refreshed.promptFingerprint);
@@ -585,13 +598,18 @@ export default defineTool({
 
     expect(opened.status).toBe("invalid");
     expect(opened.error).toContain("Unable to import echo.ts");
+    expect(opened.diagnostics).toContainEqual(expect.objectContaining({
+      severity: "error",
+      sourcePath: "tools/echo.ts"
+    }));
+    expect(opened.artifactSummary).toBeNull();
     expect(opened.threads).toHaveLength(0);
     expect((await manager.list())[0]?.status).toBe("invalid");
   });
 
   test("restores desktop-owned Threads after restart and reports a missing path", async () => {
     const { home, manager, project } = await _fixture();
-    const opened = await manager.trustAndOpen(project);
+    const opened = await _trustAndCreateThread(manager, project);
     const threadId = opened.threads[0].id;
     await manager.shutdown();
     managers.splice(managers.indexOf(manager), 1);
@@ -614,7 +632,7 @@ export default defineTool({
 
   test("migrates matching legacy model values as an explicit Thread override", async () => {
     const { home, manager, project } = await _fixture();
-    const opened = await manager.trustAndOpen(project);
+    const opened = await _trustAndCreateThread(manager, project);
     if (!opened.definition) {
       throw new Error("Missing Agent definition");
     }
@@ -660,7 +678,7 @@ export default defineTool({
 
   test("retains a legacy override when the project recovers after migration", async () => {
     const { home, manager, project } = await _fixture();
-    const opened = await manager.trustAndOpen(project);
+    const opened = await _trustAndCreateThread(manager, project);
     const threadId = opened.threads[0].id;
     const threadFile = path.join(
       home,
@@ -721,7 +739,7 @@ export default defineTool({
 
     const opened = await manager.trustAndOpen(project);
     expect(opened.removable).toBe(false);
-    expect(opened.threads).toHaveLength(1);
+    expect(opened.threads).toEqual([]);
     expect(
       await Bun.file(
         path.join(home, "settings", "external-agent-projects.json")
@@ -778,7 +796,7 @@ export default defineMcpClientConnection({
 });`,
       "utf8"
     );
-    const opened = await manager.trustAndOpen(project);
+    const opened = await _trustAndCreateThread(manager, project);
     const threadId = opened.threads[0]!.id;
     await manager.activateConnections(opened.id, threadId);
     const record = await manager.readThread(opened.id, threadId);
@@ -857,7 +875,7 @@ export default defineMcpClientConnection({
       })
     });
     await _writeWeatherConnection(project);
-    const opened = await manager.trustAndOpen(project);
+    const opened = await _trustAndCreateThread(manager, project);
     const threadId = opened.threads[0]!.id;
 
     const activation = manager.activateConnections(opened.id, threadId);
@@ -910,7 +928,7 @@ export default defineMcpClientConnection({
       }
     });
     await _writeWeatherConnection(project);
-    const opened = await manager.trustAndOpen(project);
+    const opened = await _trustAndCreateThread(manager, project);
     const threadId = opened.threads[0]!.id;
     await manager.activateConnections(opened.id, threadId);
     await writeFile(
@@ -936,6 +954,7 @@ export default defineMcpClientConnection({
     expect(blockedActivation.tools).toEqual([]);
     expect(clientCount).toBe(1);
     const refreshed = await manager.inspect(opened.id);
+    await manager.syncThreadFromAgent(opened.id, threadId);
     await manager.activateConnections(opened.id, threadId);
     expect(clientCount).toBe(2);
     expect(
@@ -985,7 +1004,7 @@ export default defineMcpClientConnection({
 });`,
       "utf8"
     );
-    const opened = await manager.trustAndOpen(project);
+    const opened = await _trustAndCreateThread(manager, project);
     await manager.activateConnections(opened.id, opened.threads[0]!.id);
 
     let shutdownFinished = false;
@@ -1049,7 +1068,7 @@ export default defineMcpClientConnection({
       "utf8"
     );
 
-    const opened = await manager.trustAndOpen(project);
+    const opened = await _trustAndCreateThread(manager, project);
     expect(await Bun.file(callbackMarker).exists()).toBe(false);
     const threadId = opened.threads[0]!.id;
     const activation = await manager.activateConnections(opened.id, threadId);
@@ -1162,6 +1181,7 @@ export default defineMcpClientConnection({
 
     await rm(path.join(project, "agent", "connections", "weather.ts"));
     await manager.refresh(opened.id);
+    await manager.syncThreadFromAgent(opened.id, threadId);
     const removed = await manager.activateConnections(opened.id, threadId);
     expect(removed.hasSchemaDrift).toBe(true);
     expect(removed.statuses).toEqual([

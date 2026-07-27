@@ -318,7 +318,7 @@ test("selects a frozen Agent snapshot after source sync and Desktop restart", as
   });
   MANAGERS.push(first);
   const opened = await first.trustAndOpen(project);
-  const threadId = opened.threads[0]!.id;
+  const { id: threadId } = await first.createThread(opened.id);
   const snapshotA = opened.snapshot;
   const waiting = await _waitingProjectRun(snapshotA);
   const original = await first.readThread(opened.id, threadId);
