@@ -1,0 +1,30 @@
+{
+  "name": "@llm-space/agent",
+  "version": "4.0.1",
+  "type": "module",
+  "private": true,
+  "license": "Apache-2.0",
+  "exports": {
+    ".": "./src/index.ts",
+    "./approval": "./src/tools/approval.ts",
+    "./channels": "./src/channels/index.ts",
+    "./connections": "./src/connections/index.ts",
+    "./context": "./src/context/index.ts",
+    "./extension": "./src/extension/index.ts",
+    "./hooks": "./src/hooks/index.ts",
+    "./instructions": "./src/instructions/index.ts",
+    "./instrumentation": "./src/instrumentation/index.ts",
+    "./loader": "./src/loader/index.ts",
+    "./sandbox": "./src/sandbox/index.ts",
+    "./schedules": "./src/schedules/index.ts",
+    "./skills": "./src/skills/index.ts",
+    "./tools": "./src/tools/index.ts",
+    "./tools/approval": "./src/tools/approval.ts",
+    "./package.json": "./package.json"
+  },
+  "dependencies": {
+    "@standard-schema/spec": "catalog:",
+    "ai": "catalog:",
+    "gray-matter": "catalog:"
+  }
+}

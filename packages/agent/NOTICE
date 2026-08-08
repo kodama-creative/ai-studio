@@ -1,0 +1,8 @@
+Portions of this package are derived from Vercel Eve 0.31.3
+(commit f835ad57409ddf33cd21c52947ec27e8c7024bb7),
+Copyright Vercel, Inc., licensed under the Apache License, Version 2.0.
+
+The derived implementation has been modified for the LLM Space package
+layout, Bun-native loading, LLM Space identifiers, and an independent
+manifest format. The upstream project is available at:
+https://github.com/vercel/eve
