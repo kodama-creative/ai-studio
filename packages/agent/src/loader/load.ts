@@ -762,6 +762,9 @@ async function _loadNode(
     kind: "llm-space-agent-manifest",
     agentId: source.agentId,
     agent,
+    ...(source.agent === undefined
+      ? {}
+      : { agentSource: _source(source.agent) }),
     channels,
     connections,
     extensions: [],

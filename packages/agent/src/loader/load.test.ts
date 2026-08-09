@@ -57,6 +57,7 @@ describe("loadAgent", () => {
       kind: "llm-space-agent-manifest",
       agentId: "@acme/echo",
       agent: { model: "openai/gpt-5", outputSchema: { type: "object" } },
+      agentSource: { sourceId: "agent.ts", logicalPath: "agent.ts" },
       instructions: [{ markdown: "Be useful.", sourceId: "instructions.md" }],
       tools: [
         {

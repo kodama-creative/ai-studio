@@ -148,6 +148,7 @@ export interface AgentManifest {
   readonly kind: "llm-space-agent-manifest";
   readonly agentId: string;
   readonly agent: Readonly<Record<string, unknown>>;
+  readonly agentSource?: AgentManifestSource;
   readonly channels: readonly LoadedChannelDefinition[];
   readonly connections: readonly LoadedConnectionDefinition[];
   readonly extensions: readonly LoadedExtensionDefinition[];
