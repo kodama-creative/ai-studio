@@ -1,4 +1,5 @@
-import type { HarnessEvent, SessionEventCursor } from "./protocol";
+import type { HarnessEvent, SessionEventCursor } from "../session/protocol";
+
 import type { SessionEventLog } from "./session-event-log";
 
 export class InMemorySessionEventLog implements SessionEventLog {

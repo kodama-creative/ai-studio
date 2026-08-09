@@ -9,7 +9,7 @@ import {
   createHarness,
   type ModelTurnEngine,
   type ModelTurnEvent,
-} from "./index";
+} from "../index";
 
 const ROOTS: string[] = [];
 
@@ -25,7 +25,7 @@ test("executes a generation produced by the code-first agent loader", async () =
   await mkdir(join(root, "agent", "tools"), { recursive: true });
   await mkdir(join(root, "node_modules", "@llm-space"), { recursive: true });
   await symlink(
-    join(import.meta.dir, "..", "..", "agent"),
+    join(import.meta.dir, "..", "..", "..", "agent"),
     join(root, "node_modules", "@llm-space", "agent"),
     "dir"
   );

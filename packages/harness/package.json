@@ -6,10 +6,11 @@
   "license": "Apache-2.0",
   "exports": {
     ".": "./src/index.ts",
-    "./model": "./src/model-engine.ts",
-    "./protocol": "./src/protocol.ts",
-    "./storage": "./src/storage.ts",
-    "./storage/file": "./src/file-storage.ts",
+    "./channel": "./src/channel/index.ts",
+    "./model": "./src/execution/model-engine.ts",
+    "./protocol": "./src/session/protocol.ts",
+    "./storage": "./src/storage/index.ts",
+    "./storage/file": "./src/storage/file/index.ts",
     "./package.json": "./package.json"
   },
   "dependencies": {

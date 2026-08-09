@@ -1,5 +1,12 @@
 import type { ToolModelOutput } from "@llm-space/agent/tools";
 
+import type { HarnessPrincipal } from "./harness-principal";
+
+export type { HarnessPrincipal } from "./harness-principal";
+export type { SessionCommand } from "./session-command";
+export type { SessionCommandReceipt } from "./session-command-receipt";
+export type { SessionCommandSource } from "./session-command-source";
+
 export interface HarnessToolCall {
   readonly id: string;
   readonly name: string;
@@ -42,11 +49,21 @@ export interface HarnessSessionSnapshot {
   readonly status: HarnessSessionStatus;
   readonly messages: readonly HarnessMessage[];
   readonly state: Readonly<Record<string, unknown>>;
+  /** Initiating identity is persisted; current identity belongs to a command. */
+  readonly auth?: {
+    readonly initiator: HarnessPrincipal | null;
+  };
   readonly turnSequence: number;
   readonly eventSequence: number;
   readonly createdAt: number;
   readonly updatedAt: number;
   readonly activeTurnId?: string;
+  readonly activeCommandId?: string;
+  readonly lastCommand?: {
+    readonly commandId: string;
+    readonly turnId: string;
+    readonly status: "completed" | "cancelled" | "failed";
+  };
   readonly error?: string;
 }
 
@@ -58,6 +75,7 @@ export type HarnessEventData =
     }
   | {
       readonly type: "turn.started";
+      readonly commandId: string;
       readonly turnId: string;
       readonly turnSequence: number;
     }

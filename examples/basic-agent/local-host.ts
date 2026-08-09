@@ -45,6 +45,7 @@ export async function createBasicAgentLocalHost(
   const storage = createFileSessionStorage(storageRoot);
   const generation = await loadAgent({ startPath: import.meta.dir });
   const harness = createHarness({
+    commandQueue: storage.commandQueue,
     engine: createPiModelTurnEngine({ models: localModels.models }),
     repository: storage.repository,
     eventLog: storage.eventLog,

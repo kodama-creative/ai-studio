@@ -1,4 +1,4 @@
-import type { HarnessEvent, SessionEventCursor } from "./protocol";
+import type { HarnessEvent, SessionEventCursor } from "../session/protocol";
 
 export interface SessionEventLog {
   append(event: HarnessEvent): Promise<void>;

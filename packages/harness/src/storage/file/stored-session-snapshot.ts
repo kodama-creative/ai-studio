@@ -1,9 +1,12 @@
-import type { HarnessSessionSnapshot } from "./protocol";
+import type { HarnessSessionSnapshot } from "../../session/protocol";
+
+import { isRecord } from "./is-record";
+import { isStoredHarnessPrincipal } from "./stored-harness-principal";
 
 export function isStoredSessionSnapshot(
   value: unknown
 ): value is HarnessSessionSnapshot {
-  if (!_isRecord(value)) return false;
+  if (!isRecord(value)) return false;
   return (
     typeof value.id === "string" &&
     typeof value.agentId === "string" &&
@@ -14,19 +17,28 @@ export function isStoredSessionSnapshot(
       value.status === "completed" ||
       value.status === "failed") &&
     Array.isArray(value.messages) &&
-    _isRecord(value.state) &&
+    isRecord(value.state) &&
+    (value.auth === undefined ||
+      (isRecord(value.auth) &&
+        (value.auth.initiator === null ||
+          isStoredHarnessPrincipal(value.auth.initiator)))) &&
     _isSequence(value.turnSequence) &&
     _isSequence(value.eventSequence) &&
     _isTimestamp(value.createdAt) &&
     _isTimestamp(value.updatedAt) &&
     (value.activeTurnId === undefined ||
       typeof value.activeTurnId === "string") &&
+    (value.activeCommandId === undefined ||
+      typeof value.activeCommandId === "string") &&
+    (value.lastCommand === undefined ||
+      (isRecord(value.lastCommand) &&
+        typeof value.lastCommand.commandId === "string" &&
+        typeof value.lastCommand.turnId === "string" &&
+        (value.lastCommand.status === "completed" ||
+          value.lastCommand.status === "cancelled" ||
+          value.lastCommand.status === "failed"))) &&
     (value.error === undefined || typeof value.error === "string")
   );
-}
-
-function _isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function _isSequence(value: unknown): value is number {

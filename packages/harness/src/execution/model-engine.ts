@@ -1,6 +1,6 @@
 import type { AgentModelDefinition } from "@llm-space/agent";
 
-import type { HarnessMessage, HarnessToolCall } from "./protocol";
+import type { HarnessMessage, HarnessToolCall } from "../session/protocol";
 
 export interface ModelToolDefinition {
   readonly name: string;

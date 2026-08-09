@@ -1,11 +1,12 @@
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
+import type { HarnessEvent, SessionEventCursor } from "../../session/protocol";
+import type { SessionEventLog } from "../session-event-log";
+
 import { encodeSessionStorageKey } from "./encode-session-storage-key";
 import { getFileErrorCode } from "./get-file-error-code";
 import { getFileEventLogCoordinator } from "./get-file-event-log-coordinator";
-import type { HarnessEvent, SessionEventCursor } from "./protocol";
-import type { SessionEventLog } from "./session-event-log";
 import { isStoredSessionEvent } from "./stored-session-event";
 
 export class JsonlSessionEventLog implements SessionEventLog {

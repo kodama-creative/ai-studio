@@ -1,14 +1,39 @@
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { link, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+
+import type { HarnessSessionSnapshot } from "../../session/protocol";
+import type { SessionRepository } from "../session-repository";
 
 import { encodeSessionStorageKey } from "./encode-session-storage-key";
 import { getFileErrorCode } from "./get-file-error-code";
-import type { HarnessSessionSnapshot } from "./protocol";
-import type { SessionRepository } from "./session-repository";
 import { isStoredSessionSnapshot } from "./stored-session-snapshot";
 
 export class FileSessionRepository implements SessionRepository {
   constructor(private readonly _root: string) {}
+
+  async create(
+    snapshot: HarnessSessionSnapshot
+  ): Promise<"created" | "existing"> {
+    await mkdir(this._sessionsRoot(), { recursive: true, mode: 0o700 });
+    const destination = this._snapshotPath(snapshot.id);
+    const temporary = `${destination}.${process.pid}.${crypto.randomUUID()}.tmp`;
+    try {
+      await writeFile(temporary, `${JSON.stringify(snapshot, null, 2)}\n`, {
+        encoding: "utf8",
+        flag: "wx",
+        mode: 0o600,
+      });
+      try {
+        await link(temporary, destination);
+        return "created";
+      } catch (error) {
+        if (getFileErrorCode(error) === "EEXIST") return "existing";
+        throw error;
+      }
+    } finally {
+      await rm(temporary, { force: true });
+    }
+  }
 
   async load(sessionId: string): Promise<HarnessSessionSnapshot | undefined> {
     const path = this._snapshotPath(sessionId);

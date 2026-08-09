@@ -1,10 +1,12 @@
-import type { HarnessEvent } from "./protocol";
+import type { HarnessEvent } from "../../session/protocol";
+
+import { isRecord } from "./is-record";
 
 export function isStoredSessionEvent(
   value: unknown,
   sessionId: string
 ): value is HarnessEvent {
-  if (!_isRecord(value) || !_isRecord(value.event)) return false;
+  if (!isRecord(value) || !isRecord(value.event)) return false;
   return (
     value.sessionId === sessionId &&
     Number.isInteger(value.sequence) &&
@@ -13,10 +15,6 @@ export function isStoredSessionEvent(
     _isTimestamp(value.timestamp) &&
     typeof value.event.type === "string"
   );
-}
-
-function _isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function _isTimestamp(value: unknown): value is number {

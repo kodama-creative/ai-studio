@@ -5,7 +5,7 @@ import type {
 } from "@llm-space/agent/loader";
 import type { ToolDefinition } from "@llm-space/agent/tools";
 
-import type { ModelToolDefinition } from "./model-engine";
+import type { ModelToolDefinition } from "../execution/model-engine";
 
 export type AgentGeneration = Pick<
   LoadAgentResult,
