@@ -1,7 +1,5 @@
-import {
-  InMemoryEvaluationRepository,
-  InMemoryEvaluationRubricRepository,
-} from "../storage/in-memory-evaluation-repository";
+import { InMemoryEvaluationRepository } from "../storage/in-memory-evaluation-repository";
+import { InMemoryEvaluationRubricRepository } from "../storage/in-memory-evaluation-rubric-repository";
 import { InMemoryRunRepository } from "../storage/in-memory-run-repository";
 
 import type {
@@ -28,7 +26,9 @@ class InMemoryStudioThreadRepository implements StudioThreadRepository {
 
   load(threadId: string): Promise<StudioThread | undefined> {
     const thread = this._threads.get(threadId);
-    return Promise.resolve(thread === undefined ? undefined : structuredClone(thread));
+    return Promise.resolve(
+      thread === undefined ? undefined : structuredClone(thread)
+    );
   }
 
   save(thread: StudioThread): Promise<void> {
@@ -37,7 +37,9 @@ class InMemoryStudioThreadRepository implements StudioThreadRepository {
   }
 
   list(): Promise<readonly StudioThread[]> {
-    return Promise.resolve([...this._threads.values()].map((thread) => structuredClone(thread)));
+    return Promise.resolve(
+      [...this._threads.values()].map((thread) => structuredClone(thread))
+    );
   }
 }
 
@@ -45,7 +47,8 @@ class InMemoryCheckpointRepository implements ThreadCheckpointRepository {
   private readonly _checkpoints = new Map<string, ThreadCheckpoint>();
 
   create(checkpoint: ThreadCheckpoint): Promise<"created" | "existing"> {
-    if (this._checkpoints.has(checkpoint.id)) return Promise.resolve("existing");
+    if (this._checkpoints.has(checkpoint.id))
+      return Promise.resolve("existing");
     this._checkpoints.set(checkpoint.id, structuredClone(checkpoint));
     return Promise.resolve("created");
   }
@@ -133,7 +136,8 @@ class InMemoryStudioThreadEventLog implements StudioThreadEventLog {
     afterSequence: number,
     signal: AbortSignal | undefined
   ): Promise<void> {
-    if (this._latestSequence(threadId) > afterSequence) return Promise.resolve();
+    if (this._latestSequence(threadId) > afterSequence)
+      return Promise.resolve();
     return new Promise((resolve) => {
       let waiters = this._waiters.get(threadId);
       if (waiters === undefined) {

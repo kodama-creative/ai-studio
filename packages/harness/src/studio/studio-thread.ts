@@ -13,14 +13,16 @@ export interface StudioThread {
   readonly schemaVersion: 1;
   readonly id: string;
   readonly document: StudioThreadDocument;
-  readonly provenance?: {
-    readonly type: "session";
-    readonly sessionId: string;
-  } | {
-    readonly type: "fork";
-    readonly threadId: string;
-    readonly checkpointId?: string;
-  };
+  readonly provenance?:
+    | {
+        readonly type: "session";
+        readonly sessionId: string;
+      }
+    | {
+        readonly type: "fork";
+        readonly threadId: string;
+        readonly checkpointId?: string;
+      };
   readonly activeRunId?: string;
   readonly createdAt: number;
   readonly updatedAt: number;

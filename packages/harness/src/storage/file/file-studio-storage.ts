@@ -63,29 +63,38 @@ class FileEvaluationRepository implements EvaluationRepository {
   constructor(private readonly _paths: FileStudioStoragePaths) {}
 
   create(evaluation: Evaluation): Promise<"created" | "existing"> {
-    return _createJson(this._path(evaluation.threadId, evaluation.id), evaluation);
+    return _createJson(
+      this._path(evaluation.threadId, evaluation.id),
+      evaluation
+    );
   }
 
-  async load(evaluationId: string): Promise<Evaluation | undefined> {
-    for (const thread of await new FileStudioThreadRepository(this._paths).list()) {
-      const value = await _readJson(this._path(thread.id, evaluationId));
-      if (value === undefined) continue;
-      if (!_isEvaluation(value) || value.id !== evaluationId) {
-        throw new Error(`Invalid Evaluation in "${this._path(thread.id, evaluationId)}".`);
-      }
-      return value;
+  async load(
+    threadId: string,
+    evaluationId: string
+  ): Promise<Evaluation | undefined> {
+    const path = this._path(threadId, evaluationId);
+    const value = await _readJson(path);
+    if (value === undefined) return undefined;
+    if (
+      !_isEvaluation(value) ||
+      value.id !== evaluationId ||
+      value.threadId !== threadId
+    ) {
+      throw new Error(`Invalid Evaluation in "${path}".`);
     }
-    return undefined;
+    return value;
   }
 
   save(evaluation: Evaluation): Promise<void> {
-    return _saveJson(this._path(evaluation.threadId, evaluation.id), evaluation);
+    return _saveJson(
+      this._path(evaluation.threadId, evaluation.id),
+      evaluation
+    );
   }
 
-  async remove(evaluationId: string): Promise<void> {
-    const evaluation = await this.load(evaluationId);
-    if (evaluation === undefined) return;
-    await rm(this._path(evaluation.threadId, evaluation.id), { force: true });
+  async remove(threadId: string, evaluationId: string): Promise<void> {
+    await rm(this._path(threadId, evaluationId), { force: true });
   }
 
   listByThread(threadId: string): Promise<readonly Evaluation[]> {
@@ -113,28 +122,29 @@ class FileEvaluationRubricRepository implements EvaluationRubricRepository {
     return _createJson(this._path(rubric.threadId, rubric.id), rubric);
   }
 
-  async load(rubricId: string): Promise<EvaluationRubric | undefined> {
-    for (const thread of await new FileStudioThreadRepository(this._paths).list()) {
-      const value = await _readJson(this._path(thread.id, rubricId));
-      if (value === undefined) continue;
-      if (!_isEvaluationRubric(value) || value.id !== rubricId) {
-        throw new Error(
-          `Invalid Evaluation Rubric in "${this._path(thread.id, rubricId)}".`
-        );
-      }
-      return value;
+  async load(
+    threadId: string,
+    rubricId: string
+  ): Promise<EvaluationRubric | undefined> {
+    const path = this._path(threadId, rubricId);
+    const value = await _readJson(path);
+    if (value === undefined) return undefined;
+    if (
+      !_isEvaluationRubric(value) ||
+      value.id !== rubricId ||
+      value.threadId !== threadId
+    ) {
+      throw new Error(`Invalid Evaluation Rubric in "${path}".`);
     }
-    return undefined;
+    return value;
   }
 
   save(rubric: EvaluationRubric): Promise<void> {
     return _saveJson(this._path(rubric.threadId, rubric.id), rubric);
   }
 
-  async remove(rubricId: string): Promise<void> {
-    const rubric = await this.load(rubricId);
-    if (rubric === undefined) return;
-    await rm(this._path(rubric.threadId, rubric.id), { force: true });
+  async remove(threadId: string, rubricId: string): Promise<void> {
+    await rm(this._path(threadId, rubricId), { force: true });
   }
 
   listByThread(threadId: string): Promise<readonly EvaluationRubric[]> {
@@ -194,15 +204,13 @@ class FileStudioThreadRepository implements StudioThreadRepository {
         .filter((entry) => entry.isDirectory())
         .map((entry) => this.load(entry.name))
     );
-    return threads.filter((thread): thread is StudioThread => thread !== undefined);
+    return threads.filter(
+      (thread): thread is StudioThread => thread !== undefined
+    );
   }
 
   private _path(threadId: string): string {
-    return join(
-      this._paths.threadsRoot,
-      _storageKey(threadId),
-      "thread.json"
-    );
+    return join(this._paths.threadsRoot, _storageKey(threadId), "thread.json");
   }
 }
 
@@ -249,13 +257,14 @@ export class FileRunRepository implements RunRepository {
   }
 }
 
-class FileThreadCheckpointRepository
-  implements ThreadCheckpointRepository
-{
+class FileThreadCheckpointRepository implements ThreadCheckpointRepository {
   constructor(private readonly _paths: FileStudioStoragePaths) {}
 
   create(checkpoint: ThreadCheckpoint): Promise<"created" | "existing"> {
-    return _createJson(this._path(checkpoint.threadId, checkpoint.id), checkpoint);
+    return _createJson(
+      this._path(checkpoint.threadId, checkpoint.id),
+      checkpoint
+    );
   }
 
   async load(checkpointId: string): Promise<ThreadCheckpoint | undefined> {
@@ -288,7 +297,9 @@ class FileThreadCheckpointRepository
         .map(async (name) => {
           const value = await _readJson(join(root, name));
           if (!_isThreadCheckpoint(value) || value.threadId !== threadId) {
-            throw new Error(`Invalid Thread Checkpoint in "${join(root, name)}".`);
+            throw new Error(
+              `Invalid Thread Checkpoint in "${join(root, name)}".`
+            );
           }
           return value;
         })
@@ -297,11 +308,7 @@ class FileThreadCheckpointRepository
   }
 
   private _checkpointRoot(threadId: string): string {
-    return join(
-      this._paths.threadsRoot,
-      _storageKey(threadId),
-      "checkpoints"
-    );
+    return join(this._paths.threadsRoot, _storageKey(threadId), "checkpoints");
   }
 
   private _path(threadId: string, checkpointId: string): string {
@@ -422,11 +429,7 @@ class JsonlStudioThreadEventLog implements StudioThreadEventLog {
   }
 
   private _path(threadId: string): string {
-    return join(
-      this._paths.threadsRoot,
-      _storageKey(threadId),
-      "events.jsonl"
-    );
+    return join(this._paths.threadsRoot, _storageKey(threadId), "events.jsonl");
   }
 }
 

@@ -235,6 +235,15 @@ export interface OpenOnboardCommand extends GenericCommand<"openOnboard"> {}
 /** Run the active thread. No-op when there is no active thread tab. */
 export interface RunThreadCommand extends GenericCommand<"runThread"> {}
 
+/** Create a new Studio Thread in the active Agent Project window. */
+export interface CreateProjectThreadCommand extends GenericCommand<"createProjectThread"> {}
+
+/** Fork a Studio Thread onto the Agent Project's current Git HEAD. */
+export interface ForkProjectThreadCommand extends GenericCommand<
+  "forkProjectThread",
+  { threadId: string; checkpointId?: string }
+> {}
+
 /**
  * Open the Share dialog for a thread. `path` + `runtimeId` target a specific
  * thread file (tree/tab context menus and playground header); omitting them
@@ -346,6 +355,8 @@ export type Command =
   | OpenCommandPaletteCommand
   | OpenOnboardCommand
   | RunThreadCommand
+  | CreateProjectThreadCommand
+  | ForkProjectThreadCommand
   | ShareThreadCommand
   | OpenVariablesCommand
   | ZoomInCommand
@@ -422,6 +433,8 @@ export const COMMAND_META: Record<
   openCommandPalette: { label: "Command Palette", target: "webview" },
   openOnboard: { label: "Onboard...", target: "webview" },
   runThread: { label: "Run Thread", target: "webview" },
+  createProjectThread: { label: "New Project Thread", target: "webview" },
+  forkProjectThread: { label: "Fork on Current HEAD", target: "webview" },
   shareThread: { label: "Share...", target: "webview" },
   openVariables: { label: "Variables", target: "webview" },
   zoomIn: { label: "Zoom In", target: "bun" },

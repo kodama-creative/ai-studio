@@ -139,7 +139,13 @@ describe("Harness", () => {
       runRepository,
       clock: () => 42,
       generateId: (() => {
-        const ids = ["session-1", "command-1", "turn-1", "message-1", "message-2"];
+        const ids = [
+          "session-1",
+          "command-1",
+          "turn-1",
+          "message-1",
+          "message-2",
+        ];
         return () => ids.shift()!;
       })(),
     });
@@ -760,12 +766,14 @@ describe("Harness", () => {
     const repository = new InMemorySessionRepository();
     const eventLog = new InMemorySessionEventLog();
     const commandQueue = new InMemorySessionCommandQueue();
+    const runRepository = new InMemoryRunRepository();
     const generation = _generation();
     const firstHarness = createHarness({
       engine: new ScriptedModelEngine([]),
       repository,
       eventLog,
       commandQueue,
+      runRepository,
     });
     const firstAgent = await firstHarness.prepare(generation);
     const original = await firstAgent.createSession();
@@ -773,6 +781,15 @@ describe("Harness", () => {
       ...(await original.snapshot()),
       activeTurnId: "turn-stale",
       status: "running",
+    });
+    await runRepository.create({
+      schemaVersion: 1,
+      id: "turn-stale",
+      owner: { type: "session", sessionId: original.id },
+      triggerMessageId: "message-stale",
+      status: "running",
+      createdAt: 1,
+      startedAt: 2,
     });
     await commandQueue.enqueue({
       id: "command-stale",
@@ -788,6 +805,7 @@ describe("Harness", () => {
       repository,
       eventLog,
       commandQueue,
+      runRepository,
     });
     const nextAgent = await nextHarness.prepare(generation);
     const attached = await nextAgent.attachSession(original.id);
@@ -797,6 +815,9 @@ describe("Harness", () => {
     expect(await attached?.snapshot()).toMatchObject({
       activeTurnId: undefined,
       status: "waiting",
+    });
+    expect(await runRepository.load("turn-stale")).toMatchObject({
+      status: "cancelled",
     });
     expect(
       (await _events(eventLog, original.id)).map((item) => item.event.type)
@@ -994,6 +1015,73 @@ describe("Harness", () => {
     );
   });
 
+  test("reconciles a terminal durable Run when its terminal event was interrupted", async () => {
+    const repository = new InMemorySessionRepository();
+    const eventLog = new InMemorySessionEventLog();
+    const commandQueue = new InMemorySessionCommandQueue();
+    const runRepository = new InMemoryRunRepository();
+    const generation = _generation();
+    const firstHarness = createHarness({
+      engine: new ScriptedModelEngine([]),
+      repository,
+      eventLog,
+      commandQueue,
+      runRepository,
+    });
+    const original = await (
+      await firstHarness.prepare(generation)
+    ).createSession();
+    const initial = await original.snapshot();
+    await repository.save({
+      ...initial,
+      activeCommandId: "command-completed-run",
+      activeTurnId: "turn-completed-run",
+      status: "running",
+    });
+    await runRepository.create({
+      schemaVersion: 1,
+      id: "turn-completed-run",
+      owner: { type: "session", sessionId: original.id },
+      triggerMessageId: "message-1",
+      status: "completed",
+      createdAt: 1,
+      startedAt: 2,
+      completedAt: 3,
+    });
+    await commandQueue.enqueue({
+      id: "command-completed-run",
+      sessionId: original.id,
+      turnId: "turn-completed-run",
+      message: "already completed",
+      principal: null,
+      createdAt: 10,
+    });
+    await commandQueue.claim(original.id, { now: 0, leaseExpiresAt: 0 });
+    const nextEngine = new ScriptedModelEngine([]);
+    const nextHarness = createHarness({
+      engine: nextEngine,
+      repository,
+      eventLog,
+      commandQueue,
+      runRepository,
+    });
+
+    const attached = await (
+      await nextHarness.prepare(generation)
+    ).attachSession(original.id);
+
+    expect(await attached?.snapshot()).toMatchObject({
+      activeTurnId: undefined,
+      status: "waiting",
+      lastCommand: { status: "completed" },
+    });
+    expect((await _events(eventLog, original.id)).at(-2)?.event).toEqual({
+      type: "turn.completed",
+      turnId: "turn-completed-run",
+    });
+    expect(nextEngine.inputs).toHaveLength(0);
+  });
+
   test("does not replay a terminal command recovered before mailbox ack", async () => {
     const repository = new InMemorySessionRepository();
     const eventLog = new InMemorySessionEventLog();
@@ -1083,7 +1171,10 @@ describe("Harness", () => {
       message: "provider unavailable",
     });
     expect(
-      await runRepository.listByOwner({ type: "session", sessionId: session.id })
+      await runRepository.listByOwner({
+        type: "session",
+        sessionId: session.id,
+      })
     ).toMatchObject([
       { status: "failed", error: { message: "provider unavailable" } },
     ]);
@@ -1209,7 +1300,10 @@ describe("Harness", () => {
       "session.waiting",
     ]);
     expect(
-      await runRepository.listByOwner({ type: "session", sessionId: session.id })
+      await runRepository.listByOwner({
+        type: "session",
+        sessionId: session.id,
+      })
     ).toMatchObject([{ status: "cancelled" }]);
   });
 });

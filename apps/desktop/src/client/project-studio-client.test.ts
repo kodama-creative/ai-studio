@@ -43,9 +43,9 @@ test("client creates, runs, and reattaches an independent Studio Thread", async 
   };
   await first.saveDocument(created.id, document);
   const receipt = await first.run(created.id, { fromMessageId: "user-1" });
-  expect(await _untilCompleted(first.events(created.id), receipt.runId)).toContain(
-    "message.delta"
-  );
+  expect(
+    await _untilCompleted(first.events(created.id), receipt.runId)
+  ).toContain("message.delta");
 
   expect(await first.loadThread(created.id)).toMatchObject({
     document: {
@@ -176,14 +176,24 @@ test("uncommitted Agent changes are ignored but a new HEAD blocks execution", as
   const project = await openAgentProject(root);
   const first = await createProjectStudioHost({ engine: TEXT_ENGINE, project });
   const created = await first.createThread();
-  await writeFile(join(project.agentRoot, "instructions.md"), "Dirty change.\n");
+  await writeFile(
+    join(project.agentRoot, "instructions.md"),
+    "Dirty change.\n"
+  );
 
   expect(await first.loadThread(created.id)).toBeDefined();
 
   await _commit(root, "agent change");
-  expect(
-    first.run(created.id, { fromMessageId: "missing" })
-  ).rejects.toThrow("Studio Thread is bound to commit");
+  expect(first.run(created.id, { fromMessageId: "missing" })).rejects.toThrow(
+    "Studio Thread is bound to commit"
+  );
+
+  const current = await first.createThread();
+  const { stdout: head } = await exec("git", ["-C", root, "rev-parse", "HEAD"]);
+  expect(current.document.commitId).toBe(head.trim());
+  expect(current.document.agent.generationId).not.toBe(
+    created.document.agent.generationId
+  );
 });
 
 const TEXT_ENGINE: ModelTurnEngine = {
@@ -204,14 +214,20 @@ const WORKING_DIRECTORY_ENGINE: ModelTurnEngine = {
     }
     yield {
       type: "tool.call",
-      call: { id: "call-working-directory", name: "working-directory", input: {} },
+      call: {
+        id: "call-working-directory",
+        name: "working-directory",
+        input: {},
+      },
     } as const;
     yield { type: "finish", reason: "tool-calls" } as const;
   },
 };
 
 async function _untilCompleted(
-  events: AsyncIterable<{ readonly event: { readonly type: string; readonly runId?: string } }>,
+  events: AsyncIterable<{
+    readonly event: { readonly type: string; readonly runId?: string };
+  }>,
   runId: string
 ): Promise<string[]> {
   const types: string[] = [];

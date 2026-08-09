@@ -58,14 +58,12 @@ export function studioThreadToPlaygroundThread(
     ...(model === undefined ? {} : { model }),
     context: {
       systemPrompt: thread.document.agent.instructions.join("\n\n"),
-      tools: thread.document.agent.tools.map(
-        (tool): Tool => ({
-          type: "function",
-          name: tool.name,
-          description: tool.description,
-          parameters: tool.inputSchema,
-        })
-      ),
+      tools: thread.document.agent.tools.map((tool): Tool => ({
+        type: "function",
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.inputSchema,
+      })),
       messages: thread.document.conversation.messages.map(_toPlaygroundMessage),
     },
     ...(runHistory.length === 0 ? {} : { runHistory }),
@@ -78,23 +76,20 @@ export function studioThreadToPlaygroundThread(
       : {}),
     ...(evaluationMetadata?.rubrics.length
       ? {
-          evaluationRubrics: evaluationMetadata.rubrics.map(
-            _toPlaygroundRubric
-          ),
+          evaluationRubrics:
+            evaluationMetadata.rubrics.map(_toPlaygroundRubric),
         }
       : {}),
   };
 }
 
-export function playgroundThreadToStudioEvaluationMetadata(
-  thread: {
-    readonly evaluations?: readonly EvaluationRecord[];
-    readonly evaluationRubrics?: readonly EvaluationRubricRecord[];
-  }
-): StudioEvaluationMetadataInput {
+export function playgroundThreadToStudioEvaluationMetadata(thread: {
+  readonly evaluations?: readonly EvaluationRecord[];
+  readonly evaluationRubrics?: readonly EvaluationRubricRecord[];
+}): StudioEvaluationMetadataInput {
   return {
-    evaluations: (thread.evaluations ?? []).map(
-      (evaluation): EvaluationInput => structuredClone(evaluation)
+    evaluations: (thread.evaluations ?? []).map((evaluation): EvaluationInput =>
+      structuredClone(evaluation)
     ),
     rubrics: (thread.evaluationRubrics ?? []).map(
       (rubric): EvaluationRubricInput => structuredClone(rubric)
@@ -182,8 +177,6 @@ export function createProjectThreadExecutionRuntime(input: {
         throw new Error("A Studio Run requires at least one message.");
       }
       const receipt = await input.client.run(input.threadId, { fromMessageId });
-      const cancel = () => void input.client.cancelRun(receipt.runId);
-      request.signal.addEventListener("abort", cancel, { once: true });
       const streaming = new Map<string, string>();
       let [history, evaluationMetadata] = await Promise.all([
         input.client.listRunHistory(input.threadId),
@@ -224,11 +217,12 @@ export function createProjectThreadExecutionRuntime(input: {
             event.type === "run.completed" &&
             event.runId === receipt.runId
           ) {
-            const [latest, nextHistory, nextEvaluationMetadata] = await Promise.all([
-              input.client.loadThread(input.threadId),
-              input.client.listRunHistory(input.threadId),
-              input.client.listEvaluationMetadata(input.threadId),
-            ]);
+            const [latest, nextHistory, nextEvaluationMetadata] =
+              await Promise.all([
+                input.client.loadThread(input.threadId),
+                input.client.listRunHistory(input.threadId),
+                input.client.listEvaluationMetadata(input.threadId),
+              ]);
             history = nextHistory;
             evaluationMetadata = nextEvaluationMetadata;
             if (latest !== undefined) {
@@ -257,7 +251,9 @@ export function createProjectThreadExecutionRuntime(input: {
           }
         }
       } finally {
-        request.signal.removeEventListener("abort", cancel);
+        if (request.signal.aborted) {
+          await input.client.cancelRun(receipt.runId);
+        }
         await input.onSettled?.();
       }
     },
@@ -275,10 +271,14 @@ function _toPlaygroundMessage(message: ConversationMessage): Message {
   return {
     id: message.id,
     role: "assistant",
-    content: message.content.map(_toPlaygroundContent).filter(
-      (content): content is Extract<PlaygroundMessageContent, { type: "text" }> =>
-        content.type === "text"
-    ),
+    content: message.content
+      .map(_toPlaygroundContent)
+      .filter(
+        (
+          content
+        ): content is Extract<PlaygroundMessageContent, { type: "text" }> =>
+          content.type === "text"
+      ),
     ...(message.thinking === undefined ? {} : { thinking: message.thinking }),
     ...(message.toolCalls === undefined
       ? {}
@@ -286,7 +286,9 @@ function _toPlaygroundMessage(message: ConversationMessage): Message {
   };
 }
 
-function _toPlaygroundContent(content: MessageContent): PlaygroundMessageContent {
+function _toPlaygroundContent(
+  content: MessageContent
+): PlaygroundMessageContent {
   return content.type === "text"
     ? content
     : { type: "image", mimeType: content.mimeType, data: content.data };
@@ -330,21 +332,19 @@ function _toConversationMessage(
     ...(message.toolCalls === undefined
       ? {}
       : {
-          toolCalls: message.toolCalls.map(
-            (call): ConversationToolCall => ({
-              id: call.id,
-              name: call.input.name,
-              input: call.input.arguments,
-              ...(call.output === undefined
-                ? {}
-                : {
-                    result: {
-                      output: _toToolModelOutput(call.output),
-                      isError: call.output.isError ?? false,
-                    },
-                  }),
-            })
-          ),
+          toolCalls: message.toolCalls.map((call): ConversationToolCall => ({
+            id: call.id,
+            name: call.input.name,
+            input: call.input.arguments,
+            ...(call.output === undefined
+              ? {}
+              : {
+                  result: {
+                    output: _toToolModelOutput(call.output),
+                    isError: call.output.isError ?? false,
+                  },
+                }),
+          })),
         }),
     ...(origin === undefined ? {} : { origin }),
   };
@@ -358,7 +358,9 @@ function _toConversationContent(
     : { type: "image", mimeType: content.mimeType, data: content.data };
 }
 
-function _toolOutputContent(output: ToolModelOutput): ToolCallOutput["content"] {
+function _toolOutputContent(
+  output: ToolModelOutput
+): ToolCallOutput["content"] {
   if (output.type === "text") return [{ type: "text", text: output.value }];
   if (output.type === "json") {
     return [{ type: "text", text: JSON.stringify(output.value) ?? "null" }];
@@ -374,9 +376,10 @@ function _toolOutputContent(output: ToolModelOutput): ToolCallOutput["content"] 
     }
     return {
       type: "text" as const,
-      text: part.filename === undefined
-        ? `[${part.mediaType} file]`
-        : `[${part.mediaType} file: ${part.filename}]`,
+      text:
+        part.filename === undefined
+          ? `[${part.mediaType} file]`
+          : `[${part.mediaType} file: ${part.filename}]`,
     };
   });
 }

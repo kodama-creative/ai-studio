@@ -3,7 +3,10 @@ import type { ToolContext } from "@llm-space/agent/tools";
 
 import type { ModelTurnEngine } from "../execution/model-engine";
 import { createModelRunExecutor } from "../execution/run-executor";
-import type { AgentGeneration, PreparedAgentDefinition } from "../generation/generation";
+import type {
+  AgentGeneration,
+  PreparedAgentDefinition,
+} from "../generation/generation";
 import { resolveAgentGeneration } from "../generation/generation";
 import type { Run, RunRepository } from "../run";
 import type {
@@ -611,6 +614,7 @@ class AgentSessionImpl implements AgentSession {
       );
     }
     const commandId = this._snapshot.activeCommandId;
+    await this._finishInterruptedRun(turnId, "cancelled");
     this._snapshot = {
       ...this._snapshot,
       activeTurnId: undefined,
@@ -645,6 +649,19 @@ class AgentSessionImpl implements AgentSession {
     const commandId = this._snapshot.activeCommandId ?? recoveredCommandId;
     const terminal = await this._findTerminalTurnEvent(turnId);
     if (terminal !== undefined) {
+      const runStatus =
+        terminal.event.type === "turn.completed"
+          ? "completed"
+          : terminal.event.type === "turn.failed"
+            ? "failed"
+            : "cancelled";
+      await this._finishInterruptedRun(
+        turnId,
+        runStatus,
+        terminal.event.type === "turn.failed"
+          ? terminal.event.message
+          : undefined
+      );
       const status =
         terminal.event.type === "turn.completed"
           ? this._snapshot.mode === "task"
@@ -691,6 +708,62 @@ class AgentSessionImpl implements AgentSession {
       );
       return;
     }
+    const persistedRun = await this._deps.runRepository.load(turnId);
+    if (
+      persistedRun?.status === "completed" ||
+      persistedRun?.status === "failed" ||
+      persistedRun?.status === "cancelled"
+    ) {
+      const status =
+        persistedRun.status === "completed"
+          ? this._snapshot.mode === "task"
+            ? "completed"
+            : "waiting"
+          : persistedRun.status === "failed"
+            ? "failed"
+            : "waiting";
+      const error = persistedRun.error?.message;
+      this._snapshot = {
+        ...this._snapshot,
+        activeTurnId: undefined,
+        activeCommandId: undefined,
+        status,
+        ...(commandId === undefined
+          ? {}
+          : {
+              lastCommand: {
+                commandId,
+                turnId,
+                status: persistedRun.status,
+              },
+            }),
+        ...(persistedRun.status === "failed"
+          ? { error: error ?? "Interrupted Run failed." }
+          : { error: undefined }),
+        updatedAt: this._deps.clock(),
+      };
+      await this._save();
+      await this._emit(
+        persistedRun.status === "completed"
+          ? { type: "turn.completed", turnId }
+          : persistedRun.status === "failed"
+            ? {
+                type: "turn.failed",
+                turnId,
+                message: this._snapshot.error ?? "Interrupted Run failed.",
+              }
+            : { type: "turn.cancelled", turnId }
+      );
+      await this._emit(
+        status === "completed"
+          ? { type: "session.completed" }
+          : status === "failed"
+            ? { type: "session.failed", message: this._snapshot.error ?? "" }
+            : { type: "session.waiting" }
+      );
+      return;
+    }
+    await this._finishInterruptedRun(turnId, "cancelled");
     this._snapshot = {
       ...this._snapshot,
       activeTurnId: undefined,
@@ -743,6 +816,30 @@ class AgentSessionImpl implements AgentSession {
     return terminal === undefined
       ? undefined
       : { event: terminal, maxSequence };
+  }
+
+  private async _finishInterruptedRun(
+    runId: string,
+    status: Extract<Run["status"], "completed" | "failed" | "cancelled">,
+    error?: string
+  ): Promise<void> {
+    const run = await this._deps.runRepository.load(runId);
+    if (
+      run === undefined ||
+      run.status === "completed" ||
+      run.status === "failed" ||
+      run.status === "cancelled"
+    ) {
+      return;
+    }
+    await this._deps.runRepository.save({
+      ...run,
+      status,
+      completedAt: this._deps.clock(),
+      ...(status === "failed"
+        ? { error: { message: error ?? "Interrupted Run failed." } }
+        : { error: undefined }),
+    });
   }
 
   private async _ensureTerminalEvent(
@@ -871,7 +968,11 @@ class AgentSessionImpl implements AgentSession {
         await this._save();
         await this._emit({ type: "message.completed", turnId, message });
         if (toolCalls.length > 0) {
-          await this._emit({ type: "actions.requested", turnId, calls: toolCalls });
+          await this._emit({
+            type: "actions.requested",
+            turnId,
+            calls: toolCalls,
+          });
         }
       } else if (event.type === "tool.completed") {
         const call = calls.get(event.toolCallId);
@@ -1050,7 +1151,10 @@ function _sessionConversation(
       const location = assistantByCall.get(message.callId);
       if (location === undefined) continue;
       const assistant = result[location.messageIndex];
-      if (assistant?.role !== "assistant" || assistant.toolCalls === undefined) {
+      if (
+        assistant?.role !== "assistant" ||
+        assistant.toolCalls === undefined
+      ) {
         continue;
       }
       const toolCalls = [...assistant.toolCalls];

@@ -92,6 +92,7 @@ export type {
 } from "./evaluation";
 export type {
   ExecutableAgent,
+  RunAgentDefinition,
   Run,
   RunError,
   RunExecutionInput,

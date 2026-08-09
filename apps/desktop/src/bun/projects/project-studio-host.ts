@@ -84,19 +84,19 @@ class ProjectStudioHostImpl implements ProjectStudioHost {
   readonly project: AgentProjectView;
 
   constructor(
-    project: AgentProject,
-    private readonly _agent: AgentSnapshot,
+    private readonly _agentProject: AgentProject,
+    agent: AgentSnapshot,
     private readonly _runtime: StudioThreadRuntime,
     private readonly _sourceFiles: ProjectSourceFiles,
     private readonly _revisionProvider: GitHeadProvider
   ) {
     this.project = {
-      id: project.id,
-      name: project.name,
-      rootPath: project.rootPath,
-      agentRoot: project.agentRoot,
-      agentId: _agent.agentId,
-      generationId: _agent.generationId,
+      id: _agentProject.id,
+      name: _agentProject.name,
+      rootPath: _agentProject.rootPath,
+      agentRoot: _agentProject.agentRoot,
+      agentId: agent.agentId,
+      generationId: agent.generationId,
     };
   }
 
@@ -112,9 +112,11 @@ class ProjectStudioHostImpl implements ProjectStudioHost {
     return this._sourceFiles.read(path);
   }
 
-  async *watchSourceFiles(input: {
-    readonly signal?: AbortSignal;
-  } = {}) {
+  async *watchSourceFiles(
+    input: {
+      readonly signal?: AbortSignal;
+    } = {}
+  ) {
     for await (const files of this._sourceFiles.watch(input)) {
       yield {
         files,
@@ -150,10 +152,13 @@ class ProjectStudioHostImpl implements ProjectStudioHost {
     return this._runtime.forkThread(threadId, input);
   }
 
-  createThread(input: { readonly title?: string } = {}) {
+  async createThread(input: { readonly title?: string } = {}) {
+    const commitId = await this._revisionProvider.current();
+    const current = await _loadExecutableAgent(this._agentProject);
     return this._runtime.createThread({
       ...input,
-      agent: this._agent,
+      agent: current.snapshot,
+      commitId,
     });
   }
 

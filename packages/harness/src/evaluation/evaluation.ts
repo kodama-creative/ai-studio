@@ -22,11 +22,7 @@ export interface EvaluationRunScores {
 }
 
 export type EvaluationVerdict =
-  | "leftBetter"
-  | "rightBetter"
-  | "tie"
-  | "pass"
-  | "fail";
+  "leftBetter" | "rightBetter" | "tie" | "pass" | "fail";
 
 interface EvaluationBase {
   readonly schemaVersion: 1;

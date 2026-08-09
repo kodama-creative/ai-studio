@@ -62,9 +62,7 @@ test("RunExecutor represents a model/tool loop entirely through messages", async
           generationId: "generation",
           model: "openai/gpt-5",
           instructions: [],
-          tools: [
-            { name: "greet", description: "Greet", inputSchema: {} },
-          ],
+          tools: [{ name: "greet", description: "Greet", inputSchema: {} }],
         },
         tools: new Map([
           [
@@ -74,7 +72,8 @@ test("RunExecutor represents a model/tool loop entirely through messages", async
               definition: {
                 description: "Greet",
                 inputSchema: {},
-                execute: ({ name }: Record<string, unknown>) => `Hi ${String(name)}`,
+                execute: ({ name }: Record<string, unknown>) =>
+                  `Hi ${String(name)}`,
               },
             },
           ],

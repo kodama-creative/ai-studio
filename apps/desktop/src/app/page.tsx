@@ -194,6 +194,8 @@ const COMMAND_PALETTE_BLACKLIST = [
   "createConnectedTraceProject",
   "importLangfuseTraceFiles",
   "syncLangfuseTraceIds",
+  "createProjectThread",
+  "forkProjectThread",
   // Only meaningful from the "ready to install" toast; a bare palette
   // invocation would silently no-op (or restart mid-work).
   "applyUpdateAndRestart",

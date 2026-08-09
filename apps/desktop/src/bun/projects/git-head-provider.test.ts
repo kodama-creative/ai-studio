@@ -18,8 +18,9 @@ test("GitHeadProvider reports HEAD and deliberately ignores dirty files", async 
     await writeFile(join(root, "agent.ts"), "export default 1;\n");
     await exec("git", ["-C", root, "add", "agent.ts"]);
     await exec("git", ["-C", root, "commit", "-m", "initial"]);
-    const expected = (await exec("git", ["-C", root, "rev-parse", "HEAD"]))
-      .stdout.trim();
+    const expected = (
+      await exec("git", ["-C", root, "rev-parse", "HEAD"])
+    ).stdout.trim();
 
     await writeFile(join(root, "agent.ts"), "export default 2;\n");
 

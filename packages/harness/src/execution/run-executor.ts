@@ -11,11 +11,7 @@ import type {
   ConversationToolCall,
 } from "../conversation";
 import type { PreparedTool } from "../generation/generation";
-import type {
-  RunExecutionInput,
-  RunExecutor,
-  RunOutputEvent,
-} from "../run";
+import type { RunExecutionInput, RunExecutor, RunOutputEvent } from "../run";
 
 import type { ModelTurnEngine } from "./model-engine";
 import { validateSchemaValue } from "./schema-validation";
@@ -70,12 +66,7 @@ class ModelRunExecutor implements RunExecutor {
       const messageId = this._generateId("message");
       let text = "";
       const toolCalls: ConversationToolCall[] = [];
-      let finishReason:
-        | "stop"
-        | "tool-calls"
-        | "length"
-        | "other"
-        | undefined;
+      let finishReason: "stop" | "tool-calls" | "length" | "other" | undefined;
 
       for await (const event of this._options.engine.run(
         {
@@ -221,8 +212,9 @@ function _textContent(
   content: readonly import("../conversation").MessageContent[]
 ): string {
   return content
-    .filter((item): item is import("../conversation").TextMessageContent =>
-      item.type === "text"
+    .filter(
+      (item): item is import("../conversation").TextMessageContent =>
+        item.type === "text"
     )
     .map((item) => item.text)
     .join("\n");

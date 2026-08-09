@@ -11,7 +11,9 @@ export class InMemoryRunRepository implements RunRepository {
 
   load(runId: string): Promise<Run | undefined> {
     const run = this._runs.get(runId);
-    return Promise.resolve(run === undefined ? undefined : structuredClone(run));
+    return Promise.resolve(
+      run === undefined ? undefined : structuredClone(run)
+    );
   }
 
   save(run: Run): Promise<void> {

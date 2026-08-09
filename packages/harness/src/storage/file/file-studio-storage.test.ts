@@ -88,25 +88,13 @@ test("file Studio storage keeps Thread, Run, and Checkpoint as separate resource
     ) as Record<string, unknown>;
     const checkpointJson = JSON.parse(
       await readFile(
-        join(
-          root,
-          "threads",
-          "thread-1",
-          "checkpoints",
-          "checkpoint-1.json"
-        ),
+        join(root, "threads", "thread-1", "checkpoints", "checkpoint-1.json"),
         "utf8"
       )
     ) as Record<string, unknown>;
     const evaluationJson = JSON.parse(
       await readFile(
-        join(
-          root,
-          "threads",
-          "thread-1",
-          "evaluations",
-          "evaluation-1.json"
-        ),
+        join(root, "threads", "thread-1", "evaluations", "evaluation-1.json"),
         "utf8"
       )
     ) as Record<string, unknown>;
@@ -148,6 +136,47 @@ test("file Studio event logs identify malformed JSON by path and line", async ()
     expect(error).toBeInstanceOf(Error);
     expect((error as Error).message).toContain(`line 2 in "${path}"`);
     expect((error as Error).cause).toBeInstanceOf(SyntaxError);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("file Evaluation resources are scoped by Thread as their paths are", async () => {
+  const root = await mkdtemp(join(tmpdir(), "llm-space-studio-evaluations-"));
+  try {
+    const storage = createFileStudioStorage(root);
+    const base = {
+      schemaVersion: 1 as const,
+      id: "evaluation-1",
+      leftRunId: "run-left",
+      rightRunId: "run-right",
+      verdict: "tie" as const,
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    await storage.evaluationRepository.create({
+      ...base,
+      threadId: "thread-1",
+    });
+    await storage.evaluationRepository.create({
+      ...base,
+      threadId: "thread-2",
+    });
+
+    expect(
+      await storage.evaluationRepository.load("thread-1", "evaluation-1")
+    ).toMatchObject({ threadId: "thread-1" });
+    expect(
+      await storage.evaluationRepository.load("thread-2", "evaluation-1")
+    ).toMatchObject({ threadId: "thread-2" });
+
+    await storage.evaluationRepository.remove("thread-1", "evaluation-1");
+    expect(
+      await storage.evaluationRepository.load("thread-1", "evaluation-1")
+    ).toBeUndefined();
+    expect(
+      await storage.evaluationRepository.load("thread-2", "evaluation-1")
+    ).toBeDefined();
   } finally {
     await rm(root, { recursive: true, force: true });
   }

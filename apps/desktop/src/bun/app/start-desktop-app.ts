@@ -42,7 +42,11 @@ import {
   RemoteServerManager,
   registerConfiguredRemoteRuntime,
 } from "../remote";
-import { createMainWindowRPC, type MainWindowRPC } from "../rpc";
+import {
+  createMainWindowRPC,
+  type MainWindowRPC,
+  type MainWindowRPCController,
+} from "../rpc";
 import { LocalRuntimeClient, RuntimeRouter } from "../runtime";
 import { SearchSettingsManager } from "../search";
 import { getManagedSkillsDir, SkillsManager } from "../skills";
@@ -275,7 +279,7 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
   const createWindowRpc = (
     getWindow: () => BrowserWindow,
     projectStudioHost?: Awaited<ReturnType<typeof createProjectStudioHost>>
-  ): MainWindowRPC =>
+  ): MainWindowRPCController =>
     createMainWindowRPC({
       analytics,
       executeCommand: (command) => executeCommand(command, getWindow()),
@@ -317,7 +321,7 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
           }
           return projectWindowRef.current;
         };
-        const projectRpc = createWindowRpc(
+        const projectRpcController = createWindowRpc(
           getProjectWindow,
           projectStudioHost
         );
@@ -326,16 +330,17 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
           project.id
         );
         const projectWindow = await createAgentProjectWindow({
-          rpc: projectRpc,
+          rpc: projectRpcController.rpc,
           project: projectStudioHost.project,
           stateStore,
           windowStates,
         });
         projectWindowRef.current = projectWindow;
-        windowRpcs.set(projectWindow.id, projectRpc);
+        windowRpcs.set(projectWindow.id, projectRpcController.rpc);
         const closed = new Set<() => void>();
         projectWindow.on("close", () => {
           windowRpcs.delete(projectWindow.id);
+          projectRpcController.dispose();
           for (const listener of closed) listener();
         });
         return {
@@ -354,11 +359,13 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
     return Promise.resolve(null);
   };
 
+  let mainRpcController: MainWindowRPCController | undefined;
   let stopPromise: Promise<void> | null = null;
   const runtime: DesktopAppRuntime = {
     stop() {
       stopPromise ??= _stopDesktopApp([
         ["agent project windows", () => projectWindows.closeAll()],
+        ["main window RPC", () => mainRpcController?.dispose()],
         ["window state", () => windowStates.flush()],
         ["updater", () => updater.stop()],
         ["remote runtime", () => remoteRuntime?.stop()],
@@ -375,7 +382,8 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
   };
 
   try {
-    rpc = createWindowRpc(getMainWindow);
+    mainRpcController = createWindowRpc(getMainWindow);
+    rpc = mainRpcController.rpc;
     remoteServerManager.setStatusListener((payload) =>
       getRpc().send.remoteServerStatusChanged(payload)
     );

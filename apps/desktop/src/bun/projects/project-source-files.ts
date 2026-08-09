@@ -37,20 +37,25 @@ export class ProjectSourceFiles {
     try {
       canonical = await realpath(candidate);
     } catch (cause) {
-      throw new Error(`Project source file "${path}" was not found.`, { cause });
+      throw new Error(`Project source file "${path}" was not found.`, {
+        cause,
+      });
     }
     _assertWithinRoot(root, canonical);
     const file = await stat(canonical);
-    if (!file.isFile()) throw new Error(`Project source path "${path}" is not a file.`);
+    if (!file.isFile())
+      throw new Error(`Project source path "${path}" is not a file.`);
     if (file.size > MAX_SOURCE_FILE_BYTES) {
       throw new Error(`Project source file "${path}" is too large to display.`);
     }
     return readFile(canonical, "utf8");
   }
 
-  async *watch(input: {
-    readonly signal?: AbortSignal;
-  } = {}): AsyncIterable<readonly ProjectSourceNode[]> {
+  async *watch(
+    input: {
+      readonly signal?: AbortSignal;
+    } = {}
+  ): AsyncIterable<readonly ProjectSourceNode[]> {
     const root = await realpath(this._root);
     const events = watchFiles(root, {
       recursive: true,
@@ -78,13 +83,18 @@ export class ProjectSourceFiles {
       .toSorted((left, right) => left.name.localeCompare(right.name));
     return Promise.all(
       entries.map(async (entry): Promise<ProjectSourceNode> => {
-        const path = relativePath ? `${relativePath}/${entry.name}` : entry.name;
+        const path = relativePath
+          ? `${relativePath}/${entry.name}`
+          : entry.name;
         if (entry.isFile()) return { name: entry.name, path, type: "file" };
         return {
           name: entry.name,
           path,
           type: "directory",
-          children: await this._listDirectory(resolve(absolutePath, entry.name), path),
+          children: await this._listDirectory(
+            resolve(absolutePath, entry.name),
+            path
+          ),
         };
       })
     );
@@ -109,5 +119,7 @@ function _isAbortError(error: unknown): boolean {
 function _assertWithinRoot(root: string, candidate: string): void {
   const path = relative(root, candidate);
   if (path === "" || (!path.startsWith(`..${sep}`) && path !== "..")) return;
-  throw new Error(`Project source path "${candidate}" is outside the Agent Project.`);
+  throw new Error(
+    `Project source path "${candidate}" is outside the Agent Project.`
+  );
 }

@@ -29,17 +29,12 @@ import {
   PlusIcon,
   XIcon,
 } from "lucide-react";
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import type { ProjectStudioClient } from "@/client/project-studio-client";
 import { createRpcProjectStudioClient } from "@/client/rpc-project-studio-client";
+import { useCommands, useRegisterCommands } from "@/commands";
 import { TreeView, type TreeDataItem } from "@/components/tree-view";
 import type { AgentProjectView } from "@/shared/agent-project";
 import type { ProjectSourceNode } from "@/shared/project-studio";
@@ -68,6 +63,7 @@ type ProjectTab =
 
 export function ProjectPage({ project }: { project: AgentProjectView }) {
   const client = useMemo(() => createRpcProjectStudioClient(), []);
+  const { executeCommand } = useCommands();
   const [threads, setThreads] = useState<readonly StudioThread[]>([]);
   const [sourceRevision, setSourceRevision] = useState<string>();
   const [runHistory, setRunHistory] = useState<
@@ -76,7 +72,9 @@ export function ProjectPage({ project }: { project: AgentProjectView }) {
   const [evaluationMetadata, setEvaluationMetadata] = useState<
     ReadonlyMap<string, StudioEvaluationMetadata>
   >(new Map());
-  const [sourceFiles, setSourceFiles] = useState<readonly ProjectSourceNode[]>([]);
+  const [sourceFiles, setSourceFiles] = useState<readonly ProjectSourceNode[]>(
+    []
+  );
   const [expandedSourceIds, setExpandedSourceIds] = useState<readonly string[]>(
     []
   );
@@ -91,6 +89,12 @@ export function ProjectPage({ project }: { project: AgentProjectView }) {
   const tabsRef = useRef(tabs);
   tabsRef.current = tabs;
   const activeTab = tabs.find((tab) => tab.id === activeTabId);
+  const visibleThread =
+    activeTab?.type === "thread" && activeThread?.id === activeTab.threadId
+      ? activeThread
+      : undefined;
+  const openingThread =
+    activeTab?.type === "thread" && activeThread?.id !== activeTab.threadId;
 
   const openThreadTab = useCallback((thread: StudioThread) => {
     const id = `thread:${thread.id}`;
@@ -209,7 +213,8 @@ export function ProjectPage({ project }: { project: AgentProjectView }) {
           client.listRunHistory(threadId),
           client.listEvaluationMetadata(threadId),
         ]);
-        if (next === undefined) throw new Error(`Thread "${threadId}" was not found.`);
+        if (next === undefined)
+          throw new Error(`Thread "${threadId}" was not found.`);
         setRunHistory((current) => new Map(current).set(threadId, history));
         setEvaluationMetadata((current) =>
           new Map(current).set(threadId, metadata)
@@ -252,6 +257,30 @@ export function ProjectPage({ project }: { project: AgentProjectView }) {
     }
   }, [client, openThreadTab, subscribeToThreadEvents, refreshThreads]);
 
+  const forkThread = useCallback(
+    async (threadId: string, checkpointId?: string) => {
+      const fork = await client.forkThread(threadId, {
+        ...(checkpointId === undefined ? {} : { checkpointId }),
+      });
+      await refreshThreads();
+      await openThread(fork.id);
+    },
+    [client, openThread, refreshThreads]
+  );
+
+  useRegisterCommands({
+    createProjectThread: createThread,
+    forkProjectThread: ({ threadId, checkpointId }) =>
+      forkThread(threadId, checkpointId),
+  });
+
+  useEffect(() => {
+    const tab = tabs.find((item) => item.id === activeTabId);
+    if (tab?.type === "thread" && activeThread?.id !== tab.threadId) {
+      void openThread(tab.threadId);
+    }
+  }, [activeTabId, activeThread?.id, openThread, tabs]);
+
   useEffect(() => {
     let cancelled = false;
     const sourceController = new AbortController();
@@ -270,7 +299,10 @@ export function ProjectPage({ project }: { project: AgentProjectView }) {
           const refreshed = await Promise.all(
             codeTabs.map(async (tab) => {
               try {
-                return { id: tab.id, content: await client.readSourceFile(tab.path) };
+                return {
+                  id: tab.id,
+                  content: await client.readSourceFile(tab.path),
+                };
               } catch {
                 return undefined;
               }
@@ -359,7 +391,7 @@ export function ProjectPage({ project }: { project: AgentProjectView }) {
         <div className="flex min-h-0 flex-1 flex-col border-b">
           <div className="flex h-9 shrink-0 items-center gap-2 px-3">
             <FolderTreeIcon className="text-muted-foreground size-3.5" />
-            <span className="text-muted-foreground text-xs font-medium uppercase tracking-wide">
+            <span className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
               Code
             </span>
           </div>
@@ -383,7 +415,7 @@ export function ProjectPage({ project }: { project: AgentProjectView }) {
           <div className="flex h-9 shrink-0 items-center justify-between px-3">
             <div className="flex items-center gap-2">
               <MessageSquareIcon className="text-muted-foreground size-3.5" />
-              <span className="text-muted-foreground text-xs font-medium uppercase tracking-wide">
+              <span className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
                 Threads
               </span>
             </div>
@@ -391,7 +423,9 @@ export function ProjectPage({ project }: { project: AgentProjectView }) {
               aria-label="New Thread"
               size="icon-sm"
               variant="ghost"
-              onClick={() => void createThread()}
+              onClick={() =>
+                executeCommand({ type: "createProjectThread", args: {} })
+              }
             >
               <PlusIcon />
             </Button>
@@ -405,13 +439,18 @@ export function ProjectPage({ project }: { project: AgentProjectView }) {
               threads.map((thread) => (
                 <button
                   className={`hover:bg-accent mb-1 w-full rounded-md px-3 py-2 text-left text-sm transition-colors ${
-                    activeThread?.id === thread.id ? "bg-accent" : ""
+                    activeTab?.type === "thread" &&
+                    activeTab.threadId === thread.id
+                      ? "bg-accent"
+                      : ""
                   }`}
                   key={thread.id}
                   type="button"
                   onClick={() => void openThread(thread.id)}
                 >
-                  <span className="block truncate">{thread.document.title}</span>
+                  <span className="block truncate">
+                    {thread.document.title}
+                  </span>
                 </button>
               ))
             )}
@@ -431,10 +470,7 @@ export function ProjectPage({ project }: { project: AgentProjectView }) {
                 }`}
                 key={tab.id}
                 type="button"
-                onClick={() => {
-                  setActiveTabId(tab.id);
-                  if (tab.type === "thread") void openThread(tab.threadId);
-                }}
+                onClick={() => setActiveTabId(tab.id)}
               >
                 {tab.type === "code" ? (
                   <FileCodeIcon className="size-3.5 shrink-0" />
@@ -444,7 +480,7 @@ export function ProjectPage({ project }: { project: AgentProjectView }) {
                 <span className="truncate">{tab.title}</span>
                 <span
                   aria-label={`Close ${tab.title}`}
-                  className="ml-auto rounded-sm opacity-0 hover:bg-white/10 group-hover:opacity-100"
+                  className="ml-auto rounded-sm opacity-0 group-hover:opacity-100 hover:bg-white/10"
                   role="button"
                   tabIndex={0}
                   onClick={(event) => {
@@ -476,47 +512,55 @@ export function ProjectPage({ project }: { project: AgentProjectView }) {
               value={activeTab.content}
             />
           </div>
-        ) : activeThread === undefined ? (
+        ) : visibleThread === undefined ? (
           <Empty className="flex-1">
             <EmptyHeader>
               <EmptyTitle>
-                {loading
-                  ? "Opening Project…"
+                {loading || openingThread
+                  ? openingThread
+                    ? "Opening Thread…"
+                    : "Opening Project…"
                   : openError === undefined
                     ? "No Studio Threads yet"
                     : "This Thread cannot be opened"}
               </EmptyTitle>
               <EmptyDescription>
-                {openError ?? "Create an independent Studio Thread for this Agent."}
+                {openError ??
+                  "Create an independent Studio Thread for this Agent."}
               </EmptyDescription>
             </EmptyHeader>
             {!loading && (
               <EmptyContent>
-                <Button onClick={() => void createThread()}>
+                <Button
+                  onClick={() =>
+                    executeCommand({ type: "createProjectThread", args: {} })
+                  }
+                >
                   <PlusIcon /> New Thread
                 </Button>
               </EmptyContent>
             )}
           </Empty>
         ) : (
-          <ProjectThreadPlaygroundPane
+          <_ProjectThreadPlaygroundPane
             client={client}
-            history={runHistory.get(activeThread.id) ?? []}
+            history={runHistory.get(visibleThread.id) ?? []}
             evaluationMetadata={
-              evaluationMetadata.get(activeThread.id) ?? {
+              evaluationMetadata.get(visibleThread.id) ?? {
                 evaluations: [],
                 rubrics: [],
               }
             }
             sourceRevision={sourceRevision}
-            thread={activeThread}
+            thread={visibleThread}
             onThread={setActiveThread}
             onSettled={refreshThreads}
-            onFork={async () => {
-              const fork = await client.forkThread(activeThread.id);
-              await refreshThreads();
-              await openThread(fork.id);
-            }}
+            onFork={() =>
+              executeCommand({
+                type: "forkProjectThread",
+                args: { threadId: visibleThread.id },
+              })
+            }
           />
         )}
       </main>
@@ -524,7 +568,7 @@ export function ProjectPage({ project }: { project: AgentProjectView }) {
   );
 }
 
-function ProjectThreadPlaygroundPane({
+function _ProjectThreadPlaygroundPane({
   client,
   history,
   evaluationMetadata,
@@ -629,16 +673,13 @@ function ProjectThreadPlaygroundPane({
               : "text-muted-foreground font-mono text-[0.625rem]"
           }
         >
-          {outdated ? "Outdated · " : ""}commit {thread.document.commitId.slice(0, 10)}
+          {outdated ? "Outdated · " : ""}commit{" "}
+          {thread.document.commitId.slice(0, 10)}
         </span>
       }
       headerActions={
         outdated ? (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => void onFork()}
-          >
+          <Button size="sm" variant="outline" onClick={() => void onFork()}>
             <GitForkIcon className="size-3.5" /> Fork on Current HEAD
           </Button>
         ) : undefined

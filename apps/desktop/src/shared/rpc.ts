@@ -152,7 +152,9 @@ export interface DesktopRPCType {
         response: import("@llm-space/harness/evaluation").StudioEvaluationMetadata;
       };
       projectSaveEvaluationMetadata: {
-        params: { threadId: string } & import("@llm-space/harness/evaluation").StudioEvaluationMetadataInput;
+        params: {
+          threadId: string;
+        } & import("@llm-space/harness/evaluation").StudioEvaluationMetadataInput;
         response: import("@llm-space/harness/evaluation").StudioEvaluationMetadata;
       };
       projectListSourceFiles: {

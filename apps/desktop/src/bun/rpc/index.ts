@@ -44,6 +44,11 @@ export type MainWindowRPC = ReturnType<
   typeof BrowserView.defineRPC<DesktopRPCType>
 >;
 
+export interface MainWindowRPCController {
+  readonly rpc: MainWindowRPC;
+  dispose(): void;
+}
+
 export interface MainWindowRPCDependencies {
   analytics: Analytics;
   executeCommand: (command: Command) => void;
@@ -82,7 +87,7 @@ export function createMainWindowRPC({
   pluginCommandExecutions,
   windowContext = { kind: "playground" },
   projectStudioHost,
-}: MainWindowRPCDependencies): MainWindowRPC {
+}: MainWindowRPCDependencies): MainWindowRPCController {
   const getRuntime = runtimeRouter.get.bind(runtimeRouter);
   const promptFileRequests = createPromptFileRpcHandlers(getRuntime);
   const projectSubscriptions = new Map<string, AbortController>();
@@ -646,7 +651,18 @@ export function createMainWindowRPC({
       },
     },
   });
-  return rpc;
+  return {
+    rpc,
+    dispose() {
+      for (const controller of projectSubscriptions.values())
+        controller.abort();
+      for (const controller of projectSourceSubscriptions.values()) {
+        controller.abort();
+      }
+      projectSubscriptions.clear();
+      projectSourceSubscriptions.clear();
+    },
+  };
 }
 
 function _errorMessage(error: unknown): string {

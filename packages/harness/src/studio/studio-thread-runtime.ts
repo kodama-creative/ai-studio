@@ -65,6 +65,8 @@ export interface CreateStudioThreadInput {
   readonly agent: AgentSnapshot;
   readonly conversation?: Conversation;
   readonly provenance?: StudioThread["provenance"];
+  /** Pins a host-resolved Agent to the revision it was loaded from. */
+  readonly commitId?: string;
 }
 
 export interface StudioRunReceipt {
@@ -95,7 +97,10 @@ export interface StudioThreadRuntime {
     threadId: string,
     input?: { readonly checkpointId?: string }
   ): Promise<StudioThread>;
-  saveDocument(threadId: string, document: StudioThreadDocument): Promise<StudioThread>;
+  saveDocument(
+    threadId: string,
+    document: StudioThreadDocument
+  ): Promise<StudioThread>;
   run(
     threadId: string,
     input: { readonly fromMessageId: string }
@@ -117,7 +122,9 @@ class StudioThreadRuntimeImpl implements StudioThreadRuntime {
   private readonly _clock: () => number;
   private readonly _generateId: (prefix: string) => string;
   private readonly _abortControllers = new Map<string, AbortController>();
+  private readonly _executions = new Map<string, Promise<void>>();
   private readonly _eventSequences = new Map<string, number>();
+  private readonly _recoveries = new Map<string, Promise<StudioThread>>();
 
   constructor(private readonly _options: CreateStudioThreadRuntimeOptions) {
     this._clock = _options.clock ?? Date.now;
@@ -128,6 +135,10 @@ class StudioThreadRuntimeImpl implements StudioThreadRuntime {
 
   async createThread(input: CreateStudioThreadInput): Promise<StudioThread> {
     const now = this._clock();
+    const currentCommitId = await this._options.revisionProvider.current();
+    if (input.commitId !== undefined && input.commitId !== currentCommitId) {
+      throw new StudioThreadOutdatedError(input.commitId, currentCommitId);
+    }
     const thread: StudioThread = {
       schemaVersion: 1,
       id: this._generateId("thread"),
@@ -137,7 +148,7 @@ class StudioThreadRuntimeImpl implements StudioThreadRuntime {
         conversation: structuredClone(
           input.conversation ?? { messages: [], state: {} }
         ),
-        commitId: await this._options.revisionProvider.current(),
+        commitId: currentCommitId,
       },
       ...(input.provenance === undefined
         ? {}
@@ -151,12 +162,17 @@ class StudioThreadRuntimeImpl implements StudioThreadRuntime {
     return structuredClone(thread);
   }
 
-  loadThread(threadId: string): Promise<StudioThread | undefined> {
-    return this._options.threadRepository.load(threadId);
+  async loadThread(threadId: string): Promise<StudioThread | undefined> {
+    const thread = await this._options.threadRepository.load(threadId);
+    return thread === undefined ? undefined : this._recoverThread(thread);
   }
 
   async listThreads(): Promise<readonly StudioThread[]> {
-    const threads = await this._options.threadRepository.list();
+    const threads = await Promise.all(
+      (await this._options.threadRepository.list()).map((thread) =>
+        this._recoverThread(thread)
+      )
+    );
     return threads.toSorted(
       (left, right) =>
         right.updatedAt - left.updatedAt || left.id.localeCompare(right.id)
@@ -168,21 +184,23 @@ class StudioThreadRuntimeImpl implements StudioThreadRuntime {
   ): Promise<readonly StudioRunHistoryEntry[]> {
     const references = await this._options.runIndexRepository.list(threadId);
     const entries = await Promise.all(
-      references.map(async (reference): Promise<StudioRunHistoryEntry | undefined> => {
-        const run = await this._options.runRepository.load(reference.runId);
-        if (run === undefined) return undefined;
-        const checkpoint =
-          reference.checkpointId === undefined
-            ? undefined
-            : await this._options.checkpointRepository.load(
-                reference.checkpointId
-              );
-        return {
-          reference,
-          run,
-          ...(checkpoint === undefined ? {} : { checkpoint }),
-        };
-      })
+      references.map(
+        async (reference): Promise<StudioRunHistoryEntry | undefined> => {
+          const run = await this._options.runRepository.load(reference.runId);
+          if (run === undefined) return undefined;
+          const checkpoint =
+            reference.checkpointId === undefined
+              ? undefined
+              : await this._options.checkpointRepository.load(
+                  reference.checkpointId
+                );
+          return {
+            reference,
+            run,
+            ...(checkpoint === undefined ? {} : { checkpoint }),
+          };
+        }
+      )
     );
     return entries.filter(
       (entry): entry is StudioRunHistoryEntry => entry !== undefined
@@ -199,19 +217,22 @@ class StudioThreadRuntimeImpl implements StudioThreadRuntime {
       "Run"
     );
     const references = await this._options.runIndexRepository.list(threadId);
-    const byId = new Map(references.map((reference) => [reference.runId, reference]));
+    const byId = new Map(
+      references.map((reference) => [reference.runId, reference])
+    );
     const next = runIds.map((runId) => {
       const reference = byId.get(runId);
       if (reference === undefined) {
-        throw new Error(`Run "${runId}" does not belong to Thread "${threadId}".`);
+        throw new Error(
+          `Run "${runId}" does not belong to Thread "${threadId}".`
+        );
       }
       return reference;
     });
     await this._options.runIndexRepository.replace(threadId, next);
     const retained = new Set(runIds);
-    const evaluations = await this._options.evaluationRepository.listByThread(
-      threadId
-    );
+    const evaluations =
+      await this._options.evaluationRepository.listByThread(threadId);
     await Promise.all(
       evaluations
         .filter(
@@ -220,7 +241,7 @@ class StudioThreadRuntimeImpl implements StudioThreadRuntime {
             !retained.has(evaluation.rightRunId)
         )
         .map((evaluation) =>
-          this._options.evaluationRepository.remove(evaluation.id)
+          this._options.evaluationRepository.remove(threadId, evaluation.id)
         )
     );
     return this.listRunHistory(threadId);
@@ -270,20 +291,20 @@ class StudioThreadRuntimeImpl implements StudioThreadRuntime {
       }
       return { ...structuredClone(evaluation), schemaVersion: 1, threadId };
     });
-    const rubrics = input.rubrics.map(
-      (rubric): EvaluationRubric => ({
-        ...structuredClone(rubric),
-        schemaVersion: 1,
-        threadId,
-      })
-    );
+    const rubrics = input.rubrics.map((rubric): EvaluationRubric => ({
+      ...structuredClone(rubric),
+      schemaVersion: 1,
+      threadId,
+    }));
     await Promise.all([
       _replaceResources(
+        threadId,
         await this._options.evaluationRepository.listByThread(threadId),
         evaluations,
         this._options.evaluationRepository
       ),
       _replaceResources(
+        threadId,
         await this._options.evaluationRubricRepository.listByThread(threadId),
         rubrics,
         this._options.evaluationRubricRepository
@@ -332,7 +353,9 @@ class StudioThreadRuntimeImpl implements StudioThreadRuntime {
     if ((await this._options.threadRepository.create(fork)) === "existing") {
       throw new Error(`Studio Thread "${fork.id}" already exists.`);
     }
-    for (const reference of await this._options.runIndexRepository.list(threadId)) {
+    for (const reference of await this._options.runIndexRepository.list(
+      threadId
+    )) {
       await this._options.runIndexRepository.append({
         ...reference,
         threadId: fork.id,
@@ -352,7 +375,11 @@ class StudioThreadRuntimeImpl implements StudioThreadRuntime {
     }
     const next = {
       ...thread,
-      document: structuredClone(document),
+      document: {
+        ...structuredClone(document),
+        agent: structuredClone(thread.document.agent),
+        commitId: thread.document.commitId,
+      },
       updatedAt: this._clock(),
     };
     await this._options.threadRepository.save(next);
@@ -379,6 +406,16 @@ class StudioThreadRuntimeImpl implements StudioThreadRuntime {
     );
     if (fromMessageIndex === -1) {
       throw new Error(`Message "${input.fromMessageId}" was not found.`);
+    }
+    const executable = (await this._options.resolveAgent?.(
+      thread.document.agent
+    )) ?? { snapshot: thread.document.agent, tools: new Map() };
+    const verifiedCommitId = await this._options.revisionProvider.current();
+    if (thread.document.commitId !== verifiedCommitId) {
+      throw new StudioThreadOutdatedError(
+        thread.document.commitId,
+        verifiedCommitId
+      );
     }
 
     const now = this._clock();
@@ -408,18 +445,40 @@ class StudioThreadRuntimeImpl implements StudioThreadRuntime {
       activeRunId: run.id,
       updatedAt: now,
     };
-    await this._options.threadRepository.save(runningThread);
     const abortController = new AbortController();
     this._abortControllers.set(run.id, abortController);
-    void this._execute(runningThread, run, abortController).catch(() => {
+    try {
+      await this._options.threadRepository.save(runningThread);
+    } catch (error) {
+      this._abortControllers.delete(run.id);
+      throw error;
+    }
+    const execution = this._execute(
+      runningThread,
+      run,
+      executable,
+      abortController
+    );
+    this._executions.set(run.id, execution);
+    void execution.catch(() => {
       // _execute persists and publishes its own terminal failure.
     });
     return { runId: run.id };
   }
 
-  cancelRun(runId: string): Promise<void> {
-    this._abortControllers.get(runId)?.abort();
-    return Promise.resolve();
+  async cancelRun(runId: string): Promise<void> {
+    const controller = this._abortControllers.get(runId);
+    if (controller !== undefined) {
+      controller.abort();
+      await this._executions.get(runId);
+      return;
+    }
+    const run = await this._options.runRepository.load(runId);
+    if (run?.owner.type !== "thread") return;
+    const thread = await this._options.threadRepository.load(
+      run.owner.threadId
+    );
+    if (thread?.activeRunId === runId) await this._recoverThread(thread);
   }
 
   events(
@@ -432,6 +491,7 @@ class StudioThreadRuntimeImpl implements StudioThreadRuntime {
   private async _execute(
     thread: StudioThread,
     run: Run,
+    executable: ExecutableAgent,
     abortController: AbortController
   ): Promise<void> {
     const startedAt = this._clock();
@@ -444,9 +504,7 @@ class StudioThreadRuntimeImpl implements StudioThreadRuntime {
         {
           runId: run.id,
           owner: run.owner,
-          agent:
-            (await this._options.resolveAgent?.(thread.document.agent)) ??
-            { snapshot: thread.document.agent, tools: new Map() },
+          agent: executable,
           conversation: thread.document.conversation,
         },
         { signal: abortController.signal }
@@ -477,7 +535,6 @@ class StudioThreadRuntimeImpl implements StudioThreadRuntime {
         activeRunId: undefined,
         updatedAt: completedAt,
       };
-      await this._options.threadRepository.save(completedThread);
       await this._options.checkpointRepository.create({
         schemaVersion: 1,
         id: checkpointId,
@@ -499,15 +556,11 @@ class StudioThreadRuntimeImpl implements StudioThreadRuntime {
         checkpointId,
         relation: "executed",
       });
+      await this._options.threadRepository.save(completedThread);
       await this._emit(thread.id, { type: "run.completed", runId: run.id });
     } catch (error) {
       const completedAt = this._clock();
       const cancelled = abortController.signal.aborted;
-      await this._options.threadRepository.save({
-        ...activeThread,
-        activeRunId: undefined,
-        updatedAt: completedAt,
-      });
       await this._options.runRepository.save({
         ...activeRun,
         status: cancelled ? "cancelled" : "failed",
@@ -519,6 +572,11 @@ class StudioThreadRuntimeImpl implements StudioThreadRuntime {
         runId: run.id,
         relation: "executed",
       });
+      await this._options.threadRepository.save({
+        ...activeThread,
+        activeRunId: undefined,
+        updatedAt: completedAt,
+      });
       await this._emit(
         thread.id,
         cancelled
@@ -527,15 +585,86 @@ class StudioThreadRuntimeImpl implements StudioThreadRuntime {
       );
     } finally {
       this._abortControllers.delete(run.id);
+      this._executions.delete(run.id);
     }
   }
 
   private async _requireThread(threadId: string): Promise<StudioThread> {
-    const thread = await this._options.threadRepository.load(threadId);
+    const thread = await this.loadThread(threadId);
     if (thread === undefined) {
       throw new Error(`Studio Thread "${threadId}" was not found.`);
     }
     return thread;
+  }
+
+  private _recoverThread(thread: StudioThread): Promise<StudioThread> {
+    if (
+      thread.activeRunId === undefined ||
+      this._abortControllers.has(thread.activeRunId)
+    ) {
+      return Promise.resolve(thread);
+    }
+    const existing = this._recoveries.get(thread.id);
+    if (existing !== undefined) return existing;
+    const recovery = this._recoverInterruptedRun(thread).finally(() => {
+      if (this._recoveries.get(thread.id) === recovery) {
+        this._recoveries.delete(thread.id);
+      }
+    });
+    this._recoveries.set(thread.id, recovery);
+    return recovery;
+  }
+
+  private async _recoverInterruptedRun(
+    thread: StudioThread
+  ): Promise<StudioThread> {
+    const runId = thread.activeRunId;
+    if (runId === undefined) return thread;
+    const run = await this._options.runRepository.load(runId);
+    const completedAt = this._clock();
+    const recovered = {
+      ...thread,
+      activeRunId: undefined,
+      updatedAt: completedAt,
+    };
+    let terminalEvent: StudioThreadEvent["event"] | undefined;
+    if (run?.status === "queued" || run?.status === "running") {
+      await this._options.runRepository.save({
+        ...run,
+        status: "cancelled",
+        completedAt,
+      });
+      await this._options.runIndexRepository.append({
+        threadId: thread.id,
+        runId,
+        relation: "executed",
+      });
+      terminalEvent = { type: "run.cancelled", runId };
+    } else if (run !== undefined) {
+      await this._options.runIndexRepository.append({
+        threadId: thread.id,
+        runId,
+        ...(run.resultCheckpointId === undefined
+          ? {}
+          : { checkpointId: run.resultCheckpointId }),
+        relation: "executed",
+      });
+      terminalEvent =
+        run.status === "completed"
+          ? { type: "run.completed", runId }
+          : run.status === "failed"
+            ? {
+                type: "run.failed",
+                runId,
+                message: run.error?.message ?? "Interrupted Run failed.",
+              }
+            : { type: "run.cancelled", runId };
+    }
+    await this._options.threadRepository.save(recovered);
+    if (terminalEvent !== undefined) {
+      await this._emit(thread.id, terminalEvent);
+    }
+    return recovered;
   }
 
   private async _emit(
@@ -574,19 +703,20 @@ function _assertUniqueIds(
 }
 
 async function _replaceResources<T extends { readonly id: string }>(
+  threadId: string,
   current: readonly T[],
   next: readonly T[],
   repository: {
     create(value: T): Promise<"created" | "existing">;
     save(value: T): Promise<void>;
-    remove(id: string): Promise<void>;
+    remove(threadId: string, id: string): Promise<void>;
   }
 ): Promise<void> {
   const nextIds = new Set(next.map((value) => value.id));
   await Promise.all(
     current
       .filter((value) => !nextIds.has(value.id))
-      .map((value) => repository.remove(value.id))
+      .map((value) => repository.remove(threadId, value.id))
   );
   await Promise.all(
     next.map(async (value) => {
@@ -606,12 +736,15 @@ function _applyRunOutput(
   }
   const messages = [...thread.document.conversation.messages];
   if (event.type === "message.completed") {
-    const index = messages.findIndex((message) => message.id === event.message.id);
+    const index = messages.findIndex(
+      (message) => message.id === event.message.id
+    );
     if (index === -1) messages.push(structuredClone(event.message));
     else messages[index] = structuredClone(event.message);
   } else {
     const messageIndex = messages.findIndex(
-      (message) => message.id === event.messageId && message.role === "assistant"
+      (message) =>
+        message.id === event.messageId && message.role === "assistant"
     );
     const message = messages[messageIndex];
     if (message?.role === "assistant") {

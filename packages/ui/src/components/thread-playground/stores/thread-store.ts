@@ -1111,7 +1111,9 @@ export function createThreadStore(
               if (!abortController.signal.aborted) {
                 toast.error("Unable to run Thread", {
                   description:
-                    error instanceof Error ? error.message : "Please try again.",
+                    error instanceof Error
+                      ? error.message
+                      : "Please try again.",
                 });
               }
             } finally {
@@ -1605,11 +1607,7 @@ export function createThreadStore(
               ),
             },
           });
-          publishRunMetadata(
-            runHistory,
-            evaluations,
-            get().evaluationRubrics
-          );
+          publishRunMetadata(runHistory, evaluations, get().evaluationRubrics);
         },
         saveEvaluation(input) {
           if (get().status !== "idle") {

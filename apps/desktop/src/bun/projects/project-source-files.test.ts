@@ -52,7 +52,9 @@ test("ProjectSourceFiles watches the project and publishes a refreshed tree", as
     await mkdir(join(root, "agent"), { recursive: true });
     await writeFile(join(root, "agent", "agent.ts"), "export default {};\n");
     const files = new ProjectSourceFiles(root);
-    const iterator = files.watch({ signal: controller.signal })[Symbol.asyncIterator]();
+    const iterator = files
+      .watch({ signal: controller.signal })
+      [Symbol.asyncIterator]();
 
     expect((await iterator.next()).value).toHaveLength(1);
     const changed = iterator.next();

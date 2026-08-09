@@ -1,15 +1,26 @@
+import type { AgentModelDefinition } from "@llm-space/agent";
+
 import type {
   Conversation,
   ConversationAssistantMessage,
   ConversationToolCall,
 } from "../conversation";
+import type { ModelToolDefinition } from "../execution/model-engine";
 import type { PreparedTool } from "../generation/generation";
-import type { AgentSnapshot } from "../studio/agent-snapshot";
 
 import type { RunOwner } from "./run";
 
+export interface RunAgentDefinition {
+  readonly schemaVersion: 1;
+  readonly agentId: string;
+  readonly generationId: string;
+  readonly model: AgentModelDefinition;
+  readonly instructions: readonly string[];
+  readonly tools: readonly ModelToolDefinition[];
+}
+
 export interface ExecutableAgent {
-  readonly snapshot: AgentSnapshot;
+  readonly snapshot: RunAgentDefinition;
   readonly tools: ReadonlyMap<string, PreparedTool>;
 }
 

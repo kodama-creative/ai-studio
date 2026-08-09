@@ -3,11 +3,7 @@ export type RunOwner =
   | { readonly type: "thread"; readonly threadId: string };
 
 export type RunStatus =
-  | "queued"
-  | "running"
-  | "completed"
-  | "failed"
-  | "cancelled";
+  "queued" | "running" | "completed" | "failed" | "cancelled";
 
 export interface RunError {
   readonly message: string;

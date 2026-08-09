@@ -46,5 +46,4 @@ export interface ConversationAssistantMessage {
 }
 
 export type ConversationMessage =
-  | ConversationUserMessage
-  | ConversationAssistantMessage;
+  ConversationUserMessage | ConversationAssistantMessage;

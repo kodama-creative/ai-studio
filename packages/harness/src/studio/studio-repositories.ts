@@ -60,7 +60,11 @@ export type StudioThreadEventData =
       readonly thread: StudioThread;
     }
   | { readonly type: "run.completed"; readonly runId: string }
-  | { readonly type: "run.failed"; readonly runId: string; readonly message: string }
+  | {
+      readonly type: "run.failed";
+      readonly runId: string;
+      readonly message: string;
+    }
   | { readonly type: "run.cancelled"; readonly runId: string };
 
 export interface StudioThreadEvent {

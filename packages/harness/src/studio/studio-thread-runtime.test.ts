@@ -3,7 +3,10 @@ import { expect, test } from "bun:test";
 import type { RunExecutor } from "../run/run-executor";
 
 import { createInMemoryStudioStorage } from "./in-memory-studio-storage";
-import { createStudioThreadRuntime } from "./studio-thread-runtime";
+import {
+  createStudioThreadRuntime,
+  StudioThreadOutdatedError,
+} from "./studio-thread-runtime";
 
 test("a Studio run persists messages in a checkpoint without Run steps", async () => {
   const storage = createInMemoryStudioStorage();
@@ -55,7 +58,10 @@ test("a Studio run persists messages in a checkpoint without Run steps", async (
     fromMessageId: "user-1",
   });
   for await (const event of runtime.events(thread.id, { follow: true })) {
-    if (event.event.type === "run.completed" && event.event.runId === receipt.runId) {
+    if (
+      event.event.type === "run.completed" &&
+      event.event.runId === receipt.runId
+    ) {
       break;
     }
   }
@@ -66,10 +72,9 @@ test("a Studio run persists messages in a checkpoint without Run steps", async (
   expect(completedRun).not.toHaveProperty("steps");
   expect(completedRun?.resultCheckpointId).toBe("checkpoint-1");
 
-  const checkpoint = await storage.checkpointRepository.load(
-    "checkpoint-1"
-  );
-  if (checkpoint === undefined) throw new Error("Checkpoint was not persisted.");
+  const checkpoint = await storage.checkpointRepository.load("checkpoint-1");
+  if (checkpoint === undefined)
+    throw new Error("Checkpoint was not persisted.");
   expect(checkpoint?.document.conversation.messages).toEqual([
     {
       id: "user-1",
@@ -105,7 +110,9 @@ test("running from an earlier message truncates the editable conversation", asyn
     executor: {
       async *execute(input) {
         await Promise.resolve();
-        inputMessageIds = input.conversation.messages.map((message) => message.id);
+        inputMessageIds = input.conversation.messages.map(
+          (message) => message.id
+        );
         yield {
           type: "message.completed",
           message: {
@@ -133,20 +140,31 @@ test("running from an earlier message truncates the editable conversation", asyn
     },
     conversation: {
       messages: [
-        { id: "user-1", role: "user", content: [{ type: "text", text: "one" }] },
+        {
+          id: "user-1",
+          role: "user",
+          content: [{ type: "text", text: "one" }],
+        },
         {
           id: "assistant-old",
           role: "assistant",
           content: [{ type: "text", text: "old" }],
         },
-        { id: "user-2", role: "user", content: [{ type: "text", text: "two" }] },
+        {
+          id: "user-2",
+          role: "user",
+          content: [{ type: "text", text: "two" }],
+        },
       ],
       state: {},
     },
   });
   const receipt = await runtime.run(thread.id, { fromMessageId: "user-1" });
   for await (const event of runtime.events(thread.id, { follow: true })) {
-    if (event.event.type === "run.completed" && event.event.runId === receipt.runId) {
+    if (
+      event.event.type === "run.completed" &&
+      event.event.runId === receipt.runId
+    ) {
       break;
     }
   }
@@ -211,7 +229,10 @@ test("fork binds a historical Checkpoint to the current commit and Agent", async
   });
   const receipt = await runtime.run(original.id, { fromMessageId: "user-1" });
   for await (const event of runtime.events(original.id, { follow: true })) {
-    if (event.event.type === "run.completed" && event.event.runId === receipt.runId) {
+    if (
+      event.event.type === "run.completed" &&
+      event.event.runId === receipt.runId
+    ) {
       break;
     }
   }
@@ -275,13 +296,23 @@ test("Studio event sequences continue after the runtime restarts", async () => {
   });
   const first = await firstRuntime.run(thread.id, { fromMessageId: "user-1" });
   for await (const event of firstRuntime.events(thread.id, { follow: true })) {
-    if (event.event.type === "run.completed" && event.event.runId === first.runId) break;
+    if (
+      event.event.type === "run.completed" &&
+      event.event.runId === first.runId
+    )
+      break;
   }
 
   const secondRuntime = createStudioThreadRuntime(options);
-  const second = await secondRuntime.run(thread.id, { fromMessageId: "user-1" });
+  const second = await secondRuntime.run(thread.id, {
+    fromMessageId: "user-1",
+  });
   for await (const event of secondRuntime.events(thread.id, { follow: true })) {
-    if (event.event.type === "run.completed" && event.event.runId === second.runId) break;
+    if (
+      event.event.type === "run.completed" &&
+      event.event.runId === second.runId
+    )
+      break;
   }
 
   const sequences: number[] = [];
@@ -289,6 +320,160 @@ test("Studio event sequences continue after the runtime restarts", async () => {
     sequences.push(event.sequence);
   }
   expect(sequences).toEqual(sequences.map((_, index) => index + 1));
+});
+
+test("a restarted Studio runtime cancels an interrupted durable Run", async () => {
+  const storage = createInMemoryStudioStorage();
+  const runtime = createStudioThreadRuntime({
+    ...storage,
+    executor: {
+      async *execute() {
+        await Promise.resolve();
+        yield _unusedRunOutput();
+      },
+    },
+    revisionProvider: { current: () => Promise.resolve("commit-a") },
+    generateId: () => "thread-1",
+  });
+  const thread = await runtime.createThread({
+    agent: {
+      schemaVersion: 1,
+      agentId: "agent",
+      generationId: "generation",
+      model: "openai/gpt-5",
+      instructions: [],
+      tools: [],
+    },
+  });
+  await storage.runRepository.create({
+    schemaVersion: 1,
+    id: "run-interrupted",
+    owner: { type: "thread", threadId: thread.id },
+    triggerMessageId: "user-1",
+    status: "running",
+    createdAt: 1,
+    startedAt: 2,
+  });
+  await storage.threadRepository.save({
+    ...thread,
+    activeRunId: "run-interrupted",
+  });
+
+  const restarted = createStudioThreadRuntime({
+    ...storage,
+    executor: {
+      async *execute() {
+        await Promise.resolve();
+        yield _unusedRunOutput();
+      },
+    },
+    revisionProvider: { current: () => Promise.resolve("commit-a") },
+    clock: () => 10,
+  });
+
+  expect(await restarted.loadThread(thread.id)).toMatchObject({
+    activeRunId: undefined,
+  });
+  expect(await storage.runRepository.load("run-interrupted")).toMatchObject({
+    status: "cancelled",
+    completedAt: 10,
+  });
+  expect(await storage.runIndexRepository.list(thread.id)).toEqual([
+    {
+      threadId: thread.id,
+      runId: "run-interrupted",
+      relation: "executed",
+    },
+  ]);
+});
+
+test("Studio document saves cannot rewrite the bound Agent or commit", async () => {
+  const storage = createInMemoryStudioStorage();
+  const runtime = createStudioThreadRuntime({
+    ...storage,
+    executor: {
+      async *execute() {
+        await Promise.resolve();
+        yield _unusedRunOutput();
+      },
+    },
+    revisionProvider: { current: () => Promise.resolve("commit-a") },
+  });
+  const thread = await runtime.createThread({
+    agent: {
+      schemaVersion: 1,
+      agentId: "agent",
+      generationId: "generation-a",
+      model: "openai/gpt-5",
+      instructions: ["original"],
+      tools: [],
+    },
+  });
+
+  const saved = await runtime.saveDocument(thread.id, {
+    ...thread.document,
+    title: "Editable",
+    agent: {
+      ...thread.document.agent,
+      generationId: "forged-generation",
+      instructions: ["forged"],
+    },
+    commitId: "forged-commit",
+  });
+
+  expect(saved.document).toMatchObject({
+    title: "Editable",
+    agent: {
+      generationId: "generation-a",
+      instructions: ["original"],
+    },
+    commitId: "commit-a",
+  });
+});
+
+test("Studio execution rejects a HEAD change while resolving the Agent", async () => {
+  const storage = createInMemoryStudioStorage();
+  let commitId = "commit-a";
+  const runtime = createStudioThreadRuntime({
+    ...storage,
+    executor: {
+      async *execute() {
+        await Promise.resolve();
+        yield _unusedRunOutput();
+      },
+    },
+    revisionProvider: { current: () => Promise.resolve(commitId) },
+    resolveAgent: (snapshot) => {
+      commitId = "commit-b";
+      return Promise.resolve({ snapshot, tools: new Map() });
+    },
+  });
+  const thread = await runtime.createThread({
+    agent: {
+      schemaVersion: 1,
+      agentId: "agent",
+      generationId: "generation-a",
+      model: "openai/gpt-5",
+      instructions: [],
+      tools: [],
+    },
+    conversation: {
+      messages: [
+        { id: "user-1", role: "user", content: [{ type: "text", text: "go" }] },
+      ],
+      state: {},
+    },
+  });
+
+  expect(runtime.run(thread.id, { fromMessageId: "user-1" })).rejects.toThrow(
+    StudioThreadOutdatedError
+  );
+  expect(
+    await storage.runRepository.listByOwner({
+      type: "thread",
+      threadId: thread.id,
+    })
+  ).toEqual([]);
 });
 
 test("Studio evaluations are stored as metadata resources outside the Thread", async () => {
@@ -330,7 +515,11 @@ test("Studio evaluations are stored as metadata resources outside the Thread", a
   });
   const first = await runtime.run(thread.id, { fromMessageId: "user-1" });
   for await (const event of runtime.events(thread.id, { follow: true })) {
-    if (event.event.type === "run.completed" && event.event.runId === first.runId) break;
+    if (
+      event.event.type === "run.completed" &&
+      event.event.runId === first.runId
+    )
+      break;
   }
   const secondRun = {
     ...(await storage.runRepository.load(first.runId))!,
@@ -403,8 +592,21 @@ test("Studio evaluations are stored as metadata resources outside the Thread", a
   expect(await runtime.loadThread(thread.id)).not.toHaveProperty("evaluations");
 
   await runtime.saveRunHistory(thread.id, [first.runId]);
-  expect((await runtime.listRunHistory(thread.id)).map((entry) => entry.run.id)).toEqual([
-    first.runId,
-  ]);
-  expect((await runtime.listEvaluationMetadata(thread.id)).evaluations).toEqual([]);
+  expect(
+    (await runtime.listRunHistory(thread.id)).map((entry) => entry.run.id)
+  ).toEqual([first.runId]);
+  expect((await runtime.listEvaluationMetadata(thread.id)).evaluations).toEqual(
+    []
+  );
 });
+
+function _unusedRunOutput() {
+  return {
+    type: "message.completed" as const,
+    message: {
+      id: "unused-assistant",
+      role: "assistant" as const,
+      content: [],
+    },
+  };
+}
