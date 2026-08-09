@@ -102,6 +102,28 @@ const _noFileExists = (): Promise<boolean> => Promise.resolve(false);
 const MAX_AUTO_TOOL_TURNS = 50;
 
 export type ThreadStoreStatus = "idle" | "preparing" | "running";
+
+export type ExternalThreadRunEvent =
+  | { readonly type: "thread.updated"; readonly thread: Thread }
+  | {
+      readonly type: "message.delta";
+      readonly message: AssistantMessage;
+    };
+
+export interface ExternalThreadExecutionRuntime {
+  execute(input: {
+    readonly thread: Thread;
+    readonly fromMessageId?: string;
+    readonly signal: AbortSignal;
+  }): AsyncIterable<ExternalThreadRunEvent>;
+}
+
+export interface ThreadRunMetadata {
+  readonly runHistory: readonly RunSnapshot[];
+  readonly evaluations: readonly EvaluationRecord[];
+  readonly evaluationRubrics: readonly EvaluationRubricRecord[];
+}
+
 export interface ThreadState {
   thread: Thread;
   runtimeId?: string;
@@ -194,6 +216,10 @@ export function createThreadStore(
   initialThread: Thread,
   options: {
     transport?: AgentTransport;
+    /** Host-owned full-run execution used by Studio/Work interactions. */
+    executionRuntime?: ExternalThreadExecutionRuntime;
+    /** Persist host-owned Run/Evaluation resources after explicit metadata edits. */
+    onRunMetadataChange?: (metadata: ThreadRunMetadata) => void;
     runtimeId?: string;
     /**
      * Resolve the model a run/edit should use given the thread's saved model:
@@ -293,6 +319,18 @@ export function createThreadStore(
 
       const patchContext = (partial: Partial<Thread["context"]>) => {
         patchThread({ context: { ...get().thread.context, ...partial } });
+      };
+
+      const publishRunMetadata = (
+        runHistory: RunSnapshot[],
+        evaluations: EvaluationRecord[],
+        evaluationRubrics: EvaluationRubricRecord[]
+      ) => {
+        options.onRunMetadataChange?.({
+          runHistory,
+          evaluations,
+          evaluationRubrics,
+        });
       };
 
       const getVariableState = () =>
@@ -1033,6 +1071,65 @@ export function createThreadStore(
           if (get().status !== "idle") {
             throw new Error("Thread is already running");
           }
+          if (options.executionRuntime !== undefined) {
+            const runId = uuid();
+            const abortController = new AbortController();
+            set({
+              status: "preparing",
+              activeRunId: runId,
+              abortController,
+              streamingMessage: null,
+              executingToolCallIds: [],
+            });
+            stopActiveRun = () => abortController.abort();
+            try {
+              set({ status: "running" });
+              for await (const event of options.executionRuntime.execute({
+                thread: get().thread,
+                fromMessageId,
+                signal: abortController.signal,
+              })) {
+                if (get().activeRunId !== runId) break;
+                if (event.type === "message.delta") {
+                  set({ streamingMessage: event.message });
+                } else {
+                  const thread = normalizeThread(event.thread);
+                  const runHistory = normalizeRunHistory(thread.runHistory);
+                  const evaluations = normalizeEvaluations(
+                    thread.evaluations,
+                    runHistory
+                  );
+                  set({
+                    thread,
+                    runHistory,
+                    evaluations,
+                    streamingMessage: null,
+                  });
+                }
+              }
+            } catch (error) {
+              if (!abortController.signal.aborted) {
+                toast.error("Unable to run Thread", {
+                  description:
+                    error instanceof Error ? error.message : "Please try again.",
+                });
+              }
+            } finally {
+              if (get().activeRunId === runId) {
+                const thread = get().thread;
+                set({
+                  status: "idle",
+                  activeRunId: null,
+                  abortController: null,
+                  streamingMessage: null,
+                  executingToolCallIds: [],
+                  changeHistory: recordSnapshot(get().changeHistory, thread),
+                });
+              }
+              stopActiveRun = null;
+            }
+            return;
+          }
           const runId = uuid();
           const isPreparingRun = () =>
             get().status === "preparing" && get().activeRunId === runId;
@@ -1508,6 +1605,11 @@ export function createThreadStore(
               ),
             },
           });
+          publishRunMetadata(
+            runHistory,
+            evaluations,
+            get().evaluationRubrics
+          );
         },
         saveEvaluation(input) {
           if (get().status !== "idle") {
@@ -1539,6 +1641,11 @@ export function createThreadStore(
               ),
             },
           });
+          publishRunMetadata(
+            get().runHistory,
+            evaluations,
+            get().evaluationRubrics
+          );
           return true;
         },
         removeEvaluation(evaluation: EvaluationRecord) {
@@ -1569,6 +1676,11 @@ export function createThreadStore(
               ),
             },
           });
+          publishRunMetadata(
+            get().runHistory,
+            evaluations,
+            get().evaluationRubrics
+          );
         },
         saveEvaluationRubric(input) {
           if (get().status !== "idle") {
@@ -1594,6 +1706,11 @@ export function createThreadStore(
               ),
             },
           });
+          publishRunMetadata(
+            get().runHistory,
+            get().evaluations,
+            result.rubrics
+          );
           return result.rubric;
         },
         removeEvaluationRubric(id) {
@@ -1623,6 +1740,11 @@ export function createThreadStore(
               ),
             },
           });
+          publishRunMetadata(
+            get().runHistory,
+            get().evaluations,
+            evaluationRubrics
+          );
           return true;
         },
         abort() {

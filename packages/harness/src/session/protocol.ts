@@ -85,11 +85,6 @@ export type HarnessEventData =
       readonly message: HarnessUserMessage;
     }
   | {
-      readonly type: "step.started";
-      readonly turnId: string;
-      readonly stepIndex: number;
-    }
-  | {
       readonly type: "message.appended";
       readonly turnId: string;
       readonly messageId: string;
@@ -112,17 +107,6 @@ export type HarnessEventData =
       readonly name: string;
       readonly output: ToolModelOutput;
       readonly isError: boolean;
-    }
-  | {
-      readonly type: "step.completed";
-      readonly turnId: string;
-      readonly stepIndex: number;
-    }
-  | {
-      readonly type: "step.failed";
-      readonly turnId: string;
-      readonly stepIndex: number;
-      readonly message: string;
     }
   | { readonly type: "turn.completed"; readonly turnId: string }
   | { readonly type: "turn.cancelled"; readonly turnId: string }

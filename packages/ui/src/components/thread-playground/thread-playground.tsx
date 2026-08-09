@@ -69,6 +69,8 @@ import {
   useRunMode,
   useThreadStore,
   useThreadStoreActions,
+  type ExternalThreadExecutionRuntime,
+  type ThreadRunMetadata,
 } from "./stores";
 import { ThreadShareButton } from "./thread-share-button";
 import { ToolListView } from "./tool/tool-list-view";
@@ -101,12 +103,19 @@ export interface ThreadPlaygroundProps {
   active?: boolean;
   /** The streaming transport used by runs (e.g. HTTP or Electrobun RPC). */
   transport?: AgentTransport;
+  /** Host-owned full-run execution for Studio/Work interactions. */
+  executionRuntime?: ExternalThreadExecutionRuntime;
+  /** Keep Agent definition controls read-only while messages remain editable. */
+  definitionReadonly?: boolean;
+  /** Disable execution without making the editable Conversation read-only. */
+  runDisabled?: boolean;
   /** Runtime that owns this playground. Used to route tool calls. */
   runtimeId?: string;
   /** Recreate only the thread store while preserving per-tab UI selections. */
   storeKey?: string | number;
 
   onChange?: (thread: Thread) => void;
+  onRunMetadataChange?: (metadata: ThreadRunMetadata) => void;
   onRenameTitle?: (title: string) => Promise<boolean>;
   validateTitle?: TitleValidator;
   onStreamingStart?: (runId: string) => boolean | void;
@@ -150,8 +159,10 @@ function _ThreadPlayground({ storeKey, ...props }: ThreadPlaygroundProps) {
 function _ThreadPlaygroundStore({
   initialValue,
   transport,
+  executionRuntime,
   runtimeId,
   onChange,
+  onRunMetadataChange,
   onStreamingStart,
   onStreamingEnd,
   ...props
@@ -173,6 +184,8 @@ function _ThreadPlaygroundStore({
     const promptFiles = createRuntimePromptFiles(files, ownerRuntimeId);
     return createThreadStore(initialValue, {
       transport,
+      executionRuntime,
+      onRunMetadataChange,
       resolveModel: (saved) =>
         resolveModelConfig(
           providersRef.current,
@@ -217,6 +230,8 @@ function ThreadPlaygroundContent({
   onRenameTitle,
   validateTitle,
   readonly: readonlyFromProps = false,
+  definitionReadonly = false,
+  runDisabled = false,
   active = false,
   compactImages = false,
 }: Omit<
@@ -246,6 +261,7 @@ function ThreadPlaygroundContent({
   const readonly = useMemo(() => {
     return readonlyFromProps || presentational || status !== "idle";
   }, [readonlyFromProps, presentational, status]);
+  const definitionIsReadonly = readonly || definitionReadonly;
   const handleRun = useCallback(async () => {
     await run();
   }, [run]);
@@ -254,11 +270,11 @@ function ThreadPlaygroundContent({
   // `runThread` targets it (and no-ops when no tab is active). Skip while
   // already running to avoid run()'s "already running" throw.
   useEffect(() => {
-    if (!active) return;
+    if (!active || runDisabled) return;
     return actions.registerRunThread(() => {
       if (status === "idle") void run();
     });
-  }, [actions, active, run, status]);
+  }, [actions, active, run, runDisabled, status]);
   const handleStop = useCallback(() => {
     try {
       abort();
@@ -393,6 +409,7 @@ function ThreadPlaygroundContent({
                     }
                     disabled={
                       readonlyFromProps ||
+                      runDisabled ||
                       status === "preparing" ||
                       (status === "idle" && !hasModel)
                     }
@@ -419,7 +436,10 @@ function ThreadPlaygroundContent({
                       )}
                       aria-label="Run settings"
                       disabled={
-                        readonlyFromProps || status !== "idle" || !hasModel
+                        readonlyFromProps ||
+                        runDisabled ||
+                        status !== "idle" ||
+                        !hasModel
                       }
                     >
                       <ChevronDownIcon className="size-3" />
@@ -479,7 +499,7 @@ function ThreadPlaygroundContent({
                       Models
                     </div>
                     <div className="flex grow items-center">
-                      <ModelConfigEditor readonly={readonly} />
+                      <ModelConfigEditor readonly={definitionIsReadonly} />
                     </div>
                   </div>
                   <div className={"flex w-full border-b py-2"}>
@@ -488,7 +508,7 @@ function ThreadPlaygroundContent({
                     </div>
                     {/* Cap at ~3 chip rows (h-6 chips + gap-2.5), then scroll. */}
                     <div className="flex max-h-24 grow items-start overflow-y-auto">
-                      <ToolListView readonly={readonly} />
+                      <ToolListView readonly={definitionIsReadonly} />
                     </div>
                   </div>
                   <div className={"flex w-full border-b py-2"}>
@@ -498,7 +518,7 @@ function ThreadPlaygroundContent({
                     {/* Cap at ~3 chip rows (h-6 chips + gap-2.5), then scroll. */}
                     <div className="flex max-h-24 grow items-start overflow-y-auto">
                       <PromptVariablesListView
-                        disabled={readonly || systemPromptStreaming}
+                        disabled={definitionIsReadonly || systemPromptStreaming}
                         active={active}
                       />
                     </div>
@@ -507,7 +527,7 @@ function ThreadPlaygroundContent({
                 <div className="flex min-h-0 w-full grow flex-col">
                   <SystemPromptEditor
                     className="size-full min-h-0 px-3"
-                    readonly={readonly}
+                    readonly={definitionIsReadonly}
                     onStreamingChange={setSystemPromptStreaming}
                   />
                 </div>

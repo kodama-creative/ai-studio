@@ -1,4 +1,14 @@
-import type { HarnessEventData, HarnessMessage } from "@llm-space/harness";
+import type { StudioEvaluationMetadata } from "@llm-space/harness/evaluation";
+import type {
+  StudioThread,
+  StudioThreadEventData,
+  StudioRunHistoryEntry,
+} from "@llm-space/harness/studio";
+import { CodeEditor } from "@llm-space/ui/components/code-editor";
+import {
+  ThreadPlayground,
+  type ThreadRunMetadata,
+} from "@llm-space/ui/components/thread-playground";
 import { Button } from "@llm-space/ui/ui/button";
 import {
   Empty,
@@ -8,78 +18,180 @@ import {
   EmptyTitle,
 } from "@llm-space/ui/ui/empty";
 import { ScrollArea } from "@llm-space/ui/ui/scroll-area";
-import { Textarea } from "@llm-space/ui/ui/textarea";
-import { BotIcon, FolderIcon, PlusIcon, SquareIcon } from "lucide-react";
+import {
+  BotIcon,
+  FileCodeIcon,
+  FileIcon,
+  FolderIcon,
+  FolderTreeIcon,
+  GitForkIcon,
+  MessageSquareIcon,
+  PlusIcon,
+  XIcon,
+} from "lucide-react";
 import {
   useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
-  type FormEvent,
 } from "react";
 import { toast } from "sonner";
 
-import { createRpcHarnessSessionClient } from "@/client/rpc-harness-session-client";
-import type {
-  AgentProjectView,
-  ProjectThread,
-  ProjectThreadSession,
-} from "@/shared/agent-project";
+import type { ProjectStudioClient } from "@/client/project-studio-client";
+import { createRpcProjectStudioClient } from "@/client/rpc-project-studio-client";
+import { TreeView, type TreeDataItem } from "@/components/tree-view";
+import type { AgentProjectView } from "@/shared/agent-project";
+import type { ProjectSourceNode } from "@/shared/project-studio";
+
+import {
+  createProjectThreadExecutionRuntime,
+  playgroundThreadToStudioEvaluationMetadata,
+  playgroundThreadToStudioDocument,
+  studioThreadToPlaygroundThread,
+} from "./project-thread-adapter";
+
+type ProjectTab =
+  | {
+      readonly id: string;
+      readonly type: "thread";
+      readonly threadId: string;
+      readonly title: string;
+    }
+  | {
+      readonly id: string;
+      readonly type: "code";
+      readonly path: string;
+      readonly title: string;
+      readonly content: string;
+    };
 
 export function ProjectPage({ project }: { project: AgentProjectView }) {
-  const client = useMemo(() => createRpcHarnessSessionClient(), []);
-  const [threads, setThreads] = useState<readonly ProjectThread[]>([]);
-  const [activeThreadSession, setActiveThreadSession] = useState<ProjectThreadSession>();
-  const [streamingText, setStreamingText] = useState("");
-  const [input, setInput] = useState("");
+  const client = useMemo(() => createRpcProjectStudioClient(), []);
+  const [threads, setThreads] = useState<readonly StudioThread[]>([]);
+  const [sourceRevision, setSourceRevision] = useState<string>();
+  const [runHistory, setRunHistory] = useState<
+    ReadonlyMap<string, readonly StudioRunHistoryEntry[]>
+  >(new Map());
+  const [evaluationMetadata, setEvaluationMetadata] = useState<
+    ReadonlyMap<string, StudioEvaluationMetadata>
+  >(new Map());
+  const [sourceFiles, setSourceFiles] = useState<readonly ProjectSourceNode[]>([]);
+  const [expandedSourceIds, setExpandedSourceIds] = useState<readonly string[]>(
+    []
+  );
+  const [tabs, setTabs] = useState<readonly ProjectTab[]>([]);
+  const [activeTabId, setActiveTabId] = useState<string>();
+  const [activeThread, setActiveThread] = useState<StudioThread>();
   const [loading, setLoading] = useState(true);
   const [openError, setOpenError] = useState<string>();
-  const activeSessionId = useRef<string | undefined>(undefined);
+  const activeThreadId = useRef<string | undefined>(undefined);
+  const lastSequences = useRef(new Map<string, number>());
   const subscription = useRef<AbortController | undefined>(undefined);
+  const tabsRef = useRef(tabs);
+  tabsRef.current = tabs;
+  const activeTab = tabs.find((tab) => tab.id === activeTabId);
+
+  const openThreadTab = useCallback((thread: StudioThread) => {
+    const id = `thread:${thread.id}`;
+    setTabs((current) =>
+      current.some((tab) => tab.id === id)
+        ? current.map((tab) =>
+            tab.id === id ? { ...tab, title: thread.document.title } : tab
+          )
+        : [
+            ...current,
+            {
+              id,
+              type: "thread" as const,
+              threadId: thread.id,
+              title: thread.document.title,
+            },
+          ]
+    );
+    setActiveTabId(id);
+  }, []);
+
+  const openCodeFile = useCallback(
+    async (path: string) => {
+      const id = `code:${path}`;
+      const existing = tabs.find((tab) => tab.id === id);
+      if (existing !== undefined) {
+        setActiveTabId(id);
+        return;
+      }
+      try {
+        const content = await client.readSourceFile(path);
+        setTabs((current) => [
+          ...current,
+          {
+            id,
+            type: "code",
+            path,
+            title: path.split("/").at(-1) ?? path,
+            content,
+          },
+        ]);
+        setActiveTabId(id);
+      } catch (error) {
+        toast.error("Unable to open source file", {
+          description: _errorMessage(error),
+        });
+      }
+    },
+    [client, tabs]
+  );
+
+  const closeTab = useCallback(
+    (tabId: string) => {
+      setTabs((current) => {
+        const index = current.findIndex((tab) => tab.id === tabId);
+        const next = current.filter((tab) => tab.id !== tabId);
+        if (activeTabId === tabId) {
+          setActiveTabId(next[Math.min(index, next.length - 1)]?.id);
+        }
+        return next;
+      });
+    },
+    [activeTabId]
+  );
 
   const refreshThreads = useCallback(async () => {
     const items = await client.listThreads();
     setThreads(items);
-    setActiveThreadSession((value) => {
+    setActiveThread((value) => {
       if (value === undefined) return value;
-      const thread = items.find((item) => item.id === value.thread.id);
-      return thread === undefined ? value : { ...value, thread };
+      return items.find((item) => item.id === value.id) ?? value;
     });
   }, [client]);
 
-  const subscribeToSessionEvents = useCallback(
-    (sessionId: string, afterSequence: number) => {
+  const subscribeToThreadEvents = useCallback(
+    (threadId: string) => {
       subscription.current?.abort();
       const controller = new AbortController();
       subscription.current = controller;
       void (async () => {
         try {
-          for await (const item of client.events(sessionId, {
-            afterSequence,
+          for await (const item of client.events(threadId, {
+            afterSequence: lastSequences.current.get(threadId),
             signal: controller.signal,
           })) {
-            if (activeSessionId.current !== sessionId) return;
-            if (item.event.type === "message.appended") {
-              const { delta } = item.event;
-              setStreamingText((value) => value + delta);
+            lastSequences.current.set(threadId, item.sequence);
+            if (activeThreadId.current !== threadId) return;
+            if (item.event.type === "conversation.updated") {
+              setActiveThread(item.event.thread);
             }
-            if (_requiresSnapshotRefresh(item.event.type)) {
-              const snapshot = await client.snapshot(sessionId);
-              if (activeSessionId.current === sessionId) {
-                setActiveThreadSession((value) =>
-                  value === undefined ? value : { ...value, snapshot }
-                );
+            if (_isTerminalRunEvent(item.event)) {
+              const next = await client.loadThread(threadId);
+              if (next !== undefined && activeThreadId.current === threadId) {
+                setActiveThread(next);
               }
-            }
-            if (_isTerminalSessionEvent(item.event.type)) {
-              setStreamingText("");
               await refreshThreads();
             }
           }
         } catch (error) {
           if (!controller.signal.aborted) {
-            toast.error("Agent session stream failed", {
+            toast.error("Studio Thread stream failed", {
               description: _errorMessage(error),
             });
           }
@@ -92,26 +204,32 @@ export function ProjectPage({ project }: { project: AgentProjectView }) {
   const openThread = useCallback(
     async (threadId: string) => {
       try {
-        const next = await client.attachThread(threadId);
-        setOpenError(undefined);
-        activeSessionId.current = next.thread.sessionId;
-        setStreamingText("");
-        setActiveThreadSession(next);
-        subscribeToSessionEvents(
-          next.thread.sessionId,
-          next.snapshot.eventSequence
+        const [next, history, metadata] = await Promise.all([
+          client.loadThread(threadId),
+          client.listRunHistory(threadId),
+          client.listEvaluationMetadata(threadId),
+        ]);
+        if (next === undefined) throw new Error(`Thread "${threadId}" was not found.`);
+        setRunHistory((current) => new Map(current).set(threadId, history));
+        setEvaluationMetadata((current) =>
+          new Map(current).set(threadId, metadata)
         );
+        setOpenError(undefined);
+        activeThreadId.current = threadId;
+        setActiveThread(next);
+        openThreadTab(next);
+        subscribeToThreadEvents(threadId);
       } catch (error) {
         subscription.current?.abort();
-        activeSessionId.current = undefined;
-        setActiveThreadSession(undefined);
-        setOpenError(_generationAwareError(error));
-        toast.error("Unable to open thread", {
+        activeThreadId.current = undefined;
+        setActiveThread(undefined);
+        setOpenError(_errorMessage(error));
+        toast.error("Unable to open Thread", {
           description: _errorMessage(error),
         });
       }
     },
-    [client, subscribeToSessionEvents]
+    [client, openThreadTab, subscribeToThreadEvents]
   );
 
   const createThread = useCallback(async () => {
@@ -119,78 +237,109 @@ export function ProjectPage({ project }: { project: AgentProjectView }) {
       const next = await client.createThread();
       setOpenError(undefined);
       await refreshThreads();
-      activeSessionId.current = next.thread.sessionId;
-      setActiveThreadSession(next);
-      setStreamingText("");
-      subscribeToSessionEvents(
-        next.thread.sessionId,
-        next.snapshot.eventSequence
+      activeThreadId.current = next.id;
+      setActiveThread(next);
+      setRunHistory((current) => new Map(current).set(next.id, []));
+      setEvaluationMetadata((current) =>
+        new Map(current).set(next.id, { evaluations: [], rubrics: [] })
       );
+      openThreadTab(next);
+      subscribeToThreadEvents(next.id);
     } catch (error) {
-      toast.error("Unable to create thread", {
+      toast.error("Unable to create Thread", {
         description: _errorMessage(error),
       });
     }
-  }, [client, subscribeToSessionEvents, refreshThreads]);
+  }, [client, openThreadTab, subscribeToThreadEvents, refreshThreads]);
 
   useEffect(() => {
     let cancelled = false;
-    void client
-      .listThreads()
-      .then(async (items) => {
+    const sourceController = new AbortController();
+    void (async () => {
+      try {
+        for await (const snapshot of client.watchSourceFiles({
+          signal: sourceController.signal,
+        })) {
+          if (cancelled) return;
+          setSourceFiles(snapshot.files);
+          setSourceRevision(snapshot.revision);
+          const codeTabs = tabsRef.current.filter(
+            (tab): tab is Extract<ProjectTab, { readonly type: "code" }> =>
+              tab.type === "code"
+          );
+          const refreshed = await Promise.all(
+            codeTabs.map(async (tab) => {
+              try {
+                return { id: tab.id, content: await client.readSourceFile(tab.path) };
+              } catch {
+                return undefined;
+              }
+            })
+          );
+          const contentById = new Map(
+            refreshed.flatMap((item) =>
+              item === undefined ? [] : [[item.id, item.content] as const]
+            )
+          );
+          if (contentById.size > 0) {
+            setTabs((current) =>
+              current.map((tab) => {
+                const content = contentById.get(tab.id);
+                return tab.type === "code" && content !== undefined
+                  ? { ...tab, content }
+                  : tab;
+              })
+            );
+          }
+        }
+      } catch (error) {
+        if (!sourceController.signal.aborted) {
+          toast.error("Project source watch failed", {
+            description: _errorMessage(error),
+          });
+        }
+      }
+    })();
+    void Promise.all([
+      client.listThreads(),
+      client.listSourceFiles(),
+      client.getSourceRevision(),
+    ])
+      .then(async ([items, files, revision]) => {
         if (cancelled) return;
         setThreads(items);
+        setSourceFiles(files);
+        setSourceRevision(revision);
         if (items[0] !== undefined) await openThread(items[0].id);
       })
       .catch((error: unknown) => {
-        toast.error("Unable to load project threads", {
+        toast.error("Unable to load Project Threads", {
           description: _errorMessage(error),
         });
       })
       .finally(() => setLoading(false));
     return () => {
       cancelled = true;
+      sourceController.abort();
       subscription.current?.abort();
     };
   }, [client, openThread]);
 
-  const send = async (event: FormEvent) => {
-    event.preventDefault();
-    const message = input.trim();
-    if (message.length === 0 || activeThreadSession === undefined) return;
-    const sessionId = activeThreadSession.thread.sessionId;
-    const previousSnapshot = activeThreadSession.snapshot;
-    setInput("");
-    setActiveThreadSession((value) =>
-      value === undefined
-        ? value
-        : { ...value, snapshot: { ...value.snapshot, status: "running" } }
-    );
-    try {
-      await client.send(sessionId, message);
-    } catch (error) {
-      setInput(message);
-      setActiveThreadSession((value) =>
-        value?.thread.sessionId === sessionId
-          ? { ...value, snapshot: previousSnapshot }
-          : value
-      );
-      toast.error("Unable to send message", {
-        description: _errorMessage(error),
-      });
-    }
-  };
-
-  const cancel = async () => {
-    if (activeThreadSession === undefined) return;
-    try {
-      await client.cancel(activeThreadSession.thread.sessionId);
-    } catch (error) {
-      toast.error("Unable to cancel run", {
-        description: _errorMessage(error),
-      });
-    }
-  };
+  const sourceTree = useMemo<TreeDataItem[]>(
+    () =>
+      _sourceTreeItems(
+        sourceFiles,
+        (path) => void openCodeFile(path),
+        (path) =>
+          setExpandedSourceIds((current) => {
+            const id = `source:${path}`;
+            return current.includes(id)
+              ? current.filter((item) => item !== id)
+              : [...current, id];
+          })
+      ),
+    [openCodeFile, sourceFiles]
+  );
 
   return (
     <div className="bg-background flex size-full min-h-0 pt-9">
@@ -207,49 +356,138 @@ export function ProjectPage({ project }: { project: AgentProjectView }) {
             </span>
           </div>
         </div>
-        <div className="flex items-center justify-between px-3 py-2">
-          <span className="text-muted-foreground text-xs font-medium uppercase tracking-wide">
-            Threads
-          </span>
-          <Button
-            aria-label="New Thread"
-            size="icon-sm"
-            variant="ghost"
-            onClick={() => void createThread()}
-          >
-            <PlusIcon />
-          </Button>
+        <div className="flex min-h-0 flex-1 flex-col border-b">
+          <div className="flex h-9 shrink-0 items-center gap-2 px-3">
+            <FolderTreeIcon className="text-muted-foreground size-3.5" />
+            <span className="text-muted-foreground text-xs font-medium uppercase tracking-wide">
+              Code
+            </span>
+          </div>
+          <ScrollArea className="min-h-0 flex-1 pb-2">
+            {sourceTree.length === 0 ? (
+              <div className="text-muted-foreground px-4 py-3 text-xs">
+                No source files
+              </div>
+            ) : (
+              <TreeView
+                className="min-h-0"
+                data={sourceTree}
+                expandedIds={[...expandedSourceIds]}
+                defaultLeafIcon={FileIcon}
+                defaultNodeIcon={FolderIcon}
+              />
+            )}
+          </ScrollArea>
         </div>
-        <ScrollArea className="min-h-0 flex-1 px-2">
-          {threads.map((thread) => (
-            <button
-              className={`hover:bg-accent mb-1 w-full rounded-md px-3 py-2 text-left text-sm transition-colors ${
-                activeThreadSession?.thread.id === thread.id ? "bg-accent" : ""
-              }`}
-              key={thread.id}
-              type="button"
-              onClick={() => void openThread(thread.id)}
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="flex h-9 shrink-0 items-center justify-between px-3">
+            <div className="flex items-center gap-2">
+              <MessageSquareIcon className="text-muted-foreground size-3.5" />
+              <span className="text-muted-foreground text-xs font-medium uppercase tracking-wide">
+                Threads
+              </span>
+            </div>
+            <Button
+              aria-label="New Thread"
+              size="icon-sm"
+              variant="ghost"
+              onClick={() => void createThread()}
             >
-              <span className="block truncate">{thread.title}</span>
-            </button>
-          ))}
-        </ScrollArea>
+              <PlusIcon />
+            </Button>
+          </div>
+          <ScrollArea className="min-h-0 flex-1 px-2">
+            {threads.length === 0 ? (
+              <div className="text-muted-foreground px-2 py-3 text-xs">
+                No Studio Threads
+              </div>
+            ) : (
+              threads.map((thread) => (
+                <button
+                  className={`hover:bg-accent mb-1 w-full rounded-md px-3 py-2 text-left text-sm transition-colors ${
+                    activeThread?.id === thread.id ? "bg-accent" : ""
+                  }`}
+                  key={thread.id}
+                  type="button"
+                  onClick={() => void openThread(thread.id)}
+                >
+                  <span className="block truncate">{thread.document.title}</span>
+                </button>
+              ))
+            )}
+          </ScrollArea>
+        </div>
       </aside>
 
       <main className="flex min-w-0 flex-1 flex-col">
-        {activeThreadSession === undefined ? (
+        {tabs.length > 0 && (
+          <div className="border-border flex h-10 shrink-0 items-end overflow-x-auto border-b px-1">
+            {tabs.map((tab) => (
+              <button
+                className={`group border-border flex h-9 max-w-56 min-w-0 items-center gap-2 border-r px-3 text-xs ${
+                  tab.id === activeTabId
+                    ? "bg-background text-foreground"
+                    : "bg-muted/30 text-muted-foreground hover:bg-muted/60"
+                }`}
+                key={tab.id}
+                type="button"
+                onClick={() => {
+                  setActiveTabId(tab.id);
+                  if (tab.type === "thread") void openThread(tab.threadId);
+                }}
+              >
+                {tab.type === "code" ? (
+                  <FileCodeIcon className="size-3.5 shrink-0" />
+                ) : (
+                  <MessageSquareIcon className="size-3.5 shrink-0" />
+                )}
+                <span className="truncate">{tab.title}</span>
+                <span
+                  aria-label={`Close ${tab.title}`}
+                  className="ml-auto rounded-sm opacity-0 hover:bg-white/10 group-hover:opacity-100"
+                  role="button"
+                  tabIndex={0}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    closeTab(tab.id);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.stopPropagation();
+                      closeTab(tab.id);
+                    }
+                  }}
+                >
+                  <XIcon className="size-3" />
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+        {activeTab?.type === "code" ? (
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div className="text-muted-foreground border-border h-9 shrink-0 border-b px-4 py-2 font-mono text-xs">
+              {activeTab.path}
+            </div>
+            <CodeEditor
+              className="min-h-0 flex-1 rounded-none border-0"
+              hideBorder
+              readonly
+              value={activeTab.content}
+            />
+          </div>
+        ) : activeThread === undefined ? (
           <Empty className="flex-1">
             <EmptyHeader>
               <EmptyTitle>
                 {loading
-                  ? "Opening project…"
+                  ? "Opening Project…"
                   : openError === undefined
-                    ? "No agent threads yet"
-                    : "This thread cannot use the current agent"}
+                    ? "No Studio Threads yet"
+                    : "This Thread cannot be opened"}
               </EmptyTitle>
               <EmptyDescription>
-                {openError ??
-                  "Start a Harness session backed by this project’s local storage."}
+                {openError ?? "Create an independent Studio Thread for this Agent."}
               </EmptyDescription>
             </EmptyHeader>
             {!loading && (
@@ -261,114 +499,214 @@ export function ProjectPage({ project }: { project: AgentProjectView }) {
             )}
           </Empty>
         ) : (
-          <>
-            <div className="border-border flex h-12 shrink-0 items-center justify-between border-b px-5">
-              <div className="truncate text-sm font-medium">
-                {activeThreadSession.thread.title}
-              </div>
-              <div className="text-muted-foreground text-xs">
-                {activeThreadSession.snapshot.status}
-              </div>
-            </div>
-            <ScrollArea className="min-h-0 flex-1">
-              <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-6 py-8">
-                {activeThreadSession.snapshot.error !== undefined && (
-                  <div className="border-destructive/40 bg-destructive/10 text-destructive rounded-lg border px-4 py-3 text-sm">
-                    {activeThreadSession.snapshot.error}
-                  </div>
-                )}
-                {activeThreadSession.snapshot.messages.map((message) => (
-                  <ProjectMessage key={message.id} message={message} />
-                ))}
-                {streamingText.length > 0 && (
-                  <div className="bg-muted max-w-[85%] whitespace-pre-wrap rounded-xl px-4 py-3 text-sm">
-                    {streamingText}
-                  </div>
-                )}
-              </div>
-            </ScrollArea>
-            <form className="border-border shrink-0 border-t p-4" onSubmit={send}>
-              <div className="mx-auto flex max-w-3xl items-end gap-2">
-                <Textarea
-                  className="max-h-40 min-h-11 resize-none"
-                  disabled={
-                    activeThreadSession.snapshot.status === "completed" ||
-                    activeThreadSession.snapshot.status === "failed"
-                  }
-                  placeholder="Message this agent…"
-                  value={input}
-                  onChange={(event) => setInput(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" && !event.shiftKey) {
-                      event.preventDefault();
-                      event.currentTarget.form?.requestSubmit();
-                    }
-                  }}
-                />
-                {activeThreadSession.snapshot.status === "running" ? (
-                  <Button size="icon" type="button" onClick={() => void cancel()}>
-                    <SquareIcon />
-                  </Button>
-                ) : (
-                  <Button disabled={input.trim().length === 0} type="submit">
-                    Send
-                  </Button>
-                )}
-              </div>
-            </form>
-          </>
+          <ProjectThreadPlaygroundPane
+            client={client}
+            history={runHistory.get(activeThread.id) ?? []}
+            evaluationMetadata={
+              evaluationMetadata.get(activeThread.id) ?? {
+                evaluations: [],
+                rubrics: [],
+              }
+            }
+            sourceRevision={sourceRevision}
+            thread={activeThread}
+            onThread={setActiveThread}
+            onSettled={refreshThreads}
+            onFork={async () => {
+              const fork = await client.forkThread(activeThread.id);
+              await refreshThreads();
+              await openThread(fork.id);
+            }}
+          />
         )}
       </main>
     </div>
   );
 }
 
-function ProjectMessage({ message }: { message: HarnessMessage }) {
-  if (message.role === "tool") {
-    return (
-      <div className="border-border text-muted-foreground rounded-lg border px-3 py-2 font-mono text-xs">
-        <div className="mb-1 font-medium">{message.name}</div>
-        <pre className="whitespace-pre-wrap">{JSON.stringify(message.output, null, 2)}</pre>
-      </div>
-    );
-  }
-  const user = message.role === "user";
+function ProjectThreadPlaygroundPane({
+  client,
+  history,
+  evaluationMetadata,
+  sourceRevision,
+  thread,
+  onThread,
+  onSettled,
+  onFork,
+}: {
+  readonly client: ProjectStudioClient;
+  readonly history: readonly StudioRunHistoryEntry[];
+  readonly evaluationMetadata: StudioEvaluationMetadata;
+  readonly sourceRevision?: string;
+  readonly thread: StudioThread;
+  readonly onThread: (thread: StudioThread) => void;
+  readonly onSettled: () => void | Promise<void>;
+  readonly onFork: () => void | Promise<void>;
+}) {
+  const threadRef = useRef(thread);
+  threadRef.current = thread;
+  const saveChain = useRef(Promise.resolve());
+  const metadataSaveChain = useRef(Promise.resolve());
+  const publishThread = useCallback(
+    (next: StudioThread) => {
+      threadRef.current = next;
+      onThread(next);
+    },
+    [onThread]
+  );
+  const persist = useCallback(
+    (next: import("@llm-space/core").Thread): Promise<void> => {
+      saveChain.current = saveChain.current
+        .catch(() => undefined)
+        .then(async () => {
+          const current = threadRef.current;
+          const saved = await client.saveDocument(
+            current.id,
+            playgroundThreadToStudioDocument(next, current)
+          );
+          publishThread(saved);
+        });
+      return saveChain.current;
+    },
+    [client, publishThread]
+  );
+  const persistRunMetadata = useCallback(
+    (metadata: ThreadRunMetadata): Promise<void> => {
+      metadataSaveChain.current = metadataSaveChain.current
+        .catch(() => undefined)
+        .then(async () => {
+          const current = threadRef.current;
+          await Promise.all([
+            client.saveRunHistory(
+              current.id,
+              metadata.runHistory.map((run) => run.id)
+            ),
+            client.saveEvaluationMetadata(
+              current.id,
+              playgroundThreadToStudioEvaluationMetadata(metadata)
+            ),
+          ]);
+        });
+      return metadataSaveChain.current;
+    },
+    [client]
+  );
+  const executionRuntime = useMemo(
+    () =>
+      createProjectThreadExecutionRuntime({
+        client,
+        threadId: thread.id,
+        getThread: () => threadRef.current,
+        onThread: publishThread,
+        beforeExecute: () => saveChain.current,
+        onSettled,
+      }),
+    [client, onSettled, publishThread, thread.id]
+  );
+  const outdated =
+    sourceRevision !== undefined && sourceRevision !== thread.document.commitId;
+
   return (
-    <div
-      className={`max-w-[85%] whitespace-pre-wrap rounded-xl px-4 py-3 text-sm ${
-        user ? "bg-primary text-primary-foreground ml-auto" : "bg-muted"
-      }`}
-    >
-      {message.content}
-    </div>
+    <ThreadPlayground
+      active
+      className="min-h-0 flex-1"
+      definitionReadonly
+      executionRuntime={executionRuntime}
+      runDisabled={outdated}
+      initialValue={studioThreadToPlaygroundThread(
+        thread,
+        history,
+        evaluationMetadata
+      )}
+      path={`threads/${thread.id}`}
+      storeKey={thread.id}
+      title={thread.document.title}
+      headerDetails={
+        <span
+          className={
+            outdated
+              ? "text-destructive font-mono text-[0.625rem]"
+              : "text-muted-foreground font-mono text-[0.625rem]"
+          }
+        >
+          {outdated ? "Outdated · " : ""}commit {thread.document.commitId.slice(0, 10)}
+        </span>
+      }
+      headerActions={
+        outdated ? (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => void onFork()}
+          >
+            <GitForkIcon className="size-3.5" /> Fork on Current HEAD
+          </Button>
+        ) : undefined
+      }
+      onChange={(next) => {
+        void persist(next).catch((error: unknown) => {
+          toast.error("Unable to save Studio Thread", {
+            description: _errorMessage(error),
+          });
+        });
+      }}
+      onRunMetadataChange={(metadata) => {
+        void persistRunMetadata(metadata).catch((error: unknown) => {
+          toast.error("Unable to save Run metadata", {
+            description: _errorMessage(error),
+          });
+        });
+      }}
+      onRenameTitle={async (title) => {
+        const current = threadRef.current;
+        try {
+          const saved = await client.saveDocument(current.id, {
+            ...current.document,
+            title,
+          });
+          publishThread(saved);
+          return true;
+        } catch (error) {
+          toast.error("Unable to rename Studio Thread", {
+            description: _errorMessage(error),
+          });
+          return false;
+        }
+      }}
+    />
+  );
+}
+
+function _sourceTreeItems(
+  nodes: readonly ProjectSourceNode[],
+  openFile: (path: string) => void,
+  toggleDirectory: (path: string) => void
+): TreeDataItem[] {
+  return nodes.map((node) => ({
+    id: `source:${node.path}`,
+    name: node.name,
+    icon: node.type === "file" ? FileIcon : FolderIcon,
+    ...(node.type === "file"
+      ? { onClick: () => openFile(node.path) }
+      : {
+          children: _sourceTreeItems(
+            node.children ?? [],
+            openFile,
+            toggleDirectory
+          ),
+          onClick: () => toggleDirectory(node.path),
+        }),
+  }));
+}
+
+function _isTerminalRunEvent(event: StudioThreadEventData): boolean {
+  return (
+    event.type === "run.completed" ||
+    event.type === "run.failed" ||
+    event.type === "run.cancelled"
   );
 }
 
 function _errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function _generationAwareError(error: unknown): string {
-  const message = _errorMessage(error);
-  return message.includes(" belongs to ")
-    ? "The agent changed after this thread was created. Start a new thread to use the current agent generation."
-    : message;
-}
-
-function _requiresSnapshotRefresh(type: HarnessEventData["type"]): boolean {
-  return (
-    type === "turn.started" ||
-    type === "message.received" ||
-    type === "message.completed" ||
-    type === "action.result" ||
-    _isTerminalSessionEvent(type)
-  );
-}
-
-function _isTerminalSessionEvent(type: HarnessEventData["type"]): boolean {
-  return (
-    type === "session.waiting" ||
-    type === "session.completed" ||
-    type === "session.failed"
-  );
 }

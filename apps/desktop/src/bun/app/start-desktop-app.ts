@@ -32,7 +32,7 @@ import {
   PluginCommandExecutionController,
   type PluginCommandReportInput,
 } from "../plugins/plugin-command-execution-controller";
-import { createProjectSessionHost } from "../projects/project-session-host";
+import { createProjectStudioHost } from "../projects/project-studio-host";
 import { ProjectWindowManager } from "../projects/project-window-manager";
 import {
   FileProjectWindowStateStore,
@@ -274,7 +274,7 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
   };
   const createWindowRpc = (
     getWindow: () => BrowserWindow,
-    projectSessionHost?: Awaited<ReturnType<typeof createProjectSessionHost>>
+    projectStudioHost?: Awaited<ReturnType<typeof createProjectStudioHost>>
   ): MainWindowRPC =>
     createMainWindowRPC({
       analytics,
@@ -290,13 +290,13 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
       updater,
       pluginManager,
       pluginCommandExecutions,
-      ...(projectSessionHost === undefined
+      ...(projectStudioHost === undefined
         ? {}
         : {
-            projectSessionHost,
+            projectStudioHost,
             windowContext: {
               kind: "agentProject" as const,
-              project: projectSessionHost.project,
+              project: projectStudioHost.project,
             },
           }),
     });
@@ -304,7 +304,7 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
     state: new FileProjectWindowStateStore(homePath),
     windows: {
       async create(project) {
-        const projectSessionHost = await createProjectSessionHost({
+        const projectStudioHost = await createProjectStudioHost({
           project,
           engine: createPiModelTurnEngine({
             models: await modelManager.getAvailableModels(),
@@ -319,7 +319,7 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
         };
         const projectRpc = createWindowRpc(
           getProjectWindow,
-          projectSessionHost
+          projectStudioHost
         );
         const stateStore = await ProjectWindowStateFile.load(
           homePath,
@@ -327,7 +327,7 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
         );
         const projectWindow = await createAgentProjectWindow({
           rpc: projectRpc,
-          project: projectSessionHost.project,
+          project: projectStudioHost.project,
           stateStore,
           windowStates,
         });

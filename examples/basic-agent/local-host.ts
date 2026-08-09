@@ -49,6 +49,7 @@ export async function createBasicAgentLocalHost(
     engine: createPiModelTurnEngine({ models: localModels.models }),
     repository: storage.repository,
     eventLog: storage.eventLog,
+    runRepository: storage.runRepository,
   });
   const agent = await harness.prepare(generation);
   const session =

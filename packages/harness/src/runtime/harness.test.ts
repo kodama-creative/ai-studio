@@ -7,6 +7,7 @@ import {
   InMemorySessionEventLog,
   InMemorySessionCommandQueue,
   InMemorySessionRepository,
+  InMemoryRunRepository,
   createHarness,
   type HarnessEvent,
   type ModelTurnEngine,
@@ -126,6 +127,40 @@ async function _waitForTurn(
 }
 
 describe("Harness", () => {
+  test("persists a Session turn as an independent Run resource", async () => {
+    const runRepository = new InMemoryRunRepository();
+    const harness = createHarness({
+      engine: new ScriptedModelEngine([
+        [
+          { type: "text.delta", delta: "Done" },
+          { type: "finish", reason: "stop" },
+        ],
+      ]),
+      runRepository,
+      clock: () => 42,
+      generateId: (() => {
+        const ids = ["session-1", "command-1", "turn-1", "message-1", "message-2"];
+        return () => ids.shift()!;
+      })(),
+    });
+    const agent = await harness.prepare(_generation());
+    const session = await agent.createSession();
+
+    const receipt = await session.submit({ message: "Run" });
+    await _waitForTurn(session, receipt.turnId, receipt.afterSequence);
+
+    expect(await runRepository.load(receipt.turnId)).toEqual({
+      schemaVersion: 1,
+      id: receipt.turnId,
+      owner: { type: "session", sessionId: session.id },
+      triggerMessageId: "message-1",
+      status: "completed",
+      createdAt: 42,
+      startedAt: 42,
+      completedAt: 42,
+    });
+  });
+
   test("accepts a command before its turn completes", async () => {
     let release: (() => void) | undefined;
     let markStarted: (() => void) | undefined;
@@ -144,7 +179,8 @@ describe("Harness", () => {
       },
     };
     const eventLog = new InMemorySessionEventLog();
-    const harness = createHarness({ engine, eventLog });
+    const runRepository = new InMemoryRunRepository();
+    const harness = createHarness({ engine, eventLog, runRepository });
     const agent = await harness.prepare(_generation());
     const session = await agent.createSession();
 
@@ -450,11 +486,9 @@ describe("Harness", () => {
       "session.started",
       "turn.started",
       "message.received",
-      "step.started",
       "message.appended",
       "message.appended",
       "message.completed",
-      "step.completed",
       "turn.completed",
       "session.waiting",
     ]);
@@ -1026,7 +1060,8 @@ describe("Harness", () => {
       },
     };
     const eventLog = new InMemorySessionEventLog();
-    const harness = createHarness({ engine, eventLog });
+    const runRepository = new InMemoryRunRepository();
+    const harness = createHarness({ engine, eventLog, runRepository });
     const agent = await harness.prepare(_generation());
     const session = await agent.createSession();
 
@@ -1047,6 +1082,11 @@ describe("Harness", () => {
       type: "session.failed",
       message: "provider unavailable",
     });
+    expect(
+      await runRepository.listByOwner({ type: "session", sessionId: session.id })
+    ).toMatchObject([
+      { status: "failed", error: { message: "provider unavailable" } },
+    ]);
   });
 
   test("fails a model step that ends with a non-terminal finish reason", async () => {
@@ -1075,9 +1115,7 @@ describe("Harness", () => {
       "session.started",
       "turn.started",
       "message.received",
-      "step.started",
       "message.appended",
-      "step.failed",
       "turn.failed",
       "session.failed",
     ]);
@@ -1111,10 +1149,8 @@ describe("Harness", () => {
       "session.started",
       "turn.started",
       "message.received",
-      "step.started",
       "message.appended",
       "message.completed",
-      "step.completed",
       "turn.completed",
       "session.waiting",
     ]);
@@ -1151,7 +1187,8 @@ describe("Harness", () => {
       },
     };
     const eventLog = new InMemorySessionEventLog();
-    const harness = createHarness({ engine, eventLog });
+    const runRepository = new InMemoryRunRepository();
+    const harness = createHarness({ engine, eventLog, runRepository });
     const agent = await harness.prepare(_generation());
     const session = await agent.createSession();
     const run = session.send({ message: "Run" });
@@ -1167,10 +1204,12 @@ describe("Harness", () => {
       "session.started",
       "turn.started",
       "message.received",
-      "step.started",
       "message.appended",
       "turn.cancelled",
       "session.waiting",
     ]);
+    expect(
+      await runRepository.listByOwner({ type: "session", sessionId: session.id })
+    ).toMatchObject([{ status: "cancelled" }]);
   });
 });

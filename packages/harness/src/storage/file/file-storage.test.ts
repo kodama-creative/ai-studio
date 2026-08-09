@@ -10,6 +10,7 @@ import {
   FileSessionCommandQueue,
   FileSessionRepository,
   JsonlSessionEventLog,
+  createFileSessionStorage,
 } from ".";
 
 const ROOTS: string[] = [];
@@ -18,6 +19,40 @@ afterEach(async () => {
   await Promise.all(
     ROOTS.splice(0).map((root) => rm(root, { recursive: true, force: true }))
   );
+});
+
+test("file session storage persists independent Run resources", async () => {
+  const root = await mkdtemp(join(tmpdir(), "llm-space-harness-runs-"));
+  ROOTS.push(root);
+  const storage = createFileSessionStorage(root);
+  await storage.runRepository.create({
+    schemaVersion: 1,
+    id: "run-1",
+    owner: { type: "session", sessionId: "session-1" },
+    triggerMessageId: "message-1",
+    status: "completed",
+    createdAt: 10,
+    startedAt: 11,
+    completedAt: 12,
+  });
+
+  expect(
+    await createFileSessionStorage(root).runRepository.listByOwner({
+      type: "session",
+      sessionId: "session-1",
+    })
+  ).toEqual([
+    {
+      schemaVersion: 1,
+      id: "run-1",
+      owner: { type: "session", sessionId: "session-1" },
+      triggerMessageId: "message-1",
+      status: "completed",
+      createdAt: 10,
+      startedAt: 11,
+      completedAt: 12,
+    },
+  ]);
 });
 
 test("file session repository restores a snapshot in a new host instance", async () => {

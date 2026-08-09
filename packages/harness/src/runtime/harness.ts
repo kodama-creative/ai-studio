@@ -1,18 +1,11 @@
 import type { SandboxSession } from "@llm-space/agent/sandbox";
-import type {
-  ToolContext,
-  ToolDefinition,
-  ToolModelOutput,
-} from "@llm-space/agent/tools";
+import type { ToolContext } from "@llm-space/agent/tools";
 
 import type { ModelTurnEngine } from "../execution/model-engine";
-import { validateSchemaValue } from "../execution/schema-validation";
-import type {
-  AgentGeneration,
-  PreparedAgentDefinition,
-  PreparedTool,
-} from "../generation/generation";
+import { createModelRunExecutor } from "../execution/run-executor";
+import type { AgentGeneration, PreparedAgentDefinition } from "../generation/generation";
 import { resolveAgentGeneration } from "../generation/generation";
+import type { Run, RunRepository } from "../run";
 import type {
   HarnessAssistantMessage,
   HarnessEvent,
@@ -34,6 +27,7 @@ import {
   InMemorySessionCommandQueue,
   InMemorySessionEventLog,
   InMemorySessionRepository,
+  InMemoryRunRepository,
   type SessionCommandQueue,
   type SessionEventLog,
   type SessionRepository,
@@ -52,6 +46,7 @@ export interface CreateHarnessOptions {
   readonly repository?: SessionRepository;
   readonly eventLog?: SessionEventLog;
   readonly commandQueue?: SessionCommandQueue;
+  readonly runRepository?: RunRepository;
   readonly clock?: () => number;
   readonly scheduler?: HarnessScheduler;
   readonly generateId?: (prefix: string) => string;
@@ -100,6 +95,7 @@ interface HarnessDependencies {
   readonly repository: SessionRepository;
   readonly eventLog: SessionEventLog;
   readonly commandQueue: SessionCommandQueue;
+  readonly runRepository: RunRepository;
   readonly clock: () => number;
   readonly scheduler: HarnessScheduler;
   readonly generateId: (prefix: string) => string;
@@ -389,6 +385,22 @@ class AgentSessionImpl implements AgentSession {
       role: "user" as const,
       content: command.message,
     };
+    let run: Run = {
+      schemaVersion: 1,
+      id: turnId,
+      owner: { type: "session", sessionId: this.id },
+      triggerMessageId: userMessage.id,
+      status: "queued",
+      createdAt: this._deps.clock(),
+    };
+    const createResult = await this._deps.runRepository.create(run);
+    if (createResult === "existing") {
+      const existing = await this._deps.runRepository.load(run.id);
+      if (existing === undefined) {
+        throw new Error(`Run "${run.id}" exists but cannot be loaded.`);
+      }
+      run = existing;
+    }
     this._snapshot = {
       ...this._snapshot,
       activeTurnId: turnId,
@@ -411,9 +423,23 @@ class AgentSessionImpl implements AgentSession {
       turnId,
       message: userMessage,
     });
+    run = {
+      ...run,
+      status: "running",
+      startedAt: this._deps.clock(),
+      completedAt: undefined,
+      error: undefined,
+    };
+    await this._deps.runRepository.save(run);
 
     try {
       await this._runTurn(turnId, abortController.signal);
+      run = {
+        ...run,
+        status: "completed",
+        completedAt: this._deps.clock(),
+      };
+      await this._deps.runRepository.save(run);
       await this._emit({ type: "turn.completed", turnId });
       this._snapshot = {
         ...this._snapshot,
@@ -435,6 +461,12 @@ class AgentSessionImpl implements AgentSession {
       );
     } catch (error) {
       if (abortController.signal.aborted) {
+        run = {
+          ...run,
+          status: "cancelled",
+          completedAt: this._deps.clock(),
+        };
+        await this._deps.runRepository.save(run);
         this._snapshot = {
           ...this._snapshot,
           activeTurnId: undefined,
@@ -453,6 +485,13 @@ class AgentSessionImpl implements AgentSession {
         return;
       }
       const message = _errorMessage(error);
+      run = {
+        ...run,
+        status: "failed",
+        error: { message },
+        completedAt: this._deps.clock(),
+      };
+      await this._deps.runRepository.save(run);
       this._snapshot = {
         ...this._snapshot,
         activeTurnId: undefined,
@@ -772,56 +811,56 @@ class AgentSessionImpl implements AgentSession {
   }
 
   private async _runTurn(turnId: string, signal: AbortSignal): Promise<void> {
-    for (
-      let stepIndex = 0;
-      stepIndex < this._deps.maxStepsPerTurn;
-      stepIndex++
-    ) {
-      try {
-        _throwIfAborted(signal);
-        await this._emit({ type: "step.started", turnId, stepIndex });
-        const messageId = this._deps.generateId("message");
-        let content = "";
-        const toolCalls: HarnessToolCall[] = [];
-        let finishReason:
-          "stop" | "tool-calls" | "length" | "other" | undefined;
-
-        for await (const event of this._deps.engine.run(
-          {
+    const calls = new Map<string, HarnessToolCall>();
+    const executor = createModelRunExecutor({
+      engine: this._deps.engine,
+      generateId: this._deps.generateId,
+      maxModelTurns: this._deps.maxStepsPerTurn,
+      createToolContext: ({ call, signal: toolSignal }) =>
+        this._toolContext(turnId, call, toolSignal),
+    });
+    for await (const event of executor.execute(
+      {
+        runId: turnId,
+        owner: { type: "session", sessionId: this.id },
+        agent: {
+          snapshot: {
+            schemaVersion: 1,
             agentId: this._agent.agentId,
-            instructions: this._agent.instructions,
-            messages: this._snapshot.messages,
+            generationId: this._agent.generationId,
             model: this._agent.model,
+            instructions: this._agent.instructions,
             tools: [...this._agent.tools.values()].map((tool) => tool.model),
           },
-          { signal }
-        )) {
-          _throwIfAborted(signal);
-          if (finishReason !== undefined) {
-            throw new Error("Model turn emitted data after its finish event.");
-          }
-          if (event.type === "text.delta") {
-            content += event.delta;
-            await this._emit({
-              type: "message.appended",
-              turnId,
-              messageId,
-              delta: event.delta,
-            });
-          } else if (event.type === "tool.call") {
-            toolCalls.push(event.call);
-          } else {
-            finishReason = event.reason;
-          }
-        }
-        _assertModelTurnFinish(finishReason, toolCalls);
-        if (content.length === 0 && toolCalls.length === 0) {
-          throw new Error("Model turn completed without text or tool calls.");
-        }
+          tools: this._agent.tools,
+        },
+        conversation: _sessionConversation(this._snapshot.messages),
+      },
+      { signal }
+    )) {
+      if (event.type === "message.delta") {
+        await this._emit({
+          type: "message.appended",
+          turnId,
+          messageId: event.messageId,
+          delta: event.delta,
+        });
+      } else if (event.type === "message.completed") {
+        const toolCalls = (event.message.toolCalls ?? []).map(
+          (call): HarnessToolCall => ({
+            id: call.id,
+            name: call.name,
+            input: call.input,
+          })
+        );
+        for (const call of toolCalls) calls.set(call.id, call);
         const message: HarnessAssistantMessage = {
-          id: messageId,
+          id: event.message.id,
           role: "assistant",
-          content,
+          content: event.message.content
+            .filter((item) => item.type === "text")
+            .map((item) => item.text)
+            .join("\n"),
           toolCalls,
         };
         this._snapshot = {
@@ -831,84 +870,38 @@ class AgentSessionImpl implements AgentSession {
         };
         await this._save();
         await this._emit({ type: "message.completed", turnId, message });
-
         if (toolCalls.length > 0) {
-          await this._emit({
-            type: "actions.requested",
-            turnId,
-            calls: toolCalls,
-          });
-          for (const call of toolCalls) {
-            _throwIfAborted(signal);
-            await this._executeTool(turnId, call, signal);
-          }
+          await this._emit({ type: "actions.requested", turnId, calls: toolCalls });
         }
-        await this._emit({ type: "step.completed", turnId, stepIndex });
-        if (toolCalls.length === 0) return;
-      } catch (error) {
-        if (!signal.aborted) {
-          await this._emit({
-            type: "step.failed",
-            turnId,
-            stepIndex,
-            message: _errorMessage(error),
-          });
+      } else if (event.type === "tool.completed") {
+        const call = calls.get(event.toolCallId);
+        if (call === undefined) {
+          throw new Error(`Tool call "${event.toolCallId}" was not found.`);
         }
-        throw error;
+        const message: HarnessToolMessage = {
+          id: this._deps.generateId("message"),
+          role: "tool",
+          callId: call.id,
+          name: call.name,
+          output: event.result.output,
+          isError: event.result.isError,
+        };
+        this._snapshot = {
+          ...this._snapshot,
+          messages: [...this._snapshot.messages, message],
+          updatedAt: this._deps.clock(),
+        };
+        await this._save();
+        await this._emit({
+          type: "action.result",
+          turnId,
+          callId: call.id,
+          name: call.name,
+          output: event.result.output,
+          isError: event.result.isError,
+        });
       }
     }
-    throw new Error(
-      `Harness exceeded ${this._deps.maxStepsPerTurn} model steps in one turn.`
-    );
-  }
-
-  private async _executeTool(
-    turnId: string,
-    call: HarnessToolCall,
-    signal: AbortSignal
-  ): Promise<void> {
-    const prepared = this._agent.tools.get(call.name);
-    let output: ToolModelOutput;
-    let isError = false;
-    if (prepared === undefined) {
-      output = { type: "text", value: `Unknown tool: ${call.name}` };
-      isError = true;
-    } else {
-      try {
-        const result = await _executeToolDefinition(
-          prepared,
-          call,
-          this._toolContext(turnId, call, signal)
-        );
-        output = result;
-      } catch (error) {
-        if (signal.aborted) throw error;
-        output = { type: "text", value: _errorMessage(error) };
-        isError = true;
-      }
-    }
-    const message: HarnessToolMessage = {
-      id: this._deps.generateId("message"),
-      role: "tool",
-      callId: call.id,
-      name: call.name,
-      output,
-      isError,
-    };
-    this._snapshot = {
-      ...this._snapshot,
-      messages: [...this._snapshot.messages, message],
-      updatedAt: this._deps.clock(),
-    };
-    await this._save();
-    await this._emit({
-      type: "action.result",
-      turnId,
-      callId: call.id,
-      name: call.name,
-      output,
-      isError,
-    });
   }
 
   private _toolContext(
@@ -1006,6 +999,7 @@ export function createHarness(options: CreateHarnessOptions): Harness {
     repository: options.repository ?? new InMemorySessionRepository(),
     eventLog: options.eventLog ?? new InMemorySessionEventLog(),
     commandQueue: options.commandQueue ?? new InMemorySessionCommandQueue(),
+    runRepository: options.runRepository ?? new InMemoryRunRepository(),
     clock: options.clock ?? Date.now,
     scheduler: options.scheduler ?? DEFAULT_HARNESS_SCHEDULER,
     generateId:
@@ -1022,52 +1016,54 @@ export function createHarness(options: CreateHarnessOptions): Harness {
   });
 }
 
-async function _executeToolDefinition(
-  prepared: PreparedTool,
-  call: HarnessToolCall,
-  context: ToolContext
-): Promise<ToolModelOutput> {
-  const input = await validateSchemaValue(
-    prepared.definition.inputSchema,
-    call.input,
-    { direction: "input", label: `Input for tool "${call.name}"` }
-  );
-  const execution = prepared.definition.execute(input, context);
-  const values: unknown[] = [];
-  if (_isAsyncIterable(execution)) {
-    for await (const value of execution) {
-      values.push(await _validateToolOutput(prepared.definition, call, value));
-    }
-  } else {
-    values.push(
-      await _validateToolOutput(prepared.definition, call, await execution)
-    );
-  }
-  const value = values.length === 1 ? values[0] : values;
-  if (prepared.definition.toModelOutput !== undefined) {
-    return await prepared.definition.toModelOutput(value);
-  }
-  if (typeof value === "string") return { type: "text", value };
-  return { type: "json", value: value ?? null };
-}
-
-async function _validateToolOutput(
-  definition: ToolDefinition,
-  call: HarnessToolCall,
-  value: unknown
-): Promise<unknown> {
-  return definition.outputSchema === undefined
-    ? value
-    : await validateSchemaValue(definition.outputSchema, value, {
-        direction: "output",
-        label: `Output from tool "${call.name}"`,
+function _sessionConversation(
+  messages: readonly import("../session/protocol").HarnessMessage[]
+): import("../conversation").Conversation {
+  const result: import("../conversation").ConversationMessage[] = [];
+  const assistantByCall = new Map<
+    string,
+    { readonly messageIndex: number; readonly callIndex: number }
+  >();
+  for (const message of messages) {
+    if (message.role === "user") {
+      result.push({
+        id: message.id,
+        role: "user",
+        content: [{ type: "text", text: message.content }],
       });
-}
-
-function _isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
-  return (
-    typeof value === "object" && value !== null && Symbol.asyncIterator in value
-  );
+    } else if (message.role === "assistant") {
+      const messageIndex = result.length;
+      const toolCalls = message.toolCalls.map((call, callIndex) => {
+        assistantByCall.set(call.id, { messageIndex, callIndex });
+        return { id: call.id, name: call.name, input: call.input };
+      });
+      result.push({
+        id: message.id,
+        role: "assistant",
+        content:
+          message.content.length === 0
+            ? []
+            : [{ type: "text", text: message.content }],
+        ...(toolCalls.length === 0 ? {} : { toolCalls }),
+      });
+    } else {
+      const location = assistantByCall.get(message.callId);
+      if (location === undefined) continue;
+      const assistant = result[location.messageIndex];
+      if (assistant?.role !== "assistant" || assistant.toolCalls === undefined) {
+        continue;
+      }
+      const toolCalls = [...assistant.toolCalls];
+      const call = toolCalls[location.callIndex];
+      if (call === undefined) continue;
+      toolCalls[location.callIndex] = {
+        ...call,
+        result: { output: message.output, isError: message.isError },
+      };
+      result[location.messageIndex] = { ...assistant, toolCalls };
+    }
+  }
+  return { messages: result, state: {} };
 }
 
 function _assertSessionOwner(
@@ -1080,35 +1076,6 @@ function _assertSessionOwner(
   ) {
     throw new Error(
       `Session "${snapshot.id}" belongs to ${snapshot.agentId}@${snapshot.generationId}, not ${agent.agentId}@${agent.generationId}.`
-    );
-  }
-}
-
-function _throwIfAborted(signal: AbortSignal): void {
-  if (signal.aborted) throw signal.reason ?? new Error("Session turn aborted.");
-}
-
-function _assertModelTurnFinish(
-  finishReason: "stop" | "tool-calls" | "length" | "other" | undefined,
-  toolCalls: readonly HarnessToolCall[]
-): void {
-  if (finishReason === undefined) {
-    throw new Error("Model turn ended without a finish event.");
-  }
-  if (finishReason === "length") {
-    throw new Error("Model turn stopped because its output limit was reached.");
-  }
-  if (finishReason === "other") {
-    throw new Error("Model turn ended with an unsupported finish reason.");
-  }
-  if (toolCalls.length > 0 && finishReason !== "tool-calls") {
-    throw new Error(
-      `Model turn emitted tool calls with finish reason "${finishReason}".`
-    );
-  }
-  if (toolCalls.length === 0 && finishReason !== "stop") {
-    throw new Error(
-      `Model turn finished as "${finishReason}" without any tool calls.`
     );
   }
 }

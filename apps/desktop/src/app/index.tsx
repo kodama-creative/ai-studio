@@ -1,11 +1,17 @@
 import { useEffect, useState } from "react";
 
+import { CommandProvider } from "@/commands";
+import {
+  createElectrobunModelClient,
+  DesktopHostProvider,
+} from "@/host/host-services";
 import { electrobun } from "@/lib/electrobun";
 import type { DesktopWindowContext } from "@/shared/agent-project";
 
 import { Layout } from "./layout";
 import { Page } from "./page";
 import { ProjectPage } from "./project-page";
+import { WorkspaceModelScope } from "./workspace-model-scope";
 
 export function App() {
   const [context, setContext] = useState<DesktopWindowContext>();
@@ -33,7 +39,16 @@ export function App() {
           Opening workspace…
         </div>
       ) : context.kind === "agentProject" ? (
-        <ProjectPage project={context.project} />
+        <CommandProvider>
+          <DesktopHostProvider>
+            <WorkspaceModelScope
+              runtimeId="local"
+              createClient={createElectrobunModelClient}
+            >
+              <ProjectPage project={context.project} />
+            </WorkspaceModelScope>
+          </DesktopHostProvider>
+        </CommandProvider>
       ) : (
         <Page />
       )}

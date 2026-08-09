@@ -33,17 +33,14 @@ import type {
 } from "@llm-space/core";
 import type { SkillContent, SkillInfo, SkillsSettings } from "@llm-space/core";
 import type {
-  HarnessEvent,
-  HarnessSessionSnapshot,
-  SessionCommandReceipt,
-} from "@llm-space/harness";
+  StudioRunReceipt,
+  StudioThread,
+  StudioThreadDocument,
+  StudioThreadEvent,
+} from "@llm-space/harness/studio";
 import type { RPCSchema } from "electrobun";
 
-import type {
-  DesktopWindowContext,
-  ProjectThread,
-  ProjectThreadSession,
-} from "./agent-project";
+import type { DesktopWindowContext } from "./agent-project";
 import type { AnalyticsEvent, AnalyticsStatus } from "./analytics";
 import type { GithubAuthState } from "./auth";
 import type { Command } from "./commands";
@@ -88,11 +85,23 @@ export interface AbortStreamThreadPayload extends RuntimeScopedParams {
   streamId: string;
 }
 
-export type ProjectSessionEventPayload =
+export type ProjectStudioEventPayload =
   | {
       readonly subscriptionId: string;
       readonly type: "event";
-      readonly event: HarnessEvent;
+      readonly event: StudioThreadEvent;
+    }
+  | {
+      readonly subscriptionId: string;
+      readonly type: "error";
+      readonly message: string;
+    };
+
+export type ProjectSourceEventPayload =
+  | {
+      readonly subscriptionId: string;
+      readonly type: "snapshot";
+      readonly snapshot: import("./project-studio").ProjectSourceSnapshot;
     }
   | {
       readonly subscriptionId: string;
@@ -122,29 +131,61 @@ export interface DesktopRPCType {
         params: Record<string, never>;
         response: DesktopWindowContext;
       };
+      projectGetSourceRevision: {
+        params: Record<string, never>;
+        response: string;
+      };
       projectListThreads: {
         params: Record<string, never>;
-        response: readonly ProjectThread[];
+        response: readonly StudioThread[];
+      };
+      projectListRunHistory: {
+        params: { threadId: string };
+        response: readonly import("@llm-space/harness/studio").StudioRunHistoryEntry[];
+      };
+      projectSaveRunHistory: {
+        params: { threadId: string; runIds: readonly string[] };
+        response: readonly import("@llm-space/harness/studio").StudioRunHistoryEntry[];
+      };
+      projectListEvaluationMetadata: {
+        params: { threadId: string };
+        response: import("@llm-space/harness/evaluation").StudioEvaluationMetadata;
+      };
+      projectSaveEvaluationMetadata: {
+        params: { threadId: string } & import("@llm-space/harness/evaluation").StudioEvaluationMetadataInput;
+        response: import("@llm-space/harness/evaluation").StudioEvaluationMetadata;
+      };
+      projectListSourceFiles: {
+        params: Record<string, never>;
+        response: readonly import("./project-studio").ProjectSourceNode[];
+      };
+      projectReadSourceFile: {
+        params: { path: string };
+        response: string;
       };
       projectCreateThread: {
         params: { title?: string };
-        response: ProjectThreadSession;
+        response: StudioThread;
       };
-      projectAttachThread: {
+      projectForkThread: {
+        params: { threadId: string; checkpointId?: string };
+        response: StudioThread;
+      };
+      projectLoadThread: {
         params: { threadId: string };
-        response: ProjectThreadSession;
+        response: StudioThread | undefined;
       };
-      projectSessionSend: {
-        params: { sessionId: string; message: string };
-        response: SessionCommandReceipt;
+      projectSaveThreadDocument: {
+        params: { threadId: string; document: StudioThreadDocument };
+        response: StudioThread;
       };
-      projectSessionCancel: {
-        params: { sessionId: string };
+      projectRunThread: {
+        params: { threadId: string; fromMessageId: string };
+        response: StudioRunReceipt;
+      };
+      projectCancelRun: {
+        params: { runId: string };
         response: null;
-      };
-      projectSessionSnapshot: {
-        params: { sessionId: string };
-        response: HarnessSessionSnapshot;
       };
       listRuntimes: {
         params: Record<string, never>;
@@ -783,12 +824,14 @@ export interface DesktopRPCType {
     };
     // Messages the webview SENDS and the bun side handles.
     messages: {
-      projectSessionSubscribe: {
+      projectThreadSubscribe: {
         subscriptionId: string;
-        sessionId: string;
+        threadId: string;
         afterSequence?: number;
       };
-      projectSessionUnsubscribe: { subscriptionId: string };
+      projectThreadUnsubscribe: { subscriptionId: string };
+      projectSourceSubscribe: { subscriptionId: string };
+      projectSourceUnsubscribe: { subscriptionId: string };
       sendStreamThreadRequest: StreamThreadRequestPayload;
       abortStreamThread: AbortStreamThreadPayload;
       // A unified command dispatched from the webview to run in the bun process
@@ -806,7 +849,8 @@ export interface DesktopRPCType {
     requests: Record<string, never>;
     // Messages the bun side SENDS and the webview handles.
     messages: {
-      receiveProjectSessionEvent: ProjectSessionEventPayload;
+      receiveProjectStudioEvent: ProjectStudioEventPayload;
+      receiveProjectSourceEvent: ProjectSourceEventPayload;
       receiveStreamThreadResponse: StreamThreadResponsePayload;
       // OS-level fullscreen state changed (entered/exited).
       fullScreenChanged: { fullScreen: boolean };
