@@ -1,0 +1,15 @@
+{
+  "name": "@llm-space/example-basic-agent",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun run.ts"
+  },
+  "dependencies": {
+    "@earendil-works/pi-ai": "catalog:",
+    "@llm-space/agent": "workspace:*",
+    "@llm-space/harness": "workspace:*",
+    "@llm-space/harness-pi": "workspace:*"
+  }
+}

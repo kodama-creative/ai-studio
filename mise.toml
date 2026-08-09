@@ -46,6 +46,10 @@ run = "bun run dev:web"
 description = "Run the headless LLM Space runtime server"
 run = "bun run dev:server"
 
+[tasks."dev:agent"]
+description = "Run the local code-first basic agent example"
+run = "bun run dev:agent"
+
 [tasks.test]
 description = "Run all Bun tests"
 run = "bun run test"

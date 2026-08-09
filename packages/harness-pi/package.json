@@ -1,19 +1,16 @@
 {
-  "name": "@llm-space/harness",
+  "name": "@llm-space/harness-pi",
   "version": "4.0.1",
   "type": "module",
   "private": true,
   "license": "Apache-2.0",
   "exports": {
     ".": "./src/index.ts",
-    "./model": "./src/model-engine.ts",
-    "./protocol": "./src/protocol.ts",
-    "./storage": "./src/storage.ts",
-    "./storage/file": "./src/file-storage.ts",
     "./package.json": "./package.json"
   },
   "dependencies": {
+    "@earendil-works/pi-ai": "catalog:",
     "@llm-space/agent": "workspace:*",
-    "ajv": "^8.17.1"
+    "@llm-space/harness": "workspace:*"
   }
 }

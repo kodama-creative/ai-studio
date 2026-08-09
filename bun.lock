@@ -139,6 +139,16 @@
         "vite": "^8.2.0",
       },
     },
+    "examples/basic-agent": {
+      "name": "@llm-space/example-basic-agent",
+      "version": "1.0.0",
+      "dependencies": {
+        "@earendil-works/pi-ai": "catalog:",
+        "@llm-space/agent": "workspace:*",
+        "@llm-space/harness": "workspace:*",
+        "@llm-space/harness-pi": "workspace:*",
+      },
+    },
     "packages/agent": {
       "name": "@llm-space/agent",
       "version": "4.0.1",
@@ -170,6 +180,15 @@
       "dependencies": {
         "@llm-space/agent": "workspace:*",
         "ajv": "^8.17.1",
+      },
+    },
+    "packages/harness-pi": {
+      "name": "@llm-space/harness-pi",
+      "version": "4.0.1",
+      "dependencies": {
+        "@earendil-works/pi-ai": "catalog:",
+        "@llm-space/agent": "workspace:*",
+        "@llm-space/harness": "workspace:*",
       },
     },
     "packages/runtime": {
@@ -684,7 +703,11 @@
 
     "@llm-space/desktop": ["@llm-space/desktop@workspace:apps/desktop"],
 
+    "@llm-space/example-basic-agent": ["@llm-space/example-basic-agent@workspace:examples/basic-agent"],
+
     "@llm-space/harness": ["@llm-space/harness@workspace:packages/harness"],
+
+    "@llm-space/harness-pi": ["@llm-space/harness-pi@workspace:packages/harness-pi"],
 
     "@llm-space/runtime": ["@llm-space/runtime@workspace:packages/runtime"],
 

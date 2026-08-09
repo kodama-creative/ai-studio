@@ -20,7 +20,7 @@ A workbench for prompt and agent development — build, trace, debug, evaluate, 
 | Cut a release                          | `mise run release` / `mise run release:canary`                              | → `bun scripts/release.ts`; see "Releases & auto-update"                                                               |
 | Test                                   | `mise run test`                                                             | runs the complete Bun test suite from the repository root                                                                  |
 | Lint                                   | `mise run lint` / `mise run lint:fix`                                       | `lint` = `eslint .` (read-only), `lint:fix` = `eslint --fix .`; flat config at repo root                               |
-| Typecheck                              | `mise run typecheck`                                                        | `tsc --noEmit` over four projects: root, `packages/ui`, `apps/desktop`, `web`. `packages/ui`/`web` are React/DOM code, so they need their own DOM tsconfigs (the root config is Bun-flavored and excludes `packages/ui`); add a project here when you add a workspace. |
+| Typecheck                              | `mise run typecheck`                                                        | `tsc --noEmit` over the root plus each workspace-specific project; React/DOM workspaces use their own DOM tsconfigs.  |
 | Add a dependency                       | `bun add <pkg>`                                                             | run inside the target package (`apps/desktop` or `packages/core`)                                                      |
 | Add a shadcn/ui component              | `bunx --bun shadcn@latest add <component>`                                  | run inside `packages/ui` (the shared design system now lives there, not `apps/desktop`)                                |
 | Run a script from root                 | `bun --filter <pkg> <script>`                                               | e.g. `bun --filter @llm-space/desktop start`                                                                           |
@@ -56,8 +56,14 @@ fixture is intentionally preserved for review and the reason is documented.
 
 ## Architecture
 
-Bun-workspace monorepo. Workspaces are `packages/*` and `apps/*` (the static site now lives at `apps/web`).
+Bun-workspace monorepo. Workspaces are `packages/*`, `apps/*`, and the runnable
+`examples/basic-agent` tracer-bullet example (the static site lives at
+`apps/web`).
 
+- **`@llm-space/agent`** (`packages/agent`) — code-first Agent definition surfaces plus filesystem discovery/loading. The loader returns a serializable manifest alongside executable module namespaces.
+- **`@llm-space/harness`** (`packages/harness`) — headless Agent session state machine and tool loop. Hosts inject the `ModelTurnEngine`, `SessionRepository`, and `SessionEventLog` seams; memory and single-process file adapters ship with the package. It does not depend on the current Runtime package.
+- **`@llm-space/harness-pi`** (`packages/harness-pi`) — Pi implementation of the Harness `ModelTurnEngine` seam. Harness owns the outer tool loop; this adapter owns Pi model/message/event conversion.
+- **`@llm-space/example-basic-agent`** (`examples/basic-agent`) — locally runnable code-first Agent tracer bullet. `mise run dev:agent` uses a deterministic Pi faux model by default, persists Harness sessions under the LLM Space home, and can select a real registered Pi model through `LLM_SPACE_MODEL`.
 - **`@llm-space/core`** (`packages/core`) — domain library, **no build step**; its TypeScript is consumed directly via the `exports` map. Entrypoints:
   - `.` → re-exports the internal `client`, `parsers`, `types`, and `utils` directories (all browser-safe).
   - `./client` — browser-safe pieces: the `streamThread()` client (`client/api`), the `reduceMessages()` streaming reducer (`client/reducer`), and the `AgentTransport` interface (`client/transport`).

@@ -3,7 +3,8 @@
   "private": true,
   "workspaces": [
     "packages/*",
-    "apps/*"
+    "apps/*",
+    "examples/basic-agent"
   ],
   "scripts": {
     "dev": "cd apps/desktop && bun run dev:hmr",
@@ -20,9 +21,10 @@
     "test": "bun test",
     "lint": "NODE_OPTIONS=--max-old-space-size=8192 eslint --max-warnings 0 .",
     "lint:fix": "NODE_OPTIONS=--max-old-space-size=8192 eslint --fix .",
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p packages/agent/tsconfig.json && tsc --noEmit -p packages/harness/tsconfig.json && tsc --noEmit -p packages/runtime/tsconfig.json && tsc --noEmit -p packages/ui/tsconfig.json && tsc --noEmit -p apps/desktop/tsconfig.json && tsc --noEmit -p apps/web/tsconfig.json && tsc --noEmit -p apps/server/tsconfig.json && tsc --noEmit -p examples/atlas-plugin/tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p packages/agent/tsconfig.json && tsc --noEmit -p packages/harness/tsconfig.json && tsc --noEmit -p packages/harness-pi/tsconfig.json && tsc --noEmit -p packages/runtime/tsconfig.json && tsc --noEmit -p packages/ui/tsconfig.json && tsc --noEmit -p apps/desktop/tsconfig.json && tsc --noEmit -p apps/web/tsconfig.json && tsc --noEmit -p apps/server/tsconfig.json && tsc --noEmit -p examples/atlas-plugin/tsconfig.json && tsc --noEmit -p examples/basic-agent/tsconfig.json",
     "prepare": "husky",
-    "dev:server": "bun --filter @llm-space/server dev"
+    "dev:server": "bun --filter @llm-space/server dev",
+    "dev:agent": "bun --filter @llm-space/example-basic-agent start"
   },
   "lint-staged": {
     "*.{js,mjs,cjs,ts,mts,cts,jsx,tsx}": "eslint --fix"
