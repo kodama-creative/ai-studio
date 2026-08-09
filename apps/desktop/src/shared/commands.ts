@@ -288,6 +288,9 @@ export interface ReportBugsCommand extends GenericCommand<"reportBugs"> {}
 /** Open the workspace folder (`LLM_SPACE_HOME/workspace`) in the OS file manager. */
 export interface OpenWorkspaceFolderCommand extends GenericCommand<"openWorkspaceFolder"> {}
 
+/** Pick and open a code-first Agent project in its own desktop window. */
+export interface OpenAgentProjectCommand extends GenericCommand<"openAgentProject"> {}
+
 // --- GitHub auth (bun-side) ------------------------------------------------
 
 /**
@@ -353,6 +356,7 @@ export type Command =
   | OpenDocumentCommand
   | ReportBugsCommand
   | OpenWorkspaceFolderCommand
+  | OpenAgentProjectCommand
   | GithubLoginCommand
   | GithubLogoutCommand
   | CheckForUpdatesCommand
@@ -428,6 +432,7 @@ export const COMMAND_META: Record<
   openDocument: { label: "Documents", target: "bun" },
   reportBugs: { label: "Report Bug", target: "bun" },
   openWorkspaceFolder: { label: "Open Workspace Folder", target: "bun" },
+  openAgentProject: { label: "Open Agent Project...", target: "bun" },
   githubLogin: { label: "Sign in with GitHub", target: "bun" },
   githubLogout: { label: "Sign out of GitHub", target: "bun" },
   checkForUpdates: { label: "Check for Updates...", target: "bun" },

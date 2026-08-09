@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { getLlmSpaceHomePath } from "@llm-space/core/server";
 import { GistThreadReader, GistThreadWriter } from "@llm-space/core/storage";
+import { createPiModelTurnEngine } from "@llm-space/harness-pi";
 import { PluginManager } from "@llm-space/runtime/plugins";
 import Electrobun, {
   app,
@@ -31,6 +32,12 @@ import {
   PluginCommandExecutionController,
   type PluginCommandReportInput,
 } from "../plugins/plugin-command-execution-controller";
+import { createProjectSessionHost } from "../projects/project-session-host";
+import { ProjectWindowManager } from "../projects/project-window-manager";
+import {
+  FileProjectWindowStateStore,
+  ProjectWindowStateFile,
+} from "../projects/project-window-state";
 import {
   RemoteServerManager,
   registerConfiguredRemoteRuntime,
@@ -46,8 +53,8 @@ import { TraceManager } from "../traces";
 import { UpdaterService } from "../updates";
 
 import { createShutdownCoordinator } from "./shutdown-coordinator";
-import { createMainWindow } from "./window";
-import { flushWindowState } from "./window-state";
+import { createAgentProjectWindow, createMainWindow } from "./window";
+import { WindowStateManager } from "./window-state";
 
 export interface DesktopAppRuntime {
   stop(): Promise<void>;
@@ -230,15 +237,115 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
   const updater = new UpdaterService((message) =>
     getRpc().send.updateStatusChanged(message)
   );
-  const commandDependencies = {
-    openExternal: Utils.openExternal,
-    sendToWebview: (command: Command) => getRpc().send.executeCommand(command),
-    updater,
-    workspacePath,
-    githubAuth,
+  const windowStates = new WindowStateManager();
+  const windowRpcs = new Map<number, MainWindowRPC>();
+  const pickAgentProject = async (): Promise<void> => {
+    const selected = await Utils.openFileDialog({
+      startingFolder: "~/",
+      canChooseFiles: false,
+      canChooseDirectory: true,
+      allowsMultipleSelection: false,
+    });
+    const selectedPath = selected.map((value) => value.trim()).find(Boolean);
+    if (selectedPath === undefined) return;
+    try {
+      await projectWindows.openProject(selectedPath);
+    } catch (error) {
+      console.error("Failed to open agent project:", error);
+      Utils.showNotification({
+        title: "Unable to Open Agent Project",
+        body: _errorMessage(error),
+      });
+    }
   };
-  const executeCommand = (command: Command, window: BrowserWindow): void =>
-    executeCommandInBun(command, window, commandDependencies);
+  const executeCommand = (command: Command, window: BrowserWindow): void => {
+    const targetRpc = windowRpcs.get(window.id) ?? getRpc();
+    executeCommandInBun(command, window, {
+      githubAuth,
+      openAgentProject: pickAgentProject,
+      openExternal: Utils.openExternal,
+      sendToWebview: (nextCommand) =>
+        targetRpc.send.executeCommand(nextCommand),
+      saveWindowZoom: (targetWindow, zoom) =>
+        windowStates.saveZoom(targetWindow, zoom),
+      updater,
+      workspacePath,
+    });
+  };
+  const createWindowRpc = (
+    getWindow: () => BrowserWindow,
+    projectSessionHost?: Awaited<ReturnType<typeof createProjectSessionHost>>
+  ): MainWindowRPC =>
+    createMainWindowRPC({
+      analytics,
+      executeCommand: (command) => executeCommand(command, getWindow()),
+      onCancelSharedImport: () => deepLink?.cancel(),
+      githubAuth,
+      getMainWindow: getWindow,
+      gistWriter,
+      homePath,
+      runtimeRouter,
+      remoteServerManager,
+      skillsManager,
+      updater,
+      pluginManager,
+      pluginCommandExecutions,
+      ...(projectSessionHost === undefined
+        ? {}
+        : {
+            projectSessionHost,
+            windowContext: {
+              kind: "agentProject" as const,
+              project: projectSessionHost.project,
+            },
+          }),
+    });
+  const projectWindows = new ProjectWindowManager({
+    state: new FileProjectWindowStateStore(homePath),
+    windows: {
+      async create(project) {
+        const projectSessionHost = await createProjectSessionHost({
+          project,
+          engine: createPiModelTurnEngine({
+            models: await modelManager.getAvailableModels(),
+          }),
+        });
+        const projectWindowRef: { current?: BrowserWindow } = {};
+        const getProjectWindow = (): BrowserWindow => {
+          if (projectWindowRef.current === undefined) {
+            throw new Error("Agent project window is not ready.");
+          }
+          return projectWindowRef.current;
+        };
+        const projectRpc = createWindowRpc(
+          getProjectWindow,
+          projectSessionHost
+        );
+        const stateStore = await ProjectWindowStateFile.load(
+          homePath,
+          project.id
+        );
+        const projectWindow = await createAgentProjectWindow({
+          rpc: projectRpc,
+          project: projectSessionHost.project,
+          stateStore,
+          windowStates,
+        });
+        projectWindowRef.current = projectWindow;
+        windowRpcs.set(projectWindow.id, projectRpc);
+        const closed = new Set<() => void>();
+        projectWindow.on("close", () => {
+          windowRpcs.delete(projectWindow.id);
+          for (const listener of closed) listener();
+        });
+        return {
+          activate: () => projectWindow.activate(),
+          close: () => projectWindow.close(),
+          onClosed: (listener) => closed.add(listener),
+        };
+      },
+    },
+  });
   executePluginHostCommand = (type) => {
     if (type !== "openSettings" && type !== "refreshTree") {
       throw new Error(`Plugin host command is not allowed: ${type}`);
@@ -251,7 +358,8 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
   const runtime: DesktopAppRuntime = {
     stop() {
       stopPromise ??= _stopDesktopApp([
-        ["window state", () => flushWindowState()],
+        ["agent project windows", () => projectWindows.closeAll()],
+        ["window state", () => windowStates.flush()],
         ["updater", () => updater.stop()],
         ["remote runtime", () => remoteRuntime?.stop()],
         ["remote servers", () => remoteServerManager.shutdown()],
@@ -267,25 +375,16 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
   };
 
   try {
-    rpc = createMainWindowRPC({
-      analytics,
-      executeCommand: (command) => executeCommand(command, getMainWindow()),
-      onCancelSharedImport: () => deepLink?.cancel(),
-      githubAuth,
-      getMainWindow,
-      gistWriter,
-      homePath,
-      runtimeRouter,
-      remoteServerManager,
-      skillsManager,
-      updater,
-      pluginManager,
-      pluginCommandExecutions,
-    });
+    rpc = createWindowRpc(getMainWindow);
     remoteServerManager.setStatusListener((payload) =>
       getRpc().send.remoteServerStatusChanged(payload)
     );
-    mainWindow = await createMainWindow({ rpc, executeCommand });
+    mainWindow = await createMainWindow({
+      rpc,
+      executeCommand,
+      windowStates,
+    });
+    windowRpcs.set(mainWindow.id, rpc);
 
     // The window + rpc are ready — wire the importer and flush any deep links
     // buffered at process entry during a cold-start launch (see deep-link/launch).
@@ -305,6 +404,7 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
 
     analytics.capture("app_opened", { isFirstOpen: analytics.isFirstRun });
     void updater.start();
+    await projectWindows.restoreProjects();
 
     const handleBeforeQuit = createShutdownCoordinator({
       quit: () => app.quit(),
@@ -329,6 +429,10 @@ function _stringParam(params: Record<string, unknown>, key: string): string {
     throw new Error(`Plugin host parameter must be a string: ${key}`);
   }
   return value;
+}
+
+function _errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function _commandReportParam(

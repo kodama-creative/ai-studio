@@ -22,6 +22,8 @@ function _createDependencies(openedUrls: string[]) {
       signOut: () => undefined,
     },
     openExternal: (url: string) => openedUrls.push(url),
+    openAgentProject: () => Promise.resolve(),
+    saveWindowZoom: () => undefined,
     sendToWebview: () => undefined,
     updater: {
       applyUpdateAndRestart: () => Promise.resolve(),

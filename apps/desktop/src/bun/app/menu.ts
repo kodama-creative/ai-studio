@@ -1,7 +1,7 @@
 import {
   ApplicationMenu,
   type ApplicationMenuItemConfig,
-  type BrowserWindow,
+  BrowserWindow,
 } from "electrobun/bun";
 
 import type { Command } from "../../shared/commands";
@@ -48,6 +48,12 @@ function _buildMenu(updateReady: boolean): ApplicationMenuItemConfig[] {
     {
       label: "File",
       submenu: [
+        {
+          label: "Open Agent Project...",
+          action: "openAgentProject",
+          accelerator: "CommandOrControl+O",
+        },
+        { type: "divider" },
         {
           label: "New File",
           action: "newThread",
@@ -191,6 +197,7 @@ export function setUpdateReadyInMenu(version: string | null) {
  * forwarded over RPC).
  */
 const MENU_ACTION_COMMANDS: Record<string, Command> = {
+  openAgentProject: { type: "openAgentProject", args: {} },
   reload: { type: "reload", args: {} },
   zoomIn: { type: "zoomIn", args: {} },
   zoomOut: { type: "zoomOut", args: {} },
@@ -249,8 +256,12 @@ export function registerMenuActions(
 ) {
   ApplicationMenu.setApplicationMenu(_buildMenu(false));
   ApplicationMenu.on("application-menu-clicked", (event) => {
-    const { action } = (event as { data: { action: string } }).data;
+    const { action, id } = (
+      event as { data: { action: string; id?: number } }
+    ).data;
     const command = MENU_ACTION_COMMANDS[action];
-    if (command) executeCommand(command, window);
+    const target =
+      id === undefined ? window : BrowserWindow.getById(id) ?? window;
+    if (command) executeCommand(command, target);
   });
 }

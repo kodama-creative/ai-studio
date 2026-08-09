@@ -8,17 +8,23 @@ import {
 } from "@llm-space/core/server";
 import { BrowserWindow, Updater } from "electrobun/bun";
 
+import type { AgentProjectView } from "../../shared/agent-project";
 import type { Command } from "../../shared/commands";
 import type { MainWindowRPC } from "../rpc";
 
 import { registerMenuActions } from "./menu";
-import { attachWindowStates } from "./window-state";
+import type {
+  WindowStateManager,
+  WindowStatePersistenceStore,
+} from "./window-state";
 
-const DEV_SERVER_PORT = 5173;
+const DEV_SERVER_PORT = Number(
+  process.env.LLM_SPACE_DESKTOP_DEV_SERVER_PORT ?? 5173
+);
 const DEV_SERVER_URL = `http://localhost:${DEV_SERVER_PORT}`;
 
 // Check if Vite dev server is running for HMR
-async function getMainViewUrl(): Promise<string> {
+async function _getMainViewUrl(): Promise<string> {
   const channel = await Updater.localInfo.channel();
   if (channel === "dev") {
     try {
@@ -37,11 +43,13 @@ async function getMainViewUrl(): Promise<string> {
 export async function createMainWindow({
   rpc,
   executeCommand,
+  windowStates,
 }: {
   rpc: MainWindowRPC;
   executeCommand: (command: Command, window: BrowserWindow) => void;
+  windowStates: WindowStateManager;
 }): Promise<BrowserWindow> {
-  const url = await getMainViewUrl();
+  const url = await _getMainViewUrl();
   const windowStateStore = await WindowStateStore.load();
   const windowState = windowStateStore.state;
   const savedFrame = getWindowFrame(windowState) ?? DEFAULT_WINDOW_FRAME;
@@ -59,7 +67,7 @@ export async function createMainWindow({
     frame: savedFrame,
   });
 
-  attachWindowStates(window, {
+  windowStates.attach(window, {
     store: windowStateStore,
     isMaximized: getWindowMaximized(windowState),
     isFullScreen: getWindowFullScreen(windowState),
@@ -69,5 +77,43 @@ export async function createMainWindow({
     },
   });
   registerMenuActions(window, executeCommand);
+  return window;
+}
+
+export async function createAgentProjectWindow({
+  rpc,
+  project,
+  stateStore,
+  windowStates,
+}: {
+  rpc: MainWindowRPC;
+  project: AgentProjectView;
+  stateStore: WindowStatePersistenceStore;
+  windowStates: WindowStateManager;
+}): Promise<BrowserWindow> {
+  const state = stateStore.state;
+  const baseUrl = await _getMainViewUrl();
+  const url = `${baseUrl}${baseUrl.includes("?") ? "&" : "?"}window=agent-project&project=${encodeURIComponent(project.id)}`;
+  const window = new BrowserWindow({
+    title: `${project.name} — LLM Space`,
+    url,
+    titleBarStyle: "hiddenInset",
+    rpc,
+    trafficLightOffset: { x: 2, y: 16 },
+    frame: getWindowFrame(state) ?? {
+      ...DEFAULT_WINDOW_FRAME,
+      x: DEFAULT_WINDOW_FRAME.x + 32,
+      y: DEFAULT_WINDOW_FRAME.y + 32,
+    },
+  });
+  windowStates.attach(window, {
+    store: stateStore,
+    isMaximized: getWindowMaximized(state),
+    isFullScreen: getWindowFullScreen(state),
+    zoom: getWindowZoom(state) ?? 1,
+    onFullScreenChange: (fullScreen) => {
+      rpc.send.fullScreenChanged({ fullScreen });
+    },
+  });
   return window;
 }

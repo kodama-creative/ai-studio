@@ -3,6 +3,7 @@ import type { GistThreadWriter } from "@llm-space/core/storage";
 import type { PluginManager } from "@llm-space/runtime/plugins";
 import { BrowserView, Utils, type BrowserWindow } from "electrobun/bun";
 
+import type { DesktopWindowContext } from "../../shared/agent-project";
 import type { Command } from "../../shared/commands";
 import type { DesktopRPCType } from "../../shared/rpc";
 import type { Analytics } from "../analytics";
@@ -16,6 +17,7 @@ import {
   writeProjectFile,
 } from "../fs";
 import type { PluginCommandExecutionController } from "../plugins/plugin-command-execution-controller";
+import type { ProjectSessionHost } from "../projects/project-session-host";
 import {
   dismissGithubStarReminder,
   getNextFeatureReminder,
@@ -58,6 +60,8 @@ export interface MainWindowRPCDependencies {
   updater: UpdaterService;
   pluginManager: PluginManager;
   pluginCommandExecutions: PluginCommandExecutionController;
+  windowContext?: DesktopWindowContext;
+  projectSessionHost?: ProjectSessionHost;
 }
 
 const MAX_REQUEST_TIME_MS = 5 * 60_000 + 10_000;
@@ -76,13 +80,35 @@ export function createMainWindowRPC({
   updater,
   pluginManager,
   pluginCommandExecutions,
+  windowContext = { kind: "playground" },
+  projectSessionHost,
 }: MainWindowRPCDependencies): MainWindowRPC {
   const getRuntime = runtimeRouter.get.bind(runtimeRouter);
   const promptFileRequests = createPromptFileRpcHandlers(getRuntime);
+  const projectSubscriptions = new Map<string, AbortController>();
+  const getProjectHost = (): ProjectSessionHost => {
+    if (projectSessionHost === undefined) {
+      throw new Error("This window is not attached to an agent project.");
+    }
+    return projectSessionHost;
+  };
   const rpc: MainWindowRPC = BrowserView.defineRPC<DesktopRPCType>({
     maxRequestTime: MAX_REQUEST_TIME_MS,
     handlers: {
       requests: {
+        windowContext: () => Promise.resolve(windowContext),
+        projectListThreads: () => getProjectHost().listThreads(),
+        projectCreateThread: (input) => getProjectHost().createThread(input),
+        projectAttachThread: ({ threadId }) =>
+          getProjectHost().attachThread(threadId),
+        projectSessionSend: ({ sessionId, message }) =>
+          getProjectHost().send(sessionId, message),
+        projectSessionCancel: async ({ sessionId }) => {
+          await getProjectHost().cancel(sessionId);
+          return null;
+        },
+        projectSessionSnapshot: ({ sessionId }) =>
+          getProjectHost().snapshot(sessionId),
         listRuntimes: () => Promise.resolve(runtimeRouter.list()),
         getDefaultRuntime: () =>
           Promise.resolve({ runtimeId: runtimeRouter.getDefaultRuntimeId() }),
@@ -506,6 +532,46 @@ export function createMainWindowRPC({
         githubAuthStatus: () => Promise.resolve(githubAuth.getState()),
       },
       messages: {
+        projectSessionSubscribe: ({
+          subscriptionId,
+          sessionId,
+          afterSequence,
+        }) => {
+          projectSubscriptions.get(subscriptionId)?.abort();
+          const controller = new AbortController();
+          projectSubscriptions.set(subscriptionId, controller);
+          void (async () => {
+            try {
+              for await (const event of getProjectHost().events(sessionId, {
+                afterSequence,
+                follow: true,
+                signal: controller.signal,
+              })) {
+                rpc.send.receiveProjectSessionEvent({
+                  subscriptionId,
+                  type: "event",
+                  event,
+                });
+              }
+            } catch (error) {
+              if (!controller.signal.aborted) {
+                rpc.send.receiveProjectSessionEvent({
+                  subscriptionId,
+                  type: "error",
+                  message: _errorMessage(error),
+                });
+              }
+            } finally {
+              if (projectSubscriptions.get(subscriptionId) === controller) {
+                projectSubscriptions.delete(subscriptionId);
+              }
+            }
+          })();
+        },
+        projectSessionUnsubscribe: ({ subscriptionId }) => {
+          projectSubscriptions.get(subscriptionId)?.abort();
+          projectSubscriptions.delete(subscriptionId);
+        },
         sendStreamThreadRequest: (payload) => {
           // Fire-and-forget: stream events back as `receiveStreamThreadResponse`
           // messages. `rpc` is initialized by the time this handler runs.
@@ -525,4 +591,8 @@ export function createMainWindowRPC({
     },
   });
   return rpc;
+}
+
+function _errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

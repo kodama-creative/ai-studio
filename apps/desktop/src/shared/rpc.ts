@@ -32,8 +32,18 @@ import type {
   McpServerView,
 } from "@llm-space/core";
 import type { SkillContent, SkillInfo, SkillsSettings } from "@llm-space/core";
+import type {
+  HarnessEvent,
+  HarnessSessionSnapshot,
+  SessionCommandReceipt,
+} from "@llm-space/harness";
 import type { RPCSchema } from "electrobun";
 
+import type {
+  DesktopWindowContext,
+  ProjectThread,
+  ProjectThreadSession,
+} from "./agent-project";
 import type { AnalyticsEvent, AnalyticsStatus } from "./analytics";
 import type { GithubAuthState } from "./auth";
 import type { Command } from "./commands";
@@ -78,6 +88,18 @@ export interface AbortStreamThreadPayload extends RuntimeScopedParams {
   streamId: string;
 }
 
+export type ProjectSessionEventPayload =
+  | {
+      readonly subscriptionId: string;
+      readonly type: "event";
+      readonly event: HarnessEvent;
+    }
+  | {
+      readonly subscriptionId: string;
+      readonly type: "error";
+      readonly message: string;
+    };
+
 export type PluginCommandExecutionEvent =
   | {
       executionId: string;
@@ -96,6 +118,34 @@ export type PluginCommandExecutionEvent =
 export interface DesktopRPCType {
   bun: RPCSchema<{
     requests: {
+      windowContext: {
+        params: Record<string, never>;
+        response: DesktopWindowContext;
+      };
+      projectListThreads: {
+        params: Record<string, never>;
+        response: readonly ProjectThread[];
+      };
+      projectCreateThread: {
+        params: { title?: string };
+        response: ProjectThreadSession;
+      };
+      projectAttachThread: {
+        params: { threadId: string };
+        response: ProjectThreadSession;
+      };
+      projectSessionSend: {
+        params: { sessionId: string; message: string };
+        response: SessionCommandReceipt;
+      };
+      projectSessionCancel: {
+        params: { sessionId: string };
+        response: null;
+      };
+      projectSessionSnapshot: {
+        params: { sessionId: string };
+        response: HarnessSessionSnapshot;
+      };
       listRuntimes: {
         params: Record<string, never>;
         response: RuntimeView[];
@@ -733,6 +783,12 @@ export interface DesktopRPCType {
     };
     // Messages the webview SENDS and the bun side handles.
     messages: {
+      projectSessionSubscribe: {
+        subscriptionId: string;
+        sessionId: string;
+        afterSequence?: number;
+      };
+      projectSessionUnsubscribe: { subscriptionId: string };
       sendStreamThreadRequest: StreamThreadRequestPayload;
       abortStreamThread: AbortStreamThreadPayload;
       // A unified command dispatched from the webview to run in the bun process
@@ -750,6 +806,7 @@ export interface DesktopRPCType {
     requests: Record<string, never>;
     // Messages the bun side SENDS and the webview handles.
     messages: {
+      receiveProjectSessionEvent: ProjectSessionEventPayload;
       receiveStreamThreadResponse: StreamThreadResponsePayload;
       // OS-level fullscreen state changed (entered/exited).
       fullScreenChanged: { fullScreen: boolean };

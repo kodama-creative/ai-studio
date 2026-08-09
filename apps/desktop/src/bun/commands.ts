@@ -6,7 +6,6 @@ import { Utils, type BrowserWindow } from "electrobun/bun";
 import { COMMAND_META, type Command } from "../shared/commands";
 
 import { isChineseLocale } from "./app/locales";
-import { saveZoom } from "./app/window-state";
 import type { GitHubAuthManager } from "./auth";
 import {
   importFilesWithNativePicker,
@@ -35,6 +34,8 @@ export interface BunCommandDependencies {
   githubAuth: Pick<GitHubAuthManager, "signIn" | "signOut">;
   openExternal: (url: string) => void;
   sendToWebview: (command: Command) => void;
+  openAgentProject: () => Promise<void>;
+  saveWindowZoom: (window: BrowserWindow, zoom: number) => void;
   updater: Pick<UpdaterService, "applyUpdateAndRestart" | "checkForUpdates">;
   workspacePath: string;
 }
@@ -69,18 +70,18 @@ export function executeCommandInBun(
     case "zoomIn": {
       const zoom = clampZoom(window.getPageZoom() + ZOOM_STEP);
       window.setPageZoom(zoom);
-      saveZoom(zoom);
+      dependencies.saveWindowZoom(window, zoom);
       return;
     }
     case "zoomOut": {
       const zoom = clampZoom(window.getPageZoom() - ZOOM_STEP);
       window.setPageZoom(zoom);
-      saveZoom(zoom);
+      dependencies.saveWindowZoom(window, zoom);
       return;
     }
     case "resetZoom": {
       window.setPageZoom(1);
-      saveZoom(1);
+      dependencies.saveWindowZoom(window, 1);
       return;
     }
     case "reload": {
@@ -121,6 +122,10 @@ export function executeCommandInBun(
     case "openWorkspaceFolder": {
       mkdirSync(dependencies.workspacePath, { recursive: true });
       Utils.openPath(dependencies.workspacePath);
+      return;
+    }
+    case "openAgentProject": {
+      void dependencies.openAgentProject();
       return;
     }
     case "githubLogin": {

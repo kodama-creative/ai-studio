@@ -1,5 +1,9 @@
-import type { ToolContext, ToolDefinition } from "@llm-space/agent/tools";
-import type { ToolModelOutput } from "@llm-space/agent/tools";
+import type { SandboxSession } from "@llm-space/agent/sandbox";
+import type {
+  ToolContext,
+  ToolDefinition,
+  ToolModelOutput,
+} from "@llm-space/agent/tools";
 
 import type { ModelTurnEngine } from "../execution/model-engine";
 import { validateSchemaValue } from "../execution/schema-validation";
@@ -53,6 +57,9 @@ export interface CreateHarnessOptions {
   readonly generateId?: (prefix: string) => string;
   readonly maxStepsPerTurn?: number;
   readonly commandLeaseDurationMs?: number;
+  readonly getSandbox?: (input: {
+    readonly sessionId: string;
+  }) => Promise<SandboxSession>;
 }
 
 export interface CreateSessionInput {
@@ -98,6 +105,9 @@ interface HarnessDependencies {
   readonly generateId: (prefix: string) => string;
   readonly maxStepsPerTurn: number;
   readonly commandLeaseDurationMs: number;
+  readonly getSandbox: (input: {
+    readonly sessionId: string;
+  }) => Promise<SandboxSession>;
 }
 
 class HarnessImpl implements Harness {
@@ -906,6 +916,7 @@ class AgentSessionImpl implements AgentSession {
     call: HarnessToolCall,
     signal: AbortSignal
   ): ToolContext {
+    const getSandbox = this._deps.getSandbox;
     return {
       abortSignal: signal,
       callId: call.id,
@@ -919,9 +930,7 @@ class AgentSessionImpl implements AgentSession {
         turn: { id: turnId, sequence: this._snapshot.turnSequence },
       },
       getSandbox() {
-        return Promise.reject(
-          new Error("This harness host does not provide a sandbox.")
-        );
+        return getSandbox({ sessionId: this.session.id });
       },
       getSkill(identifier: string) {
         throw new Error(
@@ -1004,6 +1013,12 @@ export function createHarness(options: CreateHarnessOptions): Harness {
       ((prefix) => `${prefix}_${crypto.randomUUID().replaceAll("-", "")}`),
     maxStepsPerTurn,
     commandLeaseDurationMs,
+    getSandbox:
+      options.getSandbox ??
+      (() =>
+        Promise.reject(
+          new Error("This harness host does not provide a sandbox.")
+        )),
   });
 }
 
