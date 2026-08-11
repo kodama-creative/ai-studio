@@ -19,7 +19,7 @@ import {
   type Run,
 } from "@llm-space/engine";
 import { createSqliteEngineStore } from "@llm-space/engine/storage/sqlite";
-import { createPiModelTurnDriver } from "@llm-space/engine-pi";
+import { createPiRunExecutor } from "@llm-space/engine-pi";
 
 import { ExampleFauxModel } from "./example-faux-model";
 import { renderRun } from "./session-event-renderer";
@@ -69,7 +69,7 @@ export async function createBasicAgentLocalHost(
   try {
     engine = createAgentEngine({
       store: engineStore,
-      modelDriver: createPiModelTurnDriver({ models: localModels.models }),
+      runExecutor: createPiRunExecutor({ models: localModels.models }),
       agentResolver: {
         resolve(snapshot) {
           if (

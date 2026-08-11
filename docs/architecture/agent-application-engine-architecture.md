@@ -610,6 +610,7 @@ message.delta
 thinking.delta
 message.completed
 tool.started
+tool.updated (携带流式更新后的 AssistantMessage)
 tool.completed (携带更新后的 AssistantMessage)
 checkpoint.committed
 ```
@@ -620,16 +621,16 @@ checkpoint.committed
 
 ### 10.1 Engine
 
-| 组件                  | 职责                                                  |
-| --------------------- | ----------------------------------------------------- |
-| `AgentEngine`         | Thread/Checkpoint/Run command + query + stream facade |
-| Durable Worker        | claim、lease、heartbeat、执行与恢复                   |
-| `ModelTurnDriver`     | 单次模型步骤的 provider-neutral seam                  |
-| `AgentResolver`       | 严格解析 Run 固定的 Agent generation                  |
-| Tool loop             | schema 校验、ToolContext、结果回填、逐步 checkpoint   |
-| `EngineStore`         | 同步事务 seam                                         |
-| `InMemoryEngineStore` | 测试 Adapter                                          |
-| `SqliteEngineStore`   | Bun SQLite 生产 Adapter                               |
+| 组件                  | 职责                                                          |
+| --------------------- | ------------------------------------------------------------- |
+| `AgentEngine`         | Thread/Checkpoint/Run command + query + stream facade         |
+| Durable Worker        | claim、lease、heartbeat、执行与恢复                           |
+| `RunExecutor`         | 一次完整 Agent loop 的执行 seam；事件处理具备 awaited barrier |
+| `AgentResolver`       | 严格解析 Run 固定的 Agent generation                          |
+| Execution sink        | model/tool 事件、RunOutput、逐步 Checkpoint                   |
+| `EngineStore`         | 同步事务 seam                                                 |
+| `InMemoryEngineStore` | 测试 Adapter                                                  |
+| `SqliteEngineStore`   | Bun SQLite 生产 Adapter                                       |
 
 ### 10.2 Application
 
@@ -650,14 +651,15 @@ checkpoint.committed
 
 ### 10.4 Infra
 
-| 能力           | 接口/实现                                                    |
-| -------------- | ------------------------------------------------------------ |
-| Model          | `ModelTurnDriver` / `PiModelTurnDriver`                      |
-| Tool           | `@llm-space/agent` ToolDefinition + ToolContext.execution    |
-| Agent state    | `defineState()` + AsyncLocalStorage + Checkpoint state       |
-| Sandbox        | Host 注入 `ToolContext.getSandbox()`                         |
-| MCP/Skill/Auth | Host/runtime Adapter；Approval suspension 尚未接入 Engine v1 |
-| Persistence    | Bun SQLite，WAL、foreign keys、busy timeout                  |
+| 能力           | 接口/实现                                                            |
+| -------------- | -------------------------------------------------------------------- |
+| Agent loop     | `RunExecutor` / `PiRunExecutor`，内部复用 `runAgentLoopContinue()`   |
+| Tool           | `PiRunExecutor` 调度 `@llm-space/agent` ToolDefinition + ToolContext |
+| Durable step   | Engine awaited sink 提交 model/tool Checkpoint 后执行后端才能继续    |
+| Agent state    | `defineState()` + AsyncLocalStorage + Checkpoint state               |
+| Sandbox        | Host 注入 `ToolContext.getSandbox()`                                 |
+| MCP/Skill/Auth | Host/runtime Adapter；Approval suspension 尚未接入 Engine v1         |
+| Persistence    | Bun SQLite，WAL、foreign keys、busy timeout                          |
 
 ## 11. SQLite 表归属
 
@@ -719,32 +721,33 @@ Desktop Agent Project 使用：
 
 ## 12. 当前实现状态
 
-| 能力                                         | 状态                 |
-| -------------------------------------------- | -------------------- |
-| Engine Thread/Checkpoint/Run                 | 已实现               |
-| core Message 富内容直存                      | 已实现               |
-| SQLite Engine/App/Studio Store               | 已实现               |
-| 单 active Run、atomic startRun               | 已实现               |
-| Durable output snapshot + cursor stream      | 已实现               |
-| Pi driver、图片/tool result replay           | 已实现               |
-| Tool loop + schema validation                | 已实现               |
-| Agent `defineState()` checkpoint             | 已实现               |
-| Retry Child Thread                           | 已实现               |
-| Worker lease/interrupted recovery            | 已实现               |
-| Durable cross-Worker cancellation            | 已实现               |
-| synthetic interrupted tool output            | 已实现               |
-| Session/Task/SessionMessage projection       | 已实现               |
-| Application/Studio Run intent crash recovery | 已实现               |
-| system/user-action Session timeline API      | 已实现               |
-| Studio Draft + Engine read model             | 已实现               |
-| Desktop Project Studio 迁移                  | 已实现               |
-| basic-agent App/Engine/SQLite tracer bullet  | 已实现               |
-| 旧 Playground `core.Thread` 文件格式迁移     | 未开始；本轮刻意不改 |
-| Compaction                                   | 未实现               |
-| Subagent Thread 关系与调度                   | 未实现               |
-| Tool approval/auth suspension                | 未实现               |
-| Handoff Application command                  | 未实现               |
-| 多进程 Worker claim 压力验证                 | 未实现               |
+| 能力                                         | 状态                    |
+| -------------------------------------------- | ----------------------- |
+| Engine Thread/Checkpoint/Run                 | 已实现                  |
+| core Message 富内容直存                      | 已实现                  |
+| SQLite Engine/App/Studio Store               | 已实现                  |
+| 单 active Run、atomic startRun               | 已实现                  |
+| Durable output snapshot + cursor stream      | 已实现                  |
+| Pi 完整 ReAct loop、图片/tool result replay  | 已实现                  |
+| awaited model/tool Checkpoint barrier        | 已实现                  |
+| Tool loop + schema validation                | 已由 PiRunExecutor 实现 |
+| Agent `defineState()` checkpoint             | 已实现                  |
+| Retry Child Thread                           | 已实现                  |
+| Worker lease/interrupted recovery            | 已实现                  |
+| Durable cross-Worker cancellation            | 已实现                  |
+| synthetic interrupted tool output            | 已实现                  |
+| Session/Task/SessionMessage projection       | 已实现                  |
+| Application/Studio Run intent crash recovery | 已实现                  |
+| system/user-action Session timeline API      | 已实现                  |
+| Studio Draft + Engine read model             | 已实现                  |
+| Desktop Project Studio 迁移                  | 已实现                  |
+| basic-agent App/Engine/SQLite tracer bullet  | 已实现                  |
+| 旧 Playground `core.Thread` 文件格式迁移     | 未开始；本轮刻意不改    |
+| Compaction                                   | 未实现                  |
+| Subagent Thread 关系与调度                   | 未实现                  |
+| Tool approval/auth suspension                | 未实现                  |
+| Handoff Application command                  | 未实现                  |
+| 多进程 Worker claim 压力验证                 | 未实现                  |
 
 ## 13. 包依赖方向
 

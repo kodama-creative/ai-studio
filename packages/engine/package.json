@@ -12,7 +12,6 @@
   },
   "dependencies": {
     "@llm-space/agent": "workspace:*",
-    "@llm-space/core": "workspace:*",
-    "ajv": "^8.17.1"
+    "@llm-space/core": "workspace:*"
   }
 }

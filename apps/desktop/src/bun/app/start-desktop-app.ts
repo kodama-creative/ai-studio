@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { getLlmSpaceHomePath } from "@llm-space/core/server";
 import { GistThreadReader, GistThreadWriter } from "@llm-space/core/storage";
-import { createPiModelTurnDriver } from "@llm-space/engine-pi";
+import { createPiRunExecutor } from "@llm-space/engine-pi";
 import { PluginManager } from "@llm-space/runtime/plugins";
 import Electrobun, {
   app,
@@ -310,7 +310,7 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
       async create(project) {
         const projectStudioHost = await createProjectStudioHost({
           project,
-          modelDriver: createPiModelTurnDriver({
+          runExecutor: createPiRunExecutor({
             models: await modelManager.getAvailableModels(),
           }),
         });

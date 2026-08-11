@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
-import type { ModelTurnDriver } from "@llm-space/engine";
+import type { RunExecutor } from "@llm-space/engine";
 
 import { openAgentProject } from "../bun/projects/agent-project";
 import {
@@ -28,7 +28,7 @@ afterEach(async () => {
 test("client creates, runs, and reattaches an independent Studio Thread", async () => {
   const project = await openAgentProject(await _project());
   const first = await _host({
-    modelDriver: TEXT_DRIVER,
+    runExecutor: TEXT_EXECUTOR,
     project,
   });
   const created = await first.createThread({ title: "First task" });
@@ -67,7 +67,7 @@ test("client creates, runs, and reattaches an independent Studio Thread", async 
 
   await first.close();
   const second = await _host({
-    modelDriver: TEXT_DRIVER,
+    runExecutor: TEXT_EXECUTOR,
     project,
   });
   expect(await second.listThreads()).toEqual([
@@ -81,7 +81,7 @@ test("client creates, runs, and reattaches an independent Studio Thread", async 
 test("project tools receive Engine execution context and project sandbox", async () => {
   const project = await openAgentProject(await _project());
   const client = await _host({
-    modelDriver: WORKING_DIRECTORY_DRIVER,
+    runExecutor: WORKING_DIRECTORY_EXECUTOR,
     project,
   });
   const created = await client.createThread();
@@ -124,7 +124,7 @@ test("project tools receive Engine execution context and project sandbox", async
 test("project Evaluation metadata survives host restart outside the Thread document", async () => {
   const project = await openAgentProject(await _project());
   const first = await _host({
-    modelDriver: TEXT_DRIVER,
+    runExecutor: TEXT_EXECUTOR,
     project,
   });
   const thread = await first.createThread();
@@ -161,7 +161,7 @@ test("project Evaluation metadata survives host restart outside the Thread docum
 
   await first.close();
   const second = await _host({
-    modelDriver: TEXT_DRIVER,
+    runExecutor: TEXT_EXECUTOR,
     project,
   });
   expect(await second.listEvaluationMetadata(thread.id)).toMatchObject({
@@ -181,7 +181,7 @@ test("uncommitted Agent changes are ignored but a new HEAD blocks execution", as
   const root = await _project();
   const project = await openAgentProject(root);
   const first = await _host({
-    modelDriver: TEXT_DRIVER,
+    runExecutor: TEXT_EXECUTOR,
     project,
   });
   const created = await first.createThread();
@@ -205,37 +205,88 @@ test("uncommitted Agent changes are ignored but a new HEAD blocks execution", as
   );
 });
 
-const TEXT_DRIVER: ModelTurnDriver = {
-  async *run() {
-    await Promise.resolve();
-    yield { type: "text.delta", delta: "hello from project" } as const;
-    yield { type: "finish", reason: "stop" } as const;
+const TEXT_EXECUTOR: RunExecutor = {
+  async execute(input, sink) {
+    const message = {
+      id: input.createMessageId(),
+      role: "assistant" as const,
+      content: [{ type: "text" as const, text: "hello from project" }],
+    };
+    await sink.accept({
+      type: "assistant.delta",
+      message,
+      textDelta: "hello from project",
+    });
+    await sink.accept({ type: "assistant.completed", message });
   },
 };
 
-const WORKING_DIRECTORY_DRIVER: ModelTurnDriver = {
-  async *run(input) {
-    await Promise.resolve();
-    if (
-      input.messages.some(
-        (message) =>
-          message.role === "assistant" &&
-          message.toolCalls?.some((call) => call.output !== undefined)
-      )
-    ) {
-      yield { type: "text.delta", delta: "done" } as const;
-      yield { type: "finish", reason: "stop" } as const;
-      return;
+const WORKING_DIRECTORY_EXECUTOR: RunExecutor = {
+  async execute(input, sink, { signal }) {
+    const requested = {
+      id: input.createMessageId(),
+      role: "assistant" as const,
+      content: [],
+      toolCalls: [
+        {
+          id: "call-working-directory",
+          input: { name: "working-directory", arguments: {} },
+        },
+      ],
+    };
+    await sink.accept({ type: "assistant.completed", message: requested });
+    await sink.accept({
+      type: "tool.started",
+      messageId: requested.id,
+      toolCallId: "call-working-directory",
+      toolName: "working-directory",
+    });
+    const prepared = input.agent.tools.get("working-directory");
+    if (prepared === undefined) {
+      throw new Error("working-directory was not found");
     }
-    yield {
-      type: "tool.call",
-      call: {
-        id: "call-working-directory",
-        name: "working-directory",
-        arguments: {},
-      },
-    } as const;
-    yield { type: "finish", reason: "tool-calls" } as const;
+    const value = await prepared.definition.execute(
+      {},
+      input.createToolContext({
+        execution: {
+          threadId: input.threadId,
+          runId: input.runId,
+          stepIndex: 0,
+          callId: "call-working-directory",
+          toolName: "working-directory",
+        },
+        signal,
+      })
+    );
+    const withOutput = {
+      ...requested,
+      toolCalls: [
+        {
+          ...requested.toolCalls[0],
+          output: {
+            content: [{ type: "text" as const, text: String(value) }],
+            isError: false,
+          },
+        },
+      ],
+    };
+    await sink.accept({
+      type: "tool.completed",
+      messageId: requested.id,
+      toolCallId: "call-working-directory",
+      message: withOutput,
+    });
+    const answer = {
+      id: input.createMessageId(),
+      role: "assistant" as const,
+      content: [{ type: "text" as const, text: "done" }],
+    };
+    await sink.accept({
+      type: "assistant.delta",
+      message: answer,
+      textDelta: "done",
+    });
+    await sink.accept({ type: "assistant.completed", message: answer });
   },
 };
 

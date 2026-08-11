@@ -3,7 +3,7 @@
 This example exercises the complete local path:
 
 ```text
-code-first agent → loader → SessionApplication → AgentEngine → Pi driver → authored tool
+code-first agent → loader → SessionApplication → AgentEngine → Pi Run executor → authored tool
                                       ↘ SQLite checkpoints + Session history
 ```
 

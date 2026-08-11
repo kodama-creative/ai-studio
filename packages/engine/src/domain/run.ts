@@ -10,13 +10,14 @@ export interface RunError {
   readonly message: string;
 }
 
-/** One durable attempt to advance exactly one Thread. */
+/** One user-triggered durable attempt to execute a complete Agent loop on one Thread. */
 export interface Run {
   readonly schemaVersion: 1;
   readonly id: string;
   readonly threadId: string;
   readonly operationId: string;
   readonly retryOfRunId?: string;
+  /** Model-visible Messages materialized from the single input that started this Run. */
   readonly inputMessages: readonly Message[];
   readonly baseCheckpointId: string;
   readonly inputCheckpointId: string;
@@ -63,6 +64,12 @@ export type RunEventData =
     }
   | {
       readonly type: "tool.completed";
+      readonly messageId: string;
+      readonly toolCallId: string;
+      readonly message: AssistantMessage;
+    }
+  | {
+      readonly type: "tool.updated";
       readonly messageId: string;
       readonly toolCallId: string;
       readonly message: AssistantMessage;

@@ -5,7 +5,7 @@ import {
   resolveAgentGeneration,
   type AgentSnapshot,
   type ExecutableAgent,
-  type ModelTurnDriver,
+  type RunExecutor,
 } from "@llm-space/engine";
 import { createSqliteEngineStore } from "@llm-space/engine/storage/sqlite";
 import {
@@ -24,7 +24,7 @@ import { ProjectSourceFiles } from "./project-source-files";
 
 export interface CreateProjectStudioHostOptions {
   readonly project: AgentProject;
-  readonly modelDriver: ModelTurnDriver;
+  readonly runExecutor: RunExecutor;
   readonly clock?: () => number;
   readonly generateId?: (prefix: string) => string;
 }
@@ -47,7 +47,7 @@ export async function createProjectStudioHost(
   try {
     engine = createAgentEngine({
       store: engineStore,
-      modelDriver: options.modelDriver,
+      runExecutor: options.runExecutor,
       agentResolver: {
         resolve: (storedSnapshot) =>
           _loadExactExecutableAgent(options.project, storedSnapshot),

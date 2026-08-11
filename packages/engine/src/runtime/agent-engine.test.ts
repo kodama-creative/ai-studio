@@ -8,7 +8,7 @@ import type { JsonObject, ToolContext } from "@llm-space/agent/tools";
 import type { Message } from "@llm-space/core";
 
 import type { AgentSnapshot, ExecutableAgent } from "../domain";
-import type { ModelTurnDriver } from "../execution";
+import type { RunExecutor } from "../execution";
 import type { EngineStore } from "../storage";
 import { InMemoryEngineStore } from "../storage";
 import { createSqliteEngineStore } from "../storage/sqlite";
@@ -173,11 +173,10 @@ describe.each([
 test("startRun atomically commits input and enforces one active writer", async () => {
   const turnStarted = _deferred<void>();
   const engine = _createEngine(new InMemoryEngineStore(), {
-    modelDriver: {
-      async *run(_input, { signal }) {
+    runExecutor: {
+      async execute(_input, _sink, { signal }) {
         turnStarted.resolve();
         await _waitForAbort(signal);
-        yield { type: "finish", reason: "stop" };
       },
     },
   });
@@ -267,11 +266,10 @@ test("rejects a resolver result whose full Agent snapshot changed", async () => 
       snapshot: { ...TEST_AGENT, instructions: ["Changed instructions."] },
       tools: new Map(),
     },
-    modelDriver: {
-      async *run() {
-        await Promise.resolve();
+    runExecutor: {
+      execute() {
         modelStarted = true;
-        yield { type: "finish", reason: "stop" };
+        return Promise.resolve();
       },
     },
   });
@@ -296,8 +294,134 @@ test("rejects a resolver result whose full Agent snapshot changed", async () => 
   }
 });
 
-test("tool loop checkpoints core Messages and agent-defined JSON state", async () => {
-  let modelTurn = 0;
+test("persists a complete Run through the high-level RunExecutor seam", async () => {
+  const runExecutor: RunExecutor = {
+    async execute(input, sink) {
+      const message = {
+        id: input.createMessageId(),
+        role: "assistant" as const,
+        content: [{ type: "text" as const, text: "Executed by backend." }],
+      };
+      await sink.accept({
+        type: "assistant.delta",
+        message,
+        textDelta: "Executed by backend.",
+      });
+      await sink.accept({ type: "assistant.completed", message });
+    },
+  };
+  const engine = createAgentEngine({
+    store: new InMemoryEngineStore(),
+    runExecutor,
+    agentResolver: {
+      resolve(snapshot) {
+        return Promise.resolve({ snapshot, tools: new Map() });
+      },
+    },
+    createToolContext: _createToolContext,
+  });
+  try {
+    const thread = await engine.createThread();
+    const run = await engine.startRun({
+      threadId: thread.id,
+      expectedHeadCheckpointId: thread.headCheckpointId,
+      inputMessages: [RICH_USER_MESSAGE],
+      agentSnapshot: TEST_AGENT,
+    });
+
+    const completed = await _waitForTerminalRun(engine, run.id);
+    const result = await engine.getCheckpoint(completed.resultCheckpointId!);
+
+    expect(completed.status).toBe("completed");
+    expect(result?.threadState.messages.at(-1)).toMatchObject({
+      role: "assistant",
+      content: [{ type: "text", text: "Executed by backend." }],
+    });
+  } finally {
+    await engine.close();
+  }
+});
+
+test("fails a RunExecutor that returns without a completed assistant", async () => {
+  const engine = _createEngine(new InMemoryEngineStore(), {
+    runExecutor: { execute: () => Promise.resolve() },
+  });
+  try {
+    const thread = await engine.createThread();
+    const run = await engine.startRun({
+      threadId: thread.id,
+      expectedHeadCheckpointId: thread.headCheckpointId,
+      inputMessages: [RICH_USER_MESSAGE],
+      agentSnapshot: TEST_AGENT,
+    });
+
+    const terminal = await _waitForTerminalRun(engine, run.id);
+
+    expect(terminal.status).toBe("failed");
+    expect(terminal.error?.message).toContain(
+      "no completed Assistant Message"
+    );
+  } finally {
+    await engine.close();
+  }
+});
+
+test("fails a RunExecutor that returns with an unfinished tool call", async () => {
+  const engine = _createEngine(new InMemoryEngineStore(), {
+    runExecutor: {
+      async execute(input, sink) {
+        await sink.accept({
+          type: "assistant.completed",
+          message: {
+            id: input.createMessageId(),
+            role: "assistant",
+            content: [],
+            toolCalls: [
+              { id: "call-unfinished", input: { name: "work", arguments: {} } },
+            ],
+          },
+        });
+      },
+    },
+  });
+  try {
+    const thread = await engine.createThread();
+    const run = await engine.startRun({
+      threadId: thread.id,
+      expectedHeadCheckpointId: thread.headCheckpointId,
+      inputMessages: [RICH_USER_MESSAGE],
+      agentSnapshot: TEST_AGENT,
+    });
+
+    const terminal = await _waitForTerminalRun(engine, run.id);
+
+    expect(terminal.status).toBe("failed");
+    expect(terminal.error?.message).toContain(
+      'left tool call "call-unfinished" unfinished'
+    );
+    const recoveredThread = await engine.getThread(thread.id);
+    const recovered = await engine.getCheckpoint(
+      recoveredThread?.headCheckpointId ?? "missing"
+    );
+    expect(recovered?.source).toEqual({
+      type: "run.recovery",
+      runId: run.id,
+    });
+    expect(recovered?.threadState.messages.at(-1)).toMatchObject({
+      role: "assistant",
+      toolCalls: [
+        {
+          id: "call-unfinished",
+          output: { isError: true },
+        },
+      ],
+    });
+  } finally {
+    await engine.close();
+  }
+});
+
+test("Run execution checkpoints core Messages and agent-defined JSON state", async () => {
   let observedExecution: ToolContext["execution"] | undefined;
   const toolAgent: AgentSnapshot = {
     ...TEST_AGENT,
@@ -330,29 +454,77 @@ test("tool loop checkpoints core Messages and agent-defined JSON state", async (
         ],
       ]),
     },
-    modelDriver: {
-      async *run(input) {
-        await Promise.resolve();
-        modelTurn++;
-        if (modelTurn === 1) {
-          expect(input.messages).toEqual([RICH_USER_MESSAGE]);
-          yield {
-            type: "tool.call",
-            call: { id: "call-1", name: "increment", arguments: { amount: 2 } },
-          };
-          yield { type: "finish", reason: "tool-calls" };
-          return;
-        }
-        const toolCall = input.messages.at(-1);
-        expect(toolCall?.role).toBe("assistant");
-        if (toolCall?.role === "assistant") {
-          expect(toolCall.toolCalls?.[0]?.output).toEqual({
-            content: [{ type: "text", text: '{"count":2}' }],
-            isError: false,
-          });
-        }
-        yield { type: "text.delta", delta: "Counter is 2." };
-        yield { type: "finish", reason: "stop" };
+    runExecutor: {
+      async execute(input, sink, { signal }) {
+        expect(input.messages).toEqual([RICH_USER_MESSAGE]);
+        const messageId = input.createMessageId();
+        const requested = {
+          id: messageId,
+          role: "assistant" as const,
+          content: [],
+          toolCalls: [
+            {
+              id: "call-1",
+              input: { name: "increment", arguments: { amount: 2 } },
+            },
+          ],
+        };
+        await sink.accept({
+          type: "assistant.completed",
+          message: requested,
+        });
+        await sink.accept({
+          type: "tool.started",
+          messageId,
+          toolCallId: "call-1",
+          toolName: "increment",
+        });
+        const prepared = input.agent.tools.get("increment");
+        if (prepared === undefined) throw new Error("increment was not found");
+        const value = await prepared.definition.execute(
+          { amount: 2 },
+          input.createToolContext({
+            execution: {
+              threadId: input.threadId,
+              runId: input.runId,
+              stepIndex: 0,
+              callId: "call-1",
+              toolName: "increment",
+            },
+            signal,
+          })
+        );
+        const completedTool = {
+          ...requested,
+          toolCalls: [
+            {
+              ...requested.toolCalls[0]!,
+              output: {
+                content: [
+                  { type: "text" as const, text: JSON.stringify(value) },
+                ],
+                isError: false,
+              },
+            },
+          ],
+        };
+        await sink.accept({
+          type: "tool.completed",
+          messageId,
+          toolCallId: "call-1",
+          message: completedTool,
+        });
+        const answer = {
+          id: input.createMessageId(),
+          role: "assistant" as const,
+          content: [{ type: "text" as const, text: "Counter is 2." }],
+        };
+        await sink.accept({
+          type: "assistant.delta",
+          message: answer,
+          textDelta: "Counter is 2.",
+        });
+        await sink.accept({ type: "assistant.completed", message: answer });
       },
     },
   });
@@ -454,13 +626,31 @@ test("streamRun reconnects from a durable output snapshot", async () => {
   const releaseTurn = _deferred<void>();
   const draftPersisted = _deferred<void>();
   const engine = _createEngine(new InMemoryEngineStore(), {
-    modelDriver: {
-      async *run() {
-        yield { type: "text.delta", delta: "durable " };
+    runExecutor: {
+      async execute(input, sink) {
+        const messageId = input.createMessageId();
+        await sink.accept({
+          type: "assistant.delta",
+          message: {
+            id: messageId,
+            role: "assistant",
+            content: [{ type: "text", text: "durable " }],
+          },
+          textDelta: "durable ",
+        });
         draftPersisted.resolve();
         await releaseTurn.promise;
-        yield { type: "text.delta", delta: "answer" };
-        yield { type: "finish", reason: "stop" };
+        const answer = {
+          id: messageId,
+          role: "assistant" as const,
+          content: [{ type: "text" as const, text: "durable answer" }],
+        };
+        await sink.accept({
+          type: "assistant.delta",
+          message: answer,
+          textDelta: "answer",
+        });
+        await sink.accept({ type: "assistant.completed", message: answer });
       },
     },
   });
@@ -511,11 +701,10 @@ test("streamRun reconnects from a durable output snapshot", async () => {
 test("Engine close releases stream followers before closing SQLite", async () => {
   const turnStarted = _deferred<void>();
   const engine = _createEngine(createSqliteEngineStore({ path: ":memory:" }), {
-    modelDriver: {
-      async *run(_input, { signal }) {
+    runExecutor: {
+      async execute(_input, _sink, { signal }) {
         turnStarted.resolve();
         await _waitForAbort(signal);
-        yield { type: "finish", reason: "stop" };
       },
     },
   });
@@ -578,20 +767,10 @@ test("Engine shutdown persists interrupted Run recovery with synthetic tool outp
             ],
           ]),
         },
-        modelDriver: {
-          async *run() {
-            await Promise.resolve();
-            yield {
-              type: "tool.call",
-              call: {
-                id: "call-side-effect",
-                name: "side_effect",
-                arguments: {},
-              },
-            };
-            yield { type: "finish", reason: "tool-calls" };
-          },
-        },
+        runExecutor: _blockingToolRunExecutor(
+          "side_effect",
+          "call-side-effect"
+        ),
       }
     );
     const thread = await first.createThread();
@@ -669,20 +848,7 @@ test("cancelling a running tool commits a synthetic tool output", async () => {
         ],
       ]),
     },
-    modelDriver: {
-      async *run() {
-        await Promise.resolve();
-        yield {
-          type: "tool.call",
-          call: {
-            id: "call-side-effect",
-            name: "side_effect",
-            arguments: {},
-          },
-        };
-        yield { type: "finish", reason: "tool-calls" };
-      },
-    },
+    runExecutor: _blockingToolRunExecutor("side_effect", "call-side-effect"),
   });
   try {
     const thread = await engine.createThread();
@@ -761,20 +927,10 @@ test("a different Worker requests cancellation without terminating the Run early
         ],
       ]),
     },
-    modelDriver: {
-      async *run() {
-        await Promise.resolve();
-        yield {
-          type: "tool.call",
-          call: {
-            id: "call-remote-side-effect",
-            name: "remote_side_effect",
-            arguments: {},
-          },
-        };
-        yield { type: "finish", reason: "tool-calls" };
-      },
-    },
+    runExecutor: _blockingToolRunExecutor(
+      "remote_side_effect",
+      "call-remote-side-effect"
+    ),
   });
   let requester: AgentEngine | undefined;
   try {
@@ -815,11 +971,18 @@ test("a cross-Worker cancellation request wins a race with model completion", as
   const releaseTurn = _deferred<void>();
   const owner = _createEngine(store, {
     workerLeaseMs: 300,
-    modelDriver: {
-      async *run() {
+    runExecutor: {
+      async execute(input, sink) {
         turnStarted.resolve();
         await releaseTurn.promise;
-        yield { type: "finish", reason: "stop" };
+        await sink.accept({
+          type: "assistant.completed",
+          message: {
+            id: input.createMessageId(),
+            role: "assistant",
+            content: [],
+          },
+        });
       },
     },
   });
@@ -851,21 +1014,15 @@ test("a cross-Worker cancellation request wins a race with model completion", as
 function _createEngine(
   store: EngineStore,
   options: {
-    readonly modelDriver?: ModelTurnDriver;
+    readonly runExecutor?: RunExecutor;
     readonly executableAgent?: ExecutableAgent;
     readonly workerLeaseMs?: number;
   } = {}
 ): AgentEngine {
-  const modelDriver: ModelTurnDriver = options.modelDriver ?? {
-    async *run() {
-      await Promise.resolve();
-      yield { type: "text.delta", delta: "Done." };
-      yield { type: "finish", reason: "stop" };
-    },
-  };
+  const runExecutor = options.runExecutor ?? _textRunExecutor("Done.");
   return createAgentEngine({
     store,
-    modelDriver,
+    runExecutor,
     agentResolver: {
       resolve(snapshot): Promise<ExecutableAgent> {
         return Promise.resolve(
@@ -878,6 +1035,64 @@ function _createEngine(
       ? {}
       : { workerLeaseMs: options.workerLeaseMs }),
   });
+}
+
+function _textRunExecutor(text: string): RunExecutor {
+  return {
+    async execute(input, sink) {
+      const message = {
+        id: input.createMessageId(),
+        role: "assistant" as const,
+        content: [{ type: "text" as const, text }],
+      };
+      await sink.accept({
+        type: "assistant.delta",
+        message,
+        textDelta: text,
+      });
+      await sink.accept({ type: "assistant.completed", message });
+    },
+  };
+}
+
+function _blockingToolRunExecutor(
+  toolName: string,
+  toolCallId: string
+): RunExecutor {
+  return {
+    async execute(input, sink, { signal }) {
+      const message = {
+        id: input.createMessageId(),
+        role: "assistant" as const,
+        content: [],
+        toolCalls: [
+          { id: toolCallId, input: { name: toolName, arguments: {} } },
+        ],
+      };
+      await sink.accept({ type: "assistant.completed", message });
+      await sink.accept({
+        type: "tool.started",
+        messageId: message.id,
+        toolCallId,
+        toolName,
+      });
+      const prepared = input.agent.tools.get(toolName);
+      if (prepared === undefined) throw new Error(`${toolName} was not found`);
+      await prepared.definition.execute(
+        {},
+        input.createToolContext({
+          execution: {
+            threadId: input.threadId,
+            runId: input.runId,
+            stepIndex: 0,
+            callId: toolCallId,
+            toolName,
+          },
+          signal,
+        })
+      );
+    },
+  };
 }
 
 function _createToolContext(input: {

@@ -4,6 +4,7 @@ import {
   createAgentEngine,
   type AgentSnapshot,
   InMemoryEngineStore,
+  type RunExecutor,
 } from "@llm-space/engine";
 
 import {
@@ -30,13 +31,7 @@ describe.each([
   test("stores dirty Drafts outside Engine and retries a prior Run on a child Thread", async () => {
     const engine = createAgentEngine({
       store: new InMemoryEngineStore(),
-      modelDriver: {
-        async *run() {
-          await Promise.resolve();
-          yield { type: "text.delta", delta: "Studio answer" };
-          yield { type: "finish", reason: "stop" };
-        },
-      },
+      runExecutor: _textRunExecutor("Studio answer"),
       agentResolver: {
         resolve(snapshot) {
           return Promise.resolve({ snapshot, tools: new Map() });
@@ -183,13 +178,7 @@ describe.each([
 test("recovers a Run whose Studio reference transaction was interrupted", async () => {
   const engine = createAgentEngine({
     store: new InMemoryEngineStore(),
-    modelDriver: {
-      async *run() {
-        await Promise.resolve();
-        yield { type: "text.delta", delta: "Recovered answer" };
-        yield { type: "finish", reason: "stop" };
-      },
-    },
+    runExecutor: _textRunExecutor("Recovered answer"),
     agentResolver: {
       resolve(snapshot) {
         return Promise.resolve({ snapshot, tools: new Map() });
@@ -285,6 +274,24 @@ async function _untilCompleted(
       return;
   }
   throw new Error("Studio event stream ended before Run completion.");
+}
+
+function _textRunExecutor(text: string): RunExecutor {
+  return {
+    async execute(input, sink) {
+      const message = {
+        id: input.createMessageId(),
+        role: "assistant" as const,
+        content: [{ type: "text" as const, text }],
+      };
+      await sink.accept({
+        type: "assistant.delta",
+        message,
+        textDelta: text,
+      });
+      await sink.accept({ type: "assistant.completed", message });
+    },
+  };
 }
 
 async function _waitUntil(predicate: () => Promise<boolean>): Promise<void> {

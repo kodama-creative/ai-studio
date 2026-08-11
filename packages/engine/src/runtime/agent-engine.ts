@@ -1,10 +1,9 @@
 import { createAgentStateContext } from "@llm-space/agent/context";
-import type { ToolContext, ToolModelOutput } from "@llm-space/agent/tools";
+import type { ToolContext } from "@llm-space/agent/tools";
 import type {
   AssistantMessage,
   JsonValue,
   Message,
-  ToolCall,
   ToolCallOutput,
 } from "@llm-space/core";
 
@@ -21,8 +20,11 @@ import type {
   ThreadCheckpoint,
   ThreadState,
 } from "../domain";
-import type { ModelTurnDriver, ModelTurnEvent } from "../execution";
-import { validateSchemaValue } from "../execution/schema-validation";
+import type {
+  RunExecutionEvent,
+  RunExecutionSink,
+  RunExecutor,
+} from "../execution";
 import type { EngineStore, EngineStoreTransaction } from "../storage";
 
 const DEFAULT_MAX_MODEL_TURNS = 32;
@@ -33,7 +35,7 @@ const DELTA_FLUSH_EVENT_COUNT = 16;
 
 export interface CreateAgentEngineOptions {
   readonly store: EngineStore;
-  readonly modelDriver: ModelTurnDriver;
+  readonly runExecutor: RunExecutor;
   readonly agentResolver: AgentResolver;
   readonly createToolContext: (input: {
     readonly execution: ToolContext["execution"];
@@ -605,7 +607,7 @@ class AgentEngineImpl implements AgentEngine {
         inputCheckpoint.threadState.state
       );
       await stateContext.run(() =>
-        this._executeModelLoop(
+        this._executeWithRunExecutor(
           run,
           agent,
           inputCheckpoint,
@@ -624,7 +626,8 @@ class AgentEngineImpl implements AgentEngine {
     }
   }
 
-  private async _executeModelLoop(
+  /** Executes one complete loop while turning awaited backend events into durable steps. */
+  private async _executeWithRunExecutor(
     run: Run,
     agent: ExecutableAgent,
     initialCheckpoint: ThreadCheckpoint,
@@ -633,129 +636,117 @@ class AgentEngineImpl implements AgentEngine {
   ): Promise<void> {
     let checkpoint = initialCheckpoint;
     let messages = structuredClone(initialCheckpoint.threadState.messages);
-    for (let stepIndex = 0; stepIndex < this._maxModelTurns; stepIndex++) {
-      _throwIfAborted(signal);
-      const messageId = this._generateId("message");
-      let text = "";
-      let thinking = "";
-      const toolCalls: ToolCall[] = [];
-      let finish: Extract<ModelTurnEvent, { type: "finish" }> | undefined;
-      let bufferedText = "";
-      let bufferedThinking = "";
-      let bufferedEvents = 0;
-      let lastFlushAt = this._clock();
+    let bufferedText = "";
+    let bufferedThinking = "";
+    let bufferedEvents = 0;
+    let lastFlushAt = this._clock();
+    let streamingMessage: AssistantMessage | undefined;
+    const emittedAssistantIds = new Set<string>();
+    const activeToolCalls = new Set<string>();
 
-      const flush = () => {
-        if (bufferedText.length === 0 && bufferedThinking.length === 0) return;
-        this._flushDelta(run.id, _assistantDraft(messageId, text, thinking), {
-          text: bufferedText,
-          thinking: bufferedThinking,
-        });
-        bufferedText = "";
-        bufferedThinking = "";
-        bufferedEvents = 0;
-        lastFlushAt = this._clock();
-      };
-
-      for await (const event of this._options.modelDriver.run(
-        {
-          agentId: agent.snapshot.agentId,
-          instructions: agent.snapshot.instructions,
-          messages,
-          model: agent.snapshot.model,
-          tools: agent.snapshot.tools,
-        },
-        { signal }
-      )) {
-        _throwIfAborted(signal);
-        if (finish !== undefined) {
-          throw new Error("Model turn emitted data after its finish event.");
-        }
-        if (event.type === "text.delta") {
-          text += event.delta;
-          bufferedText += event.delta;
-          bufferedEvents++;
-        } else if (event.type === "thinking.delta") {
-          thinking += event.delta;
-          bufferedThinking += event.delta;
-          bufferedEvents++;
-        } else if (event.type === "tool.call") {
-          toolCalls.push({
-            id: event.call.id,
-            input: {
-              name: event.call.name,
-              arguments: structuredClone(event.call.arguments),
-            },
-          });
-        } else {
-          finish = event;
-        }
-        if (
-          bufferedEvents === 1 ||
-          bufferedEvents >= DELTA_FLUSH_EVENT_COUNT ||
-          bufferedText.length + bufferedThinking.length >= DELTA_FLUSH_SIZE ||
-          this._clock() - lastFlushAt >= DELTA_FLUSH_INTERVAL_MS
-        ) {
-          flush();
-        }
-      }
-      flush();
-      _assertFinish(finish?.reason, toolCalls);
-
-      const assistant: AssistantMessage = {
-        id: messageId,
-        role: "assistant",
-        content: text.length === 0 ? [] : [{ type: "text", text }],
-        ...(thinking.length === 0 ? {} : { thinking }),
-        ...(toolCalls.length === 0 ? {} : { toolCalls }),
-        ...(finish?.usage === undefined ? {} : { usage: finish.usage }),
-        ...(finish?.responseOutputItems === undefined
-          ? {}
-          : { responseOutputItems: [...finish.responseOutputItems] }),
-      };
-      messages = [...messages, assistant];
-      checkpoint = this._commitStep({
-        runId: run.id,
-        parent: checkpoint,
-        messages,
-        state: stateSnapshot(),
-        step: "model.completed",
-        output: {
-          runId: run.id,
-          message: assistant,
-          status: "completed",
-          updatedAt: this._clock(),
-        },
-        event: { type: "message.completed", message: assistant },
-      });
-
-      if (toolCalls.length === 0) {
-        this._completeRun(run.id, checkpoint.id);
+    const flush = () => {
+      if (
+        streamingMessage === undefined ||
+        (bufferedText.length === 0 && bufferedThinking.length === 0)
+      ) {
         return;
       }
+      this._flushDelta(run.id, streamingMessage, {
+        text: bufferedText,
+        thinking: bufferedThinking,
+      });
+      bufferedText = "";
+      bufferedThinking = "";
+      bufferedEvents = 0;
+      lastFlushAt = this._clock();
+    };
 
-      for (const call of toolCalls) {
+    const sink: RunExecutionSink = {
+      accept: (event: RunExecutionEvent): Promise<void> => {
         _throwIfAborted(signal);
-        this._appendEvent(run.id, {
-          type: "tool.started",
-          messageId,
-          toolCallId: call.id,
-          toolName: call.input.name,
-        });
-        const output = await this._executeTool(
-          run,
-          agent,
-          call,
-          stepIndex,
-          signal
+        if (event.type === "assistant.delta") {
+          streamingMessage = event.message;
+          bufferedText += event.textDelta ?? "";
+          bufferedThinking += event.thinkingDelta ?? "";
+          bufferedEvents++;
+          if (
+            bufferedEvents === 1 ||
+            bufferedEvents >= DELTA_FLUSH_EVENT_COUNT ||
+            bufferedText.length + bufferedThinking.length >= DELTA_FLUSH_SIZE ||
+            this._clock() - lastFlushAt >= DELTA_FLUSH_INTERVAL_MS
+          ) {
+            flush();
+          }
+          return Promise.resolve();
+        }
+        if (event.type === "assistant.completed") {
+          flush();
+          if (emittedAssistantIds.size > 0) {
+            _assertExecutionSettled(
+              messages,
+              emittedAssistantIds,
+              activeToolCalls,
+              "before the next assistant Message"
+            );
+          }
+          messages = _appendAssistant(messages, event.message);
+          emittedAssistantIds.add(event.message.id);
+          checkpoint = this._commitStep({
+            runId: run.id,
+            parent: checkpoint,
+            messages,
+            state: stateSnapshot(),
+            step: "model.completed",
+            output: {
+              runId: run.id,
+              message: event.message,
+              status: "completed",
+              updatedAt: this._clock(),
+            },
+            event: { type: "message.completed", message: event.message },
+          });
+          return Promise.resolve();
+        }
+        if (event.type === "tool.started") {
+          const call = _requireAssistantToolCall(
+            messages,
+            event.messageId,
+            event.toolCallId
+          );
+          if (call.input.name !== event.toolName) {
+            throw new Error(
+              `Tool call "${event.toolCallId}" started as "${event.toolName}" instead of "${call.input.name}".`
+            );
+          }
+          if (call.output !== undefined) {
+            throw new Error(
+              `Tool call "${event.toolCallId}" started after it completed.`
+            );
+          }
+          const key = _toolCallKey(event.messageId, event.toolCallId);
+          if (activeToolCalls.has(key)) {
+            throw new Error(`Tool call "${event.toolCallId}" started twice.`);
+          }
+          activeToolCalls.add(key);
+          this._appendEvent(run.id, {
+            type: "tool.started",
+            messageId: event.messageId,
+            toolCallId: event.toolCallId,
+            toolName: event.toolName,
+          });
+          return Promise.resolve();
+        }
+        if (event.type === "tool.updated") {
+          _assertActiveToolUpdate(messages, activeToolCalls, event);
+          messages = _replaceAssistant(messages, event.message);
+          this._updateToolProgress(run.id, event);
+          return Promise.resolve();
+        }
+        _assertActiveToolUpdate(messages, activeToolCalls, event);
+        messages = _replaceAssistant(messages, event.message);
+        activeToolCalls.delete(
+          _toolCallKey(event.messageId, event.toolCallId)
         );
-        messages = _setToolOutput(messages, messageId, call.id, output);
-        const updated = messages.find(
-          (message): message is AssistantMessage =>
-            message.id === messageId && message.role === "assistant"
-        );
-        if (updated === undefined)
-          throw new Error(`Assistant Message "${messageId}" was lost.`);
         checkpoint = this._commitStep({
           runId: run.id,
           parent: checkpoint,
@@ -764,77 +755,42 @@ class AgentEngineImpl implements AgentEngine {
           step: "tool.completed",
           output: {
             runId: run.id,
-            message: updated,
+            message: event.message,
             status: "completed",
             updatedAt: this._clock(),
           },
           event: {
             type: "tool.completed",
-            messageId,
-            toolCallId: call.id,
-            message: updated,
+            messageId: event.messageId,
+            toolCallId: event.toolCallId,
+            message: event.message,
           },
         });
-      }
-    }
-    throw new Error(
-      `Run exceeded ${this._maxModelTurns} model turns without completing.`
-    );
-  }
+        return Promise.resolve();
+      },
+    };
 
-  private async _executeTool(
-    run: Run,
-    agent: ExecutableAgent,
-    call: ToolCall,
-    stepIndex: number,
-    signal: AbortSignal
-  ): Promise<ToolCallOutput> {
-    const prepared = agent.tools.get(call.input.name);
-    if (prepared === undefined) {
-      return _errorToolOutput(`Unknown tool: ${call.input.name}`);
-    }
-    try {
-      const validated = await validateSchemaValue(
-        prepared.definition.inputSchema,
-        call.input.arguments,
-        { direction: "input", label: `Input for tool "${call.input.name}"` }
-      );
-      const context = this._options.createToolContext({
-        execution: {
-          threadId: run.threadId,
-          runId: run.id,
-          stepIndex,
-          callId: call.id,
-          toolName: call.input.name,
-        },
-        signal,
-      });
-      const execution = prepared.definition.execute(validated, context);
-      let value: unknown;
-      if (_isAsyncIterable(execution)) {
-        for await (const part of execution) value = part;
-      } else {
-        value = await execution;
-      }
-      if (prepared.definition.outputSchema !== undefined) {
-        value = await validateSchemaValue(
-          prepared.definition.outputSchema,
-          value,
-          {
-            direction: "output",
-            label: `Output from tool "${call.input.name}"`,
-          }
-        );
-      }
-      const modelOutput =
-        prepared.definition.toModelOutput === undefined
-          ? _defaultModelOutput(value)
-          : await prepared.definition.toModelOutput(value);
-      return _toolCallOutput(modelOutput, false);
-    } catch (error) {
-      if (signal.aborted) throw error;
-      return _errorToolOutput(_errorMessage(error));
-    }
+    await this._options.runExecutor.execute(
+      {
+        runId: run.id,
+        threadId: run.threadId,
+        messages,
+        agent,
+        maxModelTurns: this._maxModelTurns,
+        createMessageId: () => this._generateId("message"),
+        createToolContext: this._options.createToolContext,
+      },
+      sink,
+      { signal }
+    );
+    flush();
+    _assertExecutionSettled(
+      messages,
+      emittedAssistantIds,
+      activeToolCalls,
+      "when RunExecutor returned"
+    );
+    this._completeRun(run.id, checkpoint.id);
   }
 
   private _commitStep(input: {
@@ -933,6 +889,35 @@ class AgentEngineImpl implements AgentEngine {
     this._notify();
   }
 
+  /** Persists streamed tool progress without advancing the Thread Checkpoint head. */
+  private _updateToolProgress(
+    runId: string,
+    event: Extract<RunExecutionEvent, { type: "tool.updated" }>
+  ): void {
+    const now = this._clock();
+    this._options.store.transaction((tx) => {
+      const run = _requireRun(tx, runId);
+      _assertWorkerOwns(run, this._workerId);
+      tx.upsertRunOutput({
+        runId,
+        message: event.message,
+        status: "streaming",
+        updatedAt: now,
+      });
+      tx.appendRunEvent({
+        runId,
+        timestamp: now,
+        event: {
+          type: "tool.updated",
+          messageId: event.messageId,
+          toolCallId: event.toolCallId,
+          message: event.message,
+        },
+      });
+    });
+    this._notify();
+  }
+
   private _completeRun(runId: string, resultCheckpointId: string): void {
     const now = this._clock();
     this._options.store.transaction((tx) => {
@@ -997,6 +982,10 @@ class AgentEngineImpl implements AgentEngine {
         );
         return;
       }
+      // A backend contract failure can happen after its model Checkpoint was
+      // committed but before every requested tool settled. Close those calls
+      // before exposing the failed Thread as a valid continuation point.
+      this._closeUnfinishedToolCallsInTransaction(tx, run, now);
       const failed: Run = {
         ...run,
         status: "failed",
@@ -1089,6 +1078,38 @@ class AgentEngineImpl implements AgentEngine {
     message: string,
     now: number
   ): void {
+    const headCheckpointId = this._closeUnfinishedToolCallsInTransaction(
+      tx,
+      run,
+      now
+    );
+    const terminal: Run = {
+      ...run,
+      status,
+      workerId: undefined,
+      leaseExpiresAt: undefined,
+      completedAt: now,
+      ...(status === "interrupted"
+        ? { error: { code: "execution_interrupted", message } }
+        : { resultCheckpointId: headCheckpointId }),
+    };
+    tx.saveRun(terminal);
+    tx.appendRunEvent({
+      runId: run.id,
+      timestamp: now,
+      event: { type: "run.updated", run: terminal },
+    });
+  }
+
+  /**
+   * Replaces every unresolved call at the current head with a synthetic error.
+   * The transaction stays usable for failed, interrupted, and cancelled Runs.
+   */
+  private _closeUnfinishedToolCallsInTransaction(
+    tx: EngineStoreTransaction,
+    run: Run,
+    now: number
+  ): string {
     const thread = _requireThread(tx, run.threadId);
     const head = _requireCheckpoint(tx, thread.headCheckpointId);
     const recovered = _withInterruptedToolOutputs(head.threadState);
@@ -1140,22 +1161,7 @@ class AgentEngineImpl implements AgentEngine {
         }
       }
     }
-    const terminal: Run = {
-      ...run,
-      status,
-      workerId: undefined,
-      leaseExpiresAt: undefined,
-      completedAt: now,
-      ...(status === "interrupted"
-        ? { error: { code: "execution_interrupted", message } }
-        : { resultCheckpointId: headCheckpointId }),
-    };
-    tx.saveRun(terminal);
-    tx.appendRunEvent({
-      runId: run.id,
-      timestamp: now,
-      event: { type: "run.updated", run: terminal },
-    });
+    return headCheckpointId;
   }
 
   private _renewLease(runId: string): void {
@@ -1278,54 +1284,142 @@ function _cloneThreadState(state: ThreadState): ThreadState {
   return structuredClone(state);
 }
 
-function _assistantDraft(
-  id: string,
-  text: string,
-  thinking: string
-): AssistantMessage {
-  return {
-    id,
-    role: "assistant",
-    content: text.length === 0 ? [] : [{ type: "text", text }],
-    ...(thinking.length === 0 ? {} : { thinking }),
-  };
+function _appendAssistant(
+  messages: readonly Message[],
+  assistant: AssistantMessage
+): Message[] {
+  const index = messages.findIndex((message) => message.id === assistant.id);
+  if (index >= 0) {
+    throw new Error(`Assistant Message "${assistant.id}" was emitted twice.`);
+  }
+  return [...messages, assistant];
 }
 
-function _assertFinish(
-  reason: Extract<ModelTurnEvent, { type: "finish" }>["reason"] | undefined,
-  toolCalls: readonly ToolCall[]
-): void {
-  if (reason === undefined)
-    throw new Error("Model turn ended without a finish event.");
-  if (reason === "length") {
-    throw new Error("Model turn stopped because its output limit was reached.");
+function _replaceAssistant(
+  messages: readonly Message[],
+  assistant: AssistantMessage
+): Message[] {
+  const index = messages.findIndex((message) => message.id === assistant.id);
+  if (index < 0) {
+    throw new Error(
+      `Assistant Message "${assistant.id}" was updated before completion.`
+    );
   }
-  if (reason === "other")
-    throw new Error("Model turn ended for an unsupported reason.");
-  if (toolCalls.length > 0 && reason !== "tool-calls") {
-    throw new Error(`Model emitted tool calls with finish reason "${reason}".`);
-  }
-  if (toolCalls.length === 0 && reason !== "stop") {
-    throw new Error(`Model finished as "${reason}" without tool calls.`);
-  }
+  return messages.map((message, messageIndex) =>
+    messageIndex === index ? assistant : message
+  );
 }
 
-function _setToolOutput(
+/** Resolves one persisted model-requested tool call for event validation. */
+function _requireAssistantToolCall(
   messages: readonly Message[],
   messageId: string,
-  toolCallId: string,
-  output: ToolCallOutput
-): Message[] {
-  return messages.map((message) =>
-    message.id !== messageId || message.role !== "assistant"
-      ? message
-      : {
-          ...message,
-          toolCalls: message.toolCalls?.map((call) =>
-            call.id === toolCallId ? { ...call, output } : call
-          ),
-        }
+  toolCallId: string
+): NonNullable<AssistantMessage["toolCalls"]>[number] {
+  const assistant = messages.find(
+    (message): message is AssistantMessage =>
+      message.role === "assistant" && message.id === messageId
   );
+  const call = assistant?.toolCalls?.find(
+    (candidate) => candidate.id === toolCallId
+  );
+  if (call === undefined) {
+    throw new Error(
+      `Tool call "${toolCallId}" does not belong to completed Assistant Message "${messageId}".`
+    );
+  }
+  return call;
+}
+
+/**
+ * Validates that a tool event only changes its own output on a started call.
+ * This prevents an executor from rewriting durable model content through a
+ * tool-progress event.
+ */
+function _assertActiveToolUpdate(
+  messages: readonly Message[],
+  activeToolCalls: ReadonlySet<string>,
+  event: Extract<RunExecutionEvent, { type: "tool.updated" | "tool.completed" }>
+): void {
+  const key = _toolCallKey(event.messageId, event.toolCallId);
+  if (!activeToolCalls.has(key)) {
+    throw new Error(
+      `Tool call "${event.toolCallId}" was updated before it started or after it completed.`
+    );
+  }
+  if (event.message.id !== event.messageId) {
+    throw new Error(
+      `Tool call "${event.toolCallId}" updated Assistant Message "${event.message.id}" instead of "${event.messageId}".`
+    );
+  }
+  const previous = messages.find(
+    (message): message is AssistantMessage =>
+      message.role === "assistant" && message.id === event.messageId
+  );
+  if (previous === undefined) {
+    throw new Error(
+      `Assistant Message "${event.messageId}" was updated before completion.`
+    );
+  }
+  const previousCall = _requireAssistantToolCall(
+    messages,
+    event.messageId,
+    event.toolCallId
+  );
+  const updatedCall = event.message.toolCalls?.find(
+    (call) => call.id === event.toolCallId
+  );
+  if (updatedCall?.output === undefined) {
+    throw new Error(
+      `Tool call "${event.toolCallId}" update did not contain an output.`
+    );
+  }
+  const expected: AssistantMessage = {
+    ...previous,
+    toolCalls: previous.toolCalls?.map((call) =>
+      call.id === event.toolCallId
+        ? { ...previousCall, output: updatedCall.output }
+        : call
+    ),
+  };
+  if (!_sameJson(expected, event.message)) {
+    throw new Error(
+      `Tool call "${event.toolCallId}" update changed unrelated Assistant Message data.`
+    );
+  }
+}
+
+/** Enforces the terminal and model-to-tool ordering invariants of one Run. */
+function _assertExecutionSettled(
+  messages: readonly Message[],
+  emittedAssistantIds: ReadonlySet<string>,
+  activeToolCalls: ReadonlySet<string>,
+  boundary: string
+): void {
+  if (emittedAssistantIds.size === 0) {
+    throw new Error(
+      `RunExecutor produced no completed Assistant Message ${boundary}.`
+    );
+  }
+  if (activeToolCalls.size > 0) {
+    throw new Error(`RunExecutor left a started tool call unfinished ${boundary}.`);
+  }
+  for (const message of messages) {
+    if (message.role !== "assistant" || !emittedAssistantIds.has(message.id)) {
+      continue;
+    }
+    const pending = message.toolCalls?.find((call) => call.output === undefined);
+    if (pending !== undefined) {
+      throw new Error(
+        `RunExecutor left tool call "${pending.id}" unfinished ${boundary}.`
+      );
+    }
+  }
+}
+
+/** Produces a collision-safe key for one Assistant Message tool call. */
+function _toolCallKey(messageId: string, toolCallId: string): string {
+  return JSON.stringify([messageId, toolCallId]);
 }
 
 function _withInterruptedToolOutputs(state: ThreadState):
@@ -1376,59 +1470,8 @@ function _sameJson(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-function _toolCallOutput(
-  output: ToolModelOutput,
-  isError: boolean
-): ToolCallOutput {
-  if (output.type === "text") {
-    return { content: [{ type: "text", text: output.value }], isError };
-  }
-  if (output.type === "json") {
-    return {
-      content: [{ type: "text", text: JSON.stringify(output.value) ?? "null" }],
-      isError,
-    };
-  }
-  return {
-    content: output.value.map((part) =>
-      part.type === "text"
-        ? { type: "text" as const, text: part.text }
-        : part.mediaType.startsWith("image/")
-          ? {
-              type: "image" as const,
-              mimeType: part.mediaType,
-              data: part.data.data,
-            }
-          : {
-              type: "text" as const,
-              text:
-                part.filename === undefined
-                  ? `[${part.mediaType} file]`
-                  : `[${part.mediaType} file: ${part.filename}]`,
-            }
-    ),
-    isError,
-  };
-}
-
 function _errorToolOutput(message: string): ToolCallOutput {
   return { content: [{ type: "text", text: message }], isError: true };
-}
-
-function _defaultModelOutput(value: unknown): ToolModelOutput {
-  return typeof value === "string"
-    ? { type: "text", value }
-    : { type: "json", value };
-}
-
-function _isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    Symbol.asyncIterator in value &&
-    typeof (value as AsyncIterable<unknown>)[Symbol.asyncIterator] ===
-      "function"
-  );
 }
 
 function _throwIfAborted(signal: AbortSignal): void {

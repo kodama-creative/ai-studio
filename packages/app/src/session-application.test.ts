@@ -6,7 +6,7 @@ import {
   type AgentSnapshot,
   type ExecutableAgent,
   InMemoryEngineStore,
-  type ModelTurnDriver,
+  type RunExecutor,
 } from "@llm-space/engine";
 
 import { createSessionApplication } from "./session-application";
@@ -234,16 +234,22 @@ describe.each([
     const retryStarted = _deferred<void>();
     let turn = 0;
     const engine = _engine({
-      modelDriver: {
-        async *run(_input, { signal }) {
+      runExecutor: {
+        async execute(input, sink, { signal }) {
           turn++;
           if (turn === 1) {
-            yield { type: "finish", reason: "stop" };
+            await sink.accept({
+              type: "assistant.completed",
+              message: {
+                id: input.createMessageId(),
+                role: "assistant",
+                content: [],
+              },
+            });
             return;
           }
           retryStarted.resolve();
           await _waitForAbort(signal);
-          yield { type: "finish", reason: "stop" };
         },
       },
     });
@@ -322,20 +328,7 @@ describe.each([
     };
     const engine = _engine({
       executableAgent,
-      modelDriver: {
-        async *run() {
-          await Promise.resolve();
-          yield {
-            type: "tool.call",
-            call: {
-              id: "call-side-effect",
-              name: "side_effect",
-              arguments: {},
-            },
-          };
-          yield { type: "finish", reason: "tool-calls" };
-        },
-      },
+      runExecutor: _blockingToolRunExecutor("side_effect", "call-side-effect"),
     });
     const application = createSessionApplication({
       engine,
@@ -540,19 +533,13 @@ test("isolates a malformed Run intent while recovering other Sessions", async ()
 
 function _engine(
   options: {
-    readonly modelDriver?: ModelTurnDriver;
+    readonly runExecutor?: RunExecutor;
     readonly executableAgent?: ExecutableAgent;
   } = {}
 ): AgentEngine {
   return createAgentEngine({
     store: new InMemoryEngineStore(),
-    modelDriver: options.modelDriver ?? {
-      async *run() {
-        await Promise.resolve();
-        yield { type: "text.delta", delta: "Done." };
-        yield { type: "finish", reason: "stop" };
-      },
-    },
+    runExecutor: options.runExecutor ?? _textRunExecutor("Done."),
     agentResolver: {
       resolve(snapshot) {
         return Promise.resolve(
@@ -577,6 +564,64 @@ function _engine(
       },
     }),
   });
+}
+
+function _textRunExecutor(text: string): RunExecutor {
+  return {
+    async execute(input, sink) {
+      const message = {
+        id: input.createMessageId(),
+        role: "assistant" as const,
+        content: [{ type: "text" as const, text }],
+      };
+      await sink.accept({
+        type: "assistant.delta",
+        message,
+        textDelta: text,
+      });
+      await sink.accept({ type: "assistant.completed", message });
+    },
+  };
+}
+
+function _blockingToolRunExecutor(
+  toolName: string,
+  toolCallId: string
+): RunExecutor {
+  return {
+    async execute(input, sink, { signal }) {
+      const message = {
+        id: input.createMessageId(),
+        role: "assistant" as const,
+        content: [],
+        toolCalls: [
+          { id: toolCallId, input: { name: toolName, arguments: {} } },
+        ],
+      };
+      await sink.accept({ type: "assistant.completed", message });
+      await sink.accept({
+        type: "tool.started",
+        messageId: message.id,
+        toolCallId,
+        toolName,
+      });
+      const prepared = input.agent.tools.get(toolName);
+      if (prepared === undefined) throw new Error(`${toolName} was not found`);
+      await prepared.definition.execute(
+        {},
+        input.createToolContext({
+          execution: {
+            threadId: input.threadId,
+            runId: input.runId,
+            stepIndex: 0,
+            callId: toolCallId,
+            toolName,
+          },
+          signal,
+        })
+      );
+    },
+  };
 }
 
 async function _consume(values: AsyncIterable<unknown>): Promise<void> {
