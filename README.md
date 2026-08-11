@@ -16,7 +16,7 @@ English | [中文](./README.zh-CN.md)
 
 https://github.com/user-attachments/assets/2ba7a600-1f1a-44c0-b9f1-34ad42100213
 
-[**LLM Space** v4](https://github.com/deer-flow/llm-space) is a desktop app for agent builders — prototype your next agent ideas, inspect every step of your harness execution, debug failures, and evaluate performance, all in one place.
+[**LLM Space** v4](https://github.com/deer-flow/llm-space) is a desktop app for agent builders — prototype your next agent ideas, inspect every execution step, debug failures, and evaluate performance, all in one place.
 
 **Official website:** https://deer-flow.github.io/llm-space/
 

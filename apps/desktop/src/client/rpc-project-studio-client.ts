@@ -1,7 +1,4 @@
-import type {
-  StudioEventCursor,
-  StudioThreadEvent,
-} from "@llm-space/harness/studio";
+import type { StudioEventCursor, StudioThreadEvent } from "@llm-space/studio";
 
 import { electrobun } from "@/lib/electrobun";
 import type { ProjectSourceSnapshot } from "@/shared/project-studio";

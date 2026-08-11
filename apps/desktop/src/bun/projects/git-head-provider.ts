@@ -1,4 +1,4 @@
-import type { SourceRevisionProvider } from "@llm-space/harness/studio";
+import type { SourceRevisionProvider } from "@llm-space/studio";
 
 export class GitHeadProvider implements SourceRevisionProvider {
   constructor(private readonly _projectRoot: string) {}

@@ -37,7 +37,7 @@ import type {
   StudioThread,
   StudioThreadDocument,
   StudioThreadEvent,
-} from "@llm-space/harness/studio";
+} from "@llm-space/studio";
 import type { RPCSchema } from "electrobun";
 
 import type { DesktopWindowContext } from "./agent-project";
@@ -141,21 +141,21 @@ export interface DesktopRPCType {
       };
       projectListRunHistory: {
         params: { threadId: string };
-        response: readonly import("@llm-space/harness/studio").StudioRunHistoryEntry[];
+        response: readonly import("@llm-space/studio").StudioRunHistoryEntry[];
       };
       projectSaveRunHistory: {
         params: { threadId: string; runIds: readonly string[] };
-        response: readonly import("@llm-space/harness/studio").StudioRunHistoryEntry[];
+        response: readonly import("@llm-space/studio").StudioRunHistoryEntry[];
       };
       projectListEvaluationMetadata: {
         params: { threadId: string };
-        response: import("@llm-space/harness/evaluation").StudioEvaluationMetadata;
+        response: import("@llm-space/studio/evaluation").StudioEvaluationMetadata;
       };
       projectSaveEvaluationMetadata: {
         params: {
           threadId: string;
-        } & import("@llm-space/harness/evaluation").StudioEvaluationMetadataInput;
-        response: import("@llm-space/harness/evaluation").StudioEvaluationMetadata;
+        } & import("@llm-space/studio/evaluation").StudioEvaluationMetadataInput;
+        response: import("@llm-space/studio/evaluation").StudioEvaluationMetadata;
       };
       projectListSourceFiles: {
         params: Record<string, never>;

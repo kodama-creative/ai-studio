@@ -9,28 +9,26 @@ export interface AgentProject {
   readonly name: string;
   readonly rootPath: string;
   readonly agentRoot: string;
-  readonly threadRoot: string;
-  readonly harnessStateRoot: string;
+  readonly studioStateRoot: string;
+  readonly databasePath: string;
 }
 
-export async function openAgentProject(startPath: string): Promise<AgentProject> {
+export async function openAgentProject(
+  startPath: string
+): Promise<AgentProject> {
   const resolved = await resolveAgentProject({ startPath });
   const [rootPath, agentRoot] = await Promise.all([
     realpath(resolved.appRoot),
     realpath(resolved.agentRoot),
   ]);
-  const threadRoot = join(rootPath, "threads");
-  const harnessStateRoot = join(rootPath, ".llm-space", "harness");
-  await Promise.all([
-    mkdir(threadRoot, { recursive: true }),
-    mkdir(harnessStateRoot, { recursive: true, mode: 0o700 }),
-  ]);
+  const studioStateRoot = join(rootPath, ".llm-space", "studio");
+  await mkdir(studioStateRoot, { recursive: true, mode: 0o700 });
   return {
     id: createHash("sha256").update(rootPath).digest("hex").slice(0, 16),
     name: basename(rootPath),
     rootPath,
     agentRoot,
-    threadRoot,
-    harnessStateRoot,
+    studioStateRoot,
+    databasePath: join(studioStateRoot, "studio.sqlite"),
   };
 }

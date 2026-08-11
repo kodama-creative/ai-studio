@@ -1,8 +1,10 @@
+import type { JsonValue } from "../shared/types";
+
 import { AGENT_CONTEXT_STORAGE } from "./context-storage";
 
 const RESERVED_STATE_NAME_PREFIX = "llm-space.";
 
-export interface StateHandle<T> {
+export interface StateHandle<T extends JsonValue> {
   get(): T;
   update(fn: (current: T) => T): void;
 }
@@ -15,7 +17,10 @@ function _loadContext() {
   return context;
 }
 
-export function defineState<T>(name: string, initial: () => T): StateHandle<T> {
+export function defineState<T extends JsonValue>(
+  name: string,
+  initial: () => T
+): StateHandle<T> {
   if (name.startsWith(RESERVED_STATE_NAME_PREFIX)) {
     throw new Error(
       `defineState() name "${name}" uses the reserved prefix "${RESERVED_STATE_NAME_PREFIX}".`

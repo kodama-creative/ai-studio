@@ -1,15 +1,15 @@
 import type {
-  StudioEvaluationMetadata,
-  StudioEvaluationMetadataInput,
-} from "@llm-space/harness/evaluation";
-import type {
   StudioEventCursor,
   StudioRunReceipt,
   StudioRunHistoryEntry,
   StudioThread,
   StudioThreadDocument,
   StudioThreadEvent,
-} from "@llm-space/harness/studio";
+} from "@llm-space/studio";
+import type {
+  StudioEvaluationMetadata,
+  StudioEvaluationMetadataInput,
+} from "@llm-space/studio/evaluation";
 
 export interface ProjectStudioTransport {
   getSourceRevision(): Promise<string>;

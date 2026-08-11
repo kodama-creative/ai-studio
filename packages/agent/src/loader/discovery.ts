@@ -452,7 +452,7 @@ async function _diagnoseUnsupportedExtensionSlots(
     diagnostics.push(
       _diagnostic(
         "discover/extension-slot-unsupported",
-        `Extension source cannot contribute the "${slot}" harness slot.`,
+        `Extension source cannot contribute the "${slot}" Agent definition slot.`,
         join(root, entry.name)
       )
     );

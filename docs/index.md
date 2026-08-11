@@ -26,4 +26,4 @@ This is the English user manual for LLM Space. Start with the quick start guide,
 
 - [GitHub repository](https://github.com/deer-flow/llm-space)
 - [Support and donate - Chinese](https://my.feishu.cn/wiki/OvLBwVuSkiCR1ik5wGEcBXZfnye)
-- [Harness course series - Chinese](https://my.feishu.cn/wiki/L082wubkdie8uMkRUjgceKYQnIe)
+- [Agent Engine course series - Chinese](https://my.feishu.cn/wiki/L082wubkdie8uMkRUjgceKYQnIe)

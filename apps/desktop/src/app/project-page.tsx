@@ -1,9 +1,9 @@
-import type { StudioEvaluationMetadata } from "@llm-space/harness/evaluation";
 import type {
   StudioThread,
   StudioThreadEventData,
   StudioRunHistoryEntry,
-} from "@llm-space/harness/studio";
+} from "@llm-space/studio";
+import type { StudioEvaluationMetadata } from "@llm-space/studio/evaluation";
 import { CodeEditor } from "@llm-space/ui/components/code-editor";
 import {
   ThreadPlayground,

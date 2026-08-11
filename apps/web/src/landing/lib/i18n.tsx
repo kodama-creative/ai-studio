@@ -32,7 +32,7 @@ const MESSAGES = {
       titleBefore: 'Build, trace, and debug agents in ',
       titleAfter: '',
       subtitle:
-        'A local-first desktop app to prototype agents, inspect every harness step, replay failures, and evaluate performance.',
+        'A local-first desktop app to prototype agents, inspect every execution step, replay failures, and evaluate performance.',
       download: 'Download',
       appleSilicon: 'Apple Silicon',
       intel: 'Intel',

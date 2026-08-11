@@ -293,7 +293,7 @@ describe("loadAgent", () => {
     ).toBeDefined();
   });
 
-  test("describes every executable harness slot while keeping callbacks in the module map", async () => {
+  test("describes every executable Agent slot while keeping callbacks in the module map", async () => {
     const root = await _fixture();
     const agentRoot = join(root, "agent");
     await Promise.all(
@@ -509,7 +509,7 @@ describe("loadAgent", () => {
     ).toBeDefined();
   });
 
-  test("rejects module exports that do not match their harness slot", async () => {
+  test("rejects module exports that do not match their Agent slot", async () => {
     const root = await _fixture();
     await writeFile(
       join(root, "agent", "agent.ts"),
@@ -575,7 +575,7 @@ describe("loadAgent", () => {
     });
   });
 
-  test("rejects malformed definitions in every authored harness slot", async () => {
+  test("rejects malformed definitions in every authored Agent slot", async () => {
     const root = await _fixture();
     const agentRoot = join(root, "agent");
     await Promise.all(

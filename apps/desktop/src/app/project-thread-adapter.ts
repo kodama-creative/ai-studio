@@ -1,20 +1,13 @@
-import type { ToolModelOutput } from "@llm-space/agent/tools";
-import type {
-  Message,
-  MessageContent as PlaygroundMessageContent,
-  Thread,
-  Tool,
-  ToolCallOutput,
-} from "@llm-space/core";
+import type { Thread, Tool } from "@llm-space/core";
 import type {
   EvaluationRecord,
   EvaluationRubricRecord,
 } from "@llm-space/core/thread";
 import type {
-  ConversationMessage,
-  ConversationToolCall,
-  MessageContent,
-} from "@llm-space/harness";
+  StudioThread,
+  StudioThreadDocument,
+  StudioRunHistoryEntry,
+} from "@llm-space/studio";
 import type {
   StudioEvaluationMetadata,
   StudioEvaluationMetadataInput,
@@ -22,12 +15,7 @@ import type {
   EvaluationInput,
   EvaluationRubric,
   EvaluationRubricInput,
-} from "@llm-space/harness/evaluation";
-import type {
-  StudioThread,
-  StudioThreadDocument,
-  StudioRunHistoryEntry,
-} from "@llm-space/harness/studio";
+} from "@llm-space/studio/evaluation";
 import type { ExternalThreadExecutionRuntime } from "@llm-space/ui/components/thread-playground";
 
 import type { ProjectStudioClient } from "@/client/project-studio-client";
@@ -64,7 +52,7 @@ export function studioThreadToPlaygroundThread(
         description: tool.description,
         parameters: tool.inputSchema,
       })),
-      messages: thread.document.conversation.messages.map(_toPlaygroundMessage),
+      messages: [...structuredClone(thread.document.conversation.messages)],
     },
     ...(runHistory.length === 0 ? {} : { runHistory }),
     ...(evaluationMetadata?.evaluations.length
@@ -136,20 +124,12 @@ export function playgroundThreadToStudioDocument(
   thread: Thread,
   base: StudioThread
 ): StudioThreadDocument {
-  const origins = new Map(
-    base.document.conversation.messages.map((message) => [
-      message.id,
-      message.origin,
-    ])
-  );
   return {
     ...base.document,
     title: thread.title ?? base.document.title,
     conversation: {
       state: base.document.conversation.state,
-      messages: (thread.context?.messages ?? []).map((message) =>
-        _toConversationMessage(message, origins.get(message.id))
-      ),
+      messages: structuredClone(thread.context?.messages ?? []),
     },
   };
 }
@@ -258,151 +238,6 @@ export function createProjectThreadExecutionRuntime(input: {
       }
     },
   };
-}
-
-function _toPlaygroundMessage(message: ConversationMessage): Message {
-  if (message.role === "user") {
-    return {
-      id: message.id,
-      role: "user",
-      content: message.content.map(_toPlaygroundContent),
-    };
-  }
-  return {
-    id: message.id,
-    role: "assistant",
-    content: message.content
-      .map(_toPlaygroundContent)
-      .filter(
-        (
-          content
-        ): content is Extract<PlaygroundMessageContent, { type: "text" }> =>
-          content.type === "text"
-      ),
-    ...(message.thinking === undefined ? {} : { thinking: message.thinking }),
-    ...(message.toolCalls === undefined
-      ? {}
-      : { toolCalls: message.toolCalls.map(_toPlaygroundToolCall) }),
-  };
-}
-
-function _toPlaygroundContent(
-  content: MessageContent
-): PlaygroundMessageContent {
-  return content.type === "text"
-    ? content
-    : { type: "image", mimeType: content.mimeType, data: content.data };
-}
-
-function _toPlaygroundToolCall(call: ConversationToolCall) {
-  return {
-    id: call.id,
-    input: {
-      name: call.name,
-      arguments: _argumentRecord(call.input),
-    },
-    ...(call.result === undefined
-      ? {}
-      : {
-          output: {
-            content: _toolOutputContent(call.result.output),
-            isError: call.result.isError,
-          },
-        }),
-  };
-}
-
-function _toConversationMessage(
-  message: Message,
-  origin: ConversationMessage["origin"]
-): ConversationMessage {
-  if (message.role === "user") {
-    return {
-      id: message.id,
-      role: "user",
-      content: message.content.map(_toConversationContent),
-      ...(origin === undefined ? {} : { origin }),
-    };
-  }
-  return {
-    id: message.id,
-    role: "assistant",
-    content: message.content.map(_toConversationContent),
-    ...(message.thinking === undefined ? {} : { thinking: message.thinking }),
-    ...(message.toolCalls === undefined
-      ? {}
-      : {
-          toolCalls: message.toolCalls.map((call): ConversationToolCall => ({
-            id: call.id,
-            name: call.input.name,
-            input: call.input.arguments,
-            ...(call.output === undefined
-              ? {}
-              : {
-                  result: {
-                    output: _toToolModelOutput(call.output),
-                    isError: call.output.isError ?? false,
-                  },
-                }),
-          })),
-        }),
-    ...(origin === undefined ? {} : { origin }),
-  };
-}
-
-function _toConversationContent(
-  content: PlaygroundMessageContent
-): MessageContent {
-  return content.type === "text"
-    ? content
-    : { type: "image", mimeType: content.mimeType, data: content.data };
-}
-
-function _toolOutputContent(
-  output: ToolModelOutput
-): ToolCallOutput["content"] {
-  if (output.type === "text") return [{ type: "text", text: output.value }];
-  if (output.type === "json") {
-    return [{ type: "text", text: JSON.stringify(output.value) ?? "null" }];
-  }
-  return output.value.map((part) => {
-    if (part.type === "text") return { type: "text" as const, text: part.text };
-    if (part.mediaType.startsWith("image/")) {
-      return {
-        type: "image" as const,
-        mimeType: part.mediaType,
-        data: part.data.data,
-      };
-    }
-    return {
-      type: "text" as const,
-      text:
-        part.filename === undefined
-          ? `[${part.mediaType} file]`
-          : `[${part.mediaType} file: ${part.filename}]`,
-    };
-  });
-}
-
-function _toToolModelOutput(output: ToolCallOutput): ToolModelOutput {
-  return {
-    type: "content",
-    value: output.content.map((content) =>
-      content.type === "text"
-        ? { type: "text" as const, text: content.text }
-        : {
-            type: "file" as const,
-            data: { type: "data" as const, data: content.data },
-            mediaType: content.mimeType,
-          }
-    ),
-  };
-}
-
-function _argumentRecord(value: unknown): Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
 }
 
 function _modelConfig(model: StudioThread["document"]["agent"]["model"]) {

@@ -170,7 +170,7 @@ function _buildMenu(updateReady: boolean): ApplicationMenuItemConfig[] {
         { type: "divider" },
         { label: "Visit Official Website", action: "openOfficialWebsite" },
         { label: "Visit GitHub Project", action: "openGitHubProject" },
-        { label: "Visit Harness 101", action: "openHarness101" },
+        { label: "Visit Agent 101", action: "openAgent101" },
         { type: "divider" },
         { label: "Report Bug", action: "reportBugs" },
         { label: "Donate", action: "donate" },
@@ -236,7 +236,7 @@ const MENU_ACTION_COMMANDS: Record<string, Command> = {
     args: { url: "https://my.feishu.cn/wiki/OvLBwVuSkiCR1ik5wGEcBXZfnye" },
   },
   onboard: { type: "openOnboard", args: {} },
-  openHarness101: {
+  openAgent101: {
     type: "openLink",
     args: {
       url: isChineseLocale()
@@ -256,12 +256,11 @@ export function registerMenuActions(
 ) {
   ApplicationMenu.setApplicationMenu(_buildMenu(false));
   ApplicationMenu.on("application-menu-clicked", (event) => {
-    const { action, id } = (
-      event as { data: { action: string; id?: number } }
-    ).data;
+    const { action, id } = (event as { data: { action: string; id?: number } })
+      .data;
     const command = MENU_ACTION_COMMANDS[action];
     const target =
-      id === undefined ? window : BrowserWindow.getById(id) ?? window;
+      id === undefined ? window : (BrowserWindow.getById(id) ?? window);
     if (command) executeCommand(command, target);
   });
 }

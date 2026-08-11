@@ -24,4 +24,4 @@
 
 - [GitHub 开源仓库](https://github.com/deer-flow/llm-space)
 - [支持与捐助](https://my.feishu.cn/wiki/OvLBwVuSkiCR1ik5wGEcBXZfnye)
-- [Harness 系列课程](https://my.feishu.cn/wiki/L082wubkdie8uMkRUjgceKYQnIe)
+- [Agent Engine 系列课程](https://my.feishu.cn/wiki/L082wubkdie8uMkRUjgceKYQnIe)

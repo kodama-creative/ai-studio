@@ -51,9 +51,10 @@
         "@hello-pangea/dnd": "^18.0.1",
         "@llm-space/agent": "workspace:*",
         "@llm-space/core": "workspace:*",
-        "@llm-space/harness": "workspace:*",
-        "@llm-space/harness-pi": "workspace:*",
+        "@llm-space/engine": "workspace:*",
+        "@llm-space/engine-pi": "workspace:*",
         "@llm-space/runtime": "workspace:*",
+        "@llm-space/studio": "workspace:*",
         "@llm-space/ui": "workspace:*",
         "@lobehub/icons": "^5.10.1",
         "@modelcontextprotocol/sdk": "1.30.0",
@@ -148,8 +149,10 @@
       "dependencies": {
         "@earendil-works/pi-ai": "catalog:",
         "@llm-space/agent": "workspace:*",
-        "@llm-space/harness": "workspace:*",
-        "@llm-space/harness-pi": "workspace:*",
+        "@llm-space/app": "workspace:*",
+        "@llm-space/core": "workspace:*",
+        "@llm-space/engine": "workspace:*",
+        "@llm-space/engine-pi": "workspace:*",
       },
     },
     "packages/agent": {
@@ -159,6 +162,14 @@
         "@standard-schema/spec": "catalog:",
         "ai": "catalog:",
         "gray-matter": "catalog:",
+      },
+    },
+    "packages/app": {
+      "name": "@llm-space/app",
+      "version": "4.0.1",
+      "dependencies": {
+        "@llm-space/core": "workspace:*",
+        "@llm-space/engine": "workspace:*",
       },
     },
     "packages/core": {
@@ -177,21 +188,22 @@
         "@types/nunjucks": "^3.2.6",
       },
     },
-    "packages/harness": {
-      "name": "@llm-space/harness",
+    "packages/engine": {
+      "name": "@llm-space/engine",
       "version": "4.0.1",
       "dependencies": {
         "@llm-space/agent": "workspace:*",
+        "@llm-space/core": "workspace:*",
         "ajv": "^8.17.1",
       },
     },
-    "packages/harness-pi": {
-      "name": "@llm-space/harness-pi",
+    "packages/engine-pi": {
+      "name": "@llm-space/engine-pi",
       "version": "4.0.1",
       "dependencies": {
         "@earendil-works/pi-ai": "catalog:",
-        "@llm-space/agent": "workspace:*",
-        "@llm-space/harness": "workspace:*",
+        "@llm-space/core": "workspace:*",
+        "@llm-space/engine": "workspace:*",
       },
     },
     "packages/runtime": {
@@ -205,6 +217,14 @@
         "gray-matter": "^4.0.3",
         "skills-handler": "^0.1.2",
         "zod": "catalog:",
+      },
+    },
+    "packages/studio": {
+      "name": "@llm-space/studio",
+      "version": "4.0.1",
+      "dependencies": {
+        "@llm-space/core": "workspace:*",
+        "@llm-space/engine": "workspace:*",
       },
     },
     "packages/ui": {
@@ -702,19 +722,23 @@
 
     "@llm-space/agent": ["@llm-space/agent@workspace:packages/agent"],
 
+    "@llm-space/app": ["@llm-space/app@workspace:packages/app"],
+
     "@llm-space/core": ["@llm-space/core@workspace:packages/core"],
 
     "@llm-space/desktop": ["@llm-space/desktop@workspace:apps/desktop"],
 
+    "@llm-space/engine": ["@llm-space/engine@workspace:packages/engine"],
+
+    "@llm-space/engine-pi": ["@llm-space/engine-pi@workspace:packages/engine-pi"],
+
     "@llm-space/example-basic-agent": ["@llm-space/example-basic-agent@workspace:examples/basic-agent"],
-
-    "@llm-space/harness": ["@llm-space/harness@workspace:packages/harness"],
-
-    "@llm-space/harness-pi": ["@llm-space/harness-pi@workspace:packages/harness-pi"],
 
     "@llm-space/runtime": ["@llm-space/runtime@workspace:packages/runtime"],
 
     "@llm-space/server": ["@llm-space/server@workspace:apps/server"],
+
+    "@llm-space/studio": ["@llm-space/studio@workspace:packages/studio"],
 
     "@llm-space/ui": ["@llm-space/ui@workspace:packages/ui"],
 

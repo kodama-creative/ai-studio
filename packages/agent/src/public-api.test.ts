@@ -117,7 +117,7 @@ describe("authoring helpers", () => {
     const context = {
       approvedTools: new Set<string>(),
       callId: "call-1",
-      session: { id: "s1" },
+      execution: { threadId: "thread-1", runId: "run-1" },
       toolName: "echo",
     };
     expect(always()(context)).toBe("user-approval");

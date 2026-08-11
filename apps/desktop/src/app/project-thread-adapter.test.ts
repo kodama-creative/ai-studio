@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import type { StudioThread } from "@llm-space/harness/studio";
+import type { StudioThread } from "@llm-space/studio";
 
 import {
   playgroundThreadToStudioEvaluationMetadata,
@@ -11,6 +11,8 @@ test("Studio Thread messages and tool results map into the existing Playground m
   const thread: StudioThread = {
     schemaVersion: 1,
     id: "thread-1",
+    engineThreadId: "engine-thread-1",
+    headCheckpointId: "checkpoint-1",
     document: {
       title: "Example",
       commitId: "commit-a",
@@ -32,10 +34,9 @@ test("Studio Thread messages and tool results map into the existing Playground m
             toolCalls: [
               {
                 id: "call-1",
-                name: "lookup",
-                input: { q: "Ada" },
-                result: {
-                  output: { type: "json", value: { answer: 42 } },
+                input: { name: "lookup", arguments: { q: "Ada" } },
+                output: {
+                  content: [{ type: "text", text: '{"answer":42}' }],
                   isError: false,
                 },
               },
@@ -86,6 +87,8 @@ test("Studio Evaluation resources map to Playground metadata without entering th
   const thread: StudioThread = {
     schemaVersion: 1,
     id: "thread-1",
+    engineThreadId: "engine-thread-1",
+    headCheckpointId: "checkpoint-1",
     document: {
       title: "Example",
       commitId: "commit-a",

@@ -9,7 +9,9 @@
   "dependencies": {
     "@earendil-works/pi-ai": "catalog:",
     "@llm-space/agent": "workspace:*",
-    "@llm-space/harness": "workspace:*",
-    "@llm-space/harness-pi": "workspace:*"
+    "@llm-space/app": "workspace:*",
+    "@llm-space/core": "workspace:*",
+    "@llm-space/engine": "workspace:*",
+    "@llm-space/engine-pi": "workspace:*"
   }
 }

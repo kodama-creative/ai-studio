@@ -9,9 +9,13 @@ import {
   fauxProvider,
 } from "@earendil-works/pi-ai";
 
-import { createBasicAgentLocalHost } from "./local-host";
+import {
+  createBasicAgentLocalHost,
+  type BasicAgentLocalHost,
+} from "./local-host";
 
 const ROOTS: string[] = [];
+const HOSTS: BasicAgentLocalHost[] = [];
 const ORIGINAL_MODEL = process.env.LLM_SPACE_MODEL;
 
 beforeAll(() => {
@@ -24,6 +28,7 @@ afterAll(() => {
 });
 
 afterEach(async () => {
+  await Promise.all(HOSTS.splice(0).map((host) => host.close()));
   await Promise.all(
     ROOTS.splice(0).map((root) => rm(root, { recursive: true, force: true }))
   );
@@ -33,7 +38,7 @@ test("basic agent runs locally with Pi and reattaches its persisted session", as
   const storageRoot = await mkdtemp(join(tmpdir(), "llm-space-basic-agent-"));
   ROOTS.push(storageRoot);
   let output = "";
-  const first = await createBasicAgentLocalHost({
+  const first = await _host({
     storageRoot,
     write: (value) => {
       output += value;
@@ -47,18 +52,31 @@ test("basic agent runs locally with Pi and reattaches its persisted session", as
     id: first.sessionId,
     status: "waiting",
     messages: [
-      { role: "user", content: "hello local agent" },
-      { role: "assistant", toolCalls: [{ name: "word-count" }] },
       {
-        role: "tool",
-        name: "word-count",
-        output: { type: "json", value: { count: 3 } },
+        role: "user",
+        content: [{ type: "text", text: "hello local agent" }],
       },
-      { role: "assistant", content: "The message contains 3 words." },
+      {
+        role: "assistant",
+        toolCalls: [
+          {
+            input: { name: "word-count" },
+            output: {
+              content: [{ type: "text", text: '{"count":3}' }],
+              isError: false,
+            },
+          },
+        ],
+      },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "The message contains 3 words." }],
+      },
     ],
   });
 
-  const restored = await createBasicAgentLocalHost({
+  await first.close();
+  const restored = await _host({
     storageRoot,
     sessionId: first.sessionId,
   });
@@ -87,7 +105,7 @@ test("basic agent cancellation aborts Pi and persists a waiting session", async 
   const firstDelta = new Promise<void>((resolve) => {
     observedDelta = resolve;
   });
-  const host = await createBasicAgentLocalHost({
+  const host = await _host({
     storageRoot,
     models,
     write: () => observedDelta(),
@@ -99,10 +117,19 @@ test("basic agent cancellation aborts Pi and persists a waiting session", async 
   await sending;
 
   expect(await host.snapshot()).toMatchObject({ status: "waiting" });
-  const restored = await createBasicAgentLocalHost({
+  await host.close();
+  const restored = await _host({
     storageRoot,
     sessionId: host.sessionId,
     models,
   });
   expect(await restored.snapshot()).toMatchObject({ status: "waiting" });
 });
+
+async function _host(
+  options: Parameters<typeof createBasicAgentLocalHost>[0]
+): Promise<BasicAgentLocalHost> {
+  const host = await createBasicAgentLocalHost(options);
+  HOSTS.push(host);
+  return host;
+}

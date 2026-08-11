@@ -1,19 +1,18 @@
-import { join } from "node:path";
-
 import { loadAgent } from "@llm-space/agent/loader";
 import type { ToolContext } from "@llm-space/agent/tools";
 import {
-  createModelRunExecutor,
+  createAgentEngine,
   resolveAgentGeneration,
   type AgentSnapshot,
   type ExecutableAgent,
-  type ModelTurnEngine,
-} from "@llm-space/harness";
-import { createFileStudioStorage } from "@llm-space/harness/storage/file";
+  type ModelTurnDriver,
+} from "@llm-space/engine";
+import { createSqliteEngineStore } from "@llm-space/engine/storage/sqlite";
 import {
-  createStudioThreadRuntime,
-  type StudioThreadRuntime,
-} from "@llm-space/harness/studio";
+  createStudioApplication,
+  type StudioApplication,
+} from "@llm-space/studio";
+import { createSqliteStudioStore } from "@llm-space/studio/storage/sqlite";
 
 import type { AgentProjectView } from "../../shared/agent-project";
 import type { ProjectStudioTransport } from "../../shared/project-studio";
@@ -25,13 +24,14 @@ import { ProjectSourceFiles } from "./project-source-files";
 
 export interface CreateProjectStudioHostOptions {
   readonly project: AgentProject;
-  readonly engine: ModelTurnEngine;
+  readonly modelDriver: ModelTurnDriver;
   readonly clock?: () => number;
   readonly generateId?: (prefix: string) => string;
 }
 
 export interface ProjectStudioHost extends ProjectStudioTransport {
   readonly project: AgentProjectView;
+  close(): Promise<void>;
 }
 
 export async function createProjectStudioHost(
@@ -40,37 +40,56 @@ export async function createProjectStudioHost(
   const executable = await _loadExecutableAgent(options.project);
   const { snapshot } = executable;
   const sandbox = new ProjectSandbox(options.project.rootPath);
-  const executor = createModelRunExecutor({
-    engine: options.engine,
-    ...(options.generateId === undefined
-      ? {}
-      : { generateId: options.generateId }),
-    createToolContext: ({ execution, call, modelTurnIndex, signal }) =>
-      _studioToolContext({
-        execution,
-        call,
-        modelTurnIndex,
-        signal,
-        sandbox,
-      }),
+  const engineStore = createSqliteEngineStore({
+    path: options.project.databasePath,
   });
-  const storage = createFileStudioStorage({
-    threadsRoot: options.project.threadRoot,
-    runsRoot: join(options.project.harnessStateRoot, "runs"),
-  });
+  let engine: ReturnType<typeof createAgentEngine>;
+  try {
+    engine = createAgentEngine({
+      store: engineStore,
+      modelDriver: options.modelDriver,
+      agentResolver: {
+        resolve: (storedSnapshot) =>
+          _loadExactExecutableAgent(options.project, storedSnapshot),
+      },
+      createToolContext: ({ execution, signal }) =>
+        _studioToolContext({ execution, signal, sandbox }),
+      ...(options.clock === undefined ? {} : { clock: options.clock }),
+      ...(options.generateId === undefined
+        ? {}
+        : { generateId: options.generateId }),
+    });
+  } catch (error) {
+    engineStore.close();
+    throw error;
+  }
+  let studioStore: ReturnType<typeof createSqliteStudioStore>;
+  try {
+    studioStore = createSqliteStudioStore({
+      path: options.project.databasePath,
+    });
+  } catch (error) {
+    await engine.close();
+    throw error;
+  }
   const revisionProvider = new GitHeadProvider(options.project.rootPath);
-  const runtime = createStudioThreadRuntime({
-    ...storage,
-    executor,
-    revisionProvider,
-    resolveAgent: (storedSnapshot) =>
-      _loadExecutableAgent(options.project, storedSnapshot),
-    resolveCurrentAgent: () => _loadExecutableAgent(options.project),
-    ...(options.clock === undefined ? {} : { clock: options.clock }),
-    ...(options.generateId === undefined
-      ? {}
-      : { generateId: options.generateId }),
-  });
+  let runtime: StudioApplication;
+  try {
+    runtime = createStudioApplication({
+      engine,
+      store: studioStore,
+      revisionProvider,
+      resolveCurrentAgent: () => _loadExecutableAgent(options.project),
+      ...(options.clock === undefined ? {} : { clock: options.clock }),
+      ...(options.generateId === undefined
+        ? {}
+        : { generateId: options.generateId }),
+    });
+  } catch (error) {
+    studioStore.close();
+    await engine.close();
+    throw error;
+  }
   return new ProjectStudioHostImpl(
     options.project,
     snapshot,
@@ -86,7 +105,7 @@ class ProjectStudioHostImpl implements ProjectStudioHost {
   constructor(
     private readonly _agentProject: AgentProject,
     agent: AgentSnapshot,
-    private readonly _runtime: StudioThreadRuntime,
+    private readonly _runtime: StudioApplication,
     private readonly _sourceFiles: ProjectSourceFiles,
     private readonly _revisionProvider: GitHeadProvider
   ) {
@@ -143,7 +162,7 @@ class ProjectStudioHostImpl implements ProjectStudioHost {
 
   saveEvaluationMetadata(
     threadId: string,
-    input: Parameters<StudioThreadRuntime["saveEvaluationMetadata"]>[1]
+    input: Parameters<StudioApplication["saveEvaluationMetadata"]>[1]
   ) {
     return this._runtime.saveEvaluationMetadata(threadId, input);
   }
@@ -168,7 +187,7 @@ class ProjectStudioHostImpl implements ProjectStudioHost {
 
   saveDocument(
     threadId: string,
-    document: Parameters<StudioThreadRuntime["saveDocument"]>[1]
+    document: Parameters<StudioApplication["saveDocument"]>[1]
   ) {
     return this._runtime.saveDocument(threadId, document);
   }
@@ -183,18 +202,22 @@ class ProjectStudioHostImpl implements ProjectStudioHost {
 
   events(
     threadId: string,
-    cursor?: Parameters<StudioThreadRuntime["events"]>[1]
+    cursor?: Parameters<StudioApplication["events"]>[1]
   ) {
     return this._runtime.events(threadId, {
       ...cursor,
       follow: cursor?.follow ?? true,
     });
   }
+
+  /** Stop Engine work and release this project database's connections. */
+  close(): Promise<void> {
+    return this._runtime.close();
+  }
 }
 
 async function _loadExecutableAgent(
-  project: AgentProject,
-  storedSnapshot?: AgentSnapshot
+  project: AgentProject
 ): Promise<ExecutableAgent> {
   const definition = await resolveAgentGeneration(
     await loadAgent({ startPath: project.rootPath })
@@ -208,42 +231,35 @@ async function _loadExecutableAgent(
     tools: [...definition.tools.values()].map((tool) => tool.model),
   };
   return {
-    snapshot: storedSnapshot ?? currentSnapshot,
+    snapshot: currentSnapshot,
     tools: definition.tools,
   };
 }
 
+async function _loadExactExecutableAgent(
+  project: AgentProject,
+  storedSnapshot: AgentSnapshot
+): Promise<ExecutableAgent> {
+  const current = await _loadExecutableAgent(project);
+  if (
+    current.snapshot.agentId !== storedSnapshot.agentId ||
+    current.snapshot.generationId !== storedSnapshot.generationId
+  ) {
+    throw new Error(
+      `Agent generation "${storedSnapshot.agentId}/${storedSnapshot.generationId}" is unavailable.`
+    );
+  }
+  return current;
+}
+
 function _studioToolContext(input: {
-  readonly execution: Parameters<
-    NonNullable<
-      Parameters<typeof createModelRunExecutor>[0]["createToolContext"]
-    >
-  >[0]["execution"];
-  readonly call: Parameters<
-    NonNullable<
-      Parameters<typeof createModelRunExecutor>[0]["createToolContext"]
-    >
-  >[0]["call"];
-  readonly modelTurnIndex: number;
+  readonly execution: ToolContext["execution"];
   readonly signal: AbortSignal;
   readonly sandbox: ProjectSandbox;
 }): ToolContext {
-  const threadId =
-    input.execution.owner.type === "thread"
-      ? input.execution.owner.threadId
-      : input.execution.owner.sessionId;
   return {
+    execution: input.execution,
     abortSignal: input.signal,
-    callId: input.call.id,
-    toolName: input.call.name,
-    session: {
-      id: `studio:${threadId}`,
-      auth: { current: null, initiator: null },
-      turn: {
-        id: input.execution.runId,
-        sequence: input.modelTurnIndex + 1,
-      },
-    },
     getSandbox: () => Promise.resolve(input.sandbox),
     getSkill(identifier: string) {
       throw new Error(`This Studio host cannot resolve skill "${identifier}".`);

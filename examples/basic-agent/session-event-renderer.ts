@@ -1,23 +1,18 @@
-import type { AgentSession } from "@llm-space/harness";
+import type { RunFrame } from "@llm-space/engine";
 
-export async function renderSessionTurn(
-  session: AgentSession,
-  afterSequence: number,
+/** Renders durable Run snapshots/events without owning Run execution lifetime. */
+export async function renderRun(
+  frames: AsyncIterable<RunFrame>,
   write: (value: string) => void
 ): Promise<void> {
-  for await (const item of session.events({
-    afterSequence,
-    follow: true,
-  })) {
-    if (item.event.type === "message.appended") {
-      write(item.event.delta);
-    }
-    if (
-      item.event.type === "session.waiting" ||
-      item.event.type === "session.completed" ||
-      item.event.type === "session.failed"
-    ) {
-      return;
+  for await (const frame of frames) {
+    if (frame.type === "snapshot") {
+      for (const output of frame.outputs) {
+        const text = output.message.content.map((part) => part.text).join("\n");
+        if (text.length > 0) write(text);
+      }
+    } else if (frame.event.type === "message.delta") {
+      write(frame.event.delta);
     }
   }
 }

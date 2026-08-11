@@ -16,7 +16,7 @@ LLM Space 是开源产品。如果它对你有帮助，欢迎到 [GitHub 开源�
 
 - [GitHub 开源仓库](https://github.com/deer-flow/llm-space)：欢迎 Star，这是对项目最大的帮助。
 - [支持与捐助](https://my.feishu.cn/wiki/OvLBwVuSkiCR1ik5wGEcBXZfnye)：喜欢的话，可以用爱发电。
-- [Harness 系列课程](https://my.feishu.cn/wiki/L082wubkdie8uMkRUjgceKYQnIe)：学习 Agent 开发、调试和评测的系统方法。
+- [Agent Engine 系列课程](https://my.feishu.cn/wiki/L082wubkdie8uMkRUjgceKYQnIe)：学习 Agent 开发、调试和评测的系统方法。
 
 # 下载、安装和更新
 

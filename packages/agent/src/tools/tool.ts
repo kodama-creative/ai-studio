@@ -4,11 +4,6 @@ import type {
 } from "@standard-schema/spec";
 
 import type { TokenResult } from "../connections/authorization";
-import type {
-  SessionAuth,
-  SessionParent,
-  SessionTurn,
-} from "../context/session";
 import type { SandboxSession } from "../sandbox";
 import {
   TOOL_BRAND,
@@ -20,12 +15,13 @@ import type { SkillHandle } from "../skills";
 import type { Approval } from "./approval";
 import type { ToolModelOutput } from "./output";
 
-export interface SessionContext {
-  readonly session: {
-    readonly id: string;
-    readonly auth: SessionAuth;
-    readonly turn: SessionTurn;
-    readonly parent?: SessionParent;
+export interface ExecutionContext {
+  readonly execution: {
+    readonly threadId: string;
+    readonly runId: string;
+    readonly stepIndex: number;
+    readonly callId: string;
+    readonly toolName: string;
   };
   getSandbox(): Promise<SandboxSession>;
   getSkill(identifier: string): SkillHandle;
@@ -38,10 +34,8 @@ export interface ToolAuthOptions {
   readonly displayName?: string;
 }
 
-export interface ToolContext extends SessionContext {
+export interface ToolContext extends ExecutionContext {
   readonly abortSignal: AbortSignal;
-  readonly callId: string;
-  readonly toolName: string;
   getToken(
     provider: ToolAuthProvider,
     options?: ToolAuthOptions

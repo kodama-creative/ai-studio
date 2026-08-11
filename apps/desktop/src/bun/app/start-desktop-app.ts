@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { getLlmSpaceHomePath } from "@llm-space/core/server";
 import { GistThreadReader, GistThreadWriter } from "@llm-space/core/storage";
-import { createPiModelTurnEngine } from "@llm-space/harness-pi";
+import { createPiModelTurnDriver } from "@llm-space/engine-pi";
 import { PluginManager } from "@llm-space/runtime/plugins";
 import Electrobun, {
   app,
@@ -310,44 +310,75 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
       async create(project) {
         const projectStudioHost = await createProjectStudioHost({
           project,
-          engine: createPiModelTurnEngine({
+          modelDriver: createPiModelTurnDriver({
             models: await modelManager.getAvailableModels(),
           }),
         });
-        const projectWindowRef: { current?: BrowserWindow } = {};
-        const getProjectWindow = (): BrowserWindow => {
-          if (projectWindowRef.current === undefined) {
-            throw new Error("Agent project window is not ready.");
+        let projectRpcController: MainWindowRPCController | undefined;
+        try {
+          const projectWindowRef: { current?: BrowserWindow } = {};
+          const getProjectWindow = (): BrowserWindow => {
+            if (projectWindowRef.current === undefined) {
+              throw new Error("Agent project window is not ready.");
+            }
+            return projectWindowRef.current;
+          };
+          const controller = createWindowRpc(
+            getProjectWindow,
+            projectStudioHost
+          );
+          projectRpcController = controller;
+          const stateStore = await ProjectWindowStateFile.load(
+            homePath,
+            project.id
+          );
+          const projectWindow = await createAgentProjectWindow({
+            rpc: controller.rpc,
+            project: projectStudioHost.project,
+            stateStore,
+            windowStates,
+          });
+          projectWindowRef.current = projectWindow;
+          windowRpcs.set(projectWindow.id, controller.rpc);
+          const closed = new Set<() => void>();
+          let cleanupPromise: Promise<void> | undefined;
+          const cleanup = (): Promise<void> => {
+            cleanupPromise ??= (async () => {
+              windowRpcs.delete(projectWindow.id);
+              controller.dispose();
+              try {
+                await projectStudioHost.close();
+              } finally {
+                for (const listener of closed) listener();
+              }
+            })();
+            return cleanupPromise;
+          };
+          projectWindow.on("close", () => {
+            void cleanup().catch((error) => {
+              console.error("Failed to close agent project host:", error);
+            });
+          });
+          return {
+            activate: () => projectWindow.activate(),
+            close: async () => {
+              projectWindow.close();
+              await cleanup();
+            },
+            onClosed: (listener) => closed.add(listener),
+          };
+        } catch (error) {
+          projectRpcController?.dispose();
+          try {
+            await projectStudioHost.close();
+          } catch (cleanupError) {
+            console.error(
+              "Failed to clean up agent project host after window creation failed:",
+              cleanupError
+            );
           }
-          return projectWindowRef.current;
-        };
-        const projectRpcController = createWindowRpc(
-          getProjectWindow,
-          projectStudioHost
-        );
-        const stateStore = await ProjectWindowStateFile.load(
-          homePath,
-          project.id
-        );
-        const projectWindow = await createAgentProjectWindow({
-          rpc: projectRpcController.rpc,
-          project: projectStudioHost.project,
-          stateStore,
-          windowStates,
-        });
-        projectWindowRef.current = projectWindow;
-        windowRpcs.set(projectWindow.id, projectRpcController.rpc);
-        const closed = new Set<() => void>();
-        projectWindow.on("close", () => {
-          windowRpcs.delete(projectWindow.id);
-          projectRpcController.dispose();
-          for (const listener of closed) listener();
-        });
-        return {
-          activate: () => projectWindow.activate(),
-          close: () => projectWindow.close(),
-          onClosed: (listener) => closed.add(listener),
-        };
+          throw error;
+        }
       },
     },
   });

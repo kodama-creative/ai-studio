@@ -2,7 +2,10 @@
 
 import { createInterface } from "node:readline/promises";
 
-import { createBasicAgentLocalHost } from "./local-host";
+import {
+  createBasicAgentLocalHost,
+  type BasicAgentLocalHost,
+} from "./local-host";
 
 interface CliOptions {
   readonly message?: string;
@@ -17,6 +20,17 @@ async function _main(): Promise<void> {
       : { sessionId: options.sessionId }),
     write: (value) => process.stdout.write(value),
   });
+  try {
+    await _run(host, options);
+  } finally {
+    await host.close();
+  }
+}
+
+async function _run(
+  host: BasicAgentLocalHost,
+  options: CliOptions
+): Promise<void> {
   process.stdout.write(`Session: ${host.sessionId}\n`);
   let interrupted = false;
   const readline =

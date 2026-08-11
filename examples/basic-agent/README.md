@@ -3,8 +3,8 @@
 This example exercises the complete local path:
 
 ```text
-code-first agent → loader → Harness → Pi model engine → authored tool
-                 ↘ file snapshots + JSONL events
+code-first agent → loader → SessionApplication → AgentEngine → Pi driver → authored tool
+                                      ↘ SQLite checkpoints + Session history
 ```
 
 It uses Pi's deterministic `faux/local` model by default, so it runs without an
@@ -27,8 +27,8 @@ mise run dev:agent -- --session <session-id>
 ```
 
 Sessions are stored under
-`$LLM_SPACE_HOME/harness/basic-agent` or, when `LLM_SPACE_HOME` is unset,
-`~/.llm-space/harness/basic-agent`.
+`$LLM_SPACE_HOME/engine/basic-agent` or, when `LLM_SPACE_HOME` is unset,
+`~/.llm-space/engine/basic-agent`.
 
 To use a real provider, select a Pi model and provide its normal environment
 credential:

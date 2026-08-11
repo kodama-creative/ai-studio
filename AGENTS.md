@@ -61,9 +61,11 @@ Bun-workspace monorepo. Workspaces are `packages/*`, `apps/*`, and the runnable
 `apps/web`).
 
 - **`@llm-space/agent`** (`packages/agent`) — code-first Agent definition surfaces plus filesystem discovery/loading. The loader returns a serializable manifest alongside executable module namespaces.
-- **`@llm-space/harness`** (`packages/harness`) — headless Agent session state machine and tool loop. Hosts inject the `ModelTurnEngine`, `SessionRepository`, and `SessionEventLog` seams; memory and single-process file adapters ship with the package. It does not depend on the current Runtime package.
-- **`@llm-space/harness-pi`** (`packages/harness-pi`) — Pi implementation of the Harness `ModelTurnEngine` seam. Harness owns the outer tool loop; this adapter owns Pi model/message/event conversion.
-- **`@llm-space/example-basic-agent`** (`examples/basic-agent`) — locally runnable code-first Agent tracer bullet. `mise run dev:agent` uses a deterministic Pi faux model by default, persists Harness sessions under the LLM Space home, and can select a real registered Pi model through `LLM_SPACE_MODEL`.
+- **`@llm-space/engine`** (`packages/engine`) — headless Agent execution kernel. Owns Engine `Thread`, immutable `ThreadCheckpoint`/`ThreadState`, durable `Run`, the outer model/tool loop, Worker lease/recovery, Run events, and in-memory/SQLite stores. `ThreadState.messages` directly uses `@llm-space/core.Message[]`; Engine has no Session, Task, Project, or Studio concept.
+- **`@llm-space/engine-pi`** (`packages/engine-pi`) — Pi implementation of the Engine `ModelTurnDriver` seam. It converts core messages (including image content and embedded tool results) to Pi messages and maps Pi streaming events back to provider-neutral Engine events.
+- **`@llm-space/app`** (`packages/app`) — reusable end-application layer. Owns `Session`, durable `SessionMessage`, optional `Task`, `SessionRunLink`, Engine-to-Session projection, and in-memory/SQLite stores. `Session.threadId` is only the default continuation Thread; active work is derived from Engine Runs.
+- **`@llm-space/studio`** (`packages/studio`) — Studio application module over Engine. Owns experiment metadata, dirty editable Drafts, Run ordering, evaluations, and Studio event projection. Run state/messages remain in Engine checkpoints; a Draft is cleared when a Run starts. SQLite tables share one physical project database with Engine but retain separate table ownership.
+- **`@llm-space/example-basic-agent`** (`examples/basic-agent`) — locally runnable tracer bullet across loader → App → Engine → Pi driver → authored tools. `mise run dev:agent` uses a deterministic Pi faux model by default and persists Engine checkpoints plus Session history in SQLite under the LLM Space home.
 - **`@llm-space/core`** (`packages/core`) — domain library, **no build step**; its TypeScript is consumed directly via the `exports` map. Entrypoints:
   - `.` → re-exports the internal `client`, `parsers`, `types`, and `utils` directories (all browser-safe).
   - `./client` — browser-safe pieces: the `streamThread()` client (`client/api`), the `reduceMessages()` streaming reducer (`client/reducer`), and the `AgentTransport` interface (`client/transport`).
@@ -155,6 +157,7 @@ State is **persisted to disk** under the llm-space root (`~/.llm-space` by defau
 
 - `workspace/` — thread files as JSON, served through `LocalFileSystem` behind the `fs*` RPC requests. On a fresh install `bun/workspace/seed.ts` creates the empty directory so the welcome screen can offer blank-thread and example-start choices.
 - `settings/` — `models.json` (configured providers, owned by `ModelManager`), `window.json` (frame/zoom/maximized), and `reminders.json` (`featureRemindersSeen` ids + GitHub-star reminder state, owned by `bun/reminders/`).
+- Agent Project Studio state lives per project at `.llm-space/studio/studio.sqlite`. Engine owns the `engine_*` tables; Studio owns the `studio_*` tables. Old `threads/` JSON and `.llm-space/harness/` data are not migrated or read.
 
 ### Releases & auto-update
 

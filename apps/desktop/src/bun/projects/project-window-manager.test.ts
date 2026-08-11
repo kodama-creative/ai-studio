@@ -24,7 +24,7 @@ afterEach(async () => {
   );
 });
 
-test("opening an agent project creates its isolated directories and one window", async () => {
+test("opening an agent project creates its Studio state directory and one window", async () => {
   const root = await _project("alpha");
   const opened: string[] = [];
   const manager = new ProjectWindowManager({ windows: _windows(opened) });
@@ -32,10 +32,9 @@ test("opening an agent project creates its isolated directories and one window",
   await manager.openProject(root);
 
   expect(opened).toEqual([root]);
-  expect((await stat(join(root, "threads"))).isDirectory()).toBe(true);
-  expect(
-    (await stat(join(root, ".llm-space", "harness"))).isDirectory()
-  ).toBe(true);
+  expect((await stat(join(root, ".llm-space", "studio"))).isDirectory()).toBe(
+    true
+  );
 });
 
 test("opening the same canonical project activates its existing window", async () => {

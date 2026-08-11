@@ -17,7 +17,7 @@ export {
   toolOutputPart,
 } from "./output";
 export {
-  type SessionContext,
+  type ExecutionContext,
   type ToolAuthOptions,
   type ToolAuthProvider,
   type ToolContext,

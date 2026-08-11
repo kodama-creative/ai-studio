@@ -5,17 +5,21 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
-import type { ModelTurnEngine } from "@llm-space/harness";
+import type { ModelTurnDriver } from "@llm-space/engine";
 
 import { openAgentProject } from "../bun/projects/agent-project";
-import { createProjectStudioHost } from "../bun/projects/project-studio-host";
-
-import type { ProjectStudioClient } from "./project-studio-client";
+import {
+  createProjectStudioHost,
+  type CreateProjectStudioHostOptions,
+  type ProjectStudioHost,
+} from "../bun/projects/project-studio-host";
 
 const exec = promisify(execFile);
 const ROOTS: string[] = [];
+const HOSTS: ProjectStudioHost[] = [];
 
 afterEach(async () => {
+  await Promise.all(HOSTS.splice(0).map((host) => host.close()));
   await Promise.all(
     ROOTS.splice(0).map((root) => rm(root, { recursive: true, force: true }))
   );
@@ -23,8 +27,8 @@ afterEach(async () => {
 
 test("client creates, runs, and reattaches an independent Studio Thread", async () => {
   const project = await openAgentProject(await _project());
-  const first: ProjectStudioClient = await createProjectStudioHost({
-    engine: TEXT_ENGINE,
+  const first = await _host({
+    modelDriver: TEXT_DRIVER,
     project,
   });
   const created = await first.createThread({ title: "First task" });
@@ -61,8 +65,9 @@ test("client creates, runs, and reattaches an independent Studio Thread", async 
     },
   });
 
-  const second: ProjectStudioClient = await createProjectStudioHost({
-    engine: TEXT_ENGINE,
+  await first.close();
+  const second = await _host({
+    modelDriver: TEXT_DRIVER,
     project,
   });
   expect(await second.listThreads()).toEqual([
@@ -73,10 +78,10 @@ test("client creates, runs, and reattaches an independent Studio Thread", async 
   ).toHaveLength(2);
 });
 
-test("project tools receive a synthetic Studio session and project sandbox", async () => {
+test("project tools receive Engine execution context and project sandbox", async () => {
   const project = await openAgentProject(await _project());
-  const client: ProjectStudioClient = await createProjectStudioHost({
-    engine: WORKING_DIRECTORY_ENGINE,
+  const client = await _host({
+    modelDriver: WORKING_DIRECTORY_DRIVER,
     project,
   });
   const created = await client.createThread();
@@ -104,9 +109,9 @@ test("project tools receive a synthetic Studio session and project sandbox", asy
       role: "assistant",
       toolCalls: [
         {
-          name: "working-directory",
-          result: {
-            output: { type: "text", value: project.rootPath },
+          input: { name: "working-directory" },
+          output: {
+            content: [{ type: "text", text: project.rootPath }],
             isError: false,
           },
         },
@@ -118,8 +123,8 @@ test("project tools receive a synthetic Studio session and project sandbox", asy
 
 test("project Evaluation metadata survives host restart outside the Thread document", async () => {
   const project = await openAgentProject(await _project());
-  const first: ProjectStudioClient = await createProjectStudioHost({
-    engine: TEXT_ENGINE,
+  const first = await _host({
+    modelDriver: TEXT_DRIVER,
     project,
   });
   const thread = await first.createThread();
@@ -154,8 +159,9 @@ test("project Evaluation metadata survives host restart outside the Thread docum
     rubrics: [],
   });
 
-  const second: ProjectStudioClient = await createProjectStudioHost({
-    engine: TEXT_ENGINE,
+  await first.close();
+  const second = await _host({
+    modelDriver: TEXT_DRIVER,
     project,
   });
   expect(await second.listEvaluationMetadata(thread.id)).toMatchObject({
@@ -174,7 +180,10 @@ test("project Evaluation metadata survives host restart outside the Thread docum
 test("uncommitted Agent changes are ignored but a new HEAD blocks execution", async () => {
   const root = await _project();
   const project = await openAgentProject(root);
-  const first = await createProjectStudioHost({ engine: TEXT_ENGINE, project });
+  const first = await _host({
+    modelDriver: TEXT_DRIVER,
+    project,
+  });
   const created = await first.createThread();
   await writeFile(
     join(project.agentRoot, "instructions.md"),
@@ -196,7 +205,7 @@ test("uncommitted Agent changes are ignored but a new HEAD blocks execution", as
   );
 });
 
-const TEXT_ENGINE: ModelTurnEngine = {
+const TEXT_DRIVER: ModelTurnDriver = {
   async *run() {
     await Promise.resolve();
     yield { type: "text.delta", delta: "hello from project" } as const;
@@ -204,10 +213,16 @@ const TEXT_ENGINE: ModelTurnEngine = {
   },
 };
 
-const WORKING_DIRECTORY_ENGINE: ModelTurnEngine = {
+const WORKING_DIRECTORY_DRIVER: ModelTurnDriver = {
   async *run(input) {
     await Promise.resolve();
-    if (input.messages.some((message) => message.role === "tool")) {
+    if (
+      input.messages.some(
+        (message) =>
+          message.role === "assistant" &&
+          message.toolCalls?.some((call) => call.output !== undefined)
+      )
+    ) {
       yield { type: "text.delta", delta: "done" } as const;
       yield { type: "finish", reason: "stop" } as const;
       return;
@@ -217,7 +232,7 @@ const WORKING_DIRECTORY_ENGINE: ModelTurnEngine = {
       call: {
         id: "call-working-directory",
         name: "working-directory",
-        input: {},
+        arguments: {},
       },
     } as const;
     yield { type: "finish", reason: "tool-calls" } as const;
@@ -238,6 +253,14 @@ async function _untilCompleted(
     }
   }
   throw new Error("Studio event stream ended before run completion.");
+}
+
+async function _host(
+  options: CreateProjectStudioHostOptions
+): Promise<ProjectStudioHost> {
+  const host = await createProjectStudioHost(options);
+  HOSTS.push(host);
+  return host;
 }
 
 async function _project(): Promise<string> {

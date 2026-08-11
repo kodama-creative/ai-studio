@@ -15,7 +15,10 @@ export type ApprovalStatus =
 export interface ApprovalContext<TInput = Record<string, unknown>> {
   readonly approvedTools: ReadonlySet<string>;
   readonly toolInput?: TInput extends object ? Readonly<TInput> : TInput;
-  readonly session: { readonly id: string };
+  readonly execution: {
+    readonly threadId: string;
+    readonly runId: string;
+  };
   readonly callId: string;
   readonly toolName: string;
 }

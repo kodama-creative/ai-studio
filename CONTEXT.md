@@ -12,7 +12,7 @@ Studio 中承载 Agent 源码、工作目录和运行配置的开发项目，是
 _Avoid_: Application Project
 
 **Session**:
-用户可以打开、继续和归档的稳定工作入口，拥有完整的产品时间线并指向当前 Agent Thread。
+用户可以打开、继续和归档的稳定工作入口，拥有完整的产品时间线；`threadId` 指向下一次输入默认继续执行的 Agent Thread。
 _Avoid_: Conversation、Chat、Execution Session
 
 **Session Message**:
@@ -38,7 +38,7 @@ Thread 在某一时刻可继续执行的模型消息与 Agent 自定义状态，
 _Avoid_: Transcript、Message History
 
 **Model Message**:
-Thread State 中实际供模型交互使用的消息；它不是独立的产品时间线记录。
+Thread State 中实际供模型交互使用的消息；实现直接复用 `@llm-space/core` 的 `Message`，不再定义 `ConversationMessage` 或 `ModelMessage` 类型。它不是独立的产品时间线记录。
 _Avoid_: Session Message
 
 **Checkpoint**:
@@ -61,4 +61,10 @@ _Avoid_: Turn、Task Attempt、Execution Session
 
 **Studio Experiment**:
 Studio 中用于编辑 Agent 配置、运行候选结果和进行评测的稳定工作入口；它引用 Engine Thread，但不是 Thread 本身。
-_Avoid_: Studio Thread、Session
+_Avoid for new persisted entities_: Studio Thread、Session
+
+兼容说明：现有 Playground/RPC 暂时保留 `StudioThread` 作为由 Experiment + Engine Thread/Checkpoint 组合出的 outward read model；它不是持久化实体。完成 Engine 层迁移后再单独收敛这套 UI 协议命名，当前改造不连带修改旧 `core.Thread`/Playground。
+
+**Studio Draft**:
+Studio Experiment 中尚未提交给 Engine 的可编辑工作副本。Run 创建后 Draft 被消费并清除，Engine Checkpoint 重新成为执行状态的事实来源。
+_Avoid_: Thread State、Current Checkpoint

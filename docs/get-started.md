@@ -16,7 +16,7 @@ LLM Space is open source. If it helps you, please support the project with a Sta
 
 - [GitHub repository](https://github.com/deer-flow/llm-space): a Star is the best support for the project.
 - [Support and donate](https://my.feishu.cn/wiki/OvLBwVuSkiCR1ik5wGEcBXZfnye): support the project if you like it.
-- [Harness course series](https://my.feishu.cn/wiki/L082wubkdie8uMkRUjgceKYQnIe): learn systematic methods for Agent development, debugging, and evaluation.
+- [Agent Engine course series](https://my.feishu.cn/wiki/L082wubkdie8uMkRUjgceKYQnIe): learn systematic methods for Agent development, debugging, and evaluation.
 
 # Download, Install, and Update
 
