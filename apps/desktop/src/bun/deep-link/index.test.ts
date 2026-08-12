@@ -10,7 +10,7 @@ import { DEVELOPMENT_DEEP_LINK_SCHEME } from "../../shared/deep-link-scheme";
 import type { GitHubAuthManager } from "../auth";
 import type { MainWindowRPC } from "../rpc";
 
-import { createDeepLinkHandler } from ".";
+import { createDeepLinkHandler, isStudioOpenDeepLink } from ".";
 
 const roots: string[] = [];
 
@@ -24,6 +24,49 @@ afterEach(() => {
 });
 
 describe("Thread Storage deep links", () => {
+  test("classifies only Studio-open URLs for the active scheme", () => {
+    expect(
+      isStudioOpenDeepLink(
+        "llm-space-dev://studio/open?project=%2Ftmp%2Fagent",
+        DEVELOPMENT_DEEP_LINK_SCHEME
+      )
+    ).toBe(true);
+    expect(
+      isStudioOpenDeepLink(
+        "llm-space-dev://threads/aurora/task",
+        DEVELOPMENT_DEEP_LINK_SCHEME
+      )
+    ).toBe(false);
+    expect(
+      isStudioOpenDeepLink(
+        "llm-space://studio/open?project=%2Ftmp%2Fagent",
+        DEVELOPMENT_DEEP_LINK_SCHEME
+      )
+    ).toBe(false);
+  });
+
+  test("opens an Agent Project from the Studio CLI deep link", async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "llm-space-deep-link-"));
+    roots.push(root);
+    const opened: string[] = [];
+    const handler = createDeepLinkHandler({
+      localFs: new LocalFileSystem(path.join(root, "workspace")),
+      threadStorages: new ThreadStorageRegistry(),
+      githubAuth: {} as GitHubAuthManager,
+      getRpc: () => ({}) as MainWindowRPC,
+      openAgentProject: (projectRoot) => {
+        opened.push(projectRoot);
+        return Promise.resolve();
+      },
+    });
+
+    await handler.handle(
+      "llm-space://studio/open?project=%2Ftmp%2FAgent%20Project"
+    );
+
+    expect(opened).toEqual(["/tmp/Agent Project"]);
+  });
+
   test("imports a registered storage URL into the local workspace", async () => {
     const root = mkdtempSync(path.join(os.tmpdir(), "llm-space-deep-link-"));
     roots.push(root);

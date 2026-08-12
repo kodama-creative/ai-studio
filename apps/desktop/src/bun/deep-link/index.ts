@@ -18,6 +18,7 @@ import type { MainWindowRPC } from "../rpc";
 const SHARED_DEEP_LINK_RE = /^shared\/([^/]+)\/threads\/([^/?#]+)/;
 /** `threads/<deepLinkId>/<resourceId>` */
 const STORAGE_DEEP_LINK_RE = /^threads\/([^/]+)\/(.*)$/;
+const STUDIO_OPEN_DEEP_LINK_RE = /^studio\/open(?:\?|$)/;
 
 /** Where imported shared threads land (workspace-relative). */
 const IMPORT_DIR = "shared";
@@ -30,11 +31,26 @@ export interface DeepLinkHandler {
   cancel(): void;
 }
 
+/** Studio URLs open only a Project window and do not require Main RPC. */
+export function isStudioOpenDeepLink(
+  url: string,
+  scheme: DeepLinkScheme = resolveDeepLinkScheme(
+    process.env.LLM_SPACE_DEEP_LINK_SCHEME
+  )
+): boolean {
+  const prefix = `${scheme}://`;
+  return (
+    url.startsWith(prefix) &&
+    STUDIO_OPEN_DEEP_LINK_RE.test(url.slice(prefix.length))
+  );
+}
+
 export interface DeepLinkDependencies {
   localFs: LocalFileSystem;
   githubAuth: GitHubAuthManager;
   threadStorages: ThreadStorageRegistry;
   getRpc: () => MainWindowRPC;
+  openAgentProject?: (rootPath: string) => Promise<void>;
   scheme?: DeepLinkScheme;
 }
 
@@ -48,6 +64,7 @@ export function createDeepLinkHandler({
   githubAuth,
   threadStorages,
   getRpc,
+  openAgentProject,
   scheme = resolveDeepLinkScheme(process.env.LLM_SPACE_DEEP_LINK_SCHEME),
 }: DeepLinkDependencies): DeepLinkHandler {
   const connectors: Record<string, ThreadConnector> = {
@@ -66,6 +83,15 @@ export function createDeepLinkHandler({
       const prefix = `${scheme}://`;
       if (!url.startsWith(prefix)) return;
       const route = url.slice(prefix.length);
+      if (isStudioOpenDeepLink(url, scheme)) {
+        if (openAgentProject === undefined) return;
+        const project = new URL(url).searchParams.get("project")?.trim();
+        if (project === undefined || project.length === 0) {
+          throw new Error("Can't open Studio: the project path is missing.");
+        }
+        await openAgentProject(project);
+        return;
+      }
       const sharedMatch = SHARED_DEEP_LINK_RE.exec(route);
       const storageMatch = STORAGE_DEEP_LINK_RE.exec(route);
       if (!sharedMatch && !storageMatch) return;

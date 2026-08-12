@@ -50,6 +50,7 @@
     "codemirror": "^6.0.2",
     "electrobun": "^1.18.1",
     "gray-matter": "^4.0.3",
+    "inversify": "^8.2.3",
     "lucide-react": "^1.28.0",
     "posthog-node": "^5.48.0",
     "radix-ui": "^1.6.7",

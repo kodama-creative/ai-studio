@@ -247,11 +247,12 @@ const MENU_ACTION_COMMANDS: Record<string, Command> = {
 };
 
 /**
- * Install the application menu and wire its actions to the main window. Called
- * once after the window exists.
+ * Install the process-wide application menu. Electrobun includes the focused
+ * native window id, so commands continue to target Project Studio after Main
+ * is closed and later recreated.
  */
 export function registerMenuActions(
-  window: BrowserWindow,
+  getFallbackWindow: () => BrowserWindow | undefined,
   executeCommand: (command: Command, window: BrowserWindow) => void
 ) {
   ApplicationMenu.setApplicationMenu(_buildMenu(false));
@@ -260,7 +261,8 @@ export function registerMenuActions(
       .data;
     const command = MENU_ACTION_COMMANDS[action];
     const target =
-      id === undefined ? window : (BrowserWindow.getById(id) ?? window);
-    if (command) executeCommand(command, target);
+      (id === undefined ? undefined : BrowserWindow.getById(id)) ??
+      getFallbackWindow();
+    if (command && target) executeCommand(command, target);
   });
 }

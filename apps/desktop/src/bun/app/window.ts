@@ -9,10 +9,8 @@ import {
 import { BrowserWindow, Updater } from "electrobun/bun";
 
 import type { AgentProjectView } from "../../shared/agent-project";
-import type { Command } from "../../shared/commands";
 import type { MainWindowRPC } from "../rpc";
 
-import { registerMenuActions } from "./menu";
 import type {
   WindowStateManager,
   WindowStatePersistenceStore,
@@ -42,11 +40,9 @@ async function _getMainViewUrl(): Promise<string> {
 
 export async function createMainWindow({
   rpc,
-  executeCommand,
   windowStates,
 }: {
   rpc: MainWindowRPC;
-  executeCommand: (command: Command, window: BrowserWindow) => void;
   windowStates: WindowStateManager;
 }): Promise<BrowserWindow> {
   const url = await _getMainViewUrl();
@@ -76,7 +72,6 @@ export async function createMainWindow({
       rpc.send.fullScreenChanged({ fullScreen });
     },
   });
-  registerMenuActions(window, executeCommand);
   return window;
 }
 

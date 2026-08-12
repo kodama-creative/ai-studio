@@ -90,6 +90,11 @@ export default {
       bundleCEF: false,
     },
   },
+  // Main and Project Studio windows have independent lifecycles. Keeping the
+  // process alive lets Dock reopen rebuild Main after every window is closed.
+  runtime: {
+    exitOnLastWindowClosed: false,
+  },
   scripts: {
     // Both run right before their respective codesign step. Workaround for
     // electrobun#485 (x64-only, no-op elsewhere); see the script header.

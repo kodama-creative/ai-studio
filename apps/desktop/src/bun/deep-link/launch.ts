@@ -32,3 +32,8 @@ export function setDeepLinkHandler(next: (url: string) => void): void {
   handler = next;
   pending.splice(0).forEach(next);
 }
+
+/** Inspect buffered launch URLs before deciding whether Main must be created. */
+export function getPendingDeepLinks(): readonly string[] {
+  return [...pending];
+}
