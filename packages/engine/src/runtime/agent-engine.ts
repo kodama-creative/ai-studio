@@ -12,6 +12,7 @@ import type {
   AgentSnapshot,
   ExecutableAgent,
   Run,
+  RunExecutionMode,
   RunEvent,
   RunEventCursor,
   RunFrame,
@@ -68,11 +69,18 @@ export interface StartRunInput {
   readonly expectedHeadCheckpointId: string;
   readonly inputMessages: readonly Message[];
   readonly agentSnapshot: AgentSnapshot;
+  readonly mode?: RunExecutionMode;
   readonly operationId?: string;
+}
+
+export interface StepRunInput {
+  readonly runId: string;
+  readonly toolCallId?: string;
 }
 
 export interface RetryRunInput {
   readonly runId: string;
+  readonly mode?: RunExecutionMode;
   readonly operationId?: string;
 }
 
@@ -92,6 +100,8 @@ export interface AgentEngine {
   forkThread(input: ForkThreadInput): Promise<Thread>;
   startRun(input: StartRunInput): Promise<Run>;
   retryRun(input: RetryRunInput): Promise<Run>;
+  stepRun(input: StepRunInput): Promise<Run>;
+  continueRun(runId: string): Promise<Run>;
   cancelRun(runId: string): Promise<void>;
   getRun(runId: string): Promise<Run | undefined>;
   getRunByOperationId(operationId: string): Promise<Run | undefined>;
@@ -266,7 +276,8 @@ class AgentEngineImpl implements AgentEngine {
           existing.retryOfRunId !== undefined ||
           existing.baseCheckpointId !== input.expectedHeadCheckpointId ||
           !_sameJson(existing.inputMessages, input.inputMessages) ||
-          !_sameJson(existing.agentSnapshot, input.agentSnapshot)
+          !_sameJson(existing.agentSnapshot, input.agentSnapshot) ||
+          existing.control.mode !== (input.mode ?? "continue")
         ) {
           throw new Error(
             `Run operation "${operationId}" was reused with different startRun input.`
@@ -284,6 +295,7 @@ class AgentEngineImpl implements AgentEngine {
         inputMessages: input.inputMessages,
         agentSnapshot: input.agentSnapshot,
         operationId,
+        control: { mode: input.mode ?? "continue" },
       });
     });
     this._notify();
@@ -297,7 +309,10 @@ class AgentEngineImpl implements AgentEngine {
     const run = this._options.store.transaction((tx) => {
       const existing = tx.getRunByOperationId(operationId);
       if (existing !== undefined) {
-        if (existing.retryOfRunId !== input.runId) {
+        if (
+          existing.retryOfRunId !== input.runId ||
+          existing.control.mode !== (input.mode ?? "continue")
+        ) {
           throw new Error(
             `Run operation "${operationId}" was reused with different retryRun input.`
           );
@@ -314,12 +329,59 @@ class AgentEngineImpl implements AgentEngine {
         inputMessages: original.inputMessages,
         agentSnapshot: original.agentSnapshot,
         operationId,
+        control: { mode: input.mode ?? "continue" },
         retryOfRunId: original.id,
       });
     });
     this._notify();
     this._scheduleDrain();
     return Promise.resolve(structuredClone(run));
+  }
+
+  stepRun(input: StepRunInput): Promise<Run> {
+    return this._resumeRun(input.runId, {
+      mode: "step",
+      ...(input.toolCallId === undefined
+        ? {}
+        : { toolCallId: input.toolCallId }),
+    });
+  }
+
+  continueRun(runId: string): Promise<Run> {
+    return this._resumeRun(runId, { mode: "continue" });
+  }
+
+  /** Queues the next durable control intent for one paused Run. */
+  private _resumeRun(runId: string, control: Run["control"]): Promise<Run> {
+    this._assertOpen();
+    const resumed = this._options.store.transaction((tx) => {
+      const run = _requireRun(tx, runId);
+      if (run.status !== "paused") {
+        throw new Error(`Run "${run.id}" is not paused.`);
+      }
+      const thread = _requireThread(tx, run.threadId);
+      if (run.pause?.checkpointId !== thread.headCheckpointId) {
+        throw new Error(`Thread "${thread.id}" changed while Run was paused.`);
+      }
+      const queued: Run = {
+        ...run,
+        control: structuredClone(control),
+        status: "queued",
+        pause: undefined,
+        workerId: undefined,
+        leaseExpiresAt: undefined,
+      };
+      tx.saveRun(queued);
+      tx.appendRunEvent({
+        runId: run.id,
+        timestamp: this._clock(),
+        event: { type: "run.updated", run: queued },
+      });
+      return queued;
+    });
+    this._notify();
+    this._scheduleDrain();
+    return Promise.resolve(structuredClone(resumed));
   }
 
   cancelRun(runId: string): Promise<void> {
@@ -449,6 +511,7 @@ class AgentEngineImpl implements AgentEngine {
       readonly inputMessages: readonly Message[];
       readonly agentSnapshot: AgentSnapshot;
       readonly operationId: string;
+      readonly control: Run["control"];
       readonly retryOfRunId?: string;
     }
   ): Run {
@@ -483,6 +546,7 @@ class AgentEngineImpl implements AgentEngine {
       baseCheckpointId: input.baseCheckpoint.id,
       inputCheckpointId: inputCheckpoint.id,
       agentSnapshot: structuredClone(input.agentSnapshot),
+      control: structuredClone(input.control),
       status: "queued",
       createdAt: now,
     };
@@ -600,9 +664,14 @@ class AgentEngineImpl implements AgentEngine {
         run.agentSnapshot
       );
       _assertExactAgent(run.agentSnapshot, agent);
-      const inputCheckpoint = this._options.store.transaction((tx) =>
-        _requireCheckpoint(tx, run.inputCheckpointId)
-      );
+      _assertNoUnsupportedApprovals(agent);
+      // A resumed Run continues from the durable Thread head, not from the
+      // original input Checkpoint. Paused Runs release their Worker lease, so
+      // this read is the recovery boundary for the next Step/Continue command.
+      const inputCheckpoint = this._options.store.transaction((tx) => {
+        const thread = _requireThread(tx, run.threadId);
+        return _requireCheckpoint(tx, thread.headCheckpointId);
+      });
       const stateContext = createAgentStateContext(
         inputCheckpoint.threadState.state
       );
@@ -626,7 +695,7 @@ class AgentEngineImpl implements AgentEngine {
     }
   }
 
-  /** Executes one complete loop while turning awaited backend events into durable steps. */
+  /** Executes one control intent while turning awaited backend events into durable steps. */
   private async _executeWithRunExecutor(
     run: Run,
     agent: ExecutableAgent,
@@ -744,9 +813,7 @@ class AgentEngineImpl implements AgentEngine {
         }
         _assertActiveToolUpdate(messages, activeToolCalls, event);
         messages = _replaceAssistant(messages, event.message);
-        activeToolCalls.delete(
-          _toolCallKey(event.messageId, event.toolCallId)
-        );
+        activeToolCalls.delete(_toolCallKey(event.messageId, event.toolCallId));
         checkpoint = this._commitStep({
           runId: run.id,
           parent: checkpoint,
@@ -770,27 +837,138 @@ class AgentEngineImpl implements AgentEngine {
       },
     };
 
-    await this._options.runExecutor.execute(
-      {
-        runId: run.id,
-        threadId: run.threadId,
-        messages,
-        agent,
-        maxModelTurns: this._maxModelTurns,
-        createMessageId: () => this._generateId("message"),
-        createToolContext: this._options.createToolContext,
-      },
-      sink,
-      { signal }
+    let modelTurns = this._options.store.transaction(
+      (tx) =>
+        tx
+          .listCheckpoints(run.threadId)
+          .filter(
+            (candidate) =>
+              candidate.source.type === "run.step" &&
+              candidate.source.runId === run.id &&
+              candidate.source.step === "model.completed"
+          ).length
     );
-    flush();
-    _assertExecutionSettled(
-      messages,
-      emittedAssistantIds,
-      activeToolCalls,
-      "when RunExecutor returned"
-    );
-    this._completeRun(run.id, checkpoint.id);
+
+    while (true) {
+      _throwIfAborted(signal);
+      const step = _nextExecutionStep(messages, run.control);
+      if (step === undefined) {
+        flush();
+        _assertExecutionSettled(
+          messages,
+          emittedAssistantIds,
+          activeToolCalls,
+          "when Run completed"
+        );
+        this._completeRun(run.id, checkpoint.id);
+        return;
+      }
+      if (step.type === "model" && modelTurns >= this._maxModelTurns) {
+        throw new Error(
+          `Run exceeded ${this._maxModelTurns} model turns without completing.`
+        );
+      }
+      const beforeSequence = checkpoint.sequence;
+      await this._options.runExecutor.executeStep(
+        {
+          runId: run.id,
+          threadId: run.threadId,
+          messages,
+          agent,
+          step,
+          // ToolContext stepIndex follows the model turn that requested the
+          // call. It is intentionally independent from Thread checkpoint
+          // sequence, which also includes input/manual/recovery snapshots.
+          stepIndex:
+            step.type === "model" ? modelTurns : Math.max(modelTurns - 1, 0),
+          maxModelTurns: this._maxModelTurns,
+          createMessageId: () => this._generateId("message"),
+          createToolContext: this._options.createToolContext,
+        },
+        sink,
+        { signal }
+      );
+      flush();
+      const committedSteps = checkpoint.sequence - beforeSequence;
+      if (committedSteps <= 0) {
+        throw new Error(
+          step.type === "model"
+            ? "RunExecutor produced no completed Assistant Message for the model step."
+            : "RunExecutor produced no completed tool step when it returned."
+        );
+      }
+      if (run.control.mode === "step" && committedSteps !== 1) {
+        throw new Error(
+          `RunExecutor advanced ${committedSteps} steps for one Step command.`
+        );
+      }
+      modelTurns += this._options.store.transaction(
+        (tx) =>
+          tx
+            .listCheckpoints(run.threadId)
+            .filter(
+              (candidate) =>
+                candidate.sequence > beforeSequence &&
+                candidate.sequence <= checkpoint.sequence &&
+                candidate.source.type === "run.step" &&
+                candidate.source.runId === run.id &&
+                candidate.source.step === "model.completed"
+            ).length
+      );
+      if (run.control.mode === "continue") continue;
+
+      if (_nextExecutionStep(messages, { mode: "continue" }) === undefined) {
+        _assertExecutionSettled(
+          messages,
+          emittedAssistantIds,
+          activeToolCalls,
+          "when Run completed"
+        );
+        this._completeRun(run.id, checkpoint.id);
+        return;
+      }
+      if (activeToolCalls.size > 0) {
+        throw new Error("RunExecutor left a started tool call unfinished.");
+      }
+      const source = checkpoint.source;
+      if (source.type !== "run.step" || source.runId !== run.id) {
+        throw new Error("RunExecutor did not commit the current Run step.");
+      }
+      this._pauseRun(run.id, checkpoint.id, source.step);
+      return;
+    }
+  }
+
+  /** Releases the Worker lease after one durable Step command. */
+  private _pauseRun(
+    runId: string,
+    checkpointId: string,
+    step: "model.completed" | "tool.completed"
+  ): void {
+    const now = this._clock();
+    this._options.store.transaction((tx) => {
+      const run = _requireRun(tx, runId);
+      _assertWorkerOwns(run, this._workerId);
+      const paused: Run = {
+        ...run,
+        status: "paused",
+        pause: {
+          reason: "step.completed",
+          step,
+          checkpointId,
+          pausedAt: now,
+        },
+        workerId: undefined,
+        leaseExpiresAt: undefined,
+      };
+      tx.saveRun(paused);
+      tx.appendRunEvent({
+        runId,
+        timestamp: now,
+        event: { type: "run.updated", run: paused },
+      });
+    });
+    this._notify();
   }
 
   private _commitStep(input: {
@@ -1215,6 +1393,17 @@ class AgentEngineImpl implements AgentEngine {
   }
 }
 
+/** Approval suspension is not implemented, so every resolver must fail closed. */
+function _assertNoUnsupportedApprovals(agent: ExecutableAgent): void {
+  for (const [name, tool] of agent.tools) {
+    if (tool.definition.approval !== undefined) {
+      throw new Error(
+        `Tool approval for "${name}" is not supported by Engine v1.`
+      );
+    }
+  }
+}
+
 class EngineClosedError extends Error {
   constructor() {
     super("AgentEngine closed while Run was active.");
@@ -1253,10 +1442,49 @@ function _assertNoActiveRun(
   if (
     tx
       .listRuns(threadId)
-      .some((run) => run.status === "queued" || run.status === "running")
+      .some(
+        (run) =>
+          run.status === "queued" ||
+          run.status === "running" ||
+          run.status === "paused"
+      )
   ) {
     throw new Error(`Thread "${threadId}" already has an active Run.`);
   }
+}
+
+/** Selects the next durable step from the current Core message state. */
+function _nextExecutionStep(
+  messages: readonly Message[],
+  control: Run["control"]
+):
+  | { readonly type: "model" }
+  | { readonly type: "tools"; readonly toolCallIds: readonly string[] }
+  | undefined {
+  const last = messages.at(-1);
+  if (last === undefined || last.role === "user") return { type: "model" };
+  const pending = (last.toolCalls ?? []).filter(
+    (call) => call.output === undefined
+  );
+  if (pending.length > 0) {
+    if (control.toolCallId !== undefined) {
+      const selected = pending.find((call) => call.id === control.toolCallId);
+      if (selected === undefined) {
+        throw new Error(
+          `Tool call "${control.toolCallId}" is not pending on the current Thread head.`
+        );
+      }
+      return { type: "tools", toolCallIds: [selected.id] };
+    }
+    return {
+      type: "tools",
+      toolCallIds:
+        control.mode === "step"
+          ? [pending[0]!.id]
+          : pending.map((call) => call.id),
+    };
+  }
+  return (last.toolCalls?.length ?? 0) > 0 ? { type: "model" } : undefined;
 }
 
 function _assertWorkerOwns(run: Run, workerId: string): void {
@@ -1402,13 +1630,17 @@ function _assertExecutionSettled(
     );
   }
   if (activeToolCalls.size > 0) {
-    throw new Error(`RunExecutor left a started tool call unfinished ${boundary}.`);
+    throw new Error(
+      `RunExecutor left a started tool call unfinished ${boundary}.`
+    );
   }
   for (const message of messages) {
     if (message.role !== "assistant" || !emittedAssistantIds.has(message.id)) {
       continue;
     }
-    const pending = message.toolCalls?.find((call) => call.output === undefined);
+    const pending = message.toolCalls?.find(
+      (call) => call.output === undefined
+    );
     if (pending !== undefined) {
       throw new Error(
         `RunExecutor left tool call "${pending.id}" unfinished ${boundary}.`

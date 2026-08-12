@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import {
+  access,
   mkdir,
   mkdtemp,
   realpath,
@@ -26,15 +27,23 @@ afterEach(async () => {
 
 test("opening an agent project creates its Studio state directory and one window", async () => {
   const root = await _project("alpha");
+  const homePath = await mkdtemp(join(tmpdir(), "llm-space-agent-home-"));
+  ROOTS.push(homePath);
   const opened: string[] = [];
-  const manager = new ProjectWindowManager({ windows: _windows(opened) });
+  const manager = new ProjectWindowManager({
+    windows: _windows(opened),
+    openProject: (path) =>
+      import("./agent-project").then(({ openAgentProject }) =>
+        openAgentProject(path, { homePath })
+      ),
+  });
 
   await manager.openProject(root);
 
   expect(opened).toEqual([root]);
-  expect((await stat(join(root, ".llm-space", "studio"))).isDirectory()).toBe(
-    true
-  );
+  const studioProjects = join(homePath, "studio", "projects");
+  expect((await stat(studioProjects)).isDirectory()).toBe(true);
+  expect(access(join(root, ".llm-space"))).rejects.toThrow();
 });
 
 test("opening the same canonical project activates its existing window", async () => {
@@ -102,6 +111,39 @@ test("different projects remain isolated and close together", async () => {
 
   expect(opened).toEqual([alpha, beta]);
   expect(closed).toEqual([alpha, beta]);
+});
+
+test("opened projects remain in the main-window catalog after their windows close", async () => {
+  const root = await _project("catalog");
+  let paths: readonly string[] = [];
+  let notifyClosed: (() => void) | undefined;
+  const manager = new ProjectWindowManager({
+    catalog: {
+      load: () => Promise.resolve(paths),
+      save: (next) => {
+        paths = [...next];
+        return Promise.resolve();
+      },
+    },
+    windows: {
+      create: () =>
+        Promise.resolve({
+          activate: () => undefined,
+          close: () => notifyClosed?.(),
+          onClosed: (listener) => {
+            notifyClosed = listener;
+          },
+        }),
+    },
+  });
+
+  await manager.openProject(root);
+  await manager.closeAll();
+
+  expect(paths).toEqual([root]);
+  expect(
+    (await manager.listProjects()).map((project) => project.rootPath)
+  ).toEqual([root]);
 });
 
 test("shutdown keeps open project paths available for the next restore", async () => {

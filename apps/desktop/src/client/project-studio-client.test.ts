@@ -26,7 +26,7 @@ afterEach(async () => {
 });
 
 test("client creates, runs, and reattaches an independent Studio Thread", async () => {
-  const project = await openAgentProject(await _project());
+  const project = await _openProject(await _project());
   const first = await _host({
     runExecutor: TEXT_EXECUTOR,
     project,
@@ -78,8 +78,56 @@ test("client creates, runs, and reattaches an independent Studio Thread", async 
   ).toHaveLength(2);
 });
 
+test("project host steps and continues the same durable Run", async () => {
+  const project = await _openProject(await _project());
+  const client = await _host({
+    runExecutor: STEP_EXECUTOR,
+    project,
+  });
+  const created = await client.createThread();
+  await client.saveDocument(created.id, {
+    ...created.document,
+    conversation: {
+      messages: [
+        {
+          id: "user-step",
+          role: "user",
+          content: [{ type: "text", text: "step through this" }],
+        },
+      ],
+      state: {},
+    },
+  });
+
+  const receipt = await client.run(created.id, {
+    fromMessageId: "user-step",
+    mode: "step",
+  });
+  await _untilPaused(client.events(created.id), receipt.runId);
+  const toolStep = await client.stepRun(receipt.runId, {
+    toolCallId: "call-step",
+  });
+  expect(toolStep.runId).toBe(receipt.runId);
+  await _untilPaused(client.events(created.id), receipt.runId, "tool.completed");
+  const continued = await client.continueRun(receipt.runId);
+  expect(continued.runId).toBe(receipt.runId);
+  await _untilCompleted(client.events(created.id), receipt.runId);
+
+  expect(await client.loadThread(created.id)).toMatchObject({
+    document: {
+      conversation: {
+        messages: [
+          { id: "user-step" },
+          { toolCalls: [{ id: "call-step", output: {} }] },
+          { content: [{ type: "text", text: "done stepping" }] },
+        ],
+      },
+    },
+  });
+});
+
 test("project tools receive Engine execution context and project sandbox", async () => {
-  const project = await openAgentProject(await _project());
+  const project = await _openProject(await _project());
   const client = await _host({
     runExecutor: WORKING_DIRECTORY_EXECUTOR,
     project,
@@ -122,7 +170,7 @@ test("project tools receive Engine execution context and project sandbox", async
 });
 
 test("project Evaluation metadata survives host restart outside the Thread document", async () => {
-  const project = await openAgentProject(await _project());
+  const project = await _openProject(await _project());
   const first = await _host({
     runExecutor: TEXT_EXECUTOR,
     project,
@@ -177,36 +225,63 @@ test("project Evaluation metadata survives host restart outside the Thread docum
   expect(await second.loadThread(thread.id)).not.toHaveProperty("evaluations");
 });
 
-test("uncommitted Agent changes are ignored but a new HEAD blocks execution", async () => {
+test("dirty Agent source creates an unbound Experiment that reloads current code", async () => {
   const root = await _project();
-  const project = await openAgentProject(root);
+  const project = await _openProject(root);
+  await writeFile(
+    join(project.agentRoot, "instructions.md"),
+    "Dirty initial definition.\n"
+  );
   const first = await _host({
     runExecutor: TEXT_EXECUTOR,
     project,
   });
   const created = await first.createThread();
+  expect(created.document.commitId).toBeUndefined();
   await writeFile(
     join(project.agentRoot, "instructions.md"),
-    "Dirty change.\n"
+    "Dirty definition used by the next Run.\n"
   );
+  await first.saveDocument(created.id, {
+    ...created.document,
+    conversation: {
+      messages: [
+        {
+          id: "user-dirty",
+          role: "user",
+          content: [{ type: "text", text: "use current source" }],
+        },
+      ],
+      state: {},
+    },
+  });
+  const receipt = await first.run(created.id, {
+    fromMessageId: "user-dirty",
+  });
+  await _untilCompleted(first.events(created.id), receipt.runId);
+  const reloaded = await first.loadThread(created.id);
+  expect(reloaded?.document.agent.instructions).toEqual([
+    "Dirty definition used by the next Run.",
+  ]);
+  expect(reloaded?.document.agent.generationId).toBe("uncommitted");
+});
 
-  expect(await first.loadThread(created.id)).toBeDefined();
+test("clean Experiment binds HEAD and rejects a later source commit", async () => {
+  const root = await _project();
+  const project = await _openProject(root);
+  const first = await _host({ runExecutor: TEXT_EXECUTOR, project });
+  const created = await first.createThread();
+  expect(created.document.commitId).toBeDefined();
 
+  await writeFile(join(project.agentRoot, "instructions.md"), "Changed.\n");
   await _commit(root, "agent change");
   expect(first.run(created.id, { fromMessageId: "missing" })).rejects.toThrow(
     "Studio Thread is bound to commit"
   );
-
-  const current = await first.createThread();
-  const { stdout: head } = await exec("git", ["-C", root, "rev-parse", "HEAD"]);
-  expect(current.document.commitId).toBe(head.trim());
-  expect(current.document.agent.generationId).not.toBe(
-    created.document.agent.generationId
-  );
 });
 
 const TEXT_EXECUTOR: RunExecutor = {
-  async execute(input, sink) {
+  async executeStep(input, sink) {
     const message = {
       id: input.createMessageId(),
       role: "assistant" as const,
@@ -221,8 +296,69 @@ const TEXT_EXECUTOR: RunExecutor = {
   },
 };
 
+const STEP_EXECUTOR: RunExecutor = {
+  async executeStep(input, sink) {
+    if (input.step.type === "tools") {
+      const requested = input.messages.findLast(
+        (message) => message.role === "assistant"
+      );
+      if (requested?.role !== "assistant") {
+        throw new Error("Tool Step requires an Assistant Message.");
+      }
+      const completed = {
+        ...requested,
+        toolCalls: requested.toolCalls?.map((call) =>
+          input.step.type === "tools" &&
+          input.step.toolCallIds.includes(call.id)
+            ? {
+                ...call,
+                output: {
+                  content: [{ type: "text" as const, text: "tool output" }],
+                  isError: false,
+                },
+              }
+            : call
+        ),
+      };
+      await sink.accept({
+        type: "tool.started",
+        messageId: requested.id,
+        toolCallId: "call-step",
+        toolName: "working-directory",
+      });
+      await sink.accept({
+        type: "tool.completed",
+        messageId: requested.id,
+        toolCallId: "call-step",
+        message: completed,
+      });
+      return;
+    }
+    const previous = input.messages.at(-1);
+    const message =
+      previous?.role === "assistant"
+        ? {
+            id: input.createMessageId(),
+            role: "assistant" as const,
+            content: [{ type: "text" as const, text: "done stepping" }],
+          }
+        : {
+            id: input.createMessageId(),
+            role: "assistant" as const,
+            content: [],
+            toolCalls: [
+              {
+                id: "call-step",
+                input: { name: "working-directory", arguments: {} },
+              },
+            ],
+          };
+    await sink.accept({ type: "assistant.completed", message });
+  },
+};
+
 const WORKING_DIRECTORY_EXECUTOR: RunExecutor = {
-  async execute(input, sink, { signal }) {
+  async executeStep(input, sink, { signal }) {
     const requested = {
       id: input.createMessageId(),
       role: "assistant" as const,
@@ -306,12 +442,35 @@ async function _untilCompleted(
   throw new Error("Studio event stream ended before run completion.");
 }
 
+async function _untilPaused(
+  events: AsyncIterable<import("@llm-space/studio").StudioThreadEvent>,
+  runId: string,
+  step?: string
+): Promise<void> {
+  for await (const item of events) {
+    if (
+      item.event.type === "run.paused" &&
+      item.event.run.id === runId &&
+      (step === undefined || item.event.run.pause?.step === step)
+    ) {
+      return;
+    }
+  }
+  throw new Error("Studio event stream ended before run pause.");
+}
+
 async function _host(
   options: CreateProjectStudioHostOptions
 ): Promise<ProjectStudioHost> {
   const host = await createProjectStudioHost(options);
   HOSTS.push(host);
   return host;
+}
+
+async function _openProject(root: string) {
+  const homePath = await mkdtemp(join(tmpdir(), "llm-space-studio-home-"));
+  ROOTS.push(homePath);
+  return openAgentProject(root, { homePath });
 }
 
 async function _project(): Promise<string> {

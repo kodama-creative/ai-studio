@@ -7,12 +7,15 @@ export type {
 } from "./agent";
 export type {
   Run,
+  RunControl,
   RunError,
+  RunExecutionMode,
   RunEvent,
   RunEventCursor,
   RunEventData,
   RunFrame,
   RunOutputSnapshot,
+  RunPause,
   RunStatus,
 } from "./run";
 export type {

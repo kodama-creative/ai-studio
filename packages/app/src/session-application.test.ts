@@ -235,7 +235,7 @@ describe.each([
     let turn = 0;
     const engine = _engine({
       runExecutor: {
-        async execute(input, sink, { signal }) {
+        async executeStep(input, sink, { signal }) {
           turn++;
           if (turn === 1) {
             await sink.accept({
@@ -568,7 +568,7 @@ function _engine(
 
 function _textRunExecutor(text: string): RunExecutor {
   return {
-    async execute(input, sink) {
+    async executeStep(input, sink) {
       const message = {
         id: input.createMessageId(),
         role: "assistant" as const,
@@ -589,7 +589,7 @@ function _blockingToolRunExecutor(
   toolCallId: string
 ): RunExecutor {
   return {
-    async execute(input, sink, { signal }) {
+    async executeStep(input, sink, { signal }) {
       const message = {
         id: input.createMessageId(),
         role: "assistant" as const,

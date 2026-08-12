@@ -210,7 +210,11 @@ await mock.module("@llm-space/ui/ui/select", () => ({
   SelectContent: ({ children }: { children?: ReactNode }) => (
     <div>{children}</div>
   ),
+  SelectGroup: ({ children }: { children?: ReactNode }) => (
+    <div>{children}</div>
+  ),
   SelectItem: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
+  SelectLabel: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
   SelectTrigger: ({ children }: { children?: ReactNode }) => (
     <div>{children}</div>
   ),

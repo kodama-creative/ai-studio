@@ -12,7 +12,7 @@ import type {
 } from "../../domain";
 import type { EngineStore, EngineStoreTransaction } from "../engine-store";
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 export interface CreateSqliteEngineStoreOptions {
   readonly path: string;
@@ -187,10 +187,11 @@ class SqliteEngineStoreTransaction implements EngineStoreTransaction {
         `INSERT INTO engine_runs (
           id, schema_version, thread_id, operation_id, retry_of_run_id,
           input_messages_json, base_checkpoint_id, input_checkpoint_id,
-          agent_snapshot_json, status, result_checkpoint_id, error_json,
+          agent_snapshot_json, control_json, status, pause_json,
+          result_checkpoint_id, error_json,
           worker_id, lease_expires_at, cancel_requested_at, created_at,
           started_at, completed_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(..._runParameters(run));
   }
@@ -201,7 +202,8 @@ class SqliteEngineStoreTransaction implements EngineStoreTransaction {
         `UPDATE engine_runs SET
           retry_of_run_id = ?, input_messages_json = ?,
           base_checkpoint_id = ?, input_checkpoint_id = ?, agent_snapshot_json = ?,
-          status = ?, result_checkpoint_id = ?, error_json = ?, worker_id = ?,
+          control_json = ?, status = ?, pause_json = ?, result_checkpoint_id = ?,
+          error_json = ?, worker_id = ?,
           lease_expires_at = ?, cancel_requested_at = ?, started_at = ?,
           completed_at = ?
         WHERE id = ?`
@@ -212,7 +214,9 @@ class SqliteEngineStoreTransaction implements EngineStoreTransaction {
         run.baseCheckpointId,
         run.inputCheckpointId,
         _json(run.agentSnapshot),
+        _json(run.control),
         run.status,
+        run.pause === undefined ? null : _json(run.pause),
         run.resultCheckpointId ?? null,
         run.error === undefined ? null : _json(run.error),
         run.workerId ?? null,
@@ -395,7 +399,9 @@ interface RunRow {
   base_checkpoint_id: string;
   input_checkpoint_id: string;
   agent_snapshot_json: string;
+  control_json: string;
   status: Run["status"];
+  pause_json: string | null;
   result_checkpoint_id: string | null;
   error_json: string | null;
   worker_id: string | null;
@@ -441,6 +447,20 @@ function _migrate(database: Database): void {
   }
   if (current === SCHEMA_VERSION) return;
 
+  if (current > 0) {
+    // Engine v2 intentionally has no data migration. The first-phase Studio
+    // model replaces the complete-loop Run contract, so retaining v1 Runs
+    // would falsely present them as resumable step Runs.
+    database.transaction(() => {
+      database.run("DROP TABLE IF EXISTS engine_run_events");
+      database.run("DROP TABLE IF EXISTS engine_run_outputs");
+      database.run("DROP TABLE IF EXISTS engine_runs");
+      database.run("DROP TABLE IF EXISTS engine_checkpoints");
+      database.run("DROP TABLE IF EXISTS engine_threads");
+      database.run("DELETE FROM engine_schema_migrations");
+    })();
+  }
+
   database.transaction(() => {
     database.run(`
       CREATE TABLE engine_threads (
@@ -481,7 +501,9 @@ function _migrate(database: Database): void {
         base_checkpoint_id TEXT NOT NULL,
         input_checkpoint_id TEXT NOT NULL,
         agent_snapshot_json TEXT NOT NULL,
+        control_json TEXT NOT NULL,
         status TEXT NOT NULL,
+        pause_json TEXT,
         result_checkpoint_id TEXT,
         error_json TEXT,
         worker_id TEXT,
@@ -500,7 +522,7 @@ function _migrate(database: Database): void {
     database.run(`
       CREATE UNIQUE INDEX engine_one_active_run_per_thread
       ON engine_runs(thread_id)
-      WHERE status IN ('queued', 'running')
+      WHERE status IN ('queued', 'running', 'paused')
     `);
     database.run(`
       CREATE INDEX engine_runs_claim
@@ -583,7 +605,9 @@ function _run(row: RunRow): Run {
     baseCheckpointId: row.base_checkpoint_id,
     inputCheckpointId: row.input_checkpoint_id,
     agentSnapshot: _parseJson(row.agent_snapshot_json),
+    control: _parseJson(row.control_json),
     status: row.status,
+    ...(row.pause_json === null ? {} : { pause: _parseJson(row.pause_json) }),
     ...(row.result_checkpoint_id === null
       ? {}
       : { resultCheckpointId: row.result_checkpoint_id }),
@@ -614,7 +638,9 @@ function _runParameters(
     run.baseCheckpointId,
     run.inputCheckpointId,
     _json(run.agentSnapshot),
+    _json(run.control),
     run.status,
+    run.pause === undefined ? null : _json(run.pause),
     run.resultCheckpointId ?? null,
     run.error === undefined ? null : _json(run.error),
     run.workerId ?? null,

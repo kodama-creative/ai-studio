@@ -1,8 +1,11 @@
 export type {
+  ProjectExperiment,
   StudioEventCursor,
   StudioExperimentRecord,
   StudioRunHistoryEntry,
+  StudioRunInput,
   StudioRunReceipt,
+  StudioStepRunInput,
   StudioThread,
   StudioThreadDocument,
   StudioThreadEvent,
@@ -10,6 +13,24 @@ export type {
   ThreadCheckpoint,
   ThreadRunReference,
 } from "./domain";
+export {
+  agentSpecSnapshot,
+  type AgentSpec,
+  type Playground,
+  type PlaygroundRecord,
+} from "./playground";
+export {
+  playgroundToThread,
+  threadToPlaygroundDocument,
+} from "./playground-adapter";
+export {
+  createPlaygroundApplication,
+  type CreatePlaygroundApplicationOptions,
+  type CreatePlaygroundInput,
+  type PlaygroundApplication,
+  type RunPlaygroundInput,
+  type SavePlaygroundInput,
+} from "./playground-application";
 export type {
   Evaluation,
   EvaluationCriterion,

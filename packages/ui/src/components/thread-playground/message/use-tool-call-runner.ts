@@ -33,6 +33,7 @@ export function useToolCallRunner(messageId: string) {
   const ownerRuntimeId = runtimeId ?? "local";
   const { updateToolCallOutput, updateToolCallOutputText } =
     useThreadStoreActions();
+  const { runExternalToolCall } = useThreadStoreActions();
 
   const toolsByName = useMemo(
     () =>
@@ -48,6 +49,9 @@ export function useToolCallRunner(messageId: string) {
 
   const runToolCall = useCallback(
     async (toolCall: ToolCall): Promise<ToolCallOutcome | null> => {
+      if (await runExternalToolCall(messageId, toolCall.id)) {
+        return { isError: false, isFirecrawlLimit: false };
+      }
       const tool = resolveTool(toolCall.input.name);
       if (!tool || !isExecutableTool(tool) || !executeTool) {
         return null;
@@ -95,6 +99,7 @@ export function useToolCallRunner(messageId: string) {
       thread,
       updateToolCallOutput,
       updateToolCallOutputText,
+      runExternalToolCall,
     ]
   );
 

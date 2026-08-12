@@ -2,8 +2,11 @@ import { expect, test } from "bun:test";
 
 import type { StudioThread } from "@llm-space/studio";
 
+import type { ProjectStudioClient } from "@/client/project-studio-client";
+
 import {
   playgroundThreadToStudioEvaluationMetadata,
+  createProjectThreadExecutionRuntime,
   studioThreadToPlaygroundThread,
 } from "./project-thread-adapter";
 
@@ -82,6 +85,264 @@ test("Studio Thread messages and tool results map into the existing Playground m
     },
   });
 });
+
+test("Project runtime maps UI step and ReAct controls onto the same durable Run", async () => {
+  let thread: StudioThread = {
+    schemaVersion: 1,
+    id: "experiment-1",
+    engineThreadId: "thread-1",
+    headCheckpointId: "checkpoint-1",
+    document: {
+      title: "Example",
+      agent: {
+        schemaVersion: 1,
+        agentId: "agent",
+        generationId: "uncommitted",
+        model: "test/model",
+        instructions: [],
+        tools: [],
+      },
+      conversation: {
+        messages: [
+          {
+            id: "user-1",
+            role: "user",
+            content: [{ type: "text", text: "hello" }],
+          },
+        ],
+        state: {},
+      },
+    },
+    createdAt: 1,
+    updatedAt: 1,
+  };
+  const calls: string[] = [];
+  const client = {
+    saveDocument: () => Promise.resolve(thread),
+    run: (
+      _threadId: string,
+      input: Parameters<ProjectStudioClient["run"]>[1]
+    ) => {
+      calls.push(`run:${input.mode}`);
+      thread = { ...thread, activeRunId: "run-1" };
+      return Promise.resolve({ runId: "run-1" });
+    },
+    events: async function* () {
+      await Promise.resolve();
+      yield {
+        threadId: thread.id,
+        sequence: 1,
+        timestamp: 1,
+        event: {
+          type: "run.paused" as const,
+          run: _pausedProjectRun(),
+        },
+      };
+    },
+    listRunHistory: () => Promise.resolve([]),
+    listEvaluationMetadata: () =>
+      Promise.resolve({ evaluations: [], rubrics: [] }),
+    loadThread: () => Promise.resolve(thread),
+    stepRun: (runId: string) => {
+      calls.push(`step:${runId}`);
+      return Promise.resolve({ runId });
+    },
+    continueRun: (runId: string) => {
+      calls.push(`continue:${runId}`);
+      return Promise.resolve({ runId });
+    },
+    cancelRun: () => Promise.resolve(),
+  } as unknown as ProjectStudioClient;
+  const runtime = createProjectThreadExecutionRuntime({
+    client,
+    threadId: thread.id,
+    getThread: () => thread,
+    onThread: (next) => {
+      thread = next;
+    },
+  });
+
+  for await (const event of runtime.execute({
+    thread: studioThreadToPlaygroundThread(thread),
+    fromMessageId: "user-1",
+    autoRunTools: false,
+    reactLoop: false,
+    signal: new AbortController().signal,
+  })) {
+    void event;
+  }
+  for await (const event of runtime.execute({
+    thread: studioThreadToPlaygroundThread(thread),
+    fromMessageId: "user-1",
+    autoRunTools: true,
+    reactLoop: true,
+    signal: new AbortController().signal,
+  })) {
+    void event;
+  }
+
+  expect(calls).toEqual(["run:step", "continue:run-1"]);
+});
+
+test("Project runtime auto-executes one paused tool phase without advancing the model", async () => {
+  let thread: StudioThread = {
+    ..._projectThreadWithPendingTool(),
+    activeRunId: undefined,
+  };
+  const calls: string[] = [];
+  let subscription = 0;
+  const client = {
+    saveDocument: () => Promise.resolve(thread),
+    run: () => {
+      calls.push("run:step");
+      thread = { ...thread, activeRunId: "run-1" };
+      return Promise.resolve({ runId: "run-1" });
+    },
+    events: async function* () {
+      await Promise.resolve();
+      subscription += 1;
+      if (subscription === 1) {
+        yield {
+          threadId: thread.id,
+          sequence: 1,
+          timestamp: 1,
+          event: { type: "run.paused" as const, run: _pausedProjectRun() },
+        };
+        return;
+      }
+      yield {
+        threadId: thread.id,
+        sequence: 2,
+        timestamp: 2,
+        event: {
+          type: "run.paused" as const,
+          run: {
+            ..._pausedProjectRun(),
+            pause: {
+              ..._pausedProjectRun().pause,
+              step: "tool.completed" as const,
+            },
+          },
+        },
+      };
+    },
+    listRunHistory: () => Promise.resolve([]),
+    listEvaluationMetadata: () =>
+      Promise.resolve({ evaluations: [], rubrics: [] }),
+    loadThread: () => Promise.resolve(thread),
+    stepRun: (
+      runId: string,
+      input?: { readonly toolCallId?: string }
+    ) => {
+      calls.push(`step:${runId}:${input?.toolCallId}`);
+      thread = _projectThreadWithPendingTool(true);
+      return Promise.resolve({ runId });
+    },
+    continueRun: (runId: string) => Promise.resolve({ runId }),
+    cancelRun: () => Promise.resolve(),
+  } as unknown as ProjectStudioClient;
+  const runtime = createProjectThreadExecutionRuntime({
+    client,
+    threadId: thread.id,
+    getThread: () => thread,
+    onThread: (next) => {
+      thread = next;
+    },
+  });
+
+  for await (const event of runtime.execute({
+    thread: studioThreadToPlaygroundThread(thread),
+    fromMessageId: "user-1",
+    autoRunTools: true,
+    reactLoop: false,
+    signal: new AbortController().signal,
+  })) {
+    void event;
+  }
+
+  expect(calls).toEqual(["run:step", "step:run-1:call-1"]);
+});
+
+function _pausedProjectRun() {
+  return {
+    schemaVersion: 1 as const,
+    id: "run-1",
+    threadId: "thread-1",
+    operationId: "operation-1",
+    inputMessages: [],
+    baseCheckpointId: "checkpoint-1",
+    inputCheckpointId: "checkpoint-2",
+    agentSnapshot: {
+      schemaVersion: 1 as const,
+      agentId: "agent",
+      generationId: "uncommitted",
+      model: "test/model",
+      instructions: [],
+      tools: [],
+    },
+    control: { mode: "step" as const },
+    status: "paused" as const,
+    pause: {
+      reason: "step.completed" as const,
+      step: "model.completed" as const,
+      checkpointId: "checkpoint-3",
+      pausedAt: 1,
+    },
+    createdAt: 1,
+  };
+}
+
+function _projectThreadWithPendingTool(completed = false): StudioThread {
+  return {
+    schemaVersion: 1,
+    id: "experiment-1",
+    engineThreadId: "thread-1",
+    headCheckpointId: completed ? "checkpoint-4" : "checkpoint-3",
+    document: {
+      title: "Example",
+      agent: {
+        schemaVersion: 1,
+        agentId: "agent",
+        generationId: "uncommitted",
+        model: "test/model",
+        instructions: [],
+        tools: [{ name: "lookup", description: "Lookup", inputSchema: {} }],
+      },
+      conversation: {
+        messages: [
+          {
+            id: "user-1",
+            role: "user",
+            content: [{ type: "text", text: "hello" }],
+          },
+          {
+            id: "assistant-1",
+            role: "assistant",
+            content: [],
+            toolCalls: [
+              {
+                id: "call-1",
+                input: { name: "lookup", arguments: {} },
+                ...(completed
+                  ? {
+                      output: {
+                        content: [{ type: "text" as const, text: "result" }],
+                        isError: false,
+                      },
+                    }
+                  : {}),
+              },
+            ],
+          },
+        ],
+        state: {},
+      },
+    },
+    activeRunId: "run-1",
+    createdAt: 1,
+    updatedAt: 1,
+  };
+}
 
 test("Studio Evaluation resources map to Playground metadata without entering the Thread document", () => {
   const thread: StudioThread = {

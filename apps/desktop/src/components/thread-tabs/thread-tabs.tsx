@@ -31,6 +31,7 @@ import { electrobun } from "@/lib/electrobun";
 import type { RuntimeId } from "@/shared/runtime";
 
 import type { PaneLifecycleHost } from "./pane-lifecycle-host";
+import { PlaygroundTabPane } from "./playground-tab-pane";
 import { RuntimePaneHost } from "./runtime-pane-host";
 import { ShareThreadMenuItem } from "./share-thread-menu-item";
 import { ThreadTabPane } from "./thread-tab-pane";
@@ -46,7 +47,7 @@ const MOVE_TO_TRASH_LABEL = _isWindows
   : "Move to Trash";
 
 function _getPaneKey(tab: AppTab): string {
-  return tab.type === "thread" ? tab.paneId : tab.id;
+  return tab.type === "trace" ? tab.id : tab.paneId;
 }
 
 // Suppress focus on mouse-down so a click doesn't leave these toolbar icons
@@ -90,6 +91,7 @@ interface ThreadTabsProps {
     title: string,
     runtimeId: RuntimeId
   ) => void;
+  onPlaygroundTitleChange?: (playgroundId: string, title: string) => void;
   onToggleSidebar?: () => void;
   lifecycleHost: PaneLifecycleHost;
   mutationRevision: number;
@@ -120,6 +122,7 @@ export function ThreadTabs({
   onNewFile,
   onMove,
   onTraceTitleChange,
+  onPlaygroundTitleChange,
   onToggleSidebar,
   lifecycleHost,
   mutationRevision,
@@ -248,7 +251,20 @@ export function ThreadTabs({
 
   const renderPane = useCallback(
     (tab: AppTab, active: boolean) =>
-      tab.type === "thread" ? (
+      tab.type === "playground" ? (
+        <PlaygroundTabPane
+          tabId={tab.id}
+          paneId={tab.paneId}
+          playgroundId={tab.playgroundId}
+          active={active}
+          lifecycleHost={lifecycleHost}
+          mutationRevision={mutationRevision}
+          refreshNonce={tab.refreshNonce ?? 0}
+          onClose={close}
+          onTitleChange={onPlaygroundTitleChange}
+          onThreadStateChange={onThreadStateChange}
+        />
+      ) : tab.type === "thread" ? (
         <ThreadTabPane
           tabId={tab.id}
           paneId={tab.paneId}
@@ -282,6 +298,7 @@ export function ThreadTabs({
       lifecycleHost,
       mutationRevision,
       onMove,
+      onPlaygroundTitleChange,
       onThreadStateChange,
       onTraceTitleChange,
     ]

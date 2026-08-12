@@ -129,6 +129,7 @@ describe.each([
           baseCheckpointId: checkpoint.id,
           inputCheckpointId: checkpoint.id,
           agentSnapshot: TEST_AGENT,
+          control: { mode: "continue" as const },
           status: "running" as const,
           workerId: "worker-original",
           leaseExpiresAt: 10,
@@ -174,7 +175,7 @@ test("startRun atomically commits input and enforces one active writer", async (
   const turnStarted = _deferred<void>();
   const engine = _createEngine(new InMemoryEngineStore(), {
     runExecutor: {
-      async execute(_input, _sink, { signal }) {
+      async executeStep(_input, _sink, { signal }) {
         turnStarted.resolve();
         await _waitForAbort(signal);
       },
@@ -267,7 +268,7 @@ test("rejects a resolver result whose full Agent snapshot changed", async () => 
       tools: new Map(),
     },
     runExecutor: {
-      execute() {
+      executeStep() {
         modelStarted = true;
         return Promise.resolve();
       },
@@ -294,9 +295,66 @@ test("rejects a resolver result whose full Agent snapshot changed", async () => 
   }
 });
 
+test("fails closed when a custom resolver returns an approval-gated tool", async () => {
+  let executorStarted = false;
+  const snapshot: AgentSnapshot = {
+    ...TEST_AGENT,
+    tools: [
+      {
+        name: "guarded",
+        description: "Requires approval",
+        inputSchema: {},
+      },
+    ],
+  };
+  const engine = _createEngine(new InMemoryEngineStore(), {
+    executableAgent: {
+      snapshot,
+      tools: new Map([
+        [
+          "guarded",
+          {
+            definition: {
+              description: "Requires approval",
+              inputSchema: {},
+              approval: () => "user-approval",
+              execute: () => "must not execute",
+            },
+          },
+        ],
+      ]),
+    },
+    runExecutor: {
+      executeStep() {
+        executorStarted = true;
+        return Promise.resolve();
+      },
+    },
+  });
+  try {
+    const thread = await engine.createThread();
+    const run = await engine.startRun({
+      threadId: thread.id,
+      expectedHeadCheckpointId: thread.headCheckpointId,
+      inputMessages: [RICH_USER_MESSAGE],
+      agentSnapshot: snapshot,
+    });
+
+    const terminal = await _waitForTerminalRun(engine, run.id);
+
+    expect(executorStarted).toBeFalse();
+    expect(terminal.status).toBe("failed");
+    expect(terminal.error?.message).toBe(
+      'Tool approval for "guarded" is not supported by Engine v1.'
+    );
+  } finally {
+    await engine.close();
+  }
+});
+
 test("persists a complete Run through the high-level RunExecutor seam", async () => {
   const runExecutor: RunExecutor = {
-    async execute(input, sink) {
+    async executeStep(input, sink) {
       const message = {
         id: input.createMessageId(),
         role: "assistant" as const,
@@ -342,9 +400,148 @@ test("persists a complete Run through the high-level RunExecutor seam", async ()
   }
 });
 
+test("step pauses one Run and continue resumes it from the durable head", async () => {
+  const runExecutor: RunExecutor = {
+    async executeStep(input, sink) {
+      const last = input.messages.at(-1);
+      if (input.step.type === "tools") {
+        const { toolCallIds } = input.step;
+        const assistant = input.messages.findLast(
+          (message) => message.role === "assistant"
+        );
+        if (assistant?.role !== "assistant") {
+          throw new Error("A completed Assistant Message is required.");
+        }
+        const completed = {
+          ...assistant,
+          toolCalls: assistant.toolCalls?.map((call) =>
+            toolCallIds.includes(call.id)
+              ? {
+                  ...call,
+                  output: {
+                    content: [{ type: "text" as const, text: "tool result" }],
+                    isError: false,
+                  },
+                }
+              : call
+          ),
+        };
+        for (const toolCallId of toolCallIds) {
+          const call = assistant.toolCalls?.find(
+            (candidate) => candidate.id === toolCallId
+          );
+          if (call === undefined) throw new Error("Tool call was not found.");
+          await sink.accept({
+            type: "tool.started",
+            messageId: assistant.id,
+            toolCallId,
+            toolName: call.input.name,
+          });
+          await sink.accept({
+            type: "tool.completed",
+            messageId: assistant.id,
+            toolCallId,
+            message: completed,
+          });
+        }
+        return;
+      }
+      const message =
+        last?.role === "assistant"
+          ? {
+              id: input.createMessageId(),
+              role: "assistant" as const,
+              content: [{ type: "text" as const, text: "Finished." }],
+            }
+          : {
+              id: input.createMessageId(),
+              role: "assistant" as const,
+              content: [],
+              toolCalls: [
+                {
+                  id: "call-step",
+                  input: { name: "lookup", arguments: {} },
+                },
+              ],
+            };
+      await sink.accept({ type: "assistant.completed", message });
+    },
+  };
+  const engine = _createEngine(new InMemoryEngineStore(), { runExecutor });
+  try {
+    const thread = await engine.createThread();
+    const started = await engine.startRun({
+      threadId: thread.id,
+      expectedHeadCheckpointId: thread.headCheckpointId,
+      inputMessages: [RICH_USER_MESSAGE],
+      agentSnapshot: TEST_AGENT,
+      mode: "step",
+    });
+
+    const paused = await _waitForRunStatus(engine, started.id, "paused");
+    const pausedThread = await engine.getThread(thread.id);
+    const pausedCheckpoint = await engine.getCheckpoint(
+      pausedThread!.headCheckpointId
+    );
+
+    expect(paused.id).toBe(started.id);
+    expect(paused.pause).toMatchObject({
+      reason: "step.completed",
+      step: "model.completed",
+      checkpointId: pausedThread?.headCheckpointId,
+    });
+    const requested = pausedCheckpoint?.threadState.messages.at(-1);
+    expect(requested).toMatchObject({
+      role: "assistant",
+      toolCalls: [{ id: "call-step" }],
+    });
+    expect(
+      requested?.role === "assistant" && requested.toolCalls?.[0]?.output
+    ).toBeUndefined();
+
+    const resumed = await engine.continueRun(started.id);
+    const completed = await _waitForTerminalRun(engine, started.id);
+    const result = await engine.getCheckpoint(completed.resultCheckpointId!);
+
+    expect(resumed.id).toBe(started.id);
+    expect(completed.id).toBe(started.id);
+    expect(completed.status).toBe("completed");
+    expect(result?.threadState.messages.at(-1)).toMatchObject({
+      role: "assistant",
+      content: [{ type: "text", text: "Finished." }],
+    });
+  } finally {
+    await engine.close();
+  }
+});
+
+test("retry preserves the requested Step execution mode", async () => {
+  const engine = _createEngine(new InMemoryEngineStore());
+  try {
+    const thread = await engine.createThread();
+    const original = await engine.startRun({
+      threadId: thread.id,
+      expectedHeadCheckpointId: thread.headCheckpointId,
+      inputMessages: [RICH_USER_MESSAGE],
+      agentSnapshot: TEST_AGENT,
+    });
+    await _waitForTerminalRun(engine, original.id);
+
+    const retry = await engine.retryRun({
+      runId: original.id,
+      mode: "step",
+    });
+
+    expect(retry.retryOfRunId).toBe(original.id);
+    expect(retry.control.mode).toBe("step");
+  } finally {
+    await engine.close();
+  }
+});
+
 test("fails a RunExecutor that returns without a completed assistant", async () => {
   const engine = _createEngine(new InMemoryEngineStore(), {
-    runExecutor: { execute: () => Promise.resolve() },
+    runExecutor: { executeStep: () => Promise.resolve() },
   });
   try {
     const thread = await engine.createThread();
@@ -358,9 +555,7 @@ test("fails a RunExecutor that returns without a completed assistant", async () 
     const terminal = await _waitForTerminalRun(engine, run.id);
 
     expect(terminal.status).toBe("failed");
-    expect(terminal.error?.message).toContain(
-      "no completed Assistant Message"
-    );
+    expect(terminal.error?.message).toContain("no completed Assistant Message");
   } finally {
     await engine.close();
   }
@@ -369,7 +564,7 @@ test("fails a RunExecutor that returns without a completed assistant", async () 
 test("fails a RunExecutor that returns with an unfinished tool call", async () => {
   const engine = _createEngine(new InMemoryEngineStore(), {
     runExecutor: {
-      async execute(input, sink) {
+      async executeStep(input, sink) {
         await sink.accept({
           type: "assistant.completed",
           message: {
@@ -455,7 +650,7 @@ test("Run execution checkpoints core Messages and agent-defined JSON state", asy
       ]),
     },
     runExecutor: {
-      async execute(input, sink, { signal }) {
+      async executeStep(input, sink, { signal }) {
         expect(input.messages).toEqual([RICH_USER_MESSAGE]);
         const messageId = input.createMessageId();
         const requested = {
@@ -627,7 +822,7 @@ test("streamRun reconnects from a durable output snapshot", async () => {
   const draftPersisted = _deferred<void>();
   const engine = _createEngine(new InMemoryEngineStore(), {
     runExecutor: {
-      async execute(input, sink) {
+      async executeStep(input, sink) {
         const messageId = input.createMessageId();
         await sink.accept({
           type: "assistant.delta",
@@ -702,7 +897,7 @@ test("Engine close releases stream followers before closing SQLite", async () =>
   const turnStarted = _deferred<void>();
   const engine = _createEngine(createSqliteEngineStore({ path: ":memory:" }), {
     runExecutor: {
-      async execute(_input, _sink, { signal }) {
+      async executeStep(_input, _sink, { signal }) {
         turnStarted.resolve();
         await _waitForAbort(signal);
       },
@@ -972,7 +1167,7 @@ test("a cross-Worker cancellation request wins a race with model completion", as
   const owner = _createEngine(store, {
     workerLeaseMs: 300,
     runExecutor: {
-      async execute(input, sink) {
+      async executeStep(input, sink) {
         turnStarted.resolve();
         await releaseTurn.promise;
         await sink.accept({
@@ -1039,7 +1234,7 @@ function _createEngine(
 
 function _textRunExecutor(text: string): RunExecutor {
   return {
-    async execute(input, sink) {
+    async executeStep(input, sink) {
       const message = {
         id: input.createMessageId(),
         role: "assistant" as const,
@@ -1060,7 +1255,7 @@ function _blockingToolRunExecutor(
   toolCallId: string
 ): RunExecutor {
   return {
-    async execute(input, sink, { signal }) {
+    async executeStep(input, sink, { signal }) {
       const message = {
         id: input.createMessageId(),
         role: "assistant" as const,
@@ -1125,6 +1320,19 @@ async function _waitForTerminalRun(engine: AgentEngine, runId: string) {
   const run = await engine.getRun(runId);
   if (run === undefined) throw new Error(`Run "${runId}" disappeared.`);
   return run;
+}
+
+async function _waitForRunStatus(
+  engine: AgentEngine,
+  runId: string,
+  status: import("../domain").RunStatus
+) {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const run = await engine.getRun(runId);
+    if (run?.status === status) return run;
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+  throw new Error(`Run "${runId}" did not reach status "${status}".`);
 }
 
 function _deferred<T>() {

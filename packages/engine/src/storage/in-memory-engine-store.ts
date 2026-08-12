@@ -233,12 +233,20 @@ function _clone<T>(value: T | undefined): T | undefined {
 }
 
 function _assertNoActiveRun(candidates: Iterable<Run>, next: Run): void {
-  if (next.status !== "queued" && next.status !== "running") return;
+  if (
+    next.status !== "queued" &&
+    next.status !== "running" &&
+    next.status !== "paused"
+  ) {
+    return;
+  }
   if (
     [...candidates].some(
       (candidate) =>
         candidate.threadId === next.threadId &&
-        (candidate.status === "queued" || candidate.status === "running")
+        (candidate.status === "queued" ||
+          candidate.status === "running" ||
+          candidate.status === "paused")
     )
   ) {
     throw new Error(`Thread "${next.threadId}" already has an active Run.`);

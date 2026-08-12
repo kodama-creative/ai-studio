@@ -146,88 +146,139 @@ export function createProjectThreadExecutionRuntime(input: {
     async *execute(request) {
       await input.beforeExecute?.();
       let studioThread = input.getThread();
-      studioThread = await input.client.saveDocument(
-        input.threadId,
-        playgroundThreadToStudioDocument(request.thread, studioThread)
-      );
-      input.onThread(studioThread);
-      const fromMessageId =
-        request.fromMessageId ?? request.thread.context?.messages?.at(-1)?.id;
-      if (fromMessageId === undefined) {
-        throw new Error("A Studio Run requires at least one message.");
+      let receipt: { readonly runId: string };
+      if (studioThread.activeRunId === undefined) {
+        studioThread = await input.client.saveDocument(
+          input.threadId,
+          playgroundThreadToStudioDocument(request.thread, studioThread)
+        );
+        input.onThread(studioThread);
+        const fromMessageId =
+          request.fromMessageId ?? request.thread.context?.messages?.at(-1)?.id;
+        if (fromMessageId === undefined) {
+          throw new Error("A Studio Run requires at least one message.");
+        }
+        receipt = await input.client.run(input.threadId, {
+          fromMessageId,
+          mode: request.reactLoop ? "continue" : "step",
+        });
+      } else if (request.reactLoop) {
+        receipt = await input.client.continueRun(studioThread.activeRunId);
+      } else {
+        receipt = await input.client.stepRun(studioThread.activeRunId);
       }
-      const receipt = await input.client.run(input.threadId, { fromMessageId });
       const streaming = new Map<string, string>();
       let [history, evaluationMetadata] = await Promise.all([
         input.client.listRunHistory(input.threadId),
         input.client.listEvaluationMetadata(input.threadId),
       ]);
+      let afterSequence: number | undefined;
       try {
-        for await (const item of input.client.events(input.threadId, {
-          follow: true,
-          signal: request.signal,
-        })) {
-          const event = item.event;
-          if (event.type === "message.delta" && event.runId === receipt.runId) {
-            const text = `${streaming.get(event.messageId) ?? ""}${event.delta}`;
-            streaming.set(event.messageId, text);
-            yield {
-              type: "message.delta",
-              message: {
-                id: event.messageId,
-                role: "assistant",
-                content: [{ type: "text", text }],
-              },
-            };
-          } else if (
-            event.type === "conversation.updated" &&
-            event.runId === receipt.runId
-          ) {
-            studioThread = event.thread;
-            input.onThread(studioThread);
-            yield {
-              type: "thread.updated",
-              thread: studioThreadToPlaygroundThread(
-                studioThread,
-                history,
-                evaluationMetadata
-              ),
-            };
-          } else if (
-            event.type === "run.completed" &&
-            event.runId === receipt.runId
-          ) {
-            const [latest, nextHistory, nextEvaluationMetadata] =
-              await Promise.all([
-                input.client.loadThread(input.threadId),
-                input.client.listRunHistory(input.threadId),
-                input.client.listEvaluationMetadata(input.threadId),
-              ]);
-            history = nextHistory;
-            evaluationMetadata = nextEvaluationMetadata;
-            if (latest !== undefined) {
-              studioThread = latest;
-              input.onThread(latest);
+        while (true) {
+          let advancedTool = false;
+          for await (const item of input.client.events(input.threadId, {
+            ...(afterSequence === undefined ? {} : { afterSequence }),
+            follow: true,
+            signal: request.signal,
+          })) {
+            afterSequence = item.sequence;
+            const event = item.event;
+            if (
+              event.type === "message.delta" &&
+              event.runId === receipt.runId
+            ) {
+              const text = `${streaming.get(event.messageId) ?? ""}${event.delta}`;
+              streaming.set(event.messageId, text);
+              yield {
+                type: "message.delta",
+                message: {
+                  id: event.messageId,
+                  role: "assistant",
+                  content: [{ type: "text", text }],
+                },
+              };
+            } else if (
+              event.type === "conversation.updated" &&
+              event.runId === receipt.runId
+            ) {
+              studioThread = event.thread;
+              input.onThread(studioThread);
               yield {
                 type: "thread.updated",
                 thread: studioThreadToPlaygroundThread(
-                  latest,
+                  studioThread,
                   history,
                   evaluationMetadata
                 ),
               };
+            } else if (
+              event.type === "run.paused" &&
+              event.run.id === receipt.runId
+            ) {
+              const latest = await input.client.loadThread(input.threadId);
+              if (latest !== undefined) {
+                studioThread = latest;
+                input.onThread(latest);
+                yield {
+                  type: "thread.updated",
+                  thread: studioThreadToPlaygroundThread(
+                    latest,
+                    history,
+                    evaluationMetadata
+                  ),
+                };
+              }
+              const pending =
+                !request.reactLoop && request.autoRunTools
+                  ? _pendingToolCalls(studioThread)[0]
+                  : undefined;
+              if (pending === undefined) return;
+              receipt = await input.client.stepRun(receipt.runId, {
+                toolCallId: pending.id,
+              });
+              advancedTool = true;
+              break;
+            } else if (
+              event.type === "run.completed" &&
+              event.runId === receipt.runId
+            ) {
+              const [latest, nextHistory, nextEvaluationMetadata] =
+                await Promise.all([
+                  input.client.loadThread(input.threadId),
+                  input.client.listRunHistory(input.threadId),
+                  input.client.listEvaluationMetadata(input.threadId),
+                ]);
+              history = nextHistory;
+              evaluationMetadata = nextEvaluationMetadata;
+              if (latest !== undefined) {
+                studioThread = latest;
+                input.onThread(latest);
+                yield {
+                  type: "thread.updated",
+                  thread: studioThreadToPlaygroundThread(
+                    latest,
+                    history,
+                    evaluationMetadata
+                  ),
+                };
+              }
+              return;
+            } else if (
+              event.type === "run.failed" &&
+              event.runId === receipt.runId
+            ) {
+              throw new Error(event.message);
+            } else if (
+              event.type === "run.cancelled" &&
+              event.runId === receipt.runId
+            ) {
+              return;
             }
-            return;
-          } else if (
-            event.type === "run.failed" &&
-            event.runId === receipt.runId
-          ) {
-            throw new Error(event.message);
-          } else if (
-            event.type === "run.cancelled" &&
-            event.runId === receipt.runId
-          ) {
-            return;
+          }
+          if (!advancedTool) {
+            throw new Error(
+              `Run "${receipt.runId}" event stream ended before it settled.`
+            );
           }
         }
       } finally {
@@ -237,7 +288,82 @@ export function createProjectThreadExecutionRuntime(input: {
         await input.onSettled?.();
       }
     },
+    async *executeToolCall(request) {
+      await input.beforeExecute?.();
+      const studioThread = input.getThread();
+      const runId = studioThread.activeRunId;
+      if (runId === undefined) {
+        throw new Error("The tool call does not belong to an active Run.");
+      }
+      try {
+        await input.client.stepRun(runId, {
+          toolCallId: request.toolCallId,
+        });
+        for await (const item of input.client.events(input.threadId, {
+          follow: true,
+          signal: request.signal,
+        })) {
+          const event = item.event;
+          if (
+            (event.type === "tool.updated" ||
+              event.type === "tool.completed") &&
+            event.runId === runId &&
+            event.toolCallId === request.toolCallId
+          ) {
+            yield {
+              type: "thread.updated",
+              thread: _replaceAssistant(
+                studioThreadToPlaygroundThread(input.getThread()),
+                event.message
+              ),
+            };
+          }
+          if (event.type === "run.paused" && event.run.id === runId) {
+            const latest = await input.client.loadThread(input.threadId);
+            if (latest !== undefined) {
+              input.onThread(latest);
+              yield {
+                type: "thread.updated",
+                thread: studioThreadToPlaygroundThread(latest),
+              };
+            }
+            return;
+          }
+          if (event.type === "run.failed" && event.runId === runId) {
+            throw new Error(event.message);
+          }
+          if (
+            (event.type === "run.completed" ||
+              event.type === "run.cancelled") &&
+            event.runId === runId
+          ) {
+            return;
+          }
+        }
+      } finally {
+        if (request.signal.aborted) await input.client.cancelRun(runId);
+        await input.onSettled?.();
+      }
+    },
   };
+}
+
+function _pendingToolCalls(thread: StudioThread) {
+  const last = thread.document.conversation.messages.at(-1);
+  return last?.role === "assistant"
+    ? (last.toolCalls ?? []).filter((call) => call.output === undefined)
+    : [];
+}
+
+function _replaceAssistant(
+  thread: Thread,
+  assistant: import("@llm-space/core").AssistantMessage
+): Thread {
+  const messages = [...(thread.context?.messages ?? [])];
+  const index = messages.findIndex((message) => message.id === assistant.id);
+  if (index === -1) messages.push(assistant);
+  else messages[index] = assistant;
+  return { ...thread, context: { ...thread.context, messages } };
 }
 
 function _modelConfig(model: StudioThread["document"]["agent"]["model"]) {

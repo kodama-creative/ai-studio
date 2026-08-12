@@ -35,6 +35,9 @@ export function createRpcProjectStudioClient(): ProjectStudioClient {
       rpc.request.projectSaveThreadDocument({ threadId, document }),
     run: (threadId, input) =>
       rpc.request.projectRunThread({ threadId, ...input }),
+    stepRun: (runId, input = {}) =>
+      rpc.request.projectStepRun({ runId, ...input }),
+    continueRun: (runId) => rpc.request.projectContinueRun({ runId }),
     cancelRun: async (runId) => {
       await rpc.request.projectCancelRun({ runId });
     },

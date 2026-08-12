@@ -2,6 +2,8 @@ import type {
   StudioEventCursor,
   StudioRunReceipt,
   StudioRunHistoryEntry,
+  StudioRunInput,
+  StudioStepRunInput,
   StudioThread,
   StudioThreadDocument,
   StudioThreadEvent,
@@ -41,8 +43,13 @@ export interface ProjectStudioTransport {
   ): Promise<StudioThread>;
   run(
     threadId: string,
-    input: { readonly fromMessageId: string }
+    input: StudioRunInput
   ): Promise<StudioRunReceipt>;
+  stepRun(
+    runId: string,
+    input?: StudioStepRunInput
+  ): Promise<StudioRunReceipt>;
+  continueRun(runId: string): Promise<StudioRunReceipt>;
   cancelRun(runId: string): Promise<void>;
   events(
     threadId: string,

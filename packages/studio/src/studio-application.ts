@@ -12,7 +12,9 @@ import type {
   StudioEventCursor,
   StudioExperimentRecord,
   StudioRunHistoryEntry,
+  StudioRunInput,
   StudioRunReceipt,
+  StudioStepRunInput,
   StudioThread,
   StudioThreadDocument,
   StudioThreadEvent,
@@ -29,6 +31,8 @@ import type { StudioStore } from "./storage";
 
 export interface SourceRevisionProvider {
   current(): Promise<string>;
+  /** Return the revision safe to pin, or undefined for dirty/uncommitted source. */
+  binding?(): Promise<string | undefined>;
 }
 
 export class StudioThreadOutdatedError extends Error {
@@ -84,8 +88,13 @@ export interface StudioApplication {
   ): Promise<StudioThread>;
   run(
     threadId: string,
-    input: { readonly fromMessageId: string }
+    input: StudioRunInput
   ): Promise<StudioRunReceipt>;
+  stepRun(
+    runId: string,
+    input?: StudioStepRunInput
+  ): Promise<StudioRunReceipt>;
+  continueRun(runId: string): Promise<StudioRunReceipt>;
   cancelRun(runId: string): Promise<void>;
   events(
     threadId: string,
@@ -122,9 +131,12 @@ class StudioApplicationImpl implements StudioApplication {
 
   async createThread(input: CreateStudioThreadInput): Promise<StudioThread> {
     await this._recovery;
-    const commitId = await this._options.revisionProvider.current();
-    if (input.commitId !== undefined && input.commitId !== commitId) {
-      throw new StudioThreadOutdatedError(input.commitId, commitId);
+    const currentCommitId = await this._options.revisionProvider.current();
+    if (
+      input.commitId !== undefined &&
+      input.commitId !== currentCommitId
+    ) {
+      throw new StudioThreadOutdatedError(input.commitId, currentCommitId);
     }
     const engineThread = await this._options.engine.createThread({
       ...(input.conversation === undefined
@@ -138,7 +150,7 @@ class StudioApplicationImpl implements StudioApplication {
       engineThreadId: engineThread.id,
       title: input.title?.trim() || "New Thread",
       agent: structuredClone(input.agent),
-      commitId,
+      ...(input.commitId === undefined ? {} : { commitId: input.commitId }),
       ...(input.provenance === undefined
         ? {}
         : { provenance: structuredClone(input.provenance) }),
@@ -309,6 +321,7 @@ class StudioApplicationImpl implements StudioApplication {
     if (source.draft !== undefined && input.checkpointId === undefined) {
       await this._replaceThreadState(fork.id, source.draft);
     }
+    const binding = await this._options.revisionProvider.binding?.();
     const now = this._clock();
     const experiment: StudioExperimentRecord = {
       schemaVersion: 1,
@@ -316,7 +329,7 @@ class StudioApplicationImpl implements StudioApplication {
       engineThreadId: fork.id,
       title: `${source.title} (Fork)`,
       agent: structuredClone(currentAgent.snapshot),
-      commitId: await this._options.revisionProvider.current(),
+      ...(binding === undefined ? {} : { commitId: binding }),
       provenance: {
         type: "fork",
         threadId,
@@ -363,13 +376,28 @@ class StudioApplicationImpl implements StudioApplication {
 
   async run(
     threadId: string,
-    input: { readonly fromMessageId: string }
+    input: StudioRunInput
   ): Promise<StudioRunReceipt> {
     await this._recovery;
     let experiment = this._requireExperiment(threadId);
     const currentCommitId = await this._options.revisionProvider.current();
-    if (experiment.commitId !== currentCommitId) {
+    if (
+      experiment.commitId !== undefined &&
+      experiment.commitId !== currentCommitId
+    ) {
       throw new StudioThreadOutdatedError(experiment.commitId, currentCommitId);
+    }
+    if (experiment.commitId === undefined) {
+      const currentAgent = await this._options.resolveCurrentAgent?.();
+      if (currentAgent === undefined) {
+        throw new Error("This Studio host cannot resolve the current Agent.");
+      }
+      experiment = {
+        ...experiment,
+        agent: structuredClone(currentAgent.snapshot),
+        updatedAt: this._clock(),
+      };
+      this._options.store.transaction((tx) => tx.saveExperiment(experiment));
     }
     const view = await this._composeThread(experiment);
     if (view.activeRunId !== undefined) {
@@ -393,7 +421,8 @@ class StudioApplicationImpl implements StudioApplication {
     const retryOf = await this._findRetryRun(
       threadId,
       inputMessage,
-      desiredBase
+      desiredBase,
+      experiment.commitId !== undefined
     );
     if (retryOf !== undefined) {
       const operationId = this._generateId("operation");
@@ -402,6 +431,7 @@ class StudioApplicationImpl implements StudioApplication {
       try {
         retry = await this._options.engine.retryRun({
           runId: retryOf.id,
+          ...(input.mode === undefined ? {} : { mode: input.mode }),
           operationId,
         });
       } catch (error) {
@@ -433,6 +463,7 @@ class StudioApplicationImpl implements StudioApplication {
         expectedHeadCheckpointId: target.headCheckpointId,
         inputMessages: [inputMessage],
         agentSnapshot: experiment.agent,
+        ...(input.mode === undefined ? {} : { mode: input.mode }),
         operationId,
       });
     } catch (error) {
@@ -440,6 +471,27 @@ class StudioApplicationImpl implements StudioApplication {
       throw error;
     }
     this._recordRun(threadId, experiment, run);
+    return { runId: run.id };
+  }
+
+  /** Execute one model or selected tool step on the same paused Run. */
+  async stepRun(
+    runId: string,
+    input: StudioStepRunInput = {}
+  ): Promise<StudioRunReceipt> {
+    await this._recovery;
+    const threadId = this._requireRunThreadId(runId);
+    const run = await this._options.engine.stepRun({ runId, ...input });
+    this._scheduleProjection(threadId, run.id);
+    return { runId: run.id };
+  }
+
+  /** Continue the same paused Run until it completes or pauses again. */
+  async continueRun(runId: string): Promise<StudioRunReceipt> {
+    await this._recovery;
+    const threadId = this._requireRunThreadId(runId);
+    const run = await this._options.engine.continueRun(runId);
+    this._scheduleProjection(threadId, run.id);
     return { runId: run.id };
   }
 
@@ -570,7 +622,9 @@ class StudioApplicationImpl implements StudioApplication {
         conversation: structuredClone(
           experiment.draft ?? checkpoint.threadState
         ),
-        commitId: experiment.commitId,
+        ...(experiment.commitId === undefined
+          ? {}
+          : { commitId: experiment.commitId }),
       },
       ...(experiment.provenance === undefined
         ? {}
@@ -622,8 +676,12 @@ class StudioApplicationImpl implements StudioApplication {
   private async _findRetryRun(
     experimentId: string,
     inputMessage: Extract<Message, { role: "user" }>,
-    desiredBase: ThreadState
+    desiredBase: ThreadState,
+    allowSourceRetry: boolean
   ): Promise<Run | undefined> {
+    // An unbound Experiment deliberately executes whatever source exists now.
+    // Retrying an old immutable Run would pin its old AgentSnapshot instead.
+    if (!allowSourceRetry) return undefined;
     const references = this._options.store.transaction((tx) =>
       tx.listRunReferences(experimentId)
     );
@@ -668,8 +726,28 @@ class StudioApplicationImpl implements StudioApplication {
 
   private async _activeRun(engineThreadId: string): Promise<Run | undefined> {
     return (await this._options.engine.listRuns(engineThreadId)).find(
-      (run) => run.status === "queued" || run.status === "running"
+      (run) =>
+        run.status === "queued" ||
+        run.status === "running" ||
+        run.status === "paused"
     );
+  }
+
+  /** Resolve Studio ownership without leaking Engine Thread ids to callers. */
+  private _requireRunThreadId(runId: string): string {
+    const experiment = this._options.store.transaction((tx) =>
+      tx
+        .listExperiments()
+        .find((candidate) =>
+          tx
+            .listRunReferences(candidate.id)
+            .some((reference) => reference.runId === runId)
+        )
+    );
+    if (experiment === undefined) {
+      throw new Error(`Run "${runId}" does not belong to this Studio.`);
+    }
+    return experiment.id;
   }
 
   private _requireExperiment(threadId: string): StudioExperimentRecord {
@@ -716,21 +794,34 @@ class StudioApplicationImpl implements StudioApplication {
         }
         if (_isTerminal(frame.run.status)) {
           await this._emitTerminal(threadId, frame.run);
+        } else if (frame.run.status === "paused") {
+          this._emit(threadId, { type: "run.paused", run: frame.run });
         }
         continue;
       }
-      if (frame.event.type === "message.delta") {
+      if (
+        frame.event.type === "message.delta" ||
+        frame.event.type === "thinking.delta" ||
+        frame.event.type === "message.completed" ||
+        frame.event.type === "tool.started" ||
+        frame.event.type === "tool.updated" ||
+        frame.event.type === "tool.completed"
+      ) {
         this._emit(threadId, { ...frame.event, runId });
       } else if (frame.event.type === "checkpoint.committed") {
         const thread = await this.loadThread(threadId);
         if (thread !== undefined) {
           this._emit(threadId, { type: "conversation.updated", runId, thread });
         }
-      } else if (
-        frame.event.type === "run.updated" &&
-        _isTerminal(frame.event.run.status)
-      ) {
-        await this._emitTerminal(threadId, frame.event.run);
+      } else if (frame.event.type === "run.updated") {
+        if (frame.event.run.status === "paused") {
+          this._emit(threadId, {
+            type: "run.paused",
+            run: frame.event.run,
+          });
+        } else if (_isTerminal(frame.event.run.status)) {
+          await this._emitTerminal(threadId, frame.event.run);
+        }
       }
     }
   }
@@ -846,7 +937,9 @@ function _checkpointView(
       title: experiment.title,
       agent: structuredClone(experiment.agent),
       conversation: structuredClone(checkpoint.threadState),
-      commitId: experiment.commitId,
+      ...(experiment.commitId === undefined
+        ? {}
+        : { commitId: experiment.commitId }),
     },
     createdAt: checkpoint.createdAt,
   };

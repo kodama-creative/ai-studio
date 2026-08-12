@@ -16,6 +16,7 @@ import {
   runUv,
   writeProjectFile,
 } from "../fs";
+import type { PlaygroundHost } from "../playgrounds/playground-host";
 import type { PluginCommandExecutionController } from "../plugins/plugin-command-execution-controller";
 import type { ProjectStudioHost } from "../projects/project-studio-host";
 import {
@@ -67,6 +68,12 @@ export interface MainWindowRPCDependencies {
   pluginCommandExecutions: PluginCommandExecutionController;
   windowContext?: DesktopWindowContext;
   projectStudioHost?: ProjectStudioHost;
+  playgroundHost: PlaygroundHost;
+  listAgentProjects: () => Promise<
+    readonly import("../../shared/agent-project").AgentProjectSummary[]
+  >;
+  openAgentProject: (rootPath: string) => Promise<void>;
+  pickAgentProject: () => Promise<void>;
 }
 
 const MAX_REQUEST_TIME_MS = 5 * 60_000 + 10_000;
@@ -87,9 +94,14 @@ export function createMainWindowRPC({
   pluginCommandExecutions,
   windowContext = { kind: "playground" },
   projectStudioHost,
+  playgroundHost,
+  listAgentProjects,
+  openAgentProject,
+  pickAgentProject,
 }: MainWindowRPCDependencies): MainWindowRPCController {
   const getRuntime = runtimeRouter.get.bind(runtimeRouter);
   const promptFileRequests = createPromptFileRpcHandlers(getRuntime);
+  const playgroundSubscriptions = new Map<string, AbortController>();
   const projectSubscriptions = new Map<string, AbortController>();
   const projectSourceSubscriptions = new Map<string, AbortController>();
   const getProjectHost = (): ProjectStudioHost => {
@@ -103,6 +115,35 @@ export function createMainWindowRPC({
     handlers: {
       requests: {
         windowContext: () => Promise.resolve(windowContext),
+        playgroundList: () => playgroundHost.listPlaygrounds(),
+        playgroundCreate: (input) => playgroundHost.createPlayground(input),
+        playgroundLoad: ({ playgroundId }) =>
+          playgroundHost.loadPlayground(playgroundId),
+        playgroundSave: ({ playgroundId, document }) =>
+          playgroundHost.savePlayground(playgroundId, document),
+        playgroundRun: ({ playgroundId, fromMessageId, mode }) =>
+          playgroundHost.run(playgroundId, {
+            fromMessageId,
+            ...(mode === undefined ? {} : { mode }),
+          }),
+        playgroundStepRun: ({ runId, toolCallId }) =>
+          playgroundHost.stepRun(runId, {
+            ...(toolCallId === undefined ? {} : { toolCallId }),
+          }),
+        playgroundContinueRun: ({ runId }) => playgroundHost.continueRun(runId),
+        playgroundCancelRun: async ({ runId }) => {
+          await playgroundHost.cancelRun(runId);
+          return null;
+        },
+        agentProjectList: () => listAgentProjects(),
+        agentProjectOpen: async ({ rootPath }) => {
+          await openAgentProject(rootPath);
+          return null;
+        },
+        agentProjectPickAndOpen: async () => {
+          await pickAgentProject();
+          return null;
+        },
         projectGetSourceRevision: () => getProjectHost().getSourceRevision(),
         projectListThreads: () => getProjectHost().listThreads(),
         projectListRunHistory: ({ threadId }) =>
@@ -128,8 +169,16 @@ export function createMainWindowRPC({
           getProjectHost().loadThread(threadId),
         projectSaveThreadDocument: ({ threadId, document }) =>
           getProjectHost().saveDocument(threadId, document),
-        projectRunThread: ({ threadId, fromMessageId }) =>
-          getProjectHost().run(threadId, { fromMessageId }),
+        projectRunThread: ({ threadId, fromMessageId, mode }) =>
+          getProjectHost().run(threadId, {
+            fromMessageId,
+            ...(mode === undefined ? {} : { mode }),
+          }),
+        projectStepRun: ({ runId, toolCallId }) =>
+          getProjectHost().stepRun(runId, {
+            ...(toolCallId === undefined ? {} : { toolCallId }),
+          }),
+        projectContinueRun: ({ runId }) => getProjectHost().continueRun(runId),
         projectCancelRun: async ({ runId }) => {
           await getProjectHost().cancelRun(runId);
           return null;
@@ -557,6 +606,48 @@ export function createMainWindowRPC({
         githubAuthStatus: () => Promise.resolve(githubAuth.getState()),
       },
       messages: {
+        playgroundRunSubscribe: ({ subscriptionId, runId, afterCursor }) => {
+          playgroundSubscriptions.get(subscriptionId)?.abort();
+          const controller = new AbortController();
+          playgroundSubscriptions.set(subscriptionId, controller);
+          void (async () => {
+            try {
+              for await (const frame of playgroundHost.streamRun(runId, {
+                afterCursor,
+                follow: true,
+                signal: controller.signal,
+              })) {
+                rpc.send.receivePlaygroundRunFrame({
+                  subscriptionId,
+                  type: "frame",
+                  frame,
+                });
+              }
+              if (!controller.signal.aborted) {
+                rpc.send.receivePlaygroundRunFrame({
+                  subscriptionId,
+                  type: "done",
+                });
+              }
+            } catch (error) {
+              if (!controller.signal.aborted) {
+                rpc.send.receivePlaygroundRunFrame({
+                  subscriptionId,
+                  type: "error",
+                  message: _errorMessage(error),
+                });
+              }
+            } finally {
+              if (playgroundSubscriptions.get(subscriptionId) === controller) {
+                playgroundSubscriptions.delete(subscriptionId);
+              }
+            }
+          })();
+        },
+        playgroundRunUnsubscribe: ({ subscriptionId }) => {
+          playgroundSubscriptions.get(subscriptionId)?.abort();
+          playgroundSubscriptions.delete(subscriptionId);
+        },
         projectThreadSubscribe: ({
           subscriptionId,
           threadId,
@@ -654,11 +745,15 @@ export function createMainWindowRPC({
   return {
     rpc,
     dispose() {
+      for (const controller of playgroundSubscriptions.values()) {
+        controller.abort();
+      }
       for (const controller of projectSubscriptions.values())
         controller.abort();
       for (const controller of projectSourceSubscriptions.values()) {
         controller.abort();
       }
+      playgroundSubscriptions.clear();
       projectSubscriptions.clear();
       projectSourceSubscriptions.clear();
     },

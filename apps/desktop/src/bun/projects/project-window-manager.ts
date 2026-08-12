@@ -16,9 +16,16 @@ export interface ProjectWindowStateStore {
   save(rootPaths: readonly string[]): Promise<void>;
 }
 
+export interface AgentProjectCatalogStore {
+  load(): Promise<readonly string[]>;
+  save(rootPaths: readonly string[]): Promise<void>;
+}
+
 export interface ProjectWindowManagerOptions {
   readonly windows: ProjectWindowAdapter;
   readonly state?: ProjectWindowStateStore;
+  readonly catalog?: AgentProjectCatalogStore;
+  readonly openProject?: typeof openAgentProject;
 }
 
 /** Owns the one-project/one-window invariant for the desktop process. */
@@ -33,7 +40,9 @@ export class ProjectWindowManager {
   constructor(private readonly _options: ProjectWindowManagerOptions) {}
 
   async openProject(startPath: string): Promise<void> {
-    const project = await openAgentProject(startPath);
+    const project = await (this._options.openProject ?? openAgentProject)(
+      startPath
+    );
     const existing = this._windows.get(project.rootPath);
     if (existing !== undefined) {
       existing.handle.activate();
@@ -53,11 +62,28 @@ export class ProjectWindowManager {
       this._opening.delete(project.rootPath);
     }
     this._windows.set(project.rootPath, { project, handle });
+    await this._rememberProject(project.rootPath);
     handle.onClosed?.(() => {
       this._windows.delete(project.rootPath);
       if (!this._closingAll) void this._saveOpenProjects();
     });
     await this._saveOpenProjects();
+  }
+
+  /** Resolve durable catalog paths into current Project metadata. */
+  async listProjects(): Promise<readonly AgentProject[]> {
+    const paths = (await this._options.catalog?.load()) ?? [];
+    const projects: AgentProject[] = [];
+    for (const path of paths) {
+      try {
+        projects.push(
+          await (this._options.openProject ?? openAgentProject)(path)
+        );
+      } catch (error) {
+        console.error(`Failed to load agent project "${path}":`, error);
+      }
+    }
+    return projects.sort((left, right) => left.name.localeCompare(right.name));
   }
 
   async restoreProjects(): Promise<void> {
@@ -89,5 +115,12 @@ export class ProjectWindowManager {
         )
       ) ?? Promise.resolve()
     );
+  }
+
+  private async _rememberProject(rootPath: string): Promise<void> {
+    if (this._options.catalog === undefined) return;
+    const paths = new Set(await this._options.catalog.load());
+    paths.add(rootPath);
+    await this._options.catalog.save([...paths].sort());
   }
 }

@@ -37,7 +37,11 @@ export interface ProjectStudioHost extends ProjectStudioTransport {
 export async function createProjectStudioHost(
   options: CreateProjectStudioHostOptions
 ): Promise<ProjectStudioHost> {
-  const executable = await _loadExecutableAgent(options.project);
+  const revisionProvider = new GitHeadProvider(options.project.rootPath);
+  const executable = await _loadCurrentExecutableAgent(
+    options.project,
+    revisionProvider
+  );
   const { snapshot } = executable;
   const sandbox = new ProjectSandbox(options.project.rootPath);
   const engineStore = createSqliteEngineStore({
@@ -50,7 +54,11 @@ export async function createProjectStudioHost(
       runExecutor: options.runExecutor,
       agentResolver: {
         resolve: (storedSnapshot) =>
-          _loadExactExecutableAgent(options.project, storedSnapshot),
+          _loadExactExecutableAgent(
+            options.project,
+            storedSnapshot,
+            revisionProvider
+          ),
       },
       createToolContext: ({ execution, signal }) =>
         _studioToolContext({ execution, signal, sandbox }),
@@ -72,14 +80,14 @@ export async function createProjectStudioHost(
     await engine.close();
     throw error;
   }
-  const revisionProvider = new GitHeadProvider(options.project.rootPath);
   let runtime: StudioApplication;
   try {
     runtime = createStudioApplication({
       engine,
       store: studioStore,
       revisionProvider,
-      resolveCurrentAgent: () => _loadExecutableAgent(options.project),
+      resolveCurrentAgent: () =>
+        _loadCurrentExecutableAgent(options.project, revisionProvider),
       ...(options.clock === undefined ? {} : { clock: options.clock }),
       ...(options.generateId === undefined
         ? {}
@@ -172,12 +180,15 @@ class ProjectStudioHostImpl implements ProjectStudioHost {
   }
 
   async createThread(input: { readonly title?: string } = {}) {
-    const commitId = await this._revisionProvider.current();
-    const current = await _loadExecutableAgent(this._agentProject);
+    const commitId = await this._revisionProvider.binding();
+    const current = await _loadExecutableAgent(
+      this._agentProject,
+      _generationId(commitId)
+    );
     return this._runtime.createThread({
       ...input,
       agent: current.snapshot,
-      commitId,
+      ...(commitId === undefined ? {} : { commitId }),
     });
   }
 
@@ -192,8 +203,19 @@ class ProjectStudioHostImpl implements ProjectStudioHost {
     return this._runtime.saveDocument(threadId, document);
   }
 
-  run(threadId: string, input: { readonly fromMessageId: string }) {
+  run(threadId: string, input: Parameters<StudioApplication["run"]>[1]) {
     return this._runtime.run(threadId, input);
+  }
+
+  stepRun(
+    runId: string,
+    input: Parameters<StudioApplication["stepRun"]>[1] = {}
+  ) {
+    return this._runtime.stepRun(runId, input);
+  }
+
+  continueRun(runId: string) {
+    return this._runtime.continueRun(runId);
   }
 
   cancelRun(runId: string) {
@@ -217,7 +239,8 @@ class ProjectStudioHostImpl implements ProjectStudioHost {
 }
 
 async function _loadExecutableAgent(
-  project: AgentProject
+  project: AgentProject,
+  generationId: string
 ): Promise<ExecutableAgent> {
   const definition = await resolveAgentGeneration(
     await loadAgent({ startPath: project.rootPath })
@@ -225,7 +248,10 @@ async function _loadExecutableAgent(
   const currentSnapshot: AgentSnapshot = {
     schemaVersion: 1,
     agentId: definition.agentId,
-    generationId: definition.generationId,
+    // Project Studio uses the source-control binding as generation identity.
+    // The loader's content fingerprint remains an import-cache implementation
+    // detail and is never persisted as Experiment provenance.
+    generationId,
     model: definition.model,
     instructions: definition.instructions,
     tools: [...definition.tools.values()].map((tool) => tool.model),
@@ -238,9 +264,32 @@ async function _loadExecutableAgent(
 
 async function _loadExactExecutableAgent(
   project: AgentProject,
-  storedSnapshot: AgentSnapshot
+  storedSnapshot: AgentSnapshot,
+  revisionProvider: GitHeadProvider
 ): Promise<ExecutableAgent> {
-  const current = await _loadExecutableAgent(project);
+  if (storedSnapshot.generationId.startsWith("commit:")) {
+    const expectedCommitId = storedSnapshot.generationId.slice(
+      "commit:".length
+    );
+    const currentCommitId = await revisionProvider.binding();
+    if (currentCommitId !== expectedCommitId) {
+      throw new Error(
+        `Agent generation "${storedSnapshot.agentId}/${storedSnapshot.generationId}" is unavailable: the worktree must be clean at commit "${expectedCommitId}".`
+      );
+    }
+  }
+  if (
+    storedSnapshot.generationId === "uncommitted" &&
+    (await revisionProvider.binding()) !== undefined
+  ) {
+    throw new Error(
+      `Agent generation "${storedSnapshot.agentId}/uncommitted" is unavailable: this Run can only resume against an uncommitted worktree.`
+    );
+  }
+  const current = await _loadExecutableAgent(
+    project,
+    storedSnapshot.generationId
+  );
   if (
     current.snapshot.agentId !== storedSnapshot.agentId ||
     current.snapshot.generationId !== storedSnapshot.generationId
@@ -250,6 +299,20 @@ async function _loadExactExecutableAgent(
     );
   }
   return current;
+}
+
+async function _loadCurrentExecutableAgent(
+  project: AgentProject,
+  revisionProvider: GitHeadProvider
+): Promise<ExecutableAgent> {
+  return _loadExecutableAgent(
+    project,
+    _generationId(await revisionProvider.binding())
+  );
+}
+
+function _generationId(commitId: string | undefined): string {
+  return commitId === undefined ? "uncommitted" : `commit:${commitId}`;
 }
 
 function _studioToolContext(input: {

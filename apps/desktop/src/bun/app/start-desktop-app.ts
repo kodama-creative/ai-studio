@@ -28,6 +28,7 @@ import { DesktopHost } from "../host/desktop-host";
 import { McpManager } from "../mcp";
 import { createConfiguredArkImageGenerator, ModelManager } from "../models";
 import { NetworkSettingsManager } from "../network";
+import { createPlaygroundHost } from "../playgrounds/playground-host";
 import {
   PluginCommandExecutionController,
   type PluginCommandReportInput,
@@ -35,6 +36,7 @@ import {
 import { createProjectStudioHost } from "../projects/project-studio-host";
 import { ProjectWindowManager } from "../projects/project-window-manager";
 import {
+  FileAgentProjectCatalogStore,
   FileProjectWindowStateStore,
   ProjectWindowStateFile,
 } from "../projects/project-window-state";
@@ -232,6 +234,14 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
     },
   });
   const runtimeRouter = new RuntimeRouter(localRuntime);
+  const playgroundHost = createPlaygroundHost({
+    homePath,
+    runExecutor: createPiRunExecutor({
+      models: await modelManager.getAvailableModels(),
+    }),
+    runtime: localRuntime,
+    pluginManager,
+  });
   const remoteServerManager = new RemoteServerManager(runtimeRouter);
   const remoteRuntime = await registerConfiguredRemoteRuntime({
     env: process.env,
@@ -294,6 +304,15 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
       updater,
       pluginManager,
       pluginCommandExecutions,
+      playgroundHost,
+      listAgentProjects: async () =>
+        (await projectWindows.listProjects()).map((project) => ({
+          id: project.id,
+          name: project.name,
+          rootPath: project.rootPath,
+        })),
+      openAgentProject: (rootPath) => projectWindows.openProject(rootPath),
+      pickAgentProject,
       ...(projectStudioHost === undefined
         ? {}
         : {
@@ -306,6 +325,7 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
     });
   const projectWindows = new ProjectWindowManager({
     state: new FileProjectWindowStateStore(homePath),
+    catalog: new FileAgentProjectCatalogStore(homePath),
     windows: {
       async create(project) {
         const projectStudioHost = await createProjectStudioHost({
@@ -397,6 +417,7 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
       stopPromise ??= _stopDesktopApp([
         ["agent project windows", () => projectWindows.closeAll()],
         ["main window RPC", () => mainRpcController?.dispose()],
+        ["playground host", () => playgroundHost.close()],
         ["window state", () => windowStates.flush()],
         ["updater", () => updater.stop()],
         ["remote runtime", () => remoteRuntime?.stop()],

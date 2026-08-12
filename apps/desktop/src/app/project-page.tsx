@@ -648,7 +648,9 @@ function _ProjectThreadPlaygroundPane({
     [client, onSettled, publishThread, thread.id]
   );
   const outdated =
-    sourceRevision !== undefined && sourceRevision !== thread.document.commitId;
+    thread.document.commitId !== undefined &&
+    sourceRevision !== undefined &&
+    sourceRevision !== thread.document.commitId;
 
   return (
     <ThreadPlayground
@@ -673,8 +675,9 @@ function _ProjectThreadPlaygroundPane({
               : "text-muted-foreground font-mono text-[0.625rem]"
           }
         >
-          {outdated ? "Outdated · " : ""}commit{" "}
-          {thread.document.commitId.slice(0, 10)}
+          {thread.document.commitId === undefined
+            ? "Uncommitted"
+            : `${outdated ? "Outdated · " : ""}commit ${thread.document.commitId.slice(0, 10)}`}
         </span>
       }
       headerActions={

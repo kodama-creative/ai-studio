@@ -7,11 +7,15 @@ import {
   fauxToolCall,
 } from "@earendil-works/pi-ai";
 import type { JsonObject, ToolContext } from "@llm-space/agent/tools";
+import { createAgentEngine, InMemoryEngineStore } from "@llm-space/engine";
 import type {
+  AgentEngine,
   AgentSnapshot,
+  ExecutableAgent,
   RunExecutionEvent,
   RunExecutionInput,
   RunExecutionSink,
+  RunExecutor,
 } from "@llm-space/engine";
 
 import { createPiRunExecutor } from "./pi-run-executor";
@@ -23,7 +27,7 @@ const INCREMENT_SCHEMA: JsonObject = {
   additionalProperties: false,
 };
 
-test("Pi executor runs the complete model-tool-model loop behind one Run", async () => {
+test("Pi executor advances one model or tool step at a time", async () => {
   const faux = fauxProvider({ tokensPerSecond: 0 });
   const model = faux.getModel();
   const toolAgent: AgentSnapshot = {
@@ -74,8 +78,7 @@ test("Pi executor runs the complete model-tool-model loop behind one Run", async
   };
   const executor = createPiRunExecutor({ models });
 
-  await executor.execute(
-    {
+  const input: RunExecutionInput = {
       runId: "run-1",
       threadId: "thread-1",
       messages: [
@@ -103,9 +106,52 @@ test("Pi executor runs the complete model-tool-model loop behind one Run", async
         ]),
       },
       maxModelTurns: 4,
+      step: { type: "model" },
+      stepIndex: 0,
       createMessageId: () => `assistant-${events.length}`,
       createToolContext: ({ execution, signal }) =>
         _toolContext(execution, signal),
+    };
+
+  await executor.executeStep(
+    input,
+    sink,
+    { signal: new AbortController().signal }
+  );
+
+  expect(
+    events.map(({ type }) => type).filter((type) => type !== "assistant.delta")
+  ).toEqual(["assistant.completed"]);
+  const requested = events.find(
+    (event) => event.type === "assistant.completed"
+  );
+  if (requested?.type !== "assistant.completed") {
+    throw new Error("The model step did not complete an Assistant Message.");
+  }
+
+  await executor.executeStep(
+    {
+      ...input,
+      messages: [...input.messages, requested.message],
+      step: { type: "tools", toolCallIds: ["call-1"] },
+      stepIndex: 1,
+    },
+    sink,
+    { signal: new AbortController().signal }
+  );
+  const toolCompleted = events.findLast(
+    (event) => event.type === "tool.completed"
+  );
+  if (toolCompleted?.type !== "tool.completed") {
+    throw new Error("The tool step did not complete.");
+  }
+
+  await executor.executeStep(
+    {
+      ...input,
+      messages: [...input.messages, toolCompleted.message],
+      step: { type: "model" },
+      stepIndex: 2,
     },
     sink,
     { signal: new AbortController().signal }
@@ -162,6 +208,95 @@ test("Pi executor runs the complete model-tool-model loop behind one Run", async
   );
 });
 
+test("Pi Engine Step and Continue resume the same durable Run", async () => {
+  const faux = fauxProvider({ tokensPerSecond: 0 });
+  const model = faux.getModel();
+  faux.setResponses([
+    fauxAssistantMessage(
+      [fauxToolCall("increment", { amount: 2 }, { id: "call-engine-step" })],
+      { stopReason: "toolUse" }
+    ),
+    fauxAssistantMessage("Finished."),
+  ]);
+  const models = createModels();
+  models.setProvider(faux.provider);
+  let executions = 0;
+  const snapshot: AgentSnapshot = {
+    schemaVersion: 1,
+    agentId: "step-agent",
+    generationId: "generation-1",
+    model: `${model.provider}/${model.id}`,
+    instructions: [],
+    tools: [
+      {
+        name: "increment",
+        description: "Increment",
+        inputSchema: INCREMENT_SCHEMA,
+      },
+    ],
+  };
+  const executable: ExecutableAgent = {
+    snapshot,
+    tools: new Map([
+      [
+        "increment",
+        {
+          definition: {
+            description: "Increment",
+            inputSchema: INCREMENT_SCHEMA,
+            execute() {
+              executions++;
+              return { count: executions };
+            },
+          },
+        },
+      ],
+    ]),
+  };
+  const engine = createAgentEngine({
+    store: new InMemoryEngineStore(),
+    runExecutor: createPiRunExecutor({ models }),
+    agentResolver: { resolve: () => Promise.resolve(executable) },
+    createToolContext: ({ execution, signal }) =>
+      _toolContext(execution, signal),
+  });
+  try {
+    const thread = await engine.createThread();
+    const run = await engine.startRun({
+      threadId: thread.id,
+      expectedHeadCheckpointId: thread.headCheckpointId,
+      inputMessages: [
+        {
+          id: "user-engine-step",
+          role: "user",
+          content: [{ type: "text", text: "Increment" }],
+        },
+      ],
+      agentSnapshot: snapshot,
+      mode: "step",
+    });
+
+    await _waitForRunStatus(engine, run.id, "paused");
+    expect(executions).toBe(0);
+
+    await engine.stepRun({ runId: run.id, toolCallId: "call-engine-step" });
+    await _waitForRunStatus(engine, run.id, "paused");
+    expect(executions).toBe(1);
+
+    await engine.continueRun(run.id);
+    const completed = await _waitForRunStatus(engine, run.id, "completed");
+    const result = await engine.getCheckpoint(completed.resultCheckpointId!);
+
+    expect(completed.id).toBe(run.id);
+    expect(result?.threadState.messages.at(-1)).toMatchObject({
+      role: "assistant",
+      content: [{ type: "text", text: "Finished." }],
+    });
+  } finally {
+    await engine.close();
+  }
+});
+
 test("Pi executor expands historical tool outputs and preserves images", async () => {
   const faux = fauxProvider({ tokensPerSecond: 0 });
   const model = faux.getModel();
@@ -176,7 +311,7 @@ test("Pi executor expands historical tool outputs and preserves images", async (
   models.setProvider(faux.provider);
   const executor = createPiRunExecutor({ models });
 
-  await executor.execute(
+  await executor.executeStep(
     {
       runId: "run-history",
       threadId: "thread-history",
@@ -218,6 +353,8 @@ test("Pi executor expands historical tool outputs and preserves images", async (
         },
         tools: new Map(),
       },
+      step: { type: "model" },
+      stepIndex: 0,
       maxModelTurns: 4,
       createMessageId: () => "assistant-result",
       createToolContext: ({ execution, signal }) =>
@@ -275,7 +412,9 @@ test("Pi executor emits iterable progress and reserves the last part for complet
   models.setProvider(faux.provider);
   const events: RunExecutionEvent[] = [];
 
-  await createPiRunExecutor({ models }).execute(
+  const executor = createPiRunExecutor({ models });
+  await _executeModelAndTools(
+    executor,
     {
       ..._emptyRunInput(model, "run-stream"),
       agent: {
@@ -359,7 +498,9 @@ test("Pi executor converts invalid tool input into a durable error result", asyn
   const events: RunExecutionEvent[] = [];
   let executed = false;
 
-  await createPiRunExecutor({ models }).execute(
+  const executor = createPiRunExecutor({ models });
+  await _executeModelAndTools(
+    executor,
     {
       ..._emptyRunInput(model, "run-invalid"),
       agent: {
@@ -437,7 +578,7 @@ test("Pi executor rejects provider error and truncated terminal responses", asyn
   expect(
     (
       await _rejection(
-        executor.execute(
+        executor.executeStep(
           _emptyRunInput(model, "run-provider-error"),
           sink,
           { signal: new AbortController().signal }
@@ -448,7 +589,7 @@ test("Pi executor rejects provider error and truncated terminal responses", asyn
   expect(
     (
       await _rejection(
-        executor.execute(_emptyRunInput(model, "run-length"), sink, {
+        executor.executeStep(_emptyRunInput(model, "run-length"), sink, {
           signal: new AbortController().signal,
         })
       )
@@ -456,49 +597,73 @@ test("Pi executor rejects provider error and truncated terminal responses", asyn
   ).toContain("output limit was reached");
 });
 
-test("Pi executor rejects a loop that exhausts the model-turn limit", async () => {
+test("Pi executor runs only the tool call selected by a Step command", async () => {
   const faux = fauxProvider({ tokensPerSecond: 0 });
   const model = faux.getModel();
-  faux.setResponses([
-    fauxAssistantMessage([fauxToolCall("work", {}, { id: "call-limit" })], {
-      stopReason: "toolUse",
-    }),
-  ]);
   const models = createModels();
   models.setProvider(faux.provider);
-  const input = _emptyRunInput(model, "run-limit");
+  const executed: string[] = [];
+  const events: RunExecutionEvent[] = [];
+  const input = _emptyRunInput(model, "run-selected-tool");
 
-  const error = await _rejection(
-    createPiRunExecutor({ models }).execute(
-      {
-        ...input,
-        maxModelTurns: 1,
-        agent: {
-          snapshot: {
-            ...input.agent.snapshot,
-            tools: [
-              { name: "work", description: "Do work", inputSchema: {} },
-            ],
-          },
-          tools: new Map([
-            [
-              "work",
-              {
-                definition: {
-                  description: "Do work",
-                  inputSchema: {},
-                  execute: () => "done",
+  await createPiRunExecutor({ models }).executeStep(
+    {
+      ...input,
+      messages: [
+        ...input.messages,
+        {
+          id: "assistant-selected-tool",
+          role: "assistant",
+          content: [],
+          toolCalls: [
+            { id: "call-a", input: { name: "a", arguments: {} } },
+            { id: "call-b", input: { name: "b", arguments: {} } },
+          ],
+        },
+      ],
+      agent: {
+        snapshot: {
+          ...input.agent.snapshot,
+          tools: [
+            { name: "a", description: "A", inputSchema: {} },
+            { name: "b", description: "B", inputSchema: {} },
+          ],
+        },
+        tools: new Map(
+          ["a", "b"].map((name) => [
+            name,
+            {
+              definition: {
+                description: name,
+                inputSchema: {},
+                execute() {
+                  executed.push(name);
+                  return name;
                 },
               },
-            ],
-          ]),
-        },
+            },
+          ])
+        ),
       },
-      { accept: () => Promise.resolve() },
-      { signal: new AbortController().signal }
-    )
+      step: { type: "tools", toolCallIds: ["call-b"] },
+      stepIndex: 1,
+    },
+    {
+      accept(event) {
+        events.push(event);
+        return Promise.resolve();
+      },
+    },
+    { signal: new AbortController().signal }
   );
-  expect(error.message).toContain("exceeded 1 model turns");
+
+  expect(executed).toEqual(["b"]);
+  expect(
+    events.some(
+      (event) =>
+        event.type === "tool.completed" && event.toolCallId === "call-b"
+    )
+  ).toBe(true);
 });
 
 test("Pi executor waits for durable assistant and tool checkpoints", async () => {
@@ -523,9 +688,13 @@ test("Pi executor waits for durable assistant and tool checkpoints", async () =>
   const releaseToolCheckpoint = _deferred<void>();
   let assistantCount = 0;
   let toolStarted = false;
-
-  const execution = executor.execute(
-    {
+  let requested: Extract<RunExecutionEvent, { type: "assistant.completed" }>[
+    "message"
+  ] | undefined;
+  let completedTool: Extract<RunExecutionEvent, { type: "tool.completed" }>[
+    "message"
+  ] | undefined;
+  const input: RunExecutionInput = {
       runId: "run-barrier",
       threadId: "thread-barrier",
       messages: [
@@ -566,19 +735,53 @@ test("Pi executor waits for durable assistant and tool checkpoints", async () =>
           ],
         ]),
       },
+      step: { type: "model" },
+      stepIndex: 0,
       maxModelTurns: 4,
       createMessageId: () => `assistant-barrier-${assistantCount}`,
       createToolContext: ({ execution: contextExecution, signal }) =>
         _toolContext(contextExecution, signal),
-    },
+    };
+
+  let modelResolved = false;
+  const modelExecution = executor.executeStep(
+    input,
     {
       async accept(event) {
         if (event.type === "assistant.completed") {
+          requested = event.message;
           assistantCount++;
-          if (assistantCount !== 1) return;
           assistantReached.resolve();
           await releaseCheckpoint.promise;
-        } else if (event.type === "tool.completed") {
+        }
+      },
+    },
+    { signal: new AbortController().signal }
+  );
+  void modelExecution.then(() => {
+    modelResolved = true;
+  });
+
+  await assistantReached.promise;
+  expect(toolStarted).toBeFalse();
+  expect(modelResolved).toBeFalse();
+  releaseCheckpoint.resolve();
+  await modelExecution;
+  expect(secondModelStarted).toBeFalse();
+  if (requested === undefined) throw new Error("Model step did not complete.");
+
+  let toolResolved = false;
+  const toolExecution = executor.executeStep(
+    {
+      ...input,
+      messages: [...input.messages, requested],
+      step: { type: "tools", toolCallIds: ["call-barrier"] },
+      stepIndex: 1,
+    },
+    {
+      async accept(event) {
+        if (event.type === "tool.completed") {
+          completedTool = event.message;
           toolReached.resolve();
           await releaseToolCheckpoint.promise;
         }
@@ -586,15 +789,28 @@ test("Pi executor waits for durable assistant and tool checkpoints", async () =>
     },
     { signal: new AbortController().signal }
   );
+  void toolExecution.then(() => {
+    toolResolved = true;
+  });
 
-  await assistantReached.promise;
-  expect(toolStarted).toBeFalse();
-  releaseCheckpoint.resolve();
   await toolReached.promise;
+  expect(toolStarted).toBeTrue();
+  expect(toolResolved).toBeFalse();
   expect(secondModelStarted).toBeFalse();
   releaseToolCheckpoint.resolve();
-  await execution;
-  expect(toolStarted).toBeTrue();
+  await toolExecution;
+  if (completedTool === undefined) throw new Error("Tool step did not complete.");
+
+  await executor.executeStep(
+    {
+      ...input,
+      messages: [...input.messages, completedTool],
+      step: { type: "model" },
+      stepIndex: 2,
+    },
+    { accept: () => Promise.resolve() },
+    { signal: new AbortController().signal }
+  );
   expect(secondModelStarted).toBeTrue();
 });
 
@@ -645,11 +861,52 @@ function _emptyRunInput(
       },
       tools: new Map(),
     },
+    step: { type: "model" },
+    stepIndex: 0,
     maxModelTurns: 4,
     createMessageId: () => `assistant-${runId}`,
     createToolContext: ({ execution, signal }) =>
       _toolContext(execution, signal),
   };
+}
+
+/** Runs the two explicit steps used by tool-focused adapter tests. */
+async function _executeModelAndTools(
+  executor: RunExecutor,
+  input: RunExecutionInput,
+  sink: RunExecutionSink,
+  options: { readonly signal: AbortSignal }
+): Promise<void> {
+  let requested: Extract<RunExecutionEvent, { type: "assistant.completed" }>[
+    "message"
+  ] | undefined;
+  await executor.executeStep(
+    { ...input, step: { type: "model" } },
+    {
+      async accept(event) {
+        if (event.type === "assistant.completed") requested = event.message;
+        await sink.accept(event);
+      },
+    },
+    options
+  );
+  if (requested === undefined) {
+    throw new Error("Model step did not request a tool.");
+  }
+  const toolCallIds = requested.toolCalls?.map((call) => call.id) ?? [];
+  if (toolCallIds.length === 0) {
+    throw new Error(`Model step did not request a tool: ${JSON.stringify(requested)}`);
+  }
+  await executor.executeStep(
+    {
+      ...input,
+      messages: [...input.messages, requested],
+      step: { type: "tools", toolCallIds },
+      stepIndex: input.stepIndex + 1,
+    },
+    sink,
+    options
+  );
 }
 
 /** Captures an expected execution failure without Bun's non-thenable matcher. */
@@ -668,4 +925,17 @@ function _deferred<T>() {
     resolve = promiseResolve;
   });
   return { promise, resolve };
+}
+
+async function _waitForRunStatus(
+  engine: AgentEngine,
+  runId: string,
+  status: import("@llm-space/engine").RunStatus
+) {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const run = await engine.getRun(runId);
+    if (run?.status === status) return run;
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+  throw new Error(`Run "${runId}" did not reach status "${status}".`);
 }

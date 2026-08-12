@@ -1,9 +1,15 @@
 import type { Thread } from "@llm-space/core";
+import type { AgentSpec } from "@llm-space/studio";
 import { FirecrawlLimitDialog } from "@llm-space/ui/components/firecrawl-limit-dialog";
 import {
   useModels,
   useRefreshModels,
 } from "@llm-space/ui/components/model-provider";
+import {
+  getPromptExample,
+  resolveSeed,
+} from "@llm-space/ui/components/thread-playground/examples/prompts";
+import { useHostServices } from "@llm-space/ui/host";
 import {
   LOCAL_STORAGE_KEYS,
   readLocalStorage,
@@ -33,7 +39,11 @@ import { flushSync } from "react-dom";
 import { usePanelRef } from "react-resizable-panels";
 import { toast } from "sonner";
 
-import { createFileSystemClient } from "@/client";
+import {
+  createAgentProjectClient,
+  createFileSystemClient,
+  createPlaygroundClient,
+} from "@/client";
 import type { PluginActiveTab } from "@/client/plugins";
 import { getDefaultRuntime, listRuntimes } from "@/client/remote-servers";
 import { CommandProvider, useCommands, useRegisterCommands } from "@/commands";
@@ -46,6 +56,7 @@ import { GithubDeviceDialog } from "@/components/github-device-dialog";
 import { GithubStarReminder } from "@/components/github-star-reminder";
 import { LazyMount } from "@/components/lazy-mount";
 import { PageShareThreadController } from "@/components/page-share-thread-controller";
+import { PlaygroundSidebar } from "@/components/playground-sidebar";
 import { RemoteStatus } from "@/components/remote-status";
 import type { ShareThreadTarget } from "@/components/share-thread-dialog-flow";
 import { SharedImportProvider } from "@/components/shared-import-provider";
@@ -211,6 +222,12 @@ function hasFiles(e: React.DragEvent): boolean {
 // restores the last dragged width.
 const DEFAULT_SIDEBAR_SIZE = "16.7%";
 
+const BLANK_AGENT_SPEC: AgentSpec = {
+  schemaVersion: 1,
+  instructions: [],
+  tools: [],
+};
+
 function readSidebarSize(): number | string {
   const raw = readLocalStorage(LOCAL_STORAGE_KEYS.sidebarSize);
   const size = raw ? Number(raw) : NaN;
@@ -287,6 +304,9 @@ function PageWorkspace({
     );
   }, []);
   const tabs = useThreadTabs({ canPruneRestoredTab });
+  const playgroundClient = useMemo(() => createPlaygroundClient(), []);
+  const agentProjectClient = useMemo(() => createAgentProjectClient(), []);
+  const seedHost = useHostServices();
   const { executeCommand } = useCommands();
   const models = useModels();
   const refreshModels = useRefreshModels();
@@ -302,6 +322,7 @@ function PageWorkspace({
     handleRemove,
     openTrace,
     reopenClosed,
+    openPlayground,
   } = tabs;
   const visibleTabs = useMemo(
     () => filterTabsForRuntime(tabs.tabs, workspaceRuntimeId),
@@ -327,6 +348,12 @@ function PageWorkspace({
     const filename = activeTab.path.split("/").at(-1);
     return thread && filename
       ? { ...activeTab, tabId: activeTab.id, filename, thread }
+      : null;
+  }, [visibleActiveId, visibleTabs]);
+  const getActiveEditorThread = useCallback((): Thread | null => {
+    const activeTab = visibleTabs.find((tab) => tab.id === visibleActiveId);
+    return activeTab
+      ? (threadStateRef.current.get(activeTab.id) ?? null)
       : null;
   }, [visibleActiveId, visibleTabs]);
   const getActiveShareThread = useCallback((): ShareThreadTarget | null => {
@@ -490,6 +517,37 @@ function PageWorkspace({
   const [sidebarMode, setSidebarMode] = useState<"files" | "traces">("files");
   // Which folder a chosen example's thread is created into (default: root).
   const examplesParentRef = useRef("");
+  const createLocalPlayground = useCallback(
+    async (input?: {
+      readonly title?: string;
+      readonly agentSpec?: AgentSpec;
+      readonly messages?: NonNullable<Thread["context"]>["messages"];
+    }) => {
+      try {
+        const playground = await playgroundClient.create({
+          title: input?.title,
+          agentSpec: input?.agentSpec ?? BLANK_AGENT_SPEC,
+          conversation: {
+            messages: input?.messages ?? [
+              {
+                id: crypto.randomUUID(),
+                role: "user",
+                content: [{ type: "text", text: "" }],
+              },
+            ],
+            state: {},
+          },
+        });
+        await queryClient.invalidateQueries({ queryKey: ["playgrounds"] });
+        openPlayground(playground.id, playground.title);
+      } catch (cause) {
+        toast.error("Unable to create Playground", {
+          description: cause instanceof Error ? cause.message : String(cause),
+        });
+      }
+    },
+    [openPlayground, playgroundClient, queryClient]
+  );
 
   const switchWorkspaceRuntime = useCallback(
     (nextRuntimeId: RuntimeId) => {
@@ -588,6 +646,50 @@ function PageWorkspace({
     ) => {
       const list = [...files];
       if (list.length === 0) return;
+      if (runtimeId === "local") {
+        const records = await Promise.all(
+          list.map(async (item) => ({
+            name: item instanceof File ? item.name : item.name,
+            text: item instanceof File ? await item.text() : item.text,
+          }))
+        );
+        let imported = 0;
+        for (const record of records) {
+          try {
+            const thread = JSON.parse(record.text) as Thread;
+            await createLocalPlayground({
+              title: thread.title ?? record.name.replace(/\.json$/i, ""),
+              agentSpec: {
+                schemaVersion: 1,
+                ...(thread.model === undefined ? {} : { model: thread.model }),
+                instructions:
+                  thread.context?.systemPrompt === undefined
+                    ? []
+                    : [thread.context.systemPrompt],
+                tools: thread.context?.tools ?? [],
+                ...(thread.context?.variables === undefined
+                  ? {}
+                  : { variables: thread.context.variables }),
+                ...(thread.context?.variableVariants === undefined
+                  ? {}
+                  : { variableVariants: thread.context.variableVariants }),
+              },
+              messages: thread.context?.messages,
+            });
+            imported++;
+          } catch {
+            // Invalid imports are counted below and do not affect valid files.
+          }
+        }
+        if (imported === 0) {
+          toast.error("No Playgrounds could be imported from these files.");
+        } else {
+          toast.success(
+            `Imported ${imported} Playground${imported === 1 ? "" : "s"}`
+          );
+        }
+        return;
+      }
       const { created, total, recovered, warnings } =
         list[0] instanceof File
           ? await importThreadFiles(parent, list as File[], models, runtimeId)
@@ -623,14 +725,22 @@ function PageWorkspace({
           : undefined
       );
     },
-    [models, executeCommand, openTab, workspaceRuntimeIdRef]
+    [
+      createLocalPlayground,
+      models,
+      executeCommand,
+      openTab,
+      workspaceRuntimeIdRef,
+    ]
   );
   const getActiveThreadForStorage =
     useCallback(async (): Promise<Thread | null> => {
+      const editorThread = getActiveEditorThread();
+      if (editorThread !== null) return editorThread;
       const target = getActiveShareThread();
       if (!target) return null;
       return createFileSystemClient(target.runtimeId).read(target.path);
-    }, [getActiveShareThread]);
+    }, [getActiveEditorThread, getActiveShareThread]);
   const importFromThreadStorage = useCallback(
     async (thread: Thread) => {
       const runtimeId: RuntimeId = "local";
@@ -642,26 +752,69 @@ function PageWorkspace({
           "Finish active remote runs before importing into the local workspace."
         );
       }
-      const fs = createFileSystemClient(runtimeId);
-      await fs.mkdir("imported").catch(() => undefined);
-      await handleImportFiles(
-        [
-          {
-            name: `${thread.title?.trim() || "imported-thread"}.json`,
-            text: JSON.stringify(thread),
-          },
-        ],
-        "imported",
-        runtimeId
-      );
+      await createLocalPlayground({
+        title: thread.title ?? "Imported Playground",
+        agentSpec: {
+          schemaVersion: 1,
+          ...(thread.model === undefined ? {} : { model: thread.model }),
+          instructions:
+            thread.context?.systemPrompt === undefined
+              ? []
+              : [thread.context.systemPrompt],
+          tools: thread.context?.tools ?? [],
+          ...(thread.context?.variables === undefined
+            ? {}
+            : { variables: thread.context.variables }),
+          ...(thread.context?.variableVariants === undefined
+            ? {}
+            : { variableVariants: thread.context.variableVariants }),
+        },
+        messages: thread.context?.messages,
+      });
     },
-    [handleImportFiles, switchWorkspaceRuntime, workspaceRuntimeIdRef]
+    [createLocalPlayground, switchWorkspaceRuntime, workspaceRuntimeIdRef]
   );
 
   // Register the command handlers backed by page-level state (tabs, sidebar,
   // settings). `newFile` / `newFolder` / the tree ops are registered by the
   // file tree, which owns that state.
   useRegisterCommands({
+    newFile: ({ runtimeId }) => {
+      const targetRuntimeId = runtimeId ?? workspaceRuntimeIdRef.current;
+      if (targetRuntimeId === "local") void createLocalPlayground();
+    },
+    newFileFromPromptExample: ({ exampleId, runtimeId }) => {
+      const targetRuntimeId = runtimeId ?? workspaceRuntimeIdRef.current;
+      if (targetRuntimeId !== "local") return;
+      const example = getPromptExample(exampleId);
+      if (example === undefined) return;
+      void (async () => {
+        const [instructions, tools, messages, textVariables] =
+          await Promise.all([
+            resolveSeed(example.content, seedHost),
+            resolveSeed(example.tools, seedHost),
+            resolveSeed(example.messages, seedHost),
+            resolveSeed(example.textVariables, seedHost),
+          ]);
+        await createLocalPlayground({
+          title: example.label,
+          agentSpec: {
+            schemaVersion: 1,
+            instructions: instructions ? [instructions] : [],
+            tools: tools ?? [],
+            ...(textVariables === undefined
+              ? {}
+              : {
+                  variableVariants: {
+                    active: "default",
+                    variants: { default: textVariables },
+                  },
+                }),
+          },
+          messages,
+        });
+      })();
+    },
     closeTab: ({ id, path, runtimeId }) => {
       const targetRuntimeId = runtimeId ?? workspaceRuntimeIdRef.current;
       const target =
@@ -908,14 +1061,16 @@ function PageWorkspace({
     },
     [executeCommand]
   );
-  const handleNewFile = useCallback(
-    () =>
+  const handleNewFile = useCallback(() => {
+    if (workspaceRuntimeId !== "local") {
       executeCommand({
         type: "newFile",
         args: { runtimeId: workspaceRuntimeId },
-      }),
-    [executeCommand, workspaceRuntimeId]
-  );
+      });
+      return;
+    }
+    void createLocalPlayground();
+  }, [createLocalPlayground, executeCommand, workspaceRuntimeId]);
   const handleToggleSidebar = useCallback(
     () => executeCommand({ type: "toggleSidebar", args: {} }),
     [executeCommand]
@@ -994,16 +1149,27 @@ function PageWorkspace({
               if (size.inPixels > 0) writeSidebarSize(size.inPixels);
             }}
           >
-            <FileSystemTreeView
-              runtimeId={workspaceRuntimeId}
-              className={
-                effectiveSidebarMode === "files" ? "min-h-0 flex-1" : "hidden"
-              }
-              onSelectFile={tabs.open}
-              onRemove={reconcileFileRemove}
-              onMove={reconcileFileMove}
-              acquireMutation={acquireFileMutation}
-            />
+            {workspaceRuntimeId === "local" ? (
+              <PlaygroundSidebar
+                client={playgroundClient}
+                projectClient={agentProjectClient}
+                onOpen={(playground) =>
+                  openPlayground(playground.id, playground.title)
+                }
+                onCreate={() => void createLocalPlayground()}
+              />
+            ) : (
+              <FileSystemTreeView
+                runtimeId={workspaceRuntimeId}
+                className={
+                  effectiveSidebarMode === "files" ? "min-h-0 flex-1" : "hidden"
+                }
+                onSelectFile={tabs.open}
+                onRemove={reconcileFileRemove}
+                onMove={reconcileFileMove}
+                acquireMutation={acquireFileMutation}
+              />
+            )}
             {tracingEnabled && (
               <LazyMount open={effectiveSidebarMode === "traces"}>
                 <LazyTracePanel
@@ -1042,10 +1208,12 @@ function PageWorkspace({
                 <Welcome
                   onNewStarter={() => setExamplesOpen(true)}
                   onNewFile={() =>
-                    executeCommand({
-                      type: "newFile",
-                      args: { runtimeId: workspaceRuntimeId },
-                    })
+                    workspaceRuntimeId === "local"
+                      ? void createLocalPlayground()
+                      : executeCommand({
+                          type: "newFile",
+                          args: { runtimeId: workspaceRuntimeId },
+                        })
                   }
                   onModels={() =>
                     executeCommand({
@@ -1072,6 +1240,7 @@ function PageWorkspace({
               onNewFile={handleNewFile}
               onMove={reconcileFileMove}
               onTraceTitleChange={tabs.handleTraceTitleChange}
+              onPlaygroundTitleChange={tabs.handlePlaygroundTitleChange}
               onToggleSidebar={handleToggleSidebar}
               lifecycleHost={paneLifecycleHost}
               mutationRevision={mutationRevision}
@@ -1134,16 +1303,45 @@ function PageWorkspace({
         <StartFromExampleDialog
           open={examplesOpen}
           onOpenChange={setExamplesOpen}
-          onSelectExample={(example) =>
-            executeCommand({
-              type: "newFileFromPromptExample",
-              args: {
-                exampleId: example.id,
-                parent: examplesParentRef.current,
-                runtimeId: workspaceRuntimeId,
-              },
-            })
-          }
+          onSelectExample={(example) => {
+            if (workspaceRuntimeId !== "local") {
+              executeCommand({
+                type: "newFileFromPromptExample",
+                args: {
+                  exampleId: example.id,
+                  parent: examplesParentRef.current,
+                  runtimeId: workspaceRuntimeId,
+                },
+              });
+              return;
+            }
+            void (async () => {
+              const [instructions, tools, messages, textVariables] =
+                await Promise.all([
+                  resolveSeed(example.content, seedHost),
+                  resolveSeed(example.tools, seedHost),
+                  resolveSeed(example.messages, seedHost),
+                  resolveSeed(example.textVariables, seedHost),
+                ]);
+              await createLocalPlayground({
+                title: example.label,
+                agentSpec: {
+                  schemaVersion: 1,
+                  instructions: instructions ? [instructions] : [],
+                  tools: tools ?? [],
+                  ...(textVariables === undefined
+                    ? {}
+                    : {
+                        variableVariants: {
+                          active: "default",
+                          variants: { default: textVariables },
+                        },
+                      }),
+                },
+                messages,
+              });
+            })();
+          }}
         />
       </LazyMount>
       {isDraggingFiles && (

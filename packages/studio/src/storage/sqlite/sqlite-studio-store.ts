@@ -9,9 +9,10 @@ import type {
   ThreadRunReference,
 } from "../../domain";
 import type { Evaluation, EvaluationRubric } from "../../evaluation";
+import type { PlaygroundRecord } from "../../playground";
 import type { StudioStore, StudioStoreTransaction } from "../studio-store";
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 export interface CreateSqliteStudioStoreOptions {
   readonly path: string;
@@ -51,6 +52,59 @@ class SqliteStudioStore implements StudioStore {
 
 class SqliteTransaction implements StudioStoreTransaction {
   constructor(private readonly _database: Database) {}
+
+  getPlayground(playgroundId: string): PlaygroundRecord | undefined {
+    const row = this._database
+      .query<{ payload_json: string }, [string]>(
+        "SELECT payload_json FROM studio_playgrounds WHERE id = ?"
+      )
+      .get(playgroundId);
+    return row === null ? undefined : _parse(row.payload_json);
+  }
+
+  listPlaygrounds(): readonly PlaygroundRecord[] {
+    return this._database
+      .query<{ payload_json: string }, []>(
+        "SELECT payload_json FROM studio_playgrounds ORDER BY updated_at DESC, id"
+      )
+      .all()
+      .map((row) => _parse(row.payload_json));
+  }
+
+  insertPlayground(playground: PlaygroundRecord): void {
+    this._database
+      .query(
+        `INSERT INTO studio_playgrounds (
+          id, schema_version, engine_thread_id, payload_json, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        playground.id,
+        playground.schemaVersion,
+        playground.engineThreadId,
+        _json(playground),
+        playground.createdAt,
+        playground.updatedAt
+      );
+  }
+
+  savePlayground(playground: PlaygroundRecord): void {
+    const result = this._database
+      .query(
+        `UPDATE studio_playgrounds SET
+          engine_thread_id = ?, payload_json = ?, updated_at = ?
+        WHERE id = ?`
+      )
+      .run(
+        playground.engineThreadId,
+        _json(playground),
+        playground.updatedAt,
+        playground.id
+      );
+    if (result.changes !== 1) {
+      throw new Error(`Playground "${playground.id}" was not found.`);
+    }
+  }
 
   getExperiment(experimentId: string): StudioExperimentRecord | undefined {
     const row = this._database
@@ -236,6 +290,20 @@ function _migrate(database: Database): void {
   }
   if (current === SCHEMA_VERSION) return;
   database.transaction(() => {
+    // Studio v1 data is intentionally disposable in this phase. Rebuild only
+    // Studio-owned tables; Engine tables may share this physical database and
+    // must never be touched here.
+    for (const table of [
+      "studio_events",
+      "studio_evaluations",
+      "studio_rubrics",
+      "studio_run_references",
+      "studio_playgrounds",
+      "studio_experiments",
+    ]) {
+      database.run(`DROP TABLE IF EXISTS ${table}`);
+    }
+    database.run("DELETE FROM studio_schema_migrations");
     database.run(`
       CREATE TABLE studio_experiments (
         id TEXT PRIMARY KEY,
@@ -278,6 +346,16 @@ function _migrate(database: Database): void {
         payload_json TEXT NOT NULL,
         PRIMARY KEY(experiment_id, sequence),
         FOREIGN KEY(experiment_id) REFERENCES studio_experiments(id)
+      )
+    `);
+    database.run(`
+      CREATE TABLE studio_playgrounds (
+        id TEXT PRIMARY KEY,
+        schema_version INTEGER NOT NULL,
+        engine_thread_id TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
       )
     `);
     database.run(

@@ -8,6 +8,11 @@ export interface RunExecutionInput {
   readonly threadId: string;
   readonly messages: readonly Message[];
   readonly agent: ExecutableAgent;
+  /** One Engine-selected durable step; the executor must not advance beyond it. */
+  readonly step:
+    | { readonly type: "model" }
+    | { readonly type: "tools"; readonly toolCallIds: readonly string[] };
+  readonly stepIndex: number;
   readonly maxModelTurns: number;
   readonly createMessageId: () => string;
   readonly createToolContext: (input: {
@@ -58,13 +63,14 @@ export interface RunExecutionSink {
 }
 
 /**
- * Executes one complete Agent loop for one durable Engine Run.
+ * Executes one Engine-selected model or tool step for one durable Run.
  *
- * Resolves only after the Agent stops normally. Cancellation and execution
- * failures reject so Engine can converge the durable Run to its terminal state.
+ * Engine repeatedly invokes this seam for Continue mode and invokes it once for
+ * Step mode. Cancellation and execution failures reject so Engine can converge
+ * the durable Run to a safe durable state.
  */
 export interface RunExecutor {
-  execute(
+  executeStep(
     input: RunExecutionInput,
     sink: RunExecutionSink,
     options: { readonly signal: AbortSignal }

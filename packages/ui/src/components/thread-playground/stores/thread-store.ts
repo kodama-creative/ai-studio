@@ -114,6 +114,14 @@ export interface ExternalThreadExecutionRuntime {
   execute(input: {
     readonly thread: Thread;
     readonly fromMessageId?: string;
+    readonly autoRunTools: boolean;
+    readonly reactLoop: boolean;
+    readonly signal: AbortSignal;
+  }): AsyncIterable<ExternalThreadRunEvent>;
+  executeToolCall?(input: {
+    readonly thread: Thread;
+    readonly messageId: string;
+    readonly toolCallId: string;
     readonly signal: AbortSignal;
   }): AsyncIterable<ExternalThreadRunEvent>;
 }
@@ -133,6 +141,8 @@ export interface ThreadState {
   activeRunId: string | null;
   /** Auto-executing tool calls for in-flight UI feedback; never persisted. */
   executingToolCallIds: string[];
+  /** Engine-backed tool outputs are checkpoint-owned and cannot be edited locally. */
+  toolCallOutputsReadonly: boolean;
   collapsedMessageIds: string[];
   runValidationIssue: RunValidationIssue | null;
   /**
@@ -151,6 +161,8 @@ export interface ThreadState {
   evaluationRubrics: EvaluationRubricRecord[];
 
   run(fromMessageId?: string): Promise<void>;
+  /** Execute one host-owned durable Tool Step when using an external runtime. */
+  runExternalToolCall(messageId: string, toolCallId: string): Promise<boolean>;
   resolveRunValidationIssue(): void;
   undo(): void;
   redo(): void;
@@ -685,6 +697,7 @@ export function createThreadStore(
         abortController: null,
         activeRunId: null,
         executingToolCallIds: [],
+        toolCallOutputsReadonly: options.executionRuntime !== undefined,
         collapsedMessageIds: [],
         runValidationIssue: null,
         autoFocusMessageId: null,
@@ -1017,6 +1030,7 @@ export function createThreadStore(
           });
         },
         updateToolCallOutputTextContent(messageId, toolCallId, text, isError) {
+          if (get().toolCallOutputsReadonly) return;
           setToolCallOutput(messageId, toolCallId, (toolCall) => {
             const currentText = getToolCallOutputText(toolCall);
             const nextIsError = isError ?? toolCall.output?.isError;
@@ -1038,6 +1052,7 @@ export function createThreadStore(
           });
         },
         updateToolCallOutputContent(messageId, toolCallId, content, isError) {
+          if (get().toolCallOutputsReadonly) return;
           setToolCallOutput(messageId, toolCallId, (toolCall) => {
             const nextIsError = isError ?? toolCall.output?.isError;
             if (
@@ -1087,6 +1102,8 @@ export function createThreadStore(
               for await (const event of options.executionRuntime.execute({
                 thread: get().thread,
                 fromMessageId,
+                autoRunTools: options.getAutoRunTools?.() ?? false,
+                reactLoop: options.getReactLoop?.() ?? false,
                 signal: abortController.signal,
               })) {
                 if (get().activeRunId !== runId) break;
@@ -1507,6 +1524,48 @@ export function createThreadStore(
             finalizeActiveRun();
           }
         },
+        async runExternalToolCall(messageId: string, toolCallId: string) {
+          const execute = options.executionRuntime?.executeToolCall;
+          if (execute === undefined || get().status !== "idle") return false;
+          const runId = uuid();
+          const abortController = new AbortController();
+          set({
+            status: "running",
+            activeRunId: runId,
+            abortController,
+            streamingMessage: null,
+            executingToolCallIds: [toolCallId],
+          });
+          stopActiveRun = () => abortController.abort();
+          try {
+            for await (const event of execute({
+              thread: get().thread,
+              messageId,
+              toolCallId,
+              signal: abortController.signal,
+            })) {
+              if (get().activeRunId !== runId) return false;
+              if (event.type === "message.delta") {
+                set({ streamingMessage: event.message });
+              } else {
+                const thread = normalizeThread(event.thread);
+                set({ thread, streamingMessage: null });
+              }
+            }
+            return true;
+          } finally {
+            if (get().activeRunId === runId) {
+              set({
+                status: "idle",
+                activeRunId: null,
+                abortController: null,
+                streamingMessage: null,
+                executingToolCallIds: [],
+              });
+            }
+            stopActiveRun = null;
+          }
+        },
         undo() {
           if (get().status !== "idle") {
             return;
@@ -1795,6 +1854,7 @@ export function useThreadStore<T>(selector: (s: ThreadState) => T): T {
 
 const selectActions = (s: ThreadState) => ({
   run: s.run,
+  runExternalToolCall: s.runExternalToolCall,
   resolveRunValidationIssue: s.resolveRunValidationIssue,
   abort: s.abort,
   undo: s.undo,

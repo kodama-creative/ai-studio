@@ -4,10 +4,12 @@ import type {
   ThreadRunReference,
 } from "../domain";
 import type { Evaluation, EvaluationRubric } from "../evaluation";
+import type { PlaygroundRecord } from "../playground";
 
 import type { StudioStore, StudioStoreTransaction } from "./studio-store";
 
 interface MemoryState {
+  playgrounds: Map<string, PlaygroundRecord>;
   experiments: Map<string, StudioExperimentRecord>;
   runReferences: Map<string, ThreadRunReference[]>;
   evaluations: Map<string, Evaluation[]>;
@@ -17,6 +19,7 @@ interface MemoryState {
 
 export class InMemoryStudioStore implements StudioStore {
   private _state: MemoryState = {
+    playgrounds: new Map(),
     experiments: new Map(),
     runReferences: new Map(),
     evaluations: new Map(),
@@ -38,6 +41,30 @@ export class InMemoryStudioStore implements StudioStore {
 
 class MemoryTransaction implements StudioStoreTransaction {
   constructor(private readonly _state: MemoryState) {}
+
+  getPlayground(playgroundId: string): PlaygroundRecord | undefined {
+    return _clone(this._state.playgrounds.get(playgroundId));
+  }
+
+  listPlaygrounds(): readonly PlaygroundRecord[] {
+    return _values(this._state.playgrounds).toSorted(
+      (left, right) => right.updatedAt - left.updatedAt
+    );
+  }
+
+  insertPlayground(playground: PlaygroundRecord): void {
+    if (this._state.playgrounds.has(playground.id)) {
+      throw new Error(`Playground "${playground.id}" already exists.`);
+    }
+    this._state.playgrounds.set(playground.id, structuredClone(playground));
+  }
+
+  savePlayground(playground: PlaygroundRecord): void {
+    if (!this._state.playgrounds.has(playground.id)) {
+      throw new Error(`Playground "${playground.id}" was not found.`);
+    }
+    this._state.playgrounds.set(playground.id, structuredClone(playground));
+  }
 
   getExperiment(experimentId: string): StudioExperimentRecord | undefined {
     return _clone(this._state.experiments.get(experimentId));

@@ -1,5 +1,5 @@
 import {
-  runAgentLoopContinue,
+  agentLoopContinue,
   type AgentContext,
   type AgentEvent,
   type AgentMessage,
@@ -45,32 +45,30 @@ export function createPiRunExecutor(
 class PiRunExecutor implements RunExecutor {
   constructor(private readonly _models: Models) {}
 
-  /** Runs Pi's complete ReAct loop and awaits every Engine persistence event. */
-  async execute(
+  /** Executes exactly one Engine-selected model or tool step. */
+  async executeStep(
     input: RunExecutionInput,
     sink: RunExecutionSink,
     options: { readonly signal: AbortSignal }
   ): Promise<void> {
     const model = this._resolveModel(input.agent.snapshot.model);
-    let turnIndex = -1;
+    if (input.step.type === "tools") {
+      await _executeToolStep(input, sink, options.signal);
+      return;
+    }
     const context: AgentContext = {
       systemPrompt: input.agent.snapshot.instructions.join("\n\n"),
       messages: input.messages.flatMap((message) =>
         _toPiMessages(message, model)
       ),
       tools: input.agent.snapshot.tools.map((tool) =>
-        _toPiTool(tool, input, options.signal, () => Math.max(turnIndex, 0))
+        _toTerminatingPiTool(tool)
       ),
     };
     let currentAssistant: AssistantMessage | undefined;
     let lastPiAssistant: PiAssistantMessage | undefined;
-    let turnLimitExceeded = false;
 
-    const emit = async (event: AgentEvent): Promise<void> => {
-      if (event.type === "turn_start") {
-        turnIndex++;
-        return;
-      }
+    const acceptModelEvent = async (event: AgentEvent): Promise<void> => {
       if (
         event.type === "message_start" &&
         event.message.role === "assistant"
@@ -121,72 +119,28 @@ class PiRunExecutor implements RunExecutor {
         }
         return;
       }
-      if (event.type === "tool_execution_start") {
-        const assistant = _requireAssistant(currentAssistant);
-        await sink.accept({
-          type: "tool.started",
-          messageId: assistant.id,
-          toolCallId: event.toolCallId,
-          toolName: event.toolName,
-        });
-        return;
-      }
-      if (event.type === "tool_execution_update") {
-        if (options.signal.aborted) return;
-        const output = _fromPiToolResult(event.partialResult, false);
-        currentAssistant = _setToolOutput(
-          _requireAssistant(currentAssistant),
-          event.toolCallId,
-          output
-        );
-        await sink.accept({
-          type: "tool.updated",
-          messageId: currentAssistant.id,
-          toolCallId: event.toolCallId,
-          message: currentAssistant,
-        });
-        return;
-      }
-      if (event.type === "tool_execution_end") {
-        if (options.signal.aborted) return;
-        const output = _fromPiToolResult(event.result, event.isError);
-        currentAssistant = _setToolOutput(
-          _requireAssistant(currentAssistant),
-          event.toolCallId,
-          output
-        );
-        await sink.accept({
-          type: "tool.completed",
-          messageId: currentAssistant.id,
-          toolCallId: event.toolCallId,
-          message: currentAssistant,
-        });
-      }
     };
 
-    await runAgentLoopContinue(
+    // Pi's low-level stream still owns one internal turn. Terminating tool
+    // stubs prevent it from starting another model turn; their synthetic
+    // results are deliberately ignored because Engine executes real tools as
+    // separate durable steps.
+    const stream = agentLoopContinue(
       context,
       {
         model,
         convertToLlm: _convertToLlm,
-        toolExecution: "sequential",
-        shouldStopAfterTurn({ toolResults }) {
-          if (toolResults.length > 0 && turnIndex + 1 >= input.maxModelTurns) {
-            turnLimitExceeded = true;
-            return true;
-          }
-          return false;
-        },
+        toolExecution: "parallel",
+        // Stop after the first assistant turn even when Pi rejects malformed
+        // tool arguments before the terminating stub can run. Engine validates
+        // and executes those calls later in the explicit tool step.
+        shouldStopAfterTurn: () => true,
       },
-      emit,
       options.signal,
       this._models.streamSimple.bind(this._models)
     );
-
-    if (turnLimitExceeded) {
-      throw new Error(
-        `Run exceeded ${input.maxModelTurns} model turns without completing.`
-      );
+    for await (const event of stream) {
+      await acceptModelEvent(event);
     }
     _assertSuccessfulCompletion(lastPiAssistant, options.signal);
   }
@@ -216,67 +170,159 @@ class PiRunExecutor implements RunExecutor {
   }
 }
 
-/**
- * Adapts one authored tool to Pi while preserving LLM Space validation,
- * ToolContext identity, cancellation, and async-iterable progress semantics.
- */
-function _toPiTool(
-  modelTool: ModelToolDefinition,
-  input: RunExecutionInput,
-  runSignal: AbortSignal,
-  getStepIndex: () => number
-): AgentTool {
-  const prepared = input.agent.tools.get(modelTool.name);
+/** Creates a side-effect-free Pi tool that stops after the current model turn. */
+function _toTerminatingPiTool(modelTool: ModelToolDefinition): AgentTool {
   return {
     name: modelTool.name,
     label: modelTool.name,
     description: modelTool.description,
     parameters: modelTool.inputSchema,
-    executionMode: "sequential",
-    async execute(toolCallId, args, signal, onUpdate) {
-      if (prepared === undefined) {
-        throw new Error(`Unknown tool: ${modelTool.name}`);
-      }
-      const definition = prepared.definition;
-      const validated = await validateSchemaValue(
-        definition.inputSchema,
-        args,
-        { direction: "input", label: `Input for tool "${modelTool.name}"` }
-      );
-      const effectiveSignal = signal ?? runSignal;
-      const context = input.createToolContext({
-        execution: {
-          threadId: input.threadId,
-          runId: input.runId,
-          stepIndex: getStepIndex(),
-          callId: toolCallId,
-          toolName: modelTool.name,
-        },
-        signal: effectiveSignal,
+    executionMode: "parallel",
+    execute() {
+      return Promise.resolve({
+        terminate: true,
+        content: [{ type: "text", text: "" }],
+        details: undefined,
       });
-      const execution = definition.execute(validated, context);
-      let value: unknown;
-      if (_isAsyncIterable(execution)) {
-        let hasBufferedPart = false;
-        for await (const part of execution) {
-          if (hasBufferedPart) {
-            onUpdate?.(await _toPiToolResult(definition, value));
-          }
-          value = part;
-          hasBufferedPart = true;
-        }
-      } else {
-        value = await execution;
-      }
-      if (definition.outputSchema !== undefined) {
-        value = await validateSchemaValue(definition.outputSchema, value, {
-          direction: "output",
-          label: `Output from tool "${modelTool.name}"`,
-        });
-      }
-      return _toPiToolResult(definition, value);
     },
   } as AgentTool;
+}
+
+/** Executes the selected pending calls while serializing durable sink updates. */
+async function _executeToolStep(
+  input: RunExecutionInput,
+  sink: RunExecutionSink,
+  signal: AbortSignal
+): Promise<void> {
+  const assistant = input.messages.findLast(
+    (message): message is AssistantMessage => message.role === "assistant"
+  );
+  if (assistant === undefined) {
+    throw new Error("A tool step requires a completed Assistant Message.");
+  }
+  const calls = input.step.type === "tools" ? input.step.toolCallIds : [];
+  if (calls.length === 0) {
+    throw new Error("A tool step requires at least one tool call.");
+  }
+  const selected = calls.map((toolCallId) => {
+    const call = assistant.toolCalls?.find(
+      (candidate) => candidate.id === toolCallId
+    );
+    if (call === undefined || call.output !== undefined) {
+      throw new Error(`Tool call "${toolCallId}" is not pending.`);
+    }
+    return call;
+  });
+
+  for (const call of selected) {
+    await sink.accept({
+      type: "tool.started",
+      messageId: assistant.id,
+      toolCallId: call.id,
+      toolName: call.input.name,
+    });
+  }
+
+  let currentAssistant = assistant;
+  let updateBarrier = Promise.resolve();
+  const publish = (
+    type: "tool.updated" | "tool.completed",
+    toolCallId: string,
+    output: ToolCallOutput
+  ): Promise<void> => {
+    updateBarrier = updateBarrier.then(async () => {
+      currentAssistant = _setToolOutput(
+        currentAssistant,
+        toolCallId,
+        output
+      );
+      await sink.accept({
+        type,
+        messageId: currentAssistant.id,
+        toolCallId,
+        message: currentAssistant,
+      });
+    });
+    return updateBarrier;
+  };
+
+  await Promise.all(
+    selected.map(async (call) => {
+      const prepared = input.agent.tools.get(call.input.name);
+      if (prepared === undefined) {
+        await publish(
+          "tool.completed",
+          call.id,
+          _errorToolOutput(`Unknown tool: ${call.input.name}`)
+        );
+        return;
+      }
+      try {
+        const definition = prepared.definition;
+        const validated = await validateSchemaValue(
+          definition.inputSchema,
+          call.input.arguments,
+          {
+            direction: "input",
+            label: `Input for tool "${call.input.name}"`,
+          }
+        );
+        const context = input.createToolContext({
+          execution: {
+            threadId: input.threadId,
+            runId: input.runId,
+            stepIndex: input.stepIndex,
+            callId: call.id,
+            toolName: call.input.name,
+          },
+          signal,
+        });
+        const execution = definition.execute(validated, context);
+        let value: unknown;
+        if (_isAsyncIterable(execution)) {
+          let hasBufferedPart = false;
+          for await (const part of execution) {
+            if (hasBufferedPart) {
+              const progress = await _toPiToolResult(definition, value);
+              await publish(
+                "tool.updated",
+                call.id,
+                _fromPiToolResult(progress, false)
+              );
+            }
+            value = part;
+            hasBufferedPart = true;
+          }
+        } else {
+          value = await execution;
+        }
+        if (definition.outputSchema !== undefined) {
+          value = await validateSchemaValue(definition.outputSchema, value, {
+            direction: "output",
+            label: `Output from tool "${call.input.name}"`,
+          });
+        }
+        const result = await _toPiToolResult(definition, value);
+        await publish(
+          "tool.completed",
+          call.id,
+          _fromPiToolResult(result, false)
+        );
+      } catch (error) {
+        if (signal.aborted) {
+          throw signal.reason ?? error;
+        }
+        await publish(
+          "tool.completed",
+          call.id,
+          _errorToolOutput(
+            error instanceof Error ? error.message : String(error)
+          )
+        );
+      }
+    })
+  );
+  await updateBarrier;
 }
 
 /** Converts one authored tool value into Pi content plus durable Core details. */
@@ -518,6 +564,11 @@ function _toolCallOutput(
     ),
     isError,
   };
+}
+
+/** Converts validation/execution failures into model-visible durable output. */
+function _errorToolOutput(message: string): ToolCallOutput {
+  return _toolCallOutput({ type: "text", value: message }, true);
 }
 
 /** Applies the authoring API's default string-or-JSON model projection. */

@@ -59,6 +59,17 @@ _Avoid_: Turn、Task Attempt、Execution Session
 
 ## Studio
 
+**Playground**:
+主窗口中可编辑 AgentSpec 并调试执行的稳定工作入口；引用一个 Engine Thread。它不再以本地 JSON 文件作为持久身份。
+_Avoid_: Virtual Agent、Notebook、Thread file
+
+**AgentSpec**:
+Playground 拥有的可编辑 Agent 声明，包括 model、instructions、tools 和 prompt variables；不包含 Engine Messages/State。
+
+**Project Experiment**:
+Agent Project 中调试代码声明 Agent 的稳定入口；引用 Engine Thread，并可在 clean worktree 时绑定 commit。
+_Avoid_: Project Thread
+
 **Studio Experiment**:
 Studio 中用于编辑 Agent 配置、运行候选结果和进行评测的稳定工作入口；它引用 Engine Thread，但不是 Thread 本身。
 _Avoid for new persisted entities_: Studio Thread、Session

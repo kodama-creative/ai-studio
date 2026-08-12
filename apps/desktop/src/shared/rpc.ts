@@ -33,6 +33,8 @@ import type {
 } from "@llm-space/core";
 import type { SkillContent, SkillInfo, SkillsSettings } from "@llm-space/core";
 import type {
+  AgentSpec,
+  Playground,
   StudioRunReceipt,
   StudioThread,
   StudioThreadDocument,
@@ -97,6 +99,22 @@ export type ProjectStudioEventPayload =
       readonly message: string;
     };
 
+export type PlaygroundRunFramePayload =
+  | {
+      readonly subscriptionId: string;
+      readonly type: "frame";
+      readonly frame: import("@llm-space/engine").RunFrame;
+    }
+  | {
+      readonly subscriptionId: string;
+      readonly type: "done";
+    }
+  | {
+      readonly subscriptionId: string;
+      readonly type: "error";
+      readonly message: string;
+    };
+
 export type ProjectSourceEventPayload =
   | {
       readonly subscriptionId: string;
@@ -130,6 +148,61 @@ export interface DesktopRPCType {
       windowContext: {
         params: Record<string, never>;
         response: DesktopWindowContext;
+      };
+      playgroundList: {
+        params: Record<string, never>;
+        response: readonly Playground[];
+      };
+      playgroundCreate: {
+        params: {
+          title?: string;
+          agentSpec: AgentSpec;
+          conversation?: import("@llm-space/engine").ThreadState;
+        };
+        response: Playground;
+      };
+      playgroundLoad: {
+        params: { playgroundId: string };
+        response: Playground | undefined;
+      };
+      playgroundSave: {
+        params: {
+          playgroundId: string;
+          document: import("@llm-space/studio").SavePlaygroundInput;
+        };
+        response: Playground;
+      };
+      playgroundRun: {
+        params: {
+          playgroundId: string;
+          fromMessageId: string;
+          mode?: import("@llm-space/engine").RunExecutionMode;
+        };
+        response: StudioRunReceipt;
+      };
+      playgroundStepRun: {
+        params: { runId: string; toolCallId?: string };
+        response: StudioRunReceipt;
+      };
+      playgroundContinueRun: {
+        params: { runId: string };
+        response: StudioRunReceipt;
+      };
+      playgroundCancelRun: {
+        params: { runId: string };
+        response: null;
+      };
+      agentProjectList: {
+        params: Record<string, never>;
+        response: readonly import("./agent-project").AgentProjectSummary[];
+      };
+      agentProjectOpen: {
+        params: { rootPath: string };
+        response: null;
+      };
+      agentProjectPickAndOpen: {
+        params: Record<string, never>;
+        response: null;
       };
       projectGetSourceRevision: {
         params: Record<string, never>;
@@ -182,7 +255,19 @@ export interface DesktopRPCType {
         response: StudioThread;
       };
       projectRunThread: {
-        params: { threadId: string; fromMessageId: string };
+        params: {
+          threadId: string;
+          fromMessageId: string;
+          mode?: import("@llm-space/engine").RunExecutionMode;
+        };
+        response: StudioRunReceipt;
+      };
+      projectStepRun: {
+        params: { runId: string; toolCallId?: string };
+        response: StudioRunReceipt;
+      };
+      projectContinueRun: {
+        params: { runId: string };
         response: StudioRunReceipt;
       };
       projectCancelRun: {
@@ -826,6 +911,12 @@ export interface DesktopRPCType {
     };
     // Messages the webview SENDS and the bun side handles.
     messages: {
+      playgroundRunSubscribe: {
+        subscriptionId: string;
+        runId: string;
+        afterCursor?: number;
+      };
+      playgroundRunUnsubscribe: { subscriptionId: string };
       projectThreadSubscribe: {
         subscriptionId: string;
         threadId: string;
@@ -851,6 +942,7 @@ export interface DesktopRPCType {
     requests: Record<string, never>;
     // Messages the bun side SENDS and the webview handles.
     messages: {
+      receivePlaygroundRunFrame: PlaygroundRunFramePayload;
       receiveProjectStudioEvent: ProjectStudioEventPayload;
       receiveProjectSourceEvent: ProjectSourceEventPayload;
       receiveStreamThreadResponse: StreamThreadResponsePayload;

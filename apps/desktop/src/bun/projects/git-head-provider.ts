@@ -24,4 +24,23 @@ export class GitHeadProvider implements SourceRevisionProvider {
     }
     return commitId;
   }
+
+  /** Bind only a clean worktree; dirty experiments intentionally stay live. */
+  async binding(): Promise<string | undefined> {
+    const process = Bun.spawn(
+      ["git", "-C", this._projectRoot, "status", "--porcelain"],
+      { stdout: "pipe", stderr: "pipe" }
+    );
+    const [exitCode, stdout, stderr] = await Promise.all([
+      process.exited,
+      new Response(process.stdout).text(),
+      new Response(process.stderr).text(),
+    ]);
+    if (exitCode !== 0) {
+      throw new Error(
+        `Unable to inspect the Agent Project worktree: ${stderr.trim() || `git exited with ${exitCode}`}`
+      );
+    }
+    return stdout.trim().length === 0 ? this.current() : undefined;
+  }
 }

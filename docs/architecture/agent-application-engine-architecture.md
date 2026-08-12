@@ -1,7 +1,7 @@
 # Agent Application / Studio / Engine 架构
 
 > 状态：Engine、Application、Studio v1 已落地；Compaction、Subagent、Approval suspension 尚未实现
-> 更新：2026-08-11
+> 更新：2026-08-12
 
 ## 1. 结论
 
@@ -208,7 +208,17 @@ interface Run {
   inputCheckpointId: string;
   agentSnapshot: AgentSnapshot;
   status:
-    "queued" | "running" | "completed" | "failed" | "cancelled" | "interrupted";
+    "queued" | "running" | "paused" | "completed" | "failed" | "cancelled" | "interrupted";
+  control: {
+    mode: "step" | "continue";
+    toolCallId?: string;
+  };
+  pause?: {
+    reason: "step.completed";
+    step: "model.completed" | "tool.completed";
+    checkpointId: string;
+    pausedAt: number;
+  };
   resultCheckpointId?: string;
   error?: { code?: string; message: string };
   workerId?: string;
@@ -223,7 +233,7 @@ interface Run {
 不变量：
 
 - Run 只属于 Thread，不属于 Session 或 Studio。
-- SQLite partial unique index保证一个 Thread 最多一个 `queued | running` Run。
+- SQLite partial unique index 保证一个 Thread 最多一个 `queued | running | paused` Run。
 - `startRun()` 在一个事务中创建 input Checkpoint、queued Run、推进 Thread head、写初始事件。
 - Run 保存完整 AgentSnapshot；Worker Resolver 返回的 snapshot 必须与它完整相等（包括 model、instructions、tools），不能只匹配 `agentId + generationId` 后静默替换为最新代码。
 - `operationId` 用于调用方幂等重试命令；同一个 id 只有在命令参数完全一致时才返回已有 Run。
@@ -237,6 +247,9 @@ stateDiagram-v2
   [*] --> queued
   queued --> running: Worker claim
   queued --> cancelled: cancel
+  running --> paused: one Step committed
+  paused --> queued: stepRun / continueRun
+  paused --> cancelled: cancel
   running --> completed: final checkpoint committed
   running --> failed: model/tool/validation error
   running --> cancelled: explicit cancel
@@ -417,7 +430,7 @@ interface StudioExperimentRecord {
   engineThreadId: string;
   title: string;
   agent: AgentSnapshot;
-  commitId: string;
+  commitId?: string;
   draft?: ThreadState;
   pendingRun?: { operationId: string; createdAt: number };
   provenance?: { type: "fork"; threadId: string; checkpointId?: string };
@@ -625,7 +638,7 @@ checkpoint.committed
 | --------------------- | ------------------------------------------------------------- |
 | `AgentEngine`         | Thread/Checkpoint/Run command + query + stream facade         |
 | Durable Worker        | claim、lease、heartbeat、执行与恢复                           |
-| `RunExecutor`         | 一次完整 Agent loop 的执行 seam；事件处理具备 awaited barrier |
+| `RunExecutor`         | 执行 Engine 选中的单个 Model/Tool Step；事件处理具备 awaited barrier |
 | `AgentResolver`       | 严格解析 Run 固定的 Agent generation                          |
 | Execution sink        | model/tool 事件、RunOutput、逐步 Checkpoint                   |
 | `EngineStore`         | 同步事务 seam                                                 |
@@ -645,6 +658,7 @@ checkpoint.committed
 | 组件                   | 职责                                         |
 | ---------------------- | -------------------------------------------- |
 | `StudioApplication`    | Experiment、Draft、Run、History、Evaluation  |
+| `PlaygroundApplication` | Playground、AgentSpec、Draft 与 Engine Run 控制 |
 | Studio read composer   | metadata + Engine head/Draft -> StudioThread |
 | Studio event projector | RunFrame -> Playground-compatible events     |
 | `StudioStore`          | studio-owned 数据事务                        |
@@ -653,7 +667,7 @@ checkpoint.committed
 
 | 能力           | 接口/实现                                                            |
 | -------------- | -------------------------------------------------------------------- |
-| Agent loop     | `RunExecutor` / `PiRunExecutor`，内部复用 `runAgentLoopContinue()`   |
+| Agent loop     | Engine 负责 Step/Continue 外循环；Pi Model Step 复用 `agentLoopContinue()` 单轮 |
 | Tool           | `PiRunExecutor` 调度 `@llm-space/agent` ToolDefinition + ToolContext |
 | Durable step   | Engine awaited sink 提交 model/tool Checkpoint 后执行后端才能继续    |
 | Agent state    | `defineState()` + AsyncLocalStorage + Checkpoint state               |
@@ -678,7 +692,7 @@ engine_run_events
 
 - `engine_checkpoints(thread_id, sequence)` unique。
 - `engine_runs(operation_id)` unique。
-- `engine_runs(thread_id)` 在 `queued|running` 上 partial unique。
+- `engine_runs(thread_id)` 在 `queued|running|paused` 上 partial unique。
 - Thread 先插入、首 Checkpoint 后插入，但二者在同一事务中提交。
 
 ### 11.2 Application
@@ -705,14 +719,16 @@ studio_run_references
 studio_evaluations
 studio_rubrics
 studio_events
+studio_playgrounds
 ```
 
 Studio 的 pending Run intent 是 `studio_experiments.payload_json` 内的 `pendingRun` 字段，不额外引入一个 Run 实体或 active Run 字段。
 
-Desktop Agent Project 使用：
+Desktop 使用：
 
 ```text
-<project>/.llm-space/studio/studio.sqlite
+~/.llm-space/studio/studio.sqlite
+~/.llm-space/studio/projects/<project-id>/studio.sqlite
 ```
 
 同一个文件中 Engine 使用 `engine_*`，Studio 使用 `studio_*`。
@@ -728,7 +744,8 @@ Desktop Agent Project 使用：
 | SQLite Engine/App/Studio Store               | 已实现                  |
 | 单 active Run、atomic startRun               | 已实现                  |
 | Durable output snapshot + cursor stream      | 已实现                  |
-| Pi 完整 ReAct loop、图片/tool result replay  | 已实现                  |
+| Pi 单 Model Step、图片/tool result replay    | 已实现                  |
+| Engine Step/Continue 同 Run 暂停恢复         | 已实现                  |
 | awaited model/tool Checkpoint barrier        | 已实现                  |
 | Tool loop + schema validation                | 已由 PiRunExecutor 实现 |
 | Agent `defineState()` checkpoint             | 已实现                  |
@@ -742,7 +759,9 @@ Desktop Agent Project 使用：
 | Studio Draft + Engine read model             | 已实现                  |
 | Desktop Project Studio 迁移                  | 已实现                  |
 | basic-agent App/Engine/SQLite tracer bullet  | 已实现                  |
-| 旧 Playground `core.Thread` 文件格式迁移     | 未开始；本轮刻意不改    |
+| 主窗口 Playground SQLite/Engine 迁移         | 已实现                  |
+| 主窗口 Projects catalog / 独立 Experiment IDE | 已实现                  |
+| 旧本地 `core.Thread` JSON 自动迁移           | 不做；仅支持显式导入    |
 | Compaction                                   | 未实现                  |
 | Subagent Thread 关系与调度                   | 未实现                  |
 | Tool approval/auth suspension                | 未实现                  |

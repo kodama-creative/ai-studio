@@ -22,6 +22,46 @@ function _event(value: unknown): AgentEvent {
 }
 
 describe("auto-run tool results", () => {
+  test("does not accept UI-only tool results for an Engine-backed Thread", () => {
+    const store = createThreadStore(
+      {
+        context: {
+          messages: [
+            {
+              id: "assistant-1",
+              role: "assistant",
+              content: [],
+              toolCalls: [
+                {
+                  id: "call-1",
+                  input: { name: "unknown", arguments: {} },
+                },
+              ],
+            },
+          ],
+        },
+      },
+      {
+        executionRuntime: {
+          execute: async function* () {
+            // This test exercises editing, not execution.
+          },
+        },
+      }
+    );
+
+    store
+      .getState()
+      .updateToolCallOutputTextContent("assistant-1", "call-1", "fake");
+
+    const message = store.getState().thread.context?.messages?.[0];
+    expect(message?.role).toBe("assistant");
+    if (message?.role !== "assistant") {
+      throw new Error("Expected an assistant message.");
+    }
+    expect(message.toolCalls?.[0]?.output).toBeUndefined();
+  });
+
   test("waits for generate_image before completing the run", async () => {
     const events = [
       _event({

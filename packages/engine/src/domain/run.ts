@@ -3,7 +3,29 @@ import type { AssistantMessage, Message } from "@llm-space/core";
 import type { AgentSnapshot } from "./agent";
 
 export type RunStatus =
-  "queued" | "running" | "completed" | "failed" | "cancelled" | "interrupted";
+  | "queued"
+  | "running"
+  | "paused"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "interrupted";
+
+export type RunExecutionMode = "step" | "continue";
+
+export interface RunControl {
+  /** Whether the next Worker claim executes one step or runs until completion. */
+  readonly mode: RunExecutionMode;
+  /** Optional pending tool selected by the Studio's manual tool runner. */
+  readonly toolCallId?: string;
+}
+
+export interface RunPause {
+  readonly reason: "step.completed";
+  readonly step: "model.completed" | "tool.completed";
+  readonly checkpointId: string;
+  readonly pausedAt: number;
+}
 
 export interface RunError {
   readonly code?: string;
@@ -22,7 +44,10 @@ export interface Run {
   readonly baseCheckpointId: string;
   readonly inputCheckpointId: string;
   readonly agentSnapshot: AgentSnapshot;
+  /** Durable execution intent consumed by the Worker on every claim. */
+  readonly control: RunControl;
   readonly status: RunStatus;
+  readonly pause?: RunPause;
   readonly resultCheckpointId?: string;
   readonly error?: RunError;
   readonly workerId?: string;

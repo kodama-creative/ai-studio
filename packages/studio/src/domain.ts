@@ -1,11 +1,18 @@
-import type { AgentSnapshot, Run, ThreadState } from "@llm-space/engine";
+import type { AssistantMessage } from "@llm-space/core";
+import type {
+  AgentSnapshot,
+  Run,
+  RunExecutionMode,
+  ThreadState,
+} from "@llm-space/engine";
 
 /** Editable Studio document. Conversation is a core Message-based ThreadState. */
 export interface StudioThreadDocument {
   readonly title: string;
   readonly agent: AgentSnapshot;
   readonly conversation: ThreadState;
-  readonly commitId: string;
+  /** Present only when this Experiment is intentionally pinned to source control. */
+  readonly commitId?: string;
 }
 
 /**
@@ -37,7 +44,7 @@ export interface StudioExperimentRecord {
   readonly engineThreadId: string;
   readonly title: string;
   readonly agent: AgentSnapshot;
-  readonly commitId: string;
+  readonly commitId?: string;
   readonly draft?: ThreadState;
   readonly pendingRun?: {
     readonly operationId: string;
@@ -47,6 +54,9 @@ export interface StudioExperimentRecord {
   readonly createdAt: number;
   readonly updatedAt: number;
 }
+
+/** Preferred domain name for new code; StudioThread remains an outward adapter. */
+export type ProjectExperiment = StudioExperimentRecord;
 
 export interface ThreadCheckpoint {
   readonly schemaVersion: 1;
@@ -74,13 +84,55 @@ export interface StudioRunReceipt {
   readonly runId: string;
 }
 
+export interface StudioRunInput {
+  readonly fromMessageId: string;
+  readonly mode?: RunExecutionMode;
+}
+
+export interface StudioStepRunInput {
+  readonly toolCallId?: string;
+}
+
 export type StudioThreadEventData =
   | { readonly type: "run.started"; readonly run: Run }
+  | { readonly type: "run.paused"; readonly run: Run }
   | {
       readonly type: "message.delta";
       readonly runId: string;
       readonly messageId: string;
       readonly delta: string;
+    }
+  | {
+      readonly type: "thinking.delta";
+      readonly runId: string;
+      readonly messageId: string;
+      readonly delta: string;
+    }
+  | {
+      readonly type: "message.completed";
+      readonly runId: string;
+      readonly message: AssistantMessage;
+    }
+  | {
+      readonly type: "tool.started";
+      readonly runId: string;
+      readonly messageId: string;
+      readonly toolCallId: string;
+      readonly toolName: string;
+    }
+  | {
+      readonly type: "tool.updated";
+      readonly runId: string;
+      readonly messageId: string;
+      readonly toolCallId: string;
+      readonly message: AssistantMessage;
+    }
+  | {
+      readonly type: "tool.completed";
+      readonly runId: string;
+      readonly messageId: string;
+      readonly toolCallId: string;
+      readonly message: AssistantMessage;
     }
   | {
       readonly type: "conversation.updated";

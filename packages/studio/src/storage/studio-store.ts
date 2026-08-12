@@ -4,8 +4,14 @@ import type {
   ThreadRunReference,
 } from "../domain";
 import type { Evaluation, EvaluationRubric } from "../evaluation";
+import type { PlaygroundRecord } from "../playground";
 
 export interface StudioStoreTransaction {
+  getPlayground(playgroundId: string): PlaygroundRecord | undefined;
+  listPlaygrounds(): readonly PlaygroundRecord[];
+  insertPlayground(playground: PlaygroundRecord): void;
+  savePlayground(playground: PlaygroundRecord): void;
+
   getExperiment(experimentId: string): StudioExperimentRecord | undefined;
   listExperiments(): readonly StudioExperimentRecord[];
   insertExperiment(experiment: StudioExperimentRecord): void;

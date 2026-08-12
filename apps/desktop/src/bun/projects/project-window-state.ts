@@ -1,38 +1,72 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import {
-  WindowStateSchema,
-  type WindowState,
-} from "@llm-space/core/server";
+import { WindowStateSchema, type WindowState } from "@llm-space/core/server";
 
 import type { WindowStatePersistenceStore } from "../app/window-state";
 
 import { getFileErrorCode, writePrivateJson } from "./project-file-utils";
-import type { ProjectWindowStateStore } from "./project-window-manager";
+import type {
+  AgentProjectCatalogStore,
+  ProjectWindowStateStore,
+} from "./project-window-manager";
 
-export class FileProjectWindowStateStore implements ProjectWindowStateStore {
-  private readonly _path: string;
-
-  constructor(homePath: string) {
-    this._path = join(homePath, "settings", "agent-project-windows.json");
-  }
+class FilePathListStore {
+  constructor(private readonly _path: string) {}
 
   async load(): Promise<readonly string[]> {
     try {
       const value: unknown = JSON.parse(await readFile(this._path, "utf8"));
-      return Array.isArray(value) && value.every((item) => typeof item === "string")
+      return Array.isArray(value) &&
+        value.every((item) => typeof item === "string")
         ? value
         : [];
     } catch (error) {
       if (getFileErrorCode(error) === "ENOENT") return [];
-      console.warn("Failed to load open agent projects:", error);
+      console.warn(`Failed to load path list "${this._path}":`, error);
       return [];
     }
   }
 
   save(rootPaths: readonly string[]): Promise<void> {
     return writePrivateJson(this._path, rootPaths);
+  }
+}
+
+export class FileProjectWindowStateStore implements ProjectWindowStateStore {
+  private readonly _store: FilePathListStore;
+
+  constructor(homePath: string) {
+    this._store = new FilePathListStore(
+      join(homePath, "settings", "agent-project-windows.json")
+    );
+  }
+
+  load(): Promise<readonly string[]> {
+    return this._store.load();
+  }
+
+  save(rootPaths: readonly string[]): Promise<void> {
+    return this._store.save(rootPaths);
+  }
+}
+
+/** Durable Project catalog shown in the default main window. */
+export class FileAgentProjectCatalogStore implements AgentProjectCatalogStore {
+  private readonly _store: FilePathListStore;
+
+  constructor(homePath: string) {
+    this._store = new FilePathListStore(
+      join(homePath, "settings", "agent-projects.json")
+    );
+  }
+
+  load(): Promise<readonly string[]> {
+    return this._store.load();
+  }
+
+  save(rootPaths: readonly string[]): Promise<void> {
+    return this._store.save(rootPaths);
   }
 }
 

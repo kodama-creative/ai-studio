@@ -75,6 +75,10 @@ function _ToolCallListItem({
   const autoCalling = useThreadStore((state) =>
     state.executingToolCallIds.includes(toolCall.id)
   );
+  const outputReadonly = useThreadStore(
+    (state) => state.toolCallOutputsReadonly
+  );
+  const responseReadonly = readonly || outputReadonly;
   const isCalling = calling || autoCalling;
   const [previewOpen, setPreviewOpen] = useState(false);
   const [argsPreviewOpen, setArgsPreviewOpen] = useState(false);
@@ -91,15 +95,15 @@ function _ToolCallListItem({
   const isError = toolCall.output?.isError ?? false;
   const handleOutputChange = useCallback(
     (value: string) => {
-      if (readonly) {
+      if (responseReadonly) {
         return;
       }
       updateToolCallOutputText(messageId, toolCall.id, value);
     },
-    [messageId, readonly, toolCall.id, updateToolCallOutputText]
+    [messageId, responseReadonly, toolCall.id, updateToolCallOutputText]
   );
   const toggleError = useCallback(() => {
-    if (readonly) {
+    if (responseReadonly) {
       return;
     }
     updateToolCallOutputText(messageId, toolCall.id, outputText, !isError);
@@ -107,7 +111,7 @@ function _ToolCallListItem({
     isError,
     messageId,
     outputText,
-    readonly,
+    responseReadonly,
     toolCall.id,
     updateToolCallOutputText,
   ]);
@@ -222,7 +226,7 @@ function _ToolCallListItem({
                 className="invisible shrink-0 group-hover/message:visible"
                 size="xs"
                 variant={isError ? "destructive" : "ghost"}
-                disabled={readonly}
+                disabled={responseReadonly}
                 onClick={toggleError}
               >
                 <AlertCircleIcon />
@@ -247,7 +251,7 @@ function _ToolCallListItem({
         <ToolCallResponseEditor
           input={toolCall.input}
           plain={fidelity === "lite"}
-          readonly={readonly || isCalling}
+          readonly={responseReadonly || isCalling}
           value={outputText}
           extraExtensions={variableExtension}
           onChange={handleOutputChange}
