@@ -15,7 +15,7 @@ import type {
   ToolResultMessage,
   Usage,
 } from "@earendil-works/pi-ai";
-import type { ToolDefinition, ToolModelOutput } from "@llm-space/agent/tools";
+import type { ToolModelOutput } from "@llm-space/agent/tools";
 import type {
   AssistantMessage,
   Message,
@@ -24,6 +24,7 @@ import type {
 } from "@llm-space/core";
 import type {
   ModelToolDefinition,
+  PreparedTool,
   RunExecutionInput,
   RunExecutionSink,
   RunExecutor,
@@ -283,7 +284,7 @@ async function _executeToolStep(
           let hasBufferedPart = false;
           for await (const part of execution) {
             if (hasBufferedPart) {
-              const progress = await _toPiToolResult(definition, value);
+              const progress = await _toPiToolResult(prepared, value);
               await publish(
                 "tool.updated",
                 call.id,
@@ -302,7 +303,7 @@ async function _executeToolStep(
             label: `Output from tool "${call.input.name}"`,
           });
         }
-        const result = await _toPiToolResult(definition, value);
+        const result = await _toPiToolResult(prepared, value);
         await publish(
           "tool.completed",
           call.id,
@@ -327,20 +328,25 @@ async function _executeToolStep(
 
 /** Converts one authored tool value into Pi content plus durable Core details. */
 async function _toPiToolResult(
-  definition: ToolDefinition,
+  prepared: PreparedTool,
   value: unknown
 ): Promise<AgentToolResult<ToolCallOutput>> {
+  const { definition } = prepared;
   const modelOutput =
     definition.toModelOutput === undefined
       ? _defaultModelOutput(value)
       : await definition.toModelOutput(value);
-  const output = _toolCallOutput(modelOutput, false);
+  const output = _toolCallOutput(
+    modelOutput,
+    prepared.isErrorResult?.(value) ?? false
+  );
   return { content: output.content, details: output };
 }
 
 /** Safely narrows Pi tool results to the Core text/image output contract. */
 function _fromPiToolResult(result: unknown, isError: boolean): ToolCallOutput {
   const record = _asRecord(result);
+  const details = _asRecord(record?.details);
   const rawContent = Array.isArray(record?.content) ? record.content : [];
   const content: ToolCallOutput["content"] = [];
   for (const part of rawContent) {
@@ -361,7 +367,11 @@ function _fromPiToolResult(result: unknown, isError: boolean): ToolCallOutput {
       });
     }
   }
-  return { content, isError };
+  return {
+    content,
+    isError:
+      typeof details?.isError === "boolean" ? details.isError : isError,
+  };
 }
 
 /** Filters Pi extension-only messages at the model request boundary. */

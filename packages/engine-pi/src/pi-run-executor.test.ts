@@ -208,6 +208,88 @@ test("Pi executor advances one model or tool step at a time", async () => {
   );
 });
 
+test("Pi executor persists host-classified tool errors", async () => {
+  const faux = fauxProvider({ tokensPerSecond: 0 });
+  const model = faux.getModel();
+  const models = createModels();
+  models.setProvider(faux.provider);
+  const events: RunExecutionEvent[] = [];
+  const assistant = {
+    id: "assistant-error",
+    role: "assistant" as const,
+    content: [],
+    toolCalls: [
+      {
+        id: "call-error",
+        input: { name: "remote", arguments: {} },
+      },
+    ],
+  };
+
+  await createPiRunExecutor({ models }).executeStep(
+    {
+      runId: "run-error",
+      threadId: "thread-error",
+      messages: [assistant],
+      agent: {
+        snapshot: {
+          schemaVersion: 1,
+          agentId: "error-agent",
+          generationId: "generation-1",
+          model: `${model.provider}/${model.id}`,
+          instructions: [],
+          tools: [
+            {
+              name: "remote",
+              description: "Remote tool",
+              inputSchema: { type: "object" },
+            },
+          ],
+        },
+        tools: new Map([
+          [
+            "remote",
+            {
+              definition: {
+                description: "Remote tool",
+                inputSchema: { type: "object" },
+                execute: () => ({ message: "remote failure", failed: true }),
+              },
+              isErrorResult: (value) =>
+                (value as { failed?: boolean }).failed === true,
+            },
+          ],
+        ]),
+      },
+      step: { type: "tools", toolCallIds: ["call-error"] },
+      stepIndex: 0,
+      maxModelTurns: 4,
+      createMessageId: () => "unused",
+      createToolContext: ({ execution, signal }) =>
+        _toolContext(execution, signal),
+    },
+    {
+      accept(event) {
+        events.push(event);
+        return Promise.resolve();
+      },
+    },
+    { signal: new AbortController().signal }
+  );
+
+  expect(events.at(-1)).toMatchObject({
+    type: "tool.completed",
+    message: {
+      toolCalls: [
+        {
+          id: "call-error",
+          output: { isError: true },
+        },
+      ],
+    },
+  });
+});
+
 test("Pi Engine Step and Continue resume the same durable Run", async () => {
   const faux = fauxProvider({ tokensPerSecond: 0 });
   const model = faux.getModel();

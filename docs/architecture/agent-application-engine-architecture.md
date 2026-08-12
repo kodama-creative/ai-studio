@@ -760,6 +760,9 @@ Desktop 使用：
 | Desktop Project Studio 迁移                  | 已实现                  |
 | basic-agent App/Engine/SQLite tracer bullet  | 已实现                  |
 | 主窗口 Playground SQLite/Engine 迁移         | 已实现                  |
+| Playground MCP 工具解析、执行与错误结果持久化 | 已实现                  |
+| Playground function/provider-hosted/Plugin 工具 | Engine v1 明确拒绝；后续实现 |
+| Playground/Project 模型连接 profile 选择     | Engine v1 暂用 provider 默认 profile；后续传递瞬时引用 |
 | 主窗口 Projects catalog / 独立 Experiment IDE | 已实现                  |
 | 旧本地 `core.Thread` JSON 自动迁移           | 不做；仅支持显式导入    |
 | Compaction                                   | 未实现                  |

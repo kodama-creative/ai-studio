@@ -1,11 +1,18 @@
 import type { AgentModelDefinition } from "@llm-space/agent";
 import type { ToolDefinition } from "@llm-space/agent/tools";
+import type { JsonObject } from "@llm-space/core";
 
 export interface ModelToolDefinition {
   readonly name: string;
   readonly description: string;
   readonly inputSchema: Readonly<Record<string, unknown>>;
   readonly outputSchema?: Readonly<Record<string, unknown>>;
+  /**
+   * Opaque, serializable identity used by the host's AgentResolver.
+   * Engine persists and compares it as part of the immutable snapshot but
+   * never interprets application-specific bindings such as MCP server ids.
+   */
+  readonly hostBinding?: Readonly<JsonObject>;
 }
 
 /** Serializable Agent definition frozen onto every Run. */
@@ -20,6 +27,8 @@ export interface AgentSnapshot {
 
 export interface PreparedTool {
   readonly definition: ToolDefinition;
+  /** Classify a returned backend value without changing its model projection. */
+  readonly isErrorResult?: (output: unknown) => boolean;
 }
 
 export interface ExecutableAgent {

@@ -240,7 +240,6 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
       models: await modelManager.getAvailableModels(),
     }),
     runtime: localRuntime,
-    pluginManager,
   });
   const remoteServerManager = new RemoteServerManager(runtimeRouter);
   const remoteRuntime = await registerConfiguredRemoteRuntime({

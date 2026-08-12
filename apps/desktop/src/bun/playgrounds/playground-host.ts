@@ -4,7 +4,6 @@ import type { ToolContext, ToolDefinition } from "@llm-space/agent/tools";
 import type {
   BuiltinTool,
   McpTool,
-  PluginTool,
   ToolCallOutput,
 } from "@llm-space/core";
 import {
@@ -15,7 +14,6 @@ import {
   type RunExecutor,
 } from "@llm-space/engine";
 import { createSqliteEngineStore } from "@llm-space/engine/storage/sqlite";
-import type { PluginManager } from "@llm-space/runtime/plugins";
 import type { RuntimeClient } from "@llm-space/runtime/runtime";
 import {
   createPlaygroundApplication,
@@ -27,7 +25,6 @@ export interface CreatePlaygroundHostOptions {
   readonly homePath: string;
   readonly runExecutor: RunExecutor;
   readonly runtime: RuntimeClient;
-  readonly pluginManager: PluginManager;
 }
 
 export interface PlaygroundHost extends PlaygroundApplication {}
@@ -68,24 +65,125 @@ async function _resolveAgent(
   options: CreatePlaygroundHostOptions
 ): Promise<ExecutableAgent> {
   const tools = new Map<string, PreparedTool>();
-  for (const tool of await _runtimeTools(options)) {
-    if (!snapshot.tools.some((candidate) => candidate.name === tool.name)) {
-      continue;
+  const builtins = new Map(
+    (await options.runtime.builtInListTools()).map((tool) => [tool.name, tool])
+  );
+  const mcpResponses = new Map<
+    string,
+    Awaited<ReturnType<RuntimeClient["mcpListTools"]>>
+  >();
+
+  for (const modelTool of snapshot.tools) {
+    const frozen = _frozenTool(modelTool);
+    if (frozen === undefined) {
+      throw new Error(
+        `Playground tool "${modelTool.name}" does not have a durable host binding.`
+      );
     }
-    tools.set(tool.name, { definition: _definition(tool, options) });
+    const tool = await _resolveFrozenTool(
+      frozen,
+      { builtins, mcpResponses },
+      options
+    );
+    if (tool.name !== modelTool.name) {
+      throw new Error(
+        `Playground tool binding resolved "${tool.name}" instead of "${modelTool.name}".`
+      );
+    }
+    tools.set(modelTool.name, {
+      definition: _definition(tool, options),
+      ...(tool.type === "mcp"
+        ? {
+            isErrorResult: (result: unknown) =>
+              (result as { isError?: unknown })?.isError === true,
+          }
+        : {}),
+    });
   }
   return { snapshot, tools };
 }
 
-type ExecutableTool = BuiltinTool | McpTool | PluginTool;
+type ExecutableTool = BuiltinTool | McpTool;
 
-async function _runtimeTools(
+interface RuntimeToolIndex {
+  readonly builtins: ReadonlyMap<string, BuiltinTool>;
+  readonly mcpResponses: Map<
+    string,
+    Awaited<ReturnType<RuntimeClient["mcpListTools"]>>
+  >;
+}
+
+function _frozenTool(
+  modelTool: AgentSnapshot["tools"][number]
+): ExecutableTool | undefined {
+  const { hostBinding } = modelTool;
+  if (hostBinding?.type === "studio.playground-builtin") {
+    const config = hostBinding.config;
+    if (config !== undefined && !_isRecord(config)) return undefined;
+    return {
+      type: "builtin",
+      name: modelTool.name,
+      description: modelTool.description,
+      parameters: modelTool.inputSchema,
+      ...(config === undefined ? {} : { config }),
+    };
+  }
+  if (
+    hostBinding?.type === "studio.playground-mcp" &&
+    typeof hostBinding.serverId === "string" &&
+    typeof hostBinding.serverName === "string" &&
+    typeof hostBinding.toolName === "string"
+  ) {
+    return {
+      type: "mcp",
+      name: modelTool.name,
+      description: modelTool.description,
+      parameters: modelTool.inputSchema,
+      serverId: hostBinding.serverId,
+      serverName: hostBinding.serverName,
+      toolName: hostBinding.toolName,
+    };
+  }
+  return undefined;
+}
+
+function _isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/** Resolve only requested MCP servers and verify the frozen routing identity. */
+async function _resolveFrozenTool(
+  frozen: ExecutableTool,
+  index: RuntimeToolIndex,
   options: CreatePlaygroundHostOptions
-): Promise<ExecutableTool[]> {
-  return [
-    ...(await options.runtime.builtInListTools()),
-    ...options.pluginManager.tools.list(),
-  ];
+): Promise<ExecutableTool> {
+  if (frozen.type === "builtin") {
+    const available = index.builtins.get(frozen.name);
+    if (available === undefined) {
+      throw new Error(`Built-in tool "${frozen.name}" is unavailable.`);
+    }
+    // The registry proves availability; config and model metadata remain the
+    // exact values frozen into the Run instead of drifting after a restart.
+    return frozen;
+  }
+  let response = index.mcpResponses.get(frozen.serverId);
+  if (response === undefined) {
+    response = await options.runtime.mcpListTools(frozen.serverId);
+    index.mcpResponses.set(frozen.serverId, response);
+  }
+  const available = response.tools.find(
+    (tool) =>
+      tool.available &&
+      tool.serverId === frozen.serverId &&
+      tool.toolName === frozen.toolName &&
+      tool.directName === frozen.name
+  );
+  if (available === undefined) {
+    throw new Error(
+      `MCP tool "${frozen.serverId}/${frozen.toolName}" is unavailable as "${frozen.name}".`
+    );
+  }
+  return frozen;
 }
 
 function _definition(
@@ -104,30 +202,28 @@ function _definition(
           config: tool.config,
         });
       }
-      if (tool.type === "mcp") {
-        return options.runtime.mcpCallTool({
-          serverId: tool.serverId,
-          toolName: tool.toolName,
-          arguments: input,
-        });
-      }
-      throw new Error(
-        `Plugin tool "${tool.name}" is unavailable in Engine Playgrounds because its durable ToolContext adapter is not implemented.`
-      );
+      return options.runtime.mcpCallTool({
+        serverId: tool.serverId,
+        toolName: tool.toolName,
+        arguments: input,
+      });
     },
     toModelOutput: (rawResult) => {
-      const result = rawResult as { content: ToolCallOutput["content"] };
+      const result = rawResult as {
+        content: ToolCallOutput["content"];
+        isError?: boolean;
+      };
       return {
-      type: "content",
-      value: result.content.map((content) =>
-        content.type === "text"
-          ? content
-          : {
-              type: "file" as const,
-              data: { type: "data" as const, data: content.data },
-              mediaType: content.mimeType,
-            }
-      ),
+        type: "content",
+        value: result.content.map((content) =>
+          content.type === "text"
+            ? content
+            : {
+                type: "file" as const,
+                data: { type: "data" as const, data: content.data },
+                mediaType: content.mimeType,
+              }
+        ),
       };
     },
   };

@@ -83,6 +83,95 @@ describe.each([
   });
 });
 
+test("rejects Playground tool kinds without an Engine v1 execution path", async () => {
+  const store = new InMemoryStudioStore();
+  const engine = _engine();
+  const app = createPlaygroundApplication({ engine, store });
+  try {
+    const created = await app.createPlayground({
+      agentSpec: {
+        schemaVersion: 1,
+        model: { provider: "test", id: "local" },
+        instructions: [],
+        tools: [
+          {
+            type: "provider-hosted",
+            config: { type: "web_search" },
+          },
+          {
+            type: "plugin",
+            pluginId: "plugin-search",
+            toolId: "search",
+            name: "plugin_search",
+            description: "Search through a Plugin",
+            parameters: { type: "object" },
+          },
+        ],
+      },
+      conversation: {
+        messages: [
+          {
+            id: "user-native",
+            role: "user",
+            content: [{ type: "text", text: "Search" }],
+          },
+        ],
+        state: {},
+      },
+    });
+
+    expect(
+      app.run(created.id, { fromMessageId: "user-native" })
+    ).rejects.toThrow(
+      'Playground "' +
+        created.id +
+        '" uses tools that Engine v1 cannot execute: web_search, plugin_search.'
+    );
+  } finally {
+    await app.close();
+  }
+});
+
+test("rejects non-JSON built-in config before creating a durable Run", async () => {
+  const store = new InMemoryStudioStore();
+  const engine = _engine();
+  const app = createPlaygroundApplication({ engine, store });
+  try {
+    const created = await app.createPlayground({
+      agentSpec: {
+        schemaVersion: 1,
+        model: { provider: "test", id: "local" },
+        instructions: [],
+        tools: [
+          {
+            type: "builtin",
+            name: "broken_config",
+            description: "Has a non-serializable config",
+            parameters: { type: "object" },
+            config: { version: 1n },
+          },
+        ],
+      },
+      conversation: {
+        messages: [
+          {
+            id: "user-config",
+            role: "user",
+            content: [{ type: "text", text: "Run" }],
+          },
+        ],
+        state: {},
+      },
+    });
+
+    expect(
+      app.run(created.id, { fromMessageId: "user-config" })
+    ).rejects.toThrow('Built-in tool "broken_config" config must be a JSON object.');
+  } finally {
+    await app.close();
+  }
+});
+
 function _engine() {
   const executor: RunExecutor = {
     async executeStep(input, sink) {
