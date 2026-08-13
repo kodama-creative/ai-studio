@@ -39,6 +39,7 @@ export interface CreateAgentEngineOptions {
   readonly runExecutor: RunExecutor;
   readonly agentResolver: AgentResolver;
   readonly createToolContext: (input: {
+    readonly agent: AgentSnapshot;
     readonly execution: ToolContext["execution"];
     readonly signal: AbortSignal;
   }) => ToolContext;
@@ -69,6 +70,7 @@ export interface StartRunInput {
   readonly expectedHeadCheckpointId: string;
   readonly inputMessages: readonly Message[];
   readonly agentSnapshot: AgentSnapshot;
+  readonly modelOverride?: string;
   readonly mode?: RunExecutionMode;
   readonly operationId?: string;
 }
@@ -277,6 +279,7 @@ class AgentEngineImpl implements AgentEngine {
           existing.baseCheckpointId !== input.expectedHeadCheckpointId ||
           !_sameJson(existing.inputMessages, input.inputMessages) ||
           !_sameJson(existing.agentSnapshot, input.agentSnapshot) ||
+          existing.control.modelOverride !== input.modelOverride ||
           existing.control.mode !== (input.mode ?? "continue")
         ) {
           throw new Error(
@@ -295,7 +298,12 @@ class AgentEngineImpl implements AgentEngine {
         inputMessages: input.inputMessages,
         agentSnapshot: input.agentSnapshot,
         operationId,
-        control: { mode: input.mode ?? "continue" },
+        control: {
+          mode: input.mode ?? "continue",
+          ...(input.modelOverride === undefined
+            ? {}
+            : { modelOverride: input.modelOverride }),
+        },
       });
     });
     this._notify();
@@ -329,7 +337,12 @@ class AgentEngineImpl implements AgentEngine {
         inputMessages: original.inputMessages,
         agentSnapshot: original.agentSnapshot,
         operationId,
-        control: { mode: input.mode ?? "continue" },
+        control: {
+          mode: input.mode ?? "continue",
+          ...(original.control.modelOverride === undefined
+            ? {}
+            : { modelOverride: original.control.modelOverride }),
+        },
         retryOfRunId: original.id,
       });
     });
@@ -365,7 +378,12 @@ class AgentEngineImpl implements AgentEngine {
       }
       const queued: Run = {
         ...run,
-        control: structuredClone(control),
+        control: {
+          ...structuredClone(control),
+          ...(run.control.modelOverride === undefined
+            ? {}
+            : { modelOverride: run.control.modelOverride }),
+        },
         status: "queued",
         pause: undefined,
         workerId: undefined,
@@ -875,6 +893,9 @@ class AgentEngineImpl implements AgentEngine {
           threadId: run.threadId,
           messages,
           agent,
+          ...(run.control.modelOverride === undefined
+            ? {}
+            : { modelOverride: run.control.modelOverride }),
           step,
           // ToolContext stepIndex follows the model turn that requested the
           // call. It is intentionally independent from Thread checkpoint
@@ -883,7 +904,12 @@ class AgentEngineImpl implements AgentEngine {
             step.type === "model" ? modelTurns : Math.max(modelTurns - 1, 0),
           maxModelTurns: this._maxModelTurns,
           createMessageId: () => this._generateId("message"),
-          createToolContext: this._options.createToolContext,
+          createToolContext: ({ execution, signal }) =>
+            this._options.createToolContext({
+              agent: agent.snapshot,
+              execution,
+              signal,
+            }),
         },
         sink,
         { signal }

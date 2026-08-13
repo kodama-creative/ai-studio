@@ -16,6 +16,8 @@ export type RunExecutionMode = "step" | "continue";
 export interface RunControl {
   /** Whether the next Worker claim executes one step or runs until completion. */
   readonly mode: RunExecutionMode;
+  /** Studio-only static model used for every model step in this Run. */
+  readonly modelOverride?: string;
   /** Optional pending tool selected by the Studio's manual tool runner. */
   readonly toolCallId?: string;
 }

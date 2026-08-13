@@ -11,7 +11,7 @@ export interface StudioThreadDocument {
   readonly title: string;
   readonly agent: AgentSnapshot;
   readonly conversation: ThreadState;
-  /** Present only when this Experiment is intentionally pinned to source control. */
+  /** Legacy persisted field; new Runs clear it and always use live source. */
   readonly commitId?: string;
 }
 
@@ -44,6 +44,7 @@ export interface StudioExperimentRecord {
   readonly engineThreadId: string;
   readonly title: string;
   readonly agent: AgentSnapshot;
+  /** Legacy persisted field retained only while reading pre-live-source data. */
   readonly commitId?: string;
   readonly draft?: ThreadState;
   readonly pendingRun?: {
@@ -86,6 +87,8 @@ export interface StudioRunReceipt {
 
 export interface StudioRunInput {
   readonly fromMessageId: string;
+  /** Studio-only model selection frozen onto this Run; Agent source is unchanged. */
+  readonly modelOverride?: string;
   readonly mode?: RunExecutionMode;
 }
 

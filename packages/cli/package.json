@@ -1,0 +1,19 @@
+{
+  "name": "@llm-space/cli",
+  "version": "4.0.1",
+  "type": "module",
+  "private": true,
+  "license": "Apache-2.0",
+  "bin": {
+    "llm-space": "./src/cli.ts"
+  },
+  "scripts": {
+    "start": "bun src/cli.ts"
+  },
+  "dependencies": {
+    "@llm-space/app": "workspace:*",
+    "@llm-space/core": "workspace:*",
+    "@llm-space/engine": "workspace:*",
+    "@llm-space/runtime": "workspace:*"
+  }
+}

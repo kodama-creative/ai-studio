@@ -134,6 +134,42 @@ export function playgroundThreadToStudioDocument(
   };
 }
 
+/** Characterize whether an editor projection contains a user-authored Draft. */
+export function shouldPersistProjectThread(
+  thread: Thread,
+  base: StudioThread
+): boolean {
+  const document = playgroundThreadToStudioDocument(thread, base);
+  return !_sameJson(document, base.document);
+}
+
+function _sameJson(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return (
+      Array.isArray(left) &&
+      Array.isArray(right) &&
+      left.length === right.length &&
+      left.every((item, index) => _sameJson(item, right[index]))
+    );
+  }
+  if (!_isRecord(left) || !_isRecord(right)) return false;
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  return (
+    leftKeys.length === rightKeys.length &&
+    leftKeys.every(
+      (key) =>
+        Object.prototype.hasOwnProperty.call(right, key) &&
+        _sameJson(left[key], right[key])
+    )
+  );
+}
+
+function _isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 export function createProjectThreadExecutionRuntime(input: {
   readonly client: ProjectStudioClient;
   readonly threadId: string;
@@ -142,10 +178,21 @@ export function createProjectThreadExecutionRuntime(input: {
   readonly beforeExecute?: () => void | Promise<void>;
   readonly onSettled?: () => void | Promise<void>;
 }): ExternalThreadExecutionRuntime {
+  // One mounted Playground consumes a single ordered Studio event log. Keep
+  // the cursor across Run, Tool Step, and Continue actions so a later action
+  // never treats an earlier pause as its own settlement boundary.
+  let afterSequence: number | undefined;
   return {
     async *execute(request) {
       await input.beforeExecute?.();
+      // Model selection is a Studio UI override, not authored Agent state.
+      // Preserve it while durable conversation updates arrive from Studio.
+      const selectedModel = request.thread.model;
       let studioThread = input.getThread();
+      const resumedCheckpointId =
+        studioThread.activeRunId === undefined
+          ? undefined
+          : studioThread.headCheckpointId;
       let receipt: { readonly runId: string };
       if (studioThread.activeRunId === undefined) {
         studioThread = await input.client.saveDocument(
@@ -160,6 +207,9 @@ export function createProjectThreadExecutionRuntime(input: {
         }
         receipt = await input.client.run(input.threadId, {
           fromMessageId,
+          ...(_modelDefinition(request.thread.model) === undefined
+            ? {}
+            : { modelOverride: _modelDefinition(request.thread.model) }),
           mode: request.reactLoop ? "continue" : "step",
         });
       } else if (request.reactLoop) {
@@ -172,7 +222,6 @@ export function createProjectThreadExecutionRuntime(input: {
         input.client.listRunHistory(input.threadId),
         input.client.listEvaluationMetadata(input.threadId),
       ]);
-      let afterSequence: number | undefined;
       try {
         while (true) {
           let advancedTool = false;
@@ -198,6 +247,54 @@ export function createProjectThreadExecutionRuntime(input: {
                 },
               };
             } else if (
+              event.type === "message.completed" &&
+              event.runId === receipt.runId
+            ) {
+              yield {
+                type: "thread.updated",
+                thread: _withModelSelection(
+                  _replaceAssistant(
+                    studioThreadToPlaygroundThread(
+                      studioThread,
+                      history,
+                      evaluationMetadata
+                    ),
+                    event.message
+                  ),
+                  selectedModel
+                ),
+              };
+            } else if (
+              event.type === "tool.started" &&
+              event.runId === receipt.runId
+            ) {
+              yield { type: "tool.started", toolCallId: event.toolCallId };
+            } else if (
+              (event.type === "tool.updated" ||
+                event.type === "tool.completed") &&
+              event.runId === receipt.runId
+            ) {
+              yield {
+                type: "thread.updated",
+                thread: _withModelSelection(
+                  _replaceAssistant(
+                    studioThreadToPlaygroundThread(
+                      studioThread,
+                      history,
+                      evaluationMetadata
+                    ),
+                    event.message
+                  ),
+                  selectedModel
+                ),
+              };
+              if (event.type === "tool.completed") {
+                yield {
+                  type: "tool.completed",
+                  toolCallId: event.toolCallId,
+                };
+              }
+            } else if (
               event.type === "conversation.updated" &&
               event.runId === receipt.runId
             ) {
@@ -205,26 +302,41 @@ export function createProjectThreadExecutionRuntime(input: {
               input.onThread(studioThread);
               yield {
                 type: "thread.updated",
-                thread: studioThreadToPlaygroundThread(
-                  studioThread,
-                  history,
-                  evaluationMetadata
+                thread: _withModelSelection(
+                  studioThreadToPlaygroundThread(
+                    studioThread,
+                    history,
+                    evaluationMetadata
+                  ),
+                  selectedModel
                 ),
               };
             } else if (
               event.type === "run.paused" &&
               event.run.id === receipt.runId
             ) {
+              // A newly mounted Project runtime may not have a cursor yet.
+              // Durable replay can therefore include the pause being resumed;
+              // only a pause at a later Checkpoint settles this command.
+              if (
+                resumedCheckpointId !== undefined &&
+                event.run.pause?.checkpointId === resumedCheckpointId
+              ) {
+                continue;
+              }
               const latest = await input.client.loadThread(input.threadId);
               if (latest !== undefined) {
                 studioThread = latest;
                 input.onThread(latest);
                 yield {
                   type: "thread.updated",
-                  thread: studioThreadToPlaygroundThread(
-                    latest,
-                    history,
-                    evaluationMetadata
+                  thread: _withModelSelection(
+                    studioThreadToPlaygroundThread(
+                      latest,
+                      history,
+                      evaluationMetadata
+                    ),
+                    selectedModel
                   ),
                 };
               }
@@ -255,10 +367,13 @@ export function createProjectThreadExecutionRuntime(input: {
                 input.onThread(latest);
                 yield {
                   type: "thread.updated",
-                  thread: studioThreadToPlaygroundThread(
-                    latest,
-                    history,
-                    evaluationMetadata
+                  thread: _withModelSelection(
+                    studioThreadToPlaygroundThread(
+                      latest,
+                      history,
+                      evaluationMetadata
+                    ),
+                    selectedModel
                   ),
                 };
               }
@@ -299,10 +414,13 @@ export function createProjectThreadExecutionRuntime(input: {
         await input.client.stepRun(runId, {
           toolCallId: request.toolCallId,
         });
+        let toolCompleted = false;
         for await (const item of input.client.events(input.threadId, {
+          ...(afterSequence === undefined ? {} : { afterSequence }),
           follow: true,
           signal: request.signal,
         })) {
+          afterSequence = item.sequence;
           const event = item.event;
           if (
             (event.type === "tool.updated" ||
@@ -317,8 +435,13 @@ export function createProjectThreadExecutionRuntime(input: {
                 event.message
               ),
             };
+            if (event.type === "tool.completed") toolCompleted = true;
           }
           if (event.type === "run.paused" && event.run.id === runId) {
+            // Event history contains the model pause that exposed this Tool.
+            // It cannot settle the Tool action; wait for the selected call's
+            // durable completion and the following Tool pause.
+            if (!toolCompleted) continue;
             const latest = await input.client.loadThread(input.threadId);
             if (latest !== undefined) {
               input.onThread(latest);
@@ -374,4 +497,15 @@ function _modelConfig(model: StudioThread["document"]["agent"]["model"]) {
     provider: model.slice(0, separator),
     id: model.slice(separator + 1),
   };
+}
+
+/** Convert the editor selection into the static model identity Engine Pi uses. */
+function _modelDefinition(model: Thread["model"]): string | undefined {
+  if (!model?.provider || !model.id) return undefined;
+  return `${model.provider}/${model.id}`;
+}
+
+/** Keep an editor-local model choice while applying durable Studio updates. */
+function _withModelSelection(thread: Thread, model: Thread["model"]): Thread {
+  return model === undefined ? thread : { ...thread, model };
 }

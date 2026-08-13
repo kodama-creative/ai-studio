@@ -33,18 +33,35 @@ import type {
 import { validateSchemaValue } from "./schema-validation";
 
 export interface CreatePiRunExecutorOptions {
-  readonly models: Models;
+  /** Live registry access lets long-lived Studio windows observe provider edits. */
+  readonly models: Models | (() => Models | Promise<Models>);
+  /** Host-owned credentials stay outside Engine Runs and persistent checkpoints. */
+  readonly resolveConnection?: (
+    input: PiProviderConnectionInput
+  ) => PiProviderConnection | Promise<PiProviderConnection>;
+}
+
+export interface PiProviderConnectionInput {
+  readonly runId: string;
+  readonly providerId: string;
+  readonly signal: AbortSignal;
+}
+
+export interface PiProviderConnection {
+  readonly apiKey?: string;
+  readonly baseUrl?: string;
+  readonly headers?: Record<string, string>;
 }
 
 /** Creates a Pi-backed executor for one complete Engine Run. */
 export function createPiRunExecutor(
   options: CreatePiRunExecutorOptions
 ): RunExecutor {
-  return new PiRunExecutor(options.models);
+  return new PiRunExecutor(options);
 }
 
 class PiRunExecutor implements RunExecutor {
-  constructor(private readonly _models: Models) {}
+  constructor(private readonly _options: CreatePiRunExecutorOptions) {}
 
   /** Executes exactly one Engine-selected model or tool step. */
   async executeStep(
@@ -52,15 +69,29 @@ class PiRunExecutor implements RunExecutor {
     sink: RunExecutionSink,
     options: { readonly signal: AbortSignal }
   ): Promise<void> {
-    const model = this._resolveModel(input.agent.snapshot.model);
+    const models = await this._models();
+    const model = this._resolveModel(
+      models,
+      input.modelOverride ?? input.agent.snapshot.model
+    );
     if (input.step.type === "tools") {
       await _executeToolStep(input, sink, options.signal);
       return;
     }
+    const connection = await this._options.resolveConnection?.({
+      runId: input.runId,
+      providerId: model.provider,
+      signal: options.signal,
+    });
+    // Connection settings are request-local: never mutate the shared model
+    // registry or persist credentials into the Engine Run.
+    const requestModel = connection?.baseUrl
+      ? { ...model, baseUrl: connection.baseUrl }
+      : model;
     const context: AgentContext = {
       systemPrompt: input.agent.snapshot.instructions.join("\n\n"),
       messages: input.messages.flatMap((message) =>
-        _toPiMessages(message, model)
+        _toPiMessages(message, requestModel)
       ),
       tools: input.agent.snapshot.tools.map((tool) =>
         _toTerminatingPiTool(tool)
@@ -129,7 +160,7 @@ class PiRunExecutor implements RunExecutor {
     const stream = agentLoopContinue(
       context,
       {
-        model,
+        model: requestModel,
         convertToLlm: _convertToLlm,
         toolExecution: "parallel",
         // Stop after the first assistant turn even when Pi rejects malformed
@@ -138,7 +169,21 @@ class PiRunExecutor implements RunExecutor {
         shouldStopAfterTurn: () => true,
       },
       options.signal,
-      this._models.streamSimple.bind(this._models)
+      (streamModel, streamContext, streamOptions) =>
+        models.streamSimple(streamModel, streamContext, {
+          ...streamOptions,
+          ...(connection?.apiKey === undefined
+            ? {}
+            : { apiKey: connection.apiKey }),
+          ...(connection?.headers === undefined
+            ? {}
+            : {
+                headers: {
+                  ...connection.headers,
+                  ...streamOptions?.headers,
+                },
+              }),
+        })
     );
     for await (const event of stream) {
       await acceptModelEvent(event);
@@ -148,6 +193,7 @@ class PiRunExecutor implements RunExecutor {
 
   /** Resolves a pinned provider/model definition without implicit fallback. */
   private _resolveModel(
+    models: Models,
     definition: RunExecutionInput["agent"]["snapshot"]["model"]
   ): Model<Api> {
     if (typeof definition !== "string") {
@@ -163,11 +209,18 @@ class PiRunExecutor implements RunExecutor {
     }
     const provider = definition.slice(0, separator);
     const modelId = definition.slice(separator + 1);
-    const model = this._models.getModel(provider, modelId);
+    const model = models.getModel(provider, modelId);
     if (model === undefined) {
       throw new Error(`Pi model "${definition}" was not found.`);
     }
     return model;
+  }
+
+  /** Resolve the latest registry at execution time for long-lived hosts. */
+  private _models(): Models | Promise<Models> {
+    return typeof this._options.models === "function"
+      ? this._options.models()
+      : this._options.models;
   }
 }
 

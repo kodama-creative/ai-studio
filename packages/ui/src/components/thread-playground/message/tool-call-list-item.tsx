@@ -1,5 +1,4 @@
 import {
-  isExecutableTool,
   type ImageContent,
   type ThreadContext,
   type ToolCall,
@@ -64,13 +63,12 @@ function _ToolCallListItem({
   const { fidelity } = useRenderingFidelity();
   const { presentational } = useHostServices();
   const { updateToolCallOutputText } = useThreadStoreActions();
-  const { resolveTool, runToolCall } = useToolCallRunner(messageId);
+  const { canExecuteTool, runToolCall } = useToolCallRunner(messageId);
   const variableExtension = usePromptVariableExtensionForContext(
     createToolResultPromptVariablePlaceKey(messageId, toolCall.id),
     context
   );
-  const tool = resolveTool(toolCall.input.name);
-  const executable = tool !== undefined && isExecutableTool(tool);
+  const executable = canExecuteTool(toolCall.input.name);
   const [calling, setCalling] = useState(false);
   const autoCalling = useThreadStore((state) =>
     state.executingToolCallIds.includes(toolCall.id)

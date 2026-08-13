@@ -13,6 +13,10 @@ export type {
   ThreadCheckpoint,
   ThreadRunReference,
 } from "./domain";
+export type {
+  ProjectSourceNode,
+  ProjectSourceSnapshot,
+} from "./project-source";
 export {
   agentSpecSnapshot,
   type AgentSpec,
@@ -46,10 +50,8 @@ export type {
 } from "./evaluation";
 export {
   createStudioApplication,
-  StudioThreadOutdatedError,
   type CreateStudioApplicationOptions,
   type CreateStudioThreadInput,
-  type SourceRevisionProvider,
   type StudioApplication,
 } from "./studio-application";
 export { InMemoryStudioStore } from "./storage";

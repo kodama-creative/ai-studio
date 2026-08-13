@@ -42,6 +42,9 @@ test("Thread store delegates a full run to an external interaction runtime", asy
         },
       };
     },
+    async *executeToolCall() {
+      await Promise.resolve();
+    },
   };
   const store = createThreadStore(initial, { executionRuntime });
 
@@ -51,6 +54,74 @@ test("Thread store delegates a full run to an external interaction runtime", asy
   expect(store.getState().thread.context?.messages).toHaveLength(2);
   expect(store.getState().runHistory).toEqual([]);
   expect(store.getState().status).toBe("idle");
+  expect(store.getState().externalToolExecutionAvailable).toBeTrue();
+});
+
+test("Thread store resolves the displayed fallback model before an external run", async () => {
+  const fallback = { provider: "test", id: "fallback-model" };
+  const initial: Thread = {
+    context: {
+      messages: [
+        {
+          id: "user-1",
+          role: "user",
+          content: [{ type: "text", text: "hello" }],
+        },
+      ],
+    },
+  };
+  let received: Thread | undefined;
+  const executionRuntime: ExternalThreadExecutionRuntime = {
+    async *execute(input) {
+      received = input.thread;
+    },
+  };
+  const store = createThreadStore(initial, {
+    executionRuntime,
+    resolveModel: (saved) => saved ?? fallback,
+  });
+
+  await store.getState().run("user-1");
+
+  expect(received?.model).toEqual(fallback);
+});
+
+test("Thread store tracks host-owned Tool lifecycle events", async () => {
+  const observedExecuting: string[][] = [];
+  const executionRuntime: ExternalThreadExecutionRuntime = {
+    async *execute() {
+      yield { type: "tool.started", toolCallId: "call-1" };
+      yield { type: "tool.completed", toolCallId: "call-1" };
+    },
+  };
+  const store = createThreadStore(
+    {
+      context: {
+        messages: [
+          {
+            id: "user-1",
+            role: "user",
+            content: [{ type: "text", text: "hello" }],
+          },
+        ],
+      },
+    },
+    { executionRuntime }
+  );
+  const unsubscribe = store.subscribe((state, previous) => {
+    if (
+      state.executingToolCallIds.join(",") !==
+      previous.executingToolCallIds.join(",")
+    ) {
+      observedExecuting.push(state.executingToolCallIds);
+    }
+  });
+
+  await store.getState().run("user-1");
+  unsubscribe();
+
+  expect(observedExecuting).toContainEqual(["call-1"]);
+  expect(store.getState().executingToolCallIds).toEqual([]);
 });
 
 test("Thread store publishes durable metadata edits through the host seam", () => {

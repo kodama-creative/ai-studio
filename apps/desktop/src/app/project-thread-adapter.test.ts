@@ -6,7 +6,9 @@ import type { ProjectStudioClient } from "@/client/project-studio-client";
 
 import {
   playgroundThreadToStudioEvaluationMetadata,
+  playgroundThreadToStudioDocument,
   createProjectThreadExecutionRuntime,
+  shouldPersistProjectThread,
   studioThreadToPlaygroundThread,
 } from "./project-thread-adapter";
 
@@ -86,6 +88,35 @@ test("Studio Thread messages and tool results map into the existing Playground m
   });
 });
 
+test("Engine projections are not persisted again as a Studio Draft", () => {
+  const thread = _projectThreadWithPendingTool();
+  const projection = studioThreadToPlaygroundThread(thread);
+
+  expect(playgroundThreadToStudioDocument(projection, thread)).toEqual(
+    thread.document
+  );
+  expect(shouldPersistProjectThread(projection, thread)).toBeFalse();
+  expect(
+    shouldPersistProjectThread(
+      {
+        ...projection,
+        context: {
+          ...projection.context,
+          messages: [
+            ...(projection.context?.messages ?? []),
+            {
+              id: "user-edit",
+              role: "user",
+              content: [{ type: "text", text: "Continue" }],
+            },
+          ],
+        },
+      },
+      thread
+    )
+  ).toBeTrue();
+});
+
 test("Project runtime maps UI step and ReAct controls onto the same durable Run", async () => {
   let thread: StudioThread = {
     schemaVersion: 1,
@@ -123,7 +154,7 @@ test("Project runtime maps UI step and ReAct controls onto the same durable Run"
       _threadId: string,
       input: Parameters<ProjectStudioClient["run"]>[1]
     ) => {
-      calls.push(`run:${input.mode}`);
+      calls.push(`run:${input.mode}:${input.modelOverride}`);
       thread = { ...thread, activeRunId: "run-1" };
       return Promise.resolve({ runId: "run-1" });
     },
@@ -163,7 +194,10 @@ test("Project runtime maps UI step and ReAct controls onto the same durable Run"
   });
 
   for await (const event of runtime.execute({
-    thread: studioThreadToPlaygroundThread(thread),
+    thread: {
+      ...studioThreadToPlaygroundThread(thread),
+      model: { provider: "override", id: "model" },
+    },
     fromMessageId: "user-1",
     autoRunTools: false,
     reactLoop: false,
@@ -181,7 +215,7 @@ test("Project runtime maps UI step and ReAct controls onto the same durable Run"
     void event;
   }
 
-  expect(calls).toEqual(["run:step", "continue:run-1"]);
+  expect(calls).toEqual(["run:step:override/model", "continue:run-1"]);
 });
 
 test("Project runtime auto-executes one paused tool phase without advancing the model", async () => {
@@ -230,10 +264,7 @@ test("Project runtime auto-executes one paused tool phase without advancing the 
     listEvaluationMetadata: () =>
       Promise.resolve({ evaluations: [], rubrics: [] }),
     loadThread: () => Promise.resolve(thread),
-    stepRun: (
-      runId: string,
-      input?: { readonly toolCallId?: string }
-    ) => {
+    stepRun: (runId: string, input?: { readonly toolCallId?: string }) => {
       calls.push(`step:${runId}:${input?.toolCallId}`);
       thread = _projectThreadWithPendingTool(true);
       return Promise.resolve({ runId });
@@ -261,6 +292,227 @@ test("Project runtime auto-executes one paused tool phase without advancing the 
   }
 
   expect(calls).toEqual(["run:step", "step:run-1:call-1"]);
+});
+
+test("Project runtime exposes the automatic Tool lifecycle to the UI", async () => {
+  let thread: StudioThread = {
+    ..._projectThreadWithPendingTool(),
+    activeRunId: undefined,
+  };
+  const assistant = thread.document.conversation.messages.at(-1);
+  if (assistant?.role !== "assistant") {
+    throw new Error("Expected an Assistant Message fixture.");
+  }
+  const completedAssistant = {
+    ...assistant,
+    toolCalls: assistant.toolCalls?.map((call) => ({
+      ...call,
+      output: {
+        content: [{ type: "text" as const, text: "result" }],
+        isError: false,
+      },
+    })),
+  };
+  const client = {
+    saveDocument: () => Promise.resolve(thread),
+    run: () => {
+      thread = { ...thread, activeRunId: "run-1" };
+      return Promise.resolve({ runId: "run-1" });
+    },
+    events: async function* () {
+      await Promise.resolve();
+      const events = [
+        {
+          type: "message.completed" as const,
+          runId: "run-1",
+          message: assistant,
+        },
+        {
+          type: "tool.started" as const,
+          runId: "run-1",
+          messageId: assistant.id,
+          toolCallId: "call-1",
+          toolName: "lookup",
+        },
+        {
+          type: "tool.updated" as const,
+          runId: "run-1",
+          messageId: assistant.id,
+          toolCallId: "call-1",
+          message: completedAssistant,
+        },
+        {
+          type: "tool.completed" as const,
+          runId: "run-1",
+          messageId: assistant.id,
+          toolCallId: "call-1",
+          message: completedAssistant,
+        },
+        { type: "run.completed" as const, runId: "run-1" },
+      ];
+      for (const [index, event] of events.entries()) {
+        yield {
+          threadId: thread.id,
+          sequence: index + 1,
+          timestamp: index + 1,
+          event,
+        };
+      }
+    },
+    listRunHistory: () => Promise.resolve([]),
+    listEvaluationMetadata: () =>
+      Promise.resolve({ evaluations: [], rubrics: [] }),
+    loadThread: () => Promise.resolve(thread),
+    stepRun: (runId: string) => Promise.resolve({ runId }),
+    continueRun: (runId: string) => Promise.resolve({ runId }),
+    cancelRun: () => Promise.resolve(),
+  } as unknown as ProjectStudioClient;
+  const runtime = createProjectThreadExecutionRuntime({
+    client,
+    threadId: thread.id,
+    getThread: () => thread,
+    onThread: (next) => {
+      thread = next;
+    },
+  });
+  const events = [];
+
+  for await (const event of runtime.execute({
+    thread: studioThreadToPlaygroundThread(thread),
+    fromMessageId: "user-1",
+    autoRunTools: true,
+    reactLoop: true,
+    signal: new AbortController().signal,
+  })) {
+    events.push(event);
+  }
+
+  expect(events.map((event) => event.type)).toEqual([
+    "thread.updated",
+    "tool.started",
+    "thread.updated",
+    "thread.updated",
+    "tool.completed",
+    "thread.updated",
+  ]);
+});
+
+test("manual Tool execution ignores the preceding model pause before Continue", async () => {
+  let thread = _projectThreadWithPendingTool();
+  const calls: string[] = [];
+  const completed = _projectThreadWithPendingTool(true);
+  const completedMessage = completed.document.conversation.messages.at(-1);
+  if (completedMessage?.role !== "assistant") {
+    throw new Error("Expected an Assistant Message fixture.");
+  }
+  let subscription = 0;
+  const client = {
+    events: async function* () {
+      await Promise.resolve();
+      subscription += 1;
+      if (subscription === 1) {
+        // Studio event subscriptions replay durable history. This is the pause
+        // that exposed the Tool call, not the pause produced by this action.
+        yield {
+          threadId: thread.id,
+          sequence: 1,
+          timestamp: 1,
+          event: { type: "run.paused" as const, run: _pausedProjectRun() },
+        };
+        yield {
+          threadId: thread.id,
+          sequence: 2,
+          timestamp: 2,
+          event: {
+            type: "tool.completed" as const,
+            runId: "run-1",
+            messageId: completedMessage.id,
+            toolCallId: "call-1",
+            message: completedMessage,
+          },
+        };
+        thread = completed;
+        yield {
+          threadId: thread.id,
+          sequence: 3,
+          timestamp: 3,
+          event: {
+            type: "run.paused" as const,
+            run: {
+              ..._pausedProjectRun(),
+              pause: {
+                ..._pausedProjectRun().pause,
+                step: "tool.completed" as const,
+              },
+            },
+          },
+        };
+        return;
+      }
+      yield {
+        threadId: thread.id,
+        sequence: 4,
+        timestamp: 4,
+        event: { type: "run.completed" as const, runId: "run-1" },
+      };
+    },
+    stepRun: (runId: string) => {
+      calls.push(`step:${runId}:call-1`);
+      return Promise.resolve({ runId });
+    },
+    continueRun: (runId: string) => {
+      calls.push(`continue:${runId}`);
+      return Promise.resolve({ runId });
+    },
+    run: () => {
+      calls.push("run:new");
+      return Promise.resolve({ runId: "run-new" });
+    },
+    saveDocument: () => Promise.resolve(thread),
+    listRunHistory: () => Promise.resolve([]),
+    listEvaluationMetadata: () =>
+      Promise.resolve({ evaluations: [], rubrics: [] }),
+    loadThread: () => Promise.resolve(thread),
+    cancelRun: () => Promise.resolve(),
+  } as unknown as ProjectStudioClient;
+  const runtime = createProjectThreadExecutionRuntime({
+    client,
+    threadId: thread.id,
+    getThread: () => thread,
+    onThread: (next) => {
+      thread = next;
+    },
+  });
+  const toolEvents = [];
+
+  for await (const event of runtime.executeToolCall!({
+    thread: studioThreadToPlaygroundThread(thread),
+    messageId: "assistant-1",
+    toolCallId: "call-1",
+    signal: new AbortController().signal,
+  })) {
+    toolEvents.push(event);
+  }
+  for await (const event of runtime.execute({
+    thread: studioThreadToPlaygroundThread(thread),
+    autoRunTools: true,
+    reactLoop: true,
+    signal: new AbortController().signal,
+  })) {
+    void event;
+  }
+
+  expect(
+    toolEvents.some((event) => {
+      if (event.type !== "thread.updated") return false;
+      const message = event.thread.context?.messages?.at(-1);
+      return (
+        message?.role === "assistant" &&
+        message.toolCalls?.[0]?.output !== undefined
+      );
+    })
+  ).toBeTrue();
+  expect(calls).toEqual(["step:run-1:call-1", "continue:run-1"]);
 });
 
 function _pausedProjectRun() {

@@ -1,4 +1,6 @@
 import type {
+  ProjectSourceNode,
+  ProjectSourceSnapshot,
   StudioEventCursor,
   StudioRunReceipt,
   StudioRunHistoryEntry,
@@ -41,14 +43,8 @@ export interface ProjectStudioTransport {
     threadId: string,
     document: StudioThreadDocument
   ): Promise<StudioThread>;
-  run(
-    threadId: string,
-    input: StudioRunInput
-  ): Promise<StudioRunReceipt>;
-  stepRun(
-    runId: string,
-    input?: StudioStepRunInput
-  ): Promise<StudioRunReceipt>;
+  run(threadId: string, input: StudioRunInput): Promise<StudioRunReceipt>;
+  stepRun(runId: string, input?: StudioStepRunInput): Promise<StudioRunReceipt>;
   continueRun(runId: string): Promise<StudioRunReceipt>;
   cancelRun(runId: string): Promise<void>;
   events(
@@ -57,14 +53,4 @@ export interface ProjectStudioTransport {
   ): AsyncIterable<StudioThreadEvent>;
 }
 
-export interface ProjectSourceNode {
-  readonly name: string;
-  readonly path: string;
-  readonly type: "file" | "directory";
-  readonly children?: readonly ProjectSourceNode[];
-}
-
-export interface ProjectSourceSnapshot {
-  readonly files: readonly ProjectSourceNode[];
-  readonly revision: string;
-}
+export type { ProjectSourceNode, ProjectSourceSnapshot };

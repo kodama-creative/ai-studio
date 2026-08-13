@@ -24,7 +24,6 @@ import {
   FileIcon,
   FolderIcon,
   FolderTreeIcon,
-  GitForkIcon,
   MessageSquareIcon,
   PlusIcon,
   XIcon,
@@ -43,6 +42,7 @@ import {
   createProjectThreadExecutionRuntime,
   playgroundThreadToStudioEvaluationMetadata,
   playgroundThreadToStudioDocument,
+  shouldPersistProjectThread,
   studioThreadToPlaygroundThread,
 } from "./project-thread-adapter";
 
@@ -65,7 +65,6 @@ export function ProjectPage({ project }: { project: AgentProjectView }) {
   const client = useMemo(() => createRpcProjectStudioClient(), []);
   const { executeCommand } = useCommands();
   const [threads, setThreads] = useState<readonly StudioThread[]>([]);
-  const [sourceRevision, setSourceRevision] = useState<string>();
   const [runHistory, setRunHistory] = useState<
     ReadonlyMap<string, readonly StudioRunHistoryEntry[]>
   >(new Map());
@@ -291,7 +290,6 @@ export function ProjectPage({ project }: { project: AgentProjectView }) {
         })) {
           if (cancelled) return;
           setSourceFiles(snapshot.files);
-          setSourceRevision(snapshot.revision);
           const codeTabs = tabsRef.current.filter(
             (tab): tab is Extract<ProjectTab, { readonly type: "code" }> =>
               tab.type === "code"
@@ -332,16 +330,11 @@ export function ProjectPage({ project }: { project: AgentProjectView }) {
         }
       }
     })();
-    void Promise.all([
-      client.listThreads(),
-      client.listSourceFiles(),
-      client.getSourceRevision(),
-    ])
-      .then(async ([items, files, revision]) => {
+    void Promise.all([client.listThreads(), client.listSourceFiles()])
+      .then(async ([items, files]) => {
         if (cancelled) return;
         setThreads(items);
         setSourceFiles(files);
-        setSourceRevision(revision);
         if (items[0] !== undefined) await openThread(items[0].id);
       })
       .catch((error: unknown) => {
@@ -374,20 +367,14 @@ export function ProjectPage({ project }: { project: AgentProjectView }) {
   );
 
   return (
-    <div className="bg-background flex size-full min-h-0 pt-9">
-      <aside className="border-border bg-muted/20 flex w-72 shrink-0 flex-col border-r">
-        <div className="border-border border-b px-4 py-4">
-          <div className="flex items-center gap-2 font-medium">
-            <BotIcon className="size-4" />
-            <span className="truncate">{project.name}</span>
-          </div>
-          <div className="text-muted-foreground mt-1 flex items-center gap-1.5 text-xs">
-            <FolderIcon className="size-3" />
-            <span className="truncate" title={project.rootPath}>
-              {project.rootPath}
-            </span>
-          </div>
+    <div className="bg-background relative flex size-full min-h-0 pt-9">
+      <header className="border-border electrobun-webkit-app-region-drag absolute inset-x-0 top-0 flex h-9 items-center justify-center border-b px-28">
+        <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
+          <BotIcon className="size-4 shrink-0" />
+          <span className="truncate">{project.name}</span>
         </div>
+      </header>
+      <aside className="border-border bg-muted/20 flex w-72 shrink-0 flex-col border-r">
         <div className="flex min-h-0 flex-1 flex-col border-b">
           <div className="flex h-9 shrink-0 items-center gap-2 px-3">
             <FolderTreeIcon className="text-muted-foreground size-3.5" />
@@ -551,16 +538,9 @@ export function ProjectPage({ project }: { project: AgentProjectView }) {
                 rubrics: [],
               }
             }
-            sourceRevision={sourceRevision}
             thread={visibleThread}
             onThread={setActiveThread}
             onSettled={refreshThreads}
-            onFork={() =>
-              executeCommand({
-                type: "forkProjectThread",
-                args: { threadId: visibleThread.id },
-              })
-            }
           />
         )}
       </main>
@@ -572,20 +552,16 @@ function _ProjectThreadPlaygroundPane({
   client,
   history,
   evaluationMetadata,
-  sourceRevision,
   thread,
   onThread,
   onSettled,
-  onFork,
 }: {
   readonly client: ProjectStudioClient;
   readonly history: readonly StudioRunHistoryEntry[];
   readonly evaluationMetadata: StudioEvaluationMetadata;
-  readonly sourceRevision?: string;
   readonly thread: StudioThread;
   readonly onThread: (thread: StudioThread) => void;
   readonly onSettled: () => void | Promise<void>;
-  readonly onFork: () => void | Promise<void>;
 }) {
   const threadRef = useRef(thread);
   threadRef.current = thread;
@@ -600,6 +576,11 @@ function _ProjectThreadPlaygroundPane({
   );
   const persist = useCallback(
     (next: import("@llm-space/core").Thread): Promise<void> => {
+      // Engine checkpoints already own execution projections. Queue a Draft
+      // only when the editor changed fields Studio actually persists.
+      if (!shouldPersistProjectThread(next, threadRef.current)) {
+        return Promise.resolve();
+      }
       saveChain.current = saveChain.current
         .catch(() => undefined)
         .then(async () => {
@@ -647,18 +628,13 @@ function _ProjectThreadPlaygroundPane({
       }),
     [client, onSettled, publishThread, thread.id]
   );
-  const outdated =
-    thread.document.commitId !== undefined &&
-    sourceRevision !== undefined &&
-    sourceRevision !== thread.document.commitId;
-
   return (
     <ThreadPlayground
       active
       className="min-h-0 flex-1"
       definitionReadonly
+      modelSelectionReadonly={false}
       executionRuntime={executionRuntime}
-      runDisabled={outdated}
       initialValue={studioThreadToPlaygroundThread(
         thread,
         history,
@@ -667,26 +643,6 @@ function _ProjectThreadPlaygroundPane({
       path={`threads/${thread.id}`}
       storeKey={thread.id}
       title={thread.document.title}
-      headerDetails={
-        <span
-          className={
-            outdated
-              ? "text-destructive font-mono text-[0.625rem]"
-              : "text-muted-foreground font-mono text-[0.625rem]"
-          }
-        >
-          {thread.document.commitId === undefined
-            ? "Uncommitted"
-            : `${outdated ? "Outdated · " : ""}commit ${thread.document.commitId.slice(0, 10)}`}
-        </span>
-      }
-      headerActions={
-        outdated ? (
-          <Button size="sm" variant="outline" onClick={() => void onFork()}>
-            <GitForkIcon className="size-3.5" /> Fork on Current HEAD
-          </Button>
-        ) : undefined
-      }
       onChange={(next) => {
         void persist(next).catch((error: unknown) => {
           toast.error("Unable to save Studio Thread", {

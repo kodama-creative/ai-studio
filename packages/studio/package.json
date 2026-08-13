@@ -7,12 +7,16 @@
   "exports": {
     ".": "./src/index.ts",
     "./evaluation": "./src/evaluation.ts",
+    "./server": "./src/server/index.ts",
     "./storage": "./src/storage/index.ts",
     "./storage/sqlite": "./src/storage/sqlite/index.ts",
     "./package.json": "./package.json"
   },
   "dependencies": {
+    "@earendil-works/pi-ai": "catalog:",
+    "@llm-space/agent": "workspace:*",
     "@llm-space/core": "workspace:*",
-    "@llm-space/engine": "workspace:*"
+    "@llm-space/engine": "workspace:*",
+    "@llm-space/engine-pi": "workspace:*"
   }
 }

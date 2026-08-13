@@ -1,6 +1,7 @@
 import { userDirectoryExists } from "@llm-space/core/server";
 import type { GistThreadWriter } from "@llm-space/core/storage";
 import type { PluginManager } from "@llm-space/runtime/plugins";
+import type { Studio } from "@llm-space/studio/server";
 import { BrowserView, Utils, type BrowserWindow } from "electrobun/bun";
 
 import type { DesktopWindowContext } from "../../shared/agent-project";
@@ -18,7 +19,6 @@ import {
 } from "../fs";
 import type { PlaygroundHost } from "../playgrounds/playground-host";
 import type { PluginCommandExecutionController } from "../plugins/plugin-command-execution-controller";
-import type { ProjectStudioHost } from "../projects/project-studio-host";
 import {
   dismissGithubStarReminder,
   getNextFeatureReminder,
@@ -67,7 +67,7 @@ export interface MainWindowRPCDependencies {
   pluginManager: PluginManager;
   pluginCommandExecutions: PluginCommandExecutionController;
   windowContext?: DesktopWindowContext;
-  projectStudioHost?: ProjectStudioHost;
+  projectStudio?: Studio;
   playgroundHost: PlaygroundHost;
   listAgentProjects: () => Promise<
     readonly import("../../shared/agent-project").AgentProjectSummary[]
@@ -93,7 +93,7 @@ export function createMainWindowRPC({
   pluginManager,
   pluginCommandExecutions,
   windowContext = { kind: "playground" },
-  projectStudioHost,
+  projectStudio,
   playgroundHost,
   listAgentProjects,
   openAgentProject,
@@ -104,11 +104,11 @@ export function createMainWindowRPC({
   const playgroundSubscriptions = new Map<string, AbortController>();
   const projectSubscriptions = new Map<string, AbortController>();
   const projectSourceSubscriptions = new Map<string, AbortController>();
-  const getProjectHost = (): ProjectStudioHost => {
-    if (projectStudioHost === undefined) {
+  const getProjectStudio = (): Studio => {
+    if (projectStudio === undefined) {
       throw new Error("This window is not attached to an agent project.");
     }
-    return projectStudioHost;
+    return projectStudio;
   };
   const rpc: MainWindowRPC = BrowserView.defineRPC<DesktopRPCType>({
     maxRequestTime: MAX_REQUEST_TIME_MS,
@@ -144,43 +144,50 @@ export function createMainWindowRPC({
           await pickAgentProject();
           return null;
         },
-        projectGetSourceRevision: () => getProjectHost().getSourceRevision(),
-        projectListThreads: () => getProjectHost().listThreads(),
+        projectGetSourceRevision: () => getProjectStudio().getSourceRevision(),
+        projectListThreads: () => getProjectStudio().listThreads(),
         projectListRunHistory: ({ threadId }) =>
-          getProjectHost().listRunHistory(threadId),
+          getProjectStudio().listRunHistory(threadId),
         projectSaveRunHistory: ({ threadId, runIds }) =>
-          getProjectHost().saveRunHistory(threadId, runIds),
+          getProjectStudio().saveRunHistory(threadId, runIds),
         projectListEvaluationMetadata: ({ threadId }) =>
-          getProjectHost().listEvaluationMetadata(threadId),
+          getProjectStudio().listEvaluationMetadata(threadId),
         projectSaveEvaluationMetadata: ({ threadId, evaluations, rubrics }) =>
-          getProjectHost().saveEvaluationMetadata(threadId, {
+          getProjectStudio().saveEvaluationMetadata(threadId, {
             evaluations,
             rubrics,
           }),
-        projectListSourceFiles: () => getProjectHost().listSourceFiles(),
+        projectListSourceFiles: () => getProjectStudio().listSourceFiles(),
         projectReadSourceFile: ({ path }) =>
-          getProjectHost().readSourceFile(path),
-        projectCreateThread: (input) => getProjectHost().createThread(input),
+          getProjectStudio().readSourceFile(path),
+        projectCreateThread: (input) => getProjectStudio().createThread(input),
         projectForkThread: ({ threadId, checkpointId }) =>
-          getProjectHost().forkThread(threadId, {
+          getProjectStudio().forkThread(threadId, {
             ...(checkpointId === undefined ? {} : { checkpointId }),
           }),
         projectLoadThread: ({ threadId }) =>
-          getProjectHost().loadThread(threadId),
+          getProjectStudio().loadThread(threadId),
         projectSaveThreadDocument: ({ threadId, document }) =>
-          getProjectHost().saveDocument(threadId, document),
-        projectRunThread: ({ threadId, fromMessageId, mode }) =>
-          getProjectHost().run(threadId, {
+          getProjectStudio().saveDocument(threadId, document),
+        projectRunThread: ({
+          threadId,
+          fromMessageId,
+          modelOverride,
+          mode,
+        }) =>
+          getProjectStudio().run(threadId, {
             fromMessageId,
+            ...(modelOverride === undefined ? {} : { modelOverride }),
             ...(mode === undefined ? {} : { mode }),
           }),
         projectStepRun: ({ runId, toolCallId }) =>
-          getProjectHost().stepRun(runId, {
+          getProjectStudio().stepRun(runId, {
             ...(toolCallId === undefined ? {} : { toolCallId }),
           }),
-        projectContinueRun: ({ runId }) => getProjectHost().continueRun(runId),
+        projectContinueRun: ({ runId }) =>
+          getProjectStudio().continueRun(runId),
         projectCancelRun: async ({ runId }) => {
-          await getProjectHost().cancelRun(runId);
+          await getProjectStudio().cancelRun(runId);
           return null;
         },
         listRuntimes: () => Promise.resolve(runtimeRouter.list()),
@@ -658,7 +665,7 @@ export function createMainWindowRPC({
           projectSubscriptions.set(subscriptionId, controller);
           void (async () => {
             try {
-              for await (const event of getProjectHost().events(threadId, {
+              for await (const event of getProjectStudio().events(threadId, {
                 afterSequence,
                 follow: true,
                 signal: controller.signal,
@@ -694,7 +701,7 @@ export function createMainWindowRPC({
           projectSourceSubscriptions.set(subscriptionId, controller);
           void (async () => {
             try {
-              for await (const snapshot of getProjectHost().watchSourceFiles({
+              for await (const snapshot of getProjectStudio().watchSourceFiles({
                 signal: controller.signal,
               })) {
                 rpc.send.receiveProjectSourceEvent({

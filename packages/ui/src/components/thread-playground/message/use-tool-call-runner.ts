@@ -3,7 +3,7 @@ import {
   getToolResultText,
   resolveThreadPromptVariableValues,
 } from "@llm-space/core/thread";
-import { useCallback, useMemo } from "react";
+import { useCallback } from "react";
 
 import { useHostServices } from "@llm-space/ui/host";
 import { isFirecrawlLimitError } from "@llm-space/ui/lib/firecrawl";
@@ -18,6 +18,28 @@ export interface ToolCallOutcome {
   isFirecrawlLimit: boolean;
 }
 
+/** Decide whether a pending call has either a local or host-owned executor. */
+export function canRunToolCall(
+  tool: Tool | undefined,
+  externalExecutorAvailable: boolean
+): boolean {
+  return (
+    tool !== undefined &&
+    (isExecutableTool(tool) ||
+      (externalExecutorAvailable && tool.type === "function"))
+  );
+}
+
+/** Resolve authored function stubs as well as locally executable tool kinds. */
+export function findTool(
+  tools: readonly Tool[],
+  name: string
+): Tool | undefined {
+  return tools.find(
+    (tool) => tool.type !== "provider-hosted" && tool.name === name
+  );
+}
+
 /**
  * The single home for "call a tool and record its result". Resolves the tool by
  * name, executes it, writes the output back to the store, and classifies
@@ -29,22 +51,23 @@ export function useToolCallRunner(messageId: string) {
   const tools = useThreadStore((state) => state.thread.context?.tools);
   const thread = useThreadStore((state) => state.thread);
   const runtimeId = useThreadStore((state) => state.runtimeId);
+  const externalToolExecutionAvailable = useThreadStore(
+    (state) => state.externalToolExecutionAvailable
+  );
   const executeTool = useToolExecutor(runtimeId);
   const ownerRuntimeId = runtimeId ?? "local";
   const { updateToolCallOutput, updateToolCallOutputText } =
     useThreadStoreActions();
   const { runExternalToolCall } = useThreadStoreActions();
 
-  const toolsByName = useMemo(
-    () =>
-      new Map(
-        (tools ?? []).filter(isExecutableTool).map((tool) => [tool.name, tool])
-      ),
+  const resolveTool = useCallback(
+    (name: string): Tool | undefined => findTool(tools ?? [], name),
     [tools]
   );
-  const resolveTool = useCallback(
-    (name: string): Tool | undefined => toolsByName.get(name),
-    [toolsByName]
+  const canExecuteTool = useCallback(
+    (name: string) =>
+      canRunToolCall(resolveTool(name), externalToolExecutionAvailable),
+    [externalToolExecutionAvailable, resolveTool]
   );
 
   const runToolCall = useCallback(
@@ -103,5 +126,5 @@ export function useToolCallRunner(messageId: string) {
     ]
   );
 
-  return { resolveTool, runToolCall };
+  return { canExecuteTool, resolveTool, runToolCall };
 }

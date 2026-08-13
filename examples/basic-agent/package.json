@@ -4,14 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "bun run.ts"
+    "dev": "llm-space dev .",
+    "start": "llm-space run --project ."
   },
   "dependencies": {
-    "@earendil-works/pi-ai": "catalog:",
     "@llm-space/agent": "workspace:*",
-    "@llm-space/app": "workspace:*",
-    "@llm-space/core": "workspace:*",
-    "@llm-space/engine": "workspace:*",
-    "@llm-space/engine-pi": "workspace:*"
+    "@llm-space/cli": "workspace:*"
   }
 }

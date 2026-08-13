@@ -434,7 +434,7 @@ export const COMMAND_META: Record<
   openOnboard: { label: "Onboard...", target: "webview" },
   runThread: { label: "Run Thread", target: "webview" },
   createProjectThread: { label: "New Project Thread", target: "webview" },
-  forkProjectThread: { label: "Fork on Current HEAD", target: "webview" },
+  forkProjectThread: { label: "Fork Thread", target: "webview" },
   shareThread: { label: "Share...", target: "webview" },
   openVariables: { label: "Variables", target: "webview" },
   zoomIn: { label: "Zoom In", target: "bun" },

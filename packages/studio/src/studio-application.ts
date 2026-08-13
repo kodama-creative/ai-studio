@@ -29,29 +29,11 @@ import type {
 } from "./evaluation";
 import type { StudioStore } from "./storage";
 
-export interface SourceRevisionProvider {
-  current(): Promise<string>;
-  /** Return the revision safe to pin, or undefined for dirty/uncommitted source. */
-  binding?(): Promise<string | undefined>;
-}
-
-export class StudioThreadOutdatedError extends Error {
-  constructor(
-    readonly threadCommitId: string,
-    readonly currentCommitId: string
-  ) {
-    super(
-      `Studio Thread is bound to commit "${threadCommitId}", but the project is at "${currentCommitId}".`
-    );
-    this.name = "StudioThreadOutdatedError";
-  }
-}
-
 export interface CreateStudioApplicationOptions {
   readonly engine: AgentEngine;
   readonly store: StudioStore;
-  readonly revisionProvider: SourceRevisionProvider;
-  readonly resolveCurrentAgent?: () => Promise<ExecutableAgent>;
+  /** Load the current project source for each newly requested Studio Run. */
+  readonly resolveCurrentAgent: () => Promise<ExecutableAgent>;
   readonly clock?: () => number;
   readonly generateId?: (prefix: string) => string;
 }
@@ -131,13 +113,6 @@ class StudioApplicationImpl implements StudioApplication {
 
   async createThread(input: CreateStudioThreadInput): Promise<StudioThread> {
     await this._recovery;
-    const currentCommitId = await this._options.revisionProvider.current();
-    if (
-      input.commitId !== undefined &&
-      input.commitId !== currentCommitId
-    ) {
-      throw new StudioThreadOutdatedError(input.commitId, currentCommitId);
-    }
     const engineThread = await this._options.engine.createThread({
       ...(input.conversation === undefined
         ? {}
@@ -198,7 +173,11 @@ class StudioApplicationImpl implements StudioApplication {
           const checkpoint =
             checkpointId === undefined
               ? undefined
-              : await this._checkpointView(experiment, checkpointId);
+              : await this._checkpointView(
+                  experiment,
+                  checkpointId,
+                  _effectiveRunAgent(run)
+                );
           return {
             reference: {
               ...reference,
@@ -308,10 +287,7 @@ class StudioApplicationImpl implements StudioApplication {
   ): Promise<StudioThread> {
     await this._recovery;
     const source = this._requireExperiment(threadId);
-    const currentAgent = await this._options.resolveCurrentAgent?.();
-    if (currentAgent === undefined) {
-      throw new Error("This Studio host cannot resolve the current Agent.");
-    }
+    const currentAgent = await this._options.resolveCurrentAgent();
     const fork = await this._options.engine.forkThread({
       threadId: source.engineThreadId,
       ...(input.checkpointId === undefined
@@ -321,7 +297,6 @@ class StudioApplicationImpl implements StudioApplication {
     if (source.draft !== undefined && input.checkpointId === undefined) {
       await this._replaceThreadState(fork.id, source.draft);
     }
-    const binding = await this._options.revisionProvider.binding?.();
     const now = this._clock();
     const experiment: StudioExperimentRecord = {
       schemaVersion: 1,
@@ -329,7 +304,6 @@ class StudioApplicationImpl implements StudioApplication {
       engineThreadId: fork.id,
       title: `${source.title} (Fork)`,
       agent: structuredClone(currentAgent.snapshot),
-      ...(binding === undefined ? {} : { commitId: binding }),
       provenance: {
         type: "fork",
         threadId,
@@ -380,29 +354,20 @@ class StudioApplicationImpl implements StudioApplication {
   ): Promise<StudioRunReceipt> {
     await this._recovery;
     let experiment = this._requireExperiment(threadId);
-    const currentCommitId = await this._options.revisionProvider.current();
-    if (
-      experiment.commitId !== undefined &&
-      experiment.commitId !== currentCommitId
-    ) {
-      throw new StudioThreadOutdatedError(experiment.commitId, currentCommitId);
-    }
-    if (experiment.commitId === undefined) {
-      const currentAgent = await this._options.resolveCurrentAgent?.();
-      if (currentAgent === undefined) {
-        throw new Error("This Studio host cannot resolve the current Agent.");
-      }
-      experiment = {
-        ...experiment,
-        agent: structuredClone(currentAgent.snapshot),
-        updatedAt: this._clock(),
-      };
-      this._options.store.transaction((tx) => tx.saveExperiment(experiment));
-    }
     const view = await this._composeThread(experiment);
     if (view.activeRunId !== undefined) {
       throw new Error(`Studio Thread "${threadId}" is already running.`);
     }
+    const currentAgent = await this._options.resolveCurrentAgent();
+    experiment = {
+      ...experiment,
+      agent: structuredClone(currentAgent.snapshot),
+      // Old SQLite rows may still carry the removed commit binding. A new Run
+      // adopts live development source and clears that legacy field lazily.
+      commitId: undefined,
+      updatedAt: this._clock(),
+    };
+    this._options.store.transaction((tx) => tx.saveExperiment(experiment));
     const messages = view.document.conversation.messages;
     const inputIndex = messages.findIndex(
       (message) => message.id === input.fromMessageId
@@ -418,34 +383,6 @@ class StudioApplicationImpl implements StudioApplication {
       messages: messages.slice(0, inputIndex),
       state: structuredClone(view.document.conversation.state),
     };
-    const retryOf = await this._findRetryRun(
-      threadId,
-      inputMessage,
-      desiredBase,
-      experiment.commitId !== undefined
-    );
-    if (retryOf !== undefined) {
-      const operationId = this._generateId("operation");
-      experiment = this._stageRunIntent(experiment, operationId);
-      let retry: Run;
-      try {
-        retry = await this._options.engine.retryRun({
-          runId: retryOf.id,
-          ...(input.mode === undefined ? {} : { mode: input.mode }),
-          operationId,
-        });
-      } catch (error) {
-        this._clearRunIntent(threadId, operationId);
-        throw error;
-      }
-      experiment = {
-        ...experiment,
-        engineThreadId: retry.threadId,
-        updatedAt: this._clock(),
-      };
-      this._recordRun(threadId, experiment, retry);
-      return { runId: retry.id };
-    }
     const target = await this._prepareRunThread(experiment, desiredBase);
     if (target.id !== experiment.engineThreadId) {
       experiment = {
@@ -463,6 +400,9 @@ class StudioApplicationImpl implements StudioApplication {
         expectedHeadCheckpointId: target.headCheckpointId,
         inputMessages: [inputMessage],
         agentSnapshot: experiment.agent,
+        ...(input.modelOverride === undefined
+          ? {}
+          : { modelOverride: input.modelOverride }),
         ...(input.mode === undefined ? {} : { mode: input.mode }),
         operationId,
       });
@@ -673,37 +613,6 @@ class StudioApplicationImpl implements StudioApplication {
     };
   }
 
-  private async _findRetryRun(
-    experimentId: string,
-    inputMessage: Extract<Message, { role: "user" }>,
-    desiredBase: ThreadState,
-    allowSourceRetry: boolean
-  ): Promise<Run | undefined> {
-    // An unbound Experiment deliberately executes whatever source exists now.
-    // Retrying an old immutable Run would pin its old AgentSnapshot instead.
-    if (!allowSourceRetry) return undefined;
-    const references = this._options.store.transaction((tx) =>
-      tx.listRunReferences(experimentId)
-    );
-    for (const reference of references.toReversed()) {
-      if (reference.relation !== "executed") continue;
-      const run = await this._options.engine.getRun(reference.runId);
-      if (
-        run === undefined ||
-        JSON.stringify(run.inputMessages) !== JSON.stringify([inputMessage])
-      ) {
-        continue;
-      }
-      const base = await this._options.engine.getCheckpoint(
-        run.baseCheckpointId
-      );
-      if (base !== undefined && _sameState(base.threadState, desiredBase)) {
-        return run;
-      }
-    }
-    return undefined;
-  }
-
   private async _replaceThreadState(threadId: string, state: ThreadState) {
     const thread = await this._options.engine.getThread(threadId);
     if (thread === undefined)
@@ -717,11 +626,12 @@ class StudioApplicationImpl implements StudioApplication {
 
   private async _checkpointView(
     experiment: StudioExperimentRecord,
-    checkpointId: string
+    checkpointId: string,
+    agent: AgentSnapshot = experiment.agent
   ): Promise<ThreadCheckpoint | undefined> {
     const checkpoint = await this._options.engine.getCheckpoint(checkpointId);
     if (checkpoint === undefined) return undefined;
-    return _checkpointView(experiment, checkpoint);
+    return _checkpointView(experiment, checkpoint, agent);
   }
 
   private async _activeRun(engineThreadId: string): Promise<Run | undefined> {
@@ -926,7 +836,8 @@ class StudioApplicationImpl implements StudioApplication {
 
 function _checkpointView(
   experiment: StudioExperimentRecord,
-  checkpoint: EngineCheckpoint
+  checkpoint: EngineCheckpoint,
+  agent: AgentSnapshot = experiment.agent
 ): ThreadCheckpoint {
   return {
     schemaVersion: 1,
@@ -935,7 +846,7 @@ function _checkpointView(
     source: checkpoint.source,
     document: {
       title: experiment.title,
-      agent: structuredClone(experiment.agent),
+      agent: structuredClone(agent),
       conversation: structuredClone(checkpoint.threadState),
       ...(experiment.commitId === undefined
         ? {}
@@ -947,6 +858,13 @@ function _checkpointView(
 
 function _sameState(left: ThreadState, right: ThreadState): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
+}
+
+/** Agent definition as actually presented by one Run after Studio overrides. */
+function _effectiveRunAgent(run: Run): AgentSnapshot {
+  return run.control.modelOverride === undefined
+    ? run.agentSnapshot
+    : { ...run.agentSnapshot, model: run.control.modelOverride };
 }
 
 function _messageText(

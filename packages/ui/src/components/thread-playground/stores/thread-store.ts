@@ -105,6 +105,8 @@ export type ThreadStoreStatus = "idle" | "preparing" | "running";
 
 export type ExternalThreadRunEvent =
   | { readonly type: "thread.updated"; readonly thread: Thread }
+  | { readonly type: "tool.started"; readonly toolCallId: string }
+  | { readonly type: "tool.completed"; readonly toolCallId: string }
   | {
       readonly type: "message.delta";
       readonly message: AssistantMessage;
@@ -143,6 +145,8 @@ export interface ThreadState {
   executingToolCallIds: string[];
   /** Engine-backed tool outputs are checkpoint-owned and cannot be edited locally. */
   toolCallOutputsReadonly: boolean;
+  /** The host can execute function-tool calls that are only stubs in the UI model. */
+  externalToolExecutionAvailable: boolean;
   collapsedMessageIds: string[];
   runValidationIssue: RunValidationIssue | null;
   /**
@@ -698,6 +702,8 @@ export function createThreadStore(
         activeRunId: null,
         executingToolCallIds: [],
         toolCallOutputsReadonly: options.executionRuntime !== undefined,
+        externalToolExecutionAvailable:
+          options.executionRuntime?.executeToolCall !== undefined,
         collapsedMessageIds: [],
         runValidationIssue: null,
         autoFocusMessageId: null,
@@ -1098,9 +1104,22 @@ export function createThreadStore(
             });
             stopActiveRun = () => abortController.abort();
             try {
+              // The model selector may display a default/fallback without
+              // persisting it. Resolve that same visible value for the request
+              // so the first click behaves like subsequent explicit changes.
+              let executionThread = get().thread;
+              const resolvedModel = options.resolveModel?.(
+                executionThread.model
+              );
+              if (resolvedModel !== undefined && resolvedModel !== null) {
+                executionThread = {
+                  ...executionThread,
+                  model: resolvedModel,
+                };
+              }
               set({ status: "running" });
               for await (const event of options.executionRuntime.execute({
-                thread: get().thread,
+                thread: executionThread,
                 fromMessageId,
                 autoRunTools: options.getAutoRunTools?.() ?? false,
                 reactLoop: options.getReactLoop?.() ?? false,
@@ -1109,6 +1128,20 @@ export function createThreadStore(
                 if (get().activeRunId !== runId) break;
                 if (event.type === "message.delta") {
                   set({ streamingMessage: event.message });
+                } else if (event.type === "tool.started") {
+                  set((state) => ({
+                    executingToolCallIds: state.executingToolCallIds.includes(
+                      event.toolCallId
+                    )
+                      ? state.executingToolCallIds
+                      : [...state.executingToolCallIds, event.toolCallId],
+                  }));
+                } else if (event.type === "tool.completed") {
+                  set((state) => ({
+                    executingToolCallIds: state.executingToolCallIds.filter(
+                      (id) => id !== event.toolCallId
+                    ),
+                  }));
                 } else {
                   const thread = normalizeThread(event.thread);
                   const runHistory = normalizeRunHistory(thread.runHistory);
@@ -1547,7 +1580,7 @@ export function createThreadStore(
               if (get().activeRunId !== runId) return false;
               if (event.type === "message.delta") {
                 set({ streamingMessage: event.message });
-              } else {
+              } else if (event.type === "thread.updated") {
                 const thread = normalizeThread(event.thread);
                 set({ thread, streamingMessage: null });
               }

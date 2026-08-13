@@ -401,8 +401,10 @@ test("persists a complete Run through the high-level RunExecutor seam", async ()
 });
 
 test("step pauses one Run and continue resumes it from the durable head", async () => {
+  const modelOverrides: (string | undefined)[] = [];
   const runExecutor: RunExecutor = {
     async executeStep(input, sink) {
+      modelOverrides.push(input.modelOverride);
       const last = input.messages.at(-1);
       if (input.step.type === "tools") {
         const { toolCallIds } = input.step;
@@ -475,6 +477,7 @@ test("step pauses one Run and continue resumes it from the durable head", async 
       expectedHeadCheckpointId: thread.headCheckpointId,
       inputMessages: [RICH_USER_MESSAGE],
       agentSnapshot: TEST_AGENT,
+      modelOverride: "override/model",
       mode: "step",
     });
 
@@ -506,6 +509,12 @@ test("step pauses one Run and continue resumes it from the durable head", async 
     expect(resumed.id).toBe(started.id);
     expect(completed.id).toBe(started.id);
     expect(completed.status).toBe("completed");
+    expect(completed.control.modelOverride).toBe("override/model");
+    expect(modelOverrides).toEqual([
+      "override/model",
+      "override/model",
+      "override/model",
+    ]);
     expect(result?.threadState.messages.at(-1)).toMatchObject({
       role: "assistant",
       content: [{ type: "text", text: "Finished." }],

@@ -107,6 +107,8 @@ export interface ThreadPlaygroundProps {
   executionRuntime?: ExternalThreadExecutionRuntime;
   /** Keep Agent definition controls read-only while messages remain editable. */
   definitionReadonly?: boolean;
+  /** Override definitionReadonly for only the provider/model selector. */
+  modelSelectionReadonly?: boolean;
   /** Disable execution without making the editable Conversation read-only. */
   runDisabled?: boolean;
   /** Runtime that owns this playground. Used to route tool calls. */
@@ -231,6 +233,7 @@ function ThreadPlaygroundContent({
   validateTitle,
   readonly: readonlyFromProps = false,
   definitionReadonly = false,
+  modelSelectionReadonly,
   runDisabled = false,
   active = false,
   compactImages = false,
@@ -262,6 +265,8 @@ function ThreadPlaygroundContent({
     return readonlyFromProps || presentational || status !== "idle";
   }, [readonlyFromProps, presentational, status]);
   const definitionIsReadonly = readonly || definitionReadonly;
+  const modelSelectionIsReadonly =
+    readonly || (modelSelectionReadonly ?? definitionReadonly);
   const handleRun = useCallback(async () => {
     await run();
   }, [run]);
@@ -499,7 +504,10 @@ function ThreadPlaygroundContent({
                       Models
                     </div>
                     <div className="flex grow items-center">
-                      <ModelConfigEditor readonly={definitionIsReadonly} />
+                      <ModelConfigEditor
+                        readonly={definitionIsReadonly}
+                        selectionReadonly={modelSelectionIsReadonly}
+                      />
                     </div>
                   </div>
                   <div className={"flex w-full border-b py-2"}>

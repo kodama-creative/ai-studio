@@ -7,8 +7,6 @@ import {
 } from "node:fs/promises";
 import { relative, resolve, sep } from "node:path";
 
-import type { ProjectSourceNode } from "../../shared/project-studio";
-
 const HIDDEN_NAMES = new Set([
   ".git",
   ".llm-space",
@@ -22,13 +20,27 @@ const HIDDEN_NAMES = new Set([
 ]);
 const MAX_SOURCE_FILE_BYTES = 2 * 1024 * 1024;
 
-export class ProjectSourceFiles {
+export interface ProjectSourceNode {
+  readonly name: string;
+  readonly path: string;
+  readonly type: "file" | "directory";
+  readonly children?: readonly ProjectSourceNode[];
+}
+
+export interface ProjectSourceSnapshot {
+  readonly files: readonly ProjectSourceNode[];
+  readonly revision: string;
+}
+
+/** Safe read-only source browser rooted at one Agent Project. */
+export class ProjectSource {
   constructor(private readonly _root: string) {}
 
-  async list(): Promise<readonly ProjectSourceNode[]> {
-    return this._listDirectory(await realpath(this._root), "");
+  list(): Promise<readonly ProjectSourceNode[]> {
+    return this._list();
   }
 
+  /** Read one small regular source file without allowing path traversal. */
   async read(path: string): Promise<string> {
     const root = await realpath(this._root);
     const candidate = resolve(root, path);
@@ -43,14 +55,16 @@ export class ProjectSourceFiles {
     }
     _assertWithinRoot(root, canonical);
     const file = await stat(canonical);
-    if (!file.isFile())
+    if (!file.isFile()) {
       throw new Error(`Project source path "${path}" is not a file.`);
+    }
     if (file.size > MAX_SOURCE_FILE_BYTES) {
       throw new Error(`Project source file "${path}" is too large to display.`);
     }
     return readFile(canonical, "utf8");
   }
 
+  /** Emit an initial tree and refreshed trees after relevant filesystem changes. */
   async *watch(
     input: {
       readonly signal?: AbortSignal;
@@ -61,16 +75,20 @@ export class ProjectSourceFiles {
       recursive: true,
       signal: input.signal,
     });
-    yield await this.list();
+    yield await this._list();
     try {
       for await (const event of events) {
         if (_ignoreWatchEvent(event.filename)) continue;
-        yield await this.list();
+        yield await this._list();
       }
     } catch (error) {
       if (input.signal?.aborted || _isAbortError(error)) return;
       throw error;
     }
+  }
+
+  private async _list(): Promise<readonly ProjectSourceNode[]> {
+    return this._listDirectory(await realpath(this._root), "");
   }
 
   private async _listDirectory(

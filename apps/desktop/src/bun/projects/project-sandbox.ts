@@ -6,26 +6,29 @@ import type {
   SandboxRunOptions,
   SandboxSession,
 } from "@llm-space/agent/sandbox";
+import type { SandboxService } from "@llm-space/engine";
 
 /** Local sandbox adapter whose filesystem and default cwd are one project. */
-export class ProjectSandbox implements SandboxSession {
+export class ProjectSandbox implements SandboxSession, SandboxService {
   constructor(private readonly _rootPath: string) {}
+
+  /** Studio deliberately exposes the checked-out Project as its debug sandbox. */
+  getOrCreate(): Promise<SandboxSession> {
+    return Promise.resolve(this);
+  }
 
   async run(
     command: string,
     options: SandboxRunOptions = {}
   ): Promise<SandboxCommandResult> {
     const cwd = this._path(options.cwd ?? ".");
-    const child = Bun.spawn(
-      [process.env.SHELL || "/bin/sh", "-lc", command],
-      {
-        cwd,
-        env: { ...process.env, ...options.env },
-        signal: options.signal,
-        stdout: "pipe",
-        stderr: "pipe",
-      }
-    );
+    const child = Bun.spawn([process.env.SHELL || "/bin/sh", "-lc", command], {
+      cwd,
+      env: { ...process.env, ...options.env },
+      signal: options.signal,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
     const [exitCode, stdout, stderr] = await Promise.all([
       child.exited,
       new Response(child.stdout).text(),

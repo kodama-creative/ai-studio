@@ -8,6 +8,8 @@ export interface RunExecutionInput {
   readonly threadId: string;
   readonly messages: readonly Message[];
   readonly agent: ExecutableAgent;
+  /** Static Studio selection applied without changing the authored Agent snapshot. */
+  readonly modelOverride?: string;
   /** One Engine-selected durable step; the executor must not advance beyond it. */
   readonly step:
     | { readonly type: "model" }

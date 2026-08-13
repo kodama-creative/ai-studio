@@ -16,9 +16,12 @@ import { ProviderProfileSelector } from "./provider-profile-selector";
 export function ModelConfigEditor({
   className,
   readonly,
+  selectionReadonly = readonly,
 }: {
   className?: string;
   readonly?: boolean;
+  /** Locks only provider/model selection while other model settings follow readonly. */
+  selectionReadonly?: boolean;
 }) {
   // A thread may have no saved model, or a stale one whose provider was removed;
   // resolve it for display (own → default → first available). `null` when there
@@ -64,7 +67,10 @@ export function ModelConfigEditor({
             </span>
           ) : (
             <div className="flex w-full min-w-0 items-center gap-2">
-              <ModelSelector value={model ?? null} readonly={readonly} />
+              <ModelSelector
+                value={model ?? null}
+                readonly={selectionReadonly}
+              />
               {model ? (
                 <ProviderProfileSelector
                   className="-mt-1"

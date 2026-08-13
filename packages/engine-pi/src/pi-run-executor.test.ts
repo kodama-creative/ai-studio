@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 
 import {
   createModels,
+  envApiKeyAuth,
   fauxAssistantMessage,
   fauxProvider,
   fauxToolCall,
@@ -26,6 +27,92 @@ const INCREMENT_SCHEMA: JsonObject = {
   required: ["amount"],
   additionalProperties: false,
 };
+
+test("Pi executor uses the durable Run model override", async () => {
+  const faux = fauxProvider({
+    models: [{ id: "source-model" }, { id: "studio-model" }],
+    tokensPerSecond: 0,
+  });
+  let executedModel: string | undefined;
+  faux.setResponses([
+    (_context, _options, _state, model) => {
+      executedModel = model.id;
+      return fauxAssistantMessage("overridden");
+    },
+  ]);
+  const models = createModels();
+  models.setProvider(faux.provider);
+  const executor = createPiRunExecutor({ models });
+  const events: RunExecutionEvent[] = [];
+  const [sourceModel, studioModel] = faux.models;
+  if (studioModel === undefined) throw new Error("Studio model is missing.");
+
+  await executor.executeStep(
+    {
+      ..._emptyRunInput(sourceModel, "model-override"),
+      modelOverride: `${studioModel.provider}/${studioModel.id}`,
+    },
+    {
+      accept(event) {
+        events.push(event);
+        return Promise.resolve();
+      },
+    },
+    { signal: new AbortController().signal }
+  );
+
+  expect(executedModel).toBe("studio-model");
+  expect(events.some((event) => event.type === "assistant.completed")).toBeTrue();
+});
+
+test("Pi executor injects the host-configured provider connection", async () => {
+  const faux = fauxProvider({ tokensPerSecond: 0 });
+  let requestBaseUrl: string | undefined;
+  let requestHeaders: Record<string, string | null> | undefined;
+  faux.setResponses([
+    (_context, options, _state, model) => {
+      requestBaseUrl = model.baseUrl;
+      requestHeaders = options?.headers;
+      return fauxAssistantMessage("configured");
+    },
+  ]);
+  const models = createModels();
+  models.setProvider({
+    ...faux.provider,
+    auth: {
+      apiKey: envApiKeyAuth("Studio test key", [
+        "LLM_SPACE_UNCONFIGURED_STUDIO_TEST_KEY",
+      ]),
+    },
+  });
+  const executor = createPiRunExecutor({
+    models,
+    resolveConnection: ({ providerId }) => {
+      expect(providerId).toBe(faux.provider.id);
+      return Promise.resolve({
+        apiKey: "studio-configured-key",
+        baseUrl: "https://studio.example.test/v1",
+        headers: { "x-studio-profile": "default" },
+      });
+    },
+  });
+  const events: RunExecutionEvent[] = [];
+
+  await executor.executeStep(
+    _emptyRunInput(faux.getModel(), "configured-provider"),
+    {
+      accept(event) {
+        events.push(event);
+        return Promise.resolve();
+      },
+    },
+    { signal: new AbortController().signal }
+  );
+
+  expect(events.some((event) => event.type === "assistant.completed")).toBeTrue();
+  expect(requestBaseUrl).toBe("https://studio.example.test/v1");
+  expect(requestHeaders).toEqual({ "x-studio-profile": "default" });
+});
 
 test("Pi executor advances one model or tool step at a time", async () => {
   const faux = fauxProvider({ tokensPerSecond: 0 });

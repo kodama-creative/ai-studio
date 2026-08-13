@@ -28,7 +28,7 @@ describe.each([
   ["memory", () => new InMemoryStudioStore()],
   ["sqlite", () => createSqliteStudioStore({ path: ":memory:" })],
 ] as const)("StudioApplication with %s storage", (_name, createStore) => {
-  test("stores dirty Drafts outside Engine and retries a prior Run on a child Thread", async () => {
+  test("stores dirty Drafts outside Engine and starts each execution as a new Run", async () => {
     const engine = createAgentEngine({
       store: new InMemoryEngineStore(),
       runExecutor: _textRunExecutor("Studio answer"),
@@ -57,7 +57,6 @@ describe.each([
     const studio = createStudioApplication({
       engine,
       store: createStore(),
-      revisionProvider: { current: () => Promise.resolve("commit-1") },
       resolveCurrentAgent: () =>
         Promise.resolve({ snapshot: AGENT, tools: new Map() }),
     });
@@ -88,7 +87,14 @@ describe.each([
         (await engine.getThread(created.engineThreadId))?.headCheckpointId
       ).toBe(engineBeforeDraft?.headCheckpointId);
 
-      const first = await studio.run(created.id, { fromMessageId: "user-1" });
+      const first = await studio.run(created.id, {
+        fromMessageId: "user-1",
+        modelOverride: "override/model",
+      });
+      expect(await engine.getRun(first.runId)).toMatchObject({
+        agentSnapshot: { model: "test/model" },
+        control: { modelOverride: "override/model" },
+      });
       await _untilCompleted(
         studio.events(created.id, { follow: true }),
         first.runId
@@ -102,7 +108,14 @@ describe.each([
         },
       ]);
       expect(await studio.listRunHistory(created.id)).toMatchObject([
-        { run: { id: first.runId, status: "completed" }, checkpoint: {} },
+        {
+          run: {
+            id: first.runId,
+            status: "completed",
+            control: { modelOverride: "override/model" },
+          },
+          checkpoint: { document: { agent: { model: "override/model" } } },
+        },
       ]);
 
       const retry = await studio.run(created.id, { fromMessageId: "user-1" });
@@ -112,11 +125,15 @@ describe.each([
       );
       const retried = await studio.loadThread(created.id);
       expect(retried?.engineThreadId).not.toBe(created.engineThreadId);
-      const retryEngineThread = await engine.getThread(retried!.engineThreadId);
-      expect(retryEngineThread?.parent).toMatchObject({
+      const rerunEngineThread = await engine.getThread(
+        retried!.engineThreadId
+      );
+      expect(rerunEngineThread?.parent).toMatchObject({
         threadId: created.engineThreadId,
-        relationship: "retry",
+        relationship: "fork",
       });
+      expect((await engine.getRun(retry.runId))?.retryOfRunId).toBeUndefined();
+      expect(retried?.document.commitId).toBeUndefined();
 
       await studio.saveDocument(created.id, {
         ...retried!.document,
@@ -204,7 +221,8 @@ describe.each([
     const studio = createStudioApplication({
       engine,
       store: createStore(),
-      revisionProvider: { current: () => Promise.resolve("commit-1") },
+      resolveCurrentAgent: () =>
+        Promise.resolve({ snapshot: AGENT, tools: new Map() }),
     });
     try {
       const created = await studio.createThread({
@@ -351,7 +369,6 @@ test("recovers a Run whose Studio reference transaction was interrupted", async 
   const options = {
     engine,
     store,
-    revisionProvider: { current: () => Promise.resolve("commit-1") },
     resolveCurrentAgent: () =>
       Promise.resolve({ snapshot: AGENT, tools: new Map() }),
   };

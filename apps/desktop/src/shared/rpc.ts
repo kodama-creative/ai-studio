@@ -258,6 +258,7 @@ export interface DesktopRPCType {
         params: {
           threadId: string;
           fromMessageId: string;
+          modelOverride?: string;
           mode?: import("@llm-space/engine").RunExecutionMode;
         };
         response: StudioRunReceipt;
