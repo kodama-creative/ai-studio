@@ -16,6 +16,7 @@ import type {
   Usage,
 } from "@earendil-works/pi-ai";
 import type { ToolModelOutput } from "@llm-space/agent/tools";
+import { validateSchemaValue } from "@llm-space/agent/tools/schema-validation";
 import type {
   AssistantMessage,
   Message,
@@ -29,8 +30,6 @@ import type {
   RunExecutionSink,
   RunExecutor,
 } from "@llm-space/engine";
-
-import { validateSchemaValue } from "./schema-validation";
 
 export interface CreatePiRunExecutorOptions {
   /** Live registry access lets long-lived Studio windows observe provider edits. */
@@ -259,16 +258,20 @@ async function _executeToolStep(
     throw new Error("A tool step requires at least one tool call.");
   }
   const selected = calls.map((toolCallId) => {
-    const call = assistant.toolCalls?.find(
+    const toolIndex = assistant.toolCalls?.findIndex(
       (candidate) => candidate.id === toolCallId
     );
+    if (toolIndex === undefined || toolIndex < 0) {
+      throw new Error(`Tool call "${toolCallId}" is not pending.`);
+    }
+    const call = assistant.toolCalls?.[toolIndex];
     if (call === undefined || call.output !== undefined) {
       throw new Error(`Tool call "${toolCallId}" is not pending.`);
     }
-    return call;
+    return { call, toolIndex };
   });
 
-  for (const call of selected) {
+  for (const { call } of selected) {
     await sink.accept({
       type: "tool.started",
       messageId: assistant.id,
@@ -285,11 +288,7 @@ async function _executeToolStep(
     output: ToolCallOutput
   ): Promise<void> => {
     updateBarrier = updateBarrier.then(async () => {
-      currentAssistant = _setToolOutput(
-        currentAssistant,
-        toolCallId,
-        output
-      );
+      currentAssistant = _setToolOutput(currentAssistant, toolCallId, output);
       await sink.accept({
         type,
         messageId: currentAssistant.id,
@@ -301,7 +300,7 @@ async function _executeToolStep(
   };
 
   await Promise.all(
-    selected.map(async (call) => {
+    selected.map(async ({ call, toolIndex }) => {
       const prepared = input.agent.tools.get(call.input.name);
       if (prepared === undefined) {
         await publish(
@@ -323,11 +322,16 @@ async function _executeToolStep(
         );
         const context = input.createToolContext({
           execution: {
-            threadId: input.threadId,
+            // The retiring Engine maps its Thread identity into the new
+            // Session contract until local execution cuts over to Pi Session.
+            sessionId: input.threadId,
+            lane: "main",
             runId: input.runId,
-            stepIndex: input.stepIndex,
-            callId: call.id,
+            assistantEntryId: assistant.id,
+            toolIndex,
+            toolCallId: call.id,
             toolName: call.input.name,
+            idempotencyKey: `${input.threadId}:main:${input.runId}:${assistant.id}:${toolIndex}`,
           },
           signal,
         });
@@ -422,8 +426,7 @@ function _fromPiToolResult(result: unknown, isError: boolean): ToolCallOutput {
   }
   return {
     content,
-    isError:
-      typeof details?.isError === "boolean" ? details.isError : isError,
+    isError: typeof details?.isError === "boolean" ? details.isError : isError,
   };
 }
 

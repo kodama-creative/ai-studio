@@ -20,11 +20,13 @@
     "./skills": "./src/skills/index.ts",
     "./tools": "./src/tools/index.ts",
     "./tools/approval": "./src/tools/approval.ts",
+    "./tools/schema-validation": "./src/tools/schema-validation.ts",
     "./package.json": "./package.json"
   },
   "dependencies": {
     "@standard-schema/spec": "catalog:",
     "ai": "catalog:",
-    "gray-matter": "catalog:"
+    "gray-matter": "catalog:",
+    "ajv": "catalog:"
   }
 }

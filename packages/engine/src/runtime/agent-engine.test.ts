@@ -689,11 +689,14 @@ test("Run execution checkpoints core Messages and agent-defined JSON state", asy
           { amount: 2 },
           input.createToolContext({
             execution: {
-              threadId: input.threadId,
+              sessionId: input.threadId,
+              lane: "main",
               runId: input.runId,
-              stepIndex: 0,
-              callId: "call-1",
+              assistantEntryId: messageId,
+              toolIndex: 0,
+              toolCallId: "call-1",
               toolName: "increment",
+              idempotencyKey: `${input.threadId}:main:${input.runId}:${messageId}:0`,
             },
             signal,
           })
@@ -750,9 +753,10 @@ test("Run execution checkpoints core Messages and agent-defined JSON state", asy
       content: [{ type: "text", text: "Counter is 2." }],
     });
     expect(observedExecution).toMatchObject({
-      threadId: thread.id,
+      sessionId: thread.id,
+      lane: "main",
       runId: run.id,
-      callId: "call-1",
+      toolCallId: "call-1",
       toolName: "increment",
     });
     expect(
@@ -1286,11 +1290,14 @@ function _blockingToolRunExecutor(
         {},
         input.createToolContext({
           execution: {
-            threadId: input.threadId,
+            sessionId: input.threadId,
+            lane: "main",
             runId: input.runId,
-            stepIndex: 0,
-            callId: toolCallId,
+            assistantEntryId: message.id,
+            toolIndex: 0,
+            toolCallId,
             toolName,
+            idempotencyKey: `${input.threadId}:main:${input.runId}:${message.id}:0`,
           },
           signal,
         })

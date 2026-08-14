@@ -8,14 +8,14 @@ import type {
 } from "@llm-space/agent/tools";
 
 export interface SandboxService {
-  /** Return the durable workspace associated with one Engine Thread. */
+  /** Return the durable workspace associated with one Pi-compatible Session. */
   getOrCreate(input: {
     readonly agentId: string;
-    readonly threadId: string;
+    readonly sessionId: string;
     readonly signal: AbortSignal;
   }): Promise<SandboxSession>;
-  /** Release resources after a Thread is explicitly removed or reset. */
-  disposeThread?(threadId: string): Promise<void>;
+  /** Release resources after a Session is explicitly removed or reset. */
+  disposeSession?(sessionId: string): Promise<void>;
   /** Release process-scoped backend resources. */
   close?(): Promise<void>;
 }
@@ -24,7 +24,7 @@ export interface SkillService {
   /** Resolve a Skill explicitly mounted by the loaded Agent. */
   resolve(input: {
     readonly agentId: string;
-    readonly threadId: string;
+    readonly sessionId: string;
     readonly identifier: string;
   }): SkillHandle;
   /** Release process-scoped Skill resources. */
@@ -78,12 +78,12 @@ export function createRuntimeToolContext(
       const sandbox = services.sandbox;
       if (sandbox === undefined) {
         throw new Error(
-          `Agent "${context.agentId}" requires a SandboxService for Thread "${context.execution.threadId}".`
+          `Agent "${context.agentId}" requires a SandboxService for Session "${context.execution.sessionId}".`
         );
       }
       return sandbox.getOrCreate({
         agentId: context.agentId,
-        threadId: context.execution.threadId,
+        sessionId: context.execution.sessionId,
         signal: context.signal,
       });
     },
@@ -96,7 +96,7 @@ export function createRuntimeToolContext(
       }
       return skills.resolve({
         agentId: context.agentId,
-        threadId: context.execution.threadId,
+        sessionId: context.execution.sessionId,
         identifier,
       });
     },

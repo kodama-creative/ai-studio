@@ -1,5 +1,6 @@
-import type { ToolDefinition } from "@llm-space/agent/tools";
 import Ajv, { type AnySchema, type ValidateFunction } from "ajv";
+
+import type { ToolDefinition } from "./tool";
 
 const JSON_SCHEMA_VALIDATOR = new Ajv({ allErrors: true, strict: false });
 const COMPILED_SCHEMAS = new WeakMap<object, ValidateFunction>();
@@ -47,6 +48,7 @@ export async function validateSchemaValue(
   return value;
 }
 
+/** Resolves the directional JSON Schema supplied by Standard Schema adapters. */
 async function _resolveJsonSchema(
   schema: ToolDefinition["inputSchema"],
   standard: Readonly<Record<string, unknown>> | undefined,
@@ -64,6 +66,7 @@ async function _resolveJsonSchema(
   return schema;
 }
 
+/** Formats Standard Schema issues without depending on one validator library. */
 function _formatIssues(issues: readonly unknown[]): string {
   return issues
     .map((issue) => {
@@ -75,6 +78,7 @@ function _formatIssues(issues: readonly unknown[]): string {
     .join("; ");
 }
 
+/** Narrows unknown values to the object shape used by schema adapters. */
 function _asRecordOrUndefined(
   value: unknown
 ): Readonly<Record<string, unknown>> | undefined {

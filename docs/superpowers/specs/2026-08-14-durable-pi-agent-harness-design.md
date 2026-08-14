@@ -9,6 +9,8 @@ in-memory `Agent`. It will implement a Session-native durable Harness using
 only Pi's public Session, model, message, tool, result, and `AgentLane` types.
 Pi Session is the sole durable authority for transcript and execution state.
 
+Chinese version: [可持久化 Pi Agent Harness 技术方案](./2026-08-14-durable-pi-agent-harness-design.zh-CN.md).
+
 ## Problem Statement
 
 Studio needs model/tool single-step debugging that survives application
@@ -47,6 +49,11 @@ It composes Pi's public `Session`, `SessionRepo`, `SessionTree`, `Entry`,
 `LaneRecord`, `Models`, `AgentMessage`, and `AgentTool` contracts. It implements
 the manual-drive subset of Pi's public `AgentLane` behavior and grows toward
 full structural compatibility as capabilities are added.
+
+The first delivery deliberately does **not** declare `implements AgentLane`.
+Its public type is the exact durable subset that is implemented and tested;
+queueing, compaction, navigation, resources, and multi-lane members are not
+represented by empty or throwing compatibility stubs.
 
 `StudioPiSessionRuntime` is the single product-facing test and integration
 seam. Studio sends commands and semantic step requests to it; the facade hides
@@ -135,16 +142,16 @@ migration decision.
 - next-action planning;
 - model and tool execution phases;
 - manual/automatic drive;
-- runtime snapshots and committed/ephemeral events;
+- runtime snapshots, ephemeral deltas, and projection of Pi log changes;
 - mapping LLM Space model/tool services onto Pi contracts;
-- Session repository lifecycle.
+- the Bun SQLite Session repository and its lifecycle.
 
-Pi owns:
+Pi's public contract owns:
 
 - Session metadata, entry tree, lane pointers, records, facts, and sequence;
 - messages, model identities, usage shape, and tool call/result protocol;
 - `SessionRepo` and `SessionStorage` contracts;
-- the SQLite Session backend and writer fencing;
+- Session repository conformance and record semantics;
 - public `AgentLane`, `ActionInfo`, result, and error vocabulary used for
   compatibility.
 
@@ -255,8 +262,11 @@ registered before such an entry can enter model context.
 ### 6. Runtime binding and identity
 
 Every accepted run freezes enough identity to recover without silently using
-new code. The Pi `operation_started.intent.resumeData` extension contains an
-LLM Space runtime binding with:
+new code. The full immutable snapshot is stored in the LLM Space-owned
+`llm_space_runtime_bindings` table in the same physical SQLite database. The
+Pi `operation_started.intent.resumeData["llm-space"]` extension contains only
+`bindingId`, `bindingHash`, and `formatVersion`. The referenced binding
+contains:
 
 - project and Agent Spec identity;
 - source revision or immutable generation identity;
@@ -271,6 +281,11 @@ Large source files and tool implementations are not embedded in Session.
 Recovery resolves the frozen identities through Studio's loader and runtime
 registries. A missing or mismatched identity produces suspension with
 `MissingIdentities`; it never substitutes the latest source silently.
+
+Admission commits the binding before `operation_started`, and commits
+`operation_started` before any provider or tool effect. A missing binding or a
+hash mismatch suspends the operation; it never falls back to the current Agent
+definition.
 
 `operation_started.id` is the run id and equals the caller-provided
 `operationId`. Retrying the same start request with identical content returns
@@ -425,6 +440,13 @@ once provider attempt semantics, not exactly-once billing.
 
 ### 12. Tool execution
 
+`ToolContext.execution` is an immediate breaking change and uses Pi identities
+only: `sessionId`, `lane`, `runId`, `assistantEntryId`, `toolIndex`,
+`toolCallId`, `toolName`, and `idempotencyKey`. The old `threadId`, `stepIndex`,
+and `callId` fields are removed rather than dual-written. The retiring Engine
+adapter maps its Thread to `sessionId` during Phase 0–2. Sandbox and Skill
+lifecycle ownership follows `sessionId`.
+
 Tool preparation and finalization are explicit runtime phases rather than
 callbacks hidden inside stock Agent:
 
@@ -507,7 +529,15 @@ abort or close.
 
 ### 16. Event and snapshot model
 
-Runtime events have two classes:
+Pi `AgentMessage` is the canonical transcript message. The kernel neither
+persists nor synchronizes `@llm-space/core.Message` or ACP payloads. ACP is a
+later edge protocol for UI and host interoperability; Pi log-to-ACP projection
+belongs outside the Harness.
+
+Pi's Session log is the only durable execution log. LLM Space does not add a
+second runtime-event table. At the process edge, the runtime projects Pi log
+items into committed notifications and forwards provider/tool progress as
+ephemeral deltas. Those edge events have two classes:
 
 - ephemeral: provider text/thinking/tool-call deltas and local progress;
 - committed: Session entry/record/fact changes and derived semantic state.
@@ -526,10 +556,17 @@ to stop a run.
 
 ### 17. Persistence and writer ownership
 
-The first implementation uses Pi's official SQLite Session backend in a
-dedicated Pi-managed database for each Studio persistence scope. Studio
-metadata remains in its existing database. Separating databases avoids relying
-on undocumented cross-package transaction or schema ownership.
+The first implementation provides a Bun-native `BunSqliteSessionRepository`
+because the official Node adapter imports `node:sqlite`, which Bun 1.3.14
+cannot resolve. It implements Pi's complete public `SessionRepo` contract and
+must pass `createSessionBackendConformance` without deep-importing Pi internals.
+
+Pi Session and Studio metadata use the same physical SQLite file while keeping
+strict table ownership. Pi-owned tables use the `pi_` prefix, including
+`pi_sessions`, `pi_entries`, `pi_records`, `pi_lanes`, `pi_writer_leases`, and
+`pi_schema_migrations`. LLM Space-owned immutable bindings use
+`llm_space_runtime_bindings`. Each adapter owns its transactions; cross-owner
+atomic writes are not assumed.
 
 The repository is opened once per project/application runtime and closed by
 the composition root. A process-local registry ensures one open handle per
@@ -539,7 +576,7 @@ processes.
 Lost lease permanently faults the local Session handle. No retry is attempted
 through the old writer. The UI must reopen after the new owner is resolved.
 
-Creating a product object and Pi Session is reconciled without a cross-database
+Creating a product object and Pi Session is reconciled without a cross-owner
 transaction:
 
 1. Create the Pi Session with a caller-provided stable id.
@@ -646,7 +683,9 @@ Engine Thread.
 #### Phase 0: contracts and characterization
 
 - Add the package boundary and exact Pi dependency.
-- Run Pi Session conformance against the chosen backends.
+- Implement the Bun SQLite Session backend in the shared Studio database and
+  pass Pi's complete Session conformance suite.
+- Add fenced writer lifecycle and immutable runtime-binding storage.
 - Capture public record-validity and Session-context fixtures.
 - Define runtime snapshots, errors, effects, and stable action identity.
 - Add no-effect open/restore tests.
@@ -678,7 +717,6 @@ unsafe tool is automatically replayed.
 
 #### Phase 3: persistence and host lifecycle
 
-- Integrate Pi SQLite backend and fenced writer lifecycle.
 - Implement watch/reconnect and committed event cursoring.
 - Verify close versus abort semantics.
 - Integrate Desktop/CLI runtime composition.
@@ -861,6 +899,7 @@ all workspace typechecks, and production renderer build.
 
 - Forking Pi or contributing the implementation upstream as part of this work.
 - Subclassing or patching stock Pi `Agent`.
+- Depending on the official `node:sqlite` backend or a Pi `dist/*` deep import.
 - Full `AgentLane` support in the first production slice.
 - Multi-lane/subagent execution in the first production slice.
 - Parallel local tool stepping in the first production slice.
@@ -874,6 +913,8 @@ all workspace typechecks, and production renderer build.
   a separate compatibility plan includes them.
 - Changing Studio's Project, Experiment, Draft, Evaluation, or Task product
   concepts beyond replacing their execution references.
+- Persisting ACP payloads or making ACP a dependency of the Harness. ACP is the
+  later UI/protocol edge; the kernel persists Pi `AgentMessage` values only.
 
 ## Further Notes
 

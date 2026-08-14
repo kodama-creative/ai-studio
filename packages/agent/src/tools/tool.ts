@@ -17,11 +17,14 @@ import type { ToolModelOutput } from "./output";
 
 export interface ExecutionContext {
   readonly execution: {
-    readonly threadId: string;
+    readonly sessionId: string;
+    readonly lane: string;
     readonly runId: string;
-    readonly stepIndex: number;
-    readonly callId: string;
+    readonly assistantEntryId: string;
+    readonly toolIndex: number;
+    readonly toolCallId: string;
     readonly toolName: string;
+    readonly idempotencyKey: string;
   };
   getSandbox(): Promise<SandboxSession>;
   getSkill(identifier: string): SkillHandle;
@@ -52,6 +55,8 @@ export interface ToolDefinition<TInput = unknown, TOutput = unknown> {
     context: ToolContext
   ): TOutput | Promise<TOutput> | AsyncIterable<TOutput>;
   readonly approval?: Approval<TInput>;
+  /** Crash recovery defaults to `never`; only explicit safe tools may replay. */
+  readonly replay?: "never" | "safe";
   readonly toModelOutput?: (
     output: TOutput
   ) => ToolModelOutput | Promise<ToolModelOutput>;
@@ -79,6 +84,7 @@ export function defineTool<
     context: ToolContext
   ): TReturn;
   readonly approval?: Approval<InferSchemaOutput<TInputSchema>>;
+  readonly replay?: "never" | "safe";
   readonly toModelOutput?: (
     output: ExecuteOutput<TReturn>
   ) => ToolModelOutput | Promise<ToolModelOutput>;
@@ -89,6 +95,7 @@ export function defineTool<TReturn>(definition: {
   readonly outputSchema?: SchemaSource;
   execute(input: Record<string, unknown>, context: ToolContext): TReturn;
   readonly approval?: Approval<Record<string, unknown>>;
+  readonly replay?: "never" | "safe";
   readonly toModelOutput?: (
     output: ExecuteOutput<TReturn>
   ) => ToolModelOutput | Promise<ToolModelOutput>;

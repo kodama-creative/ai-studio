@@ -1,5 +1,5 @@
 {
-  "name": "@llm-space/engine-pi",
+  "name": "@llm-space/pi-runtime",
   "version": "4.0.1",
   "type": "module",
   "private": true,
@@ -11,8 +11,6 @@
   "dependencies": {
     "@earendil-works/pi-agent-core": "catalog:",
     "@earendil-works/pi-ai": "catalog:",
-    "@llm-space/agent": "workspace:*",
-    "@llm-space/core": "workspace:*",
-    "@llm-space/engine": "workspace:*"
+    "@llm-space/agent": "workspace:*"
   }
 }

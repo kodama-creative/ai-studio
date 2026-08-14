@@ -611,11 +611,14 @@ function _blockingToolRunExecutor(
         {},
         input.createToolContext({
           execution: {
-            threadId: input.threadId,
+            sessionId: input.threadId,
+            lane: "main",
             runId: input.runId,
-            stepIndex: 0,
-            callId: toolCallId,
+            assistantEntryId: message.id,
+            toolIndex: 0,
+            toolCallId,
             toolName,
+            idempotencyKey: `${input.threadId}:main:${input.runId}:${message.id}:0`,
           },
           signal,
         })
