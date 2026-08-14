@@ -58,8 +58,8 @@ Studio 继续拥有 Project、Playground、Experiment、Draft、source revision�
 15. 作为 Agent 作者，我希望 usage 和 cost 能跨重启保留，以免计费信息依赖临时 UI event 重建。
 16. 作为 Agent 作者，我希望 provider/tool error 成为 durable run outcome，以便重新打开 Studio 时仍能解释停止原因。
 17. 作为 Agent 作者，我希望 storage corruption 和 writer conflict 显式失败，以免 runtime 猜测下一次副作用。
-18. 作为 Studio 用户，我希望迁移期间仍能访问已有 Playground 和 Experiment，以免 runtime 切换删除工作成果。
-19. 作为 Studio 用户，我希望旧执行数据通过显式导入迁移，以便迁移过程可审计、可回退。
+18. 作为维护者，我希望直接 cutover 只支持全新 Pi-backed 数据，以便代码不保留旧 runtime reader 或 migration path。
+19. 作为维护者，我会在部署前自行清理旧 data root，产品代码不得扫描、迁移或删除旧数据。
 20. 作为 CLI 用户，我希望 CLI 和 Studio 使用同一个 Pi Session runtime，以免执行行为取决于宿主界面。
 21. 作为应用集成方，我希望只依赖一个稳定 facade，而不是直接访问 Harness，以便 Pi 升级被隔离在产品代码之外。
 22. 作为工具作者，我希望声明 `safe` 或 `never` replay 语义，以便恢复器正确处理工具副作用。
@@ -156,6 +156,8 @@ interface StudioPiSessionRuntime {
 ```
 
 这个代码片段表达需要固定的架构边界，不代表最终语法。Facade 使用调用方生成的 `operationId` 做幂等 run admission。`expectedActionId` 防止用户基于过期 UI 点击 Step，并让“Step 已提交但响应丢失”的重试收敛到同一个结果。
+
+ACP edge 只保存执行中的 command 合并状态，settle 后立即释放。Step 重试通过稳定 Pi action/result identity 重建；host-owned metadata 在同一个物理数据库中持久化 Continue 的 `commandId` receipt。ACP response 或 transcript cache 不写入 Pi log。
 
 Facade 不暴露 raw `SessionStorage`、mutable lane state、`AbortController`、parked Promise 或 stock `Agent`。
 
@@ -469,22 +471,16 @@ CLI 与 Studio 使用相同 runtime facade 启动和 watch，不再托管第二�
 
 ### 21. 迁移与发布
 
-迁移以 entity 为单位，禁止双写：
+迁移采用直接 cutover，禁止双写：
 
-1. 引入 Pi runtime 和测试，不改变已有 Playground。
-2. 创建仅开发环境可用的 `pi-session-v1` runtime Playground。
-3. 让新的 Playground 和 Experiment 只使用 Pi Session execution。
-4. 将选定旧对象导入新的 Pi Session，并比较外部可见 transcript 和 run outcome。
-5. 将新建对象的默认 runtime 切换为 Pi。
-6. 将 App 和 CLI composition 切换到相同 runtime。
-7. 所有受支持对象都切到 Pi 后，移除 Studio/App 对 Engine execution state 的写入。
-8. 当没有受支持 reader 依赖旧表后，从本地产品执行路径退休 Engine 和 Engine-Pi。
+1. 引入 Pi runtime、ACP v2 boundary 和 host lifecycle。
+2. 将 Playground、Experiment、App、CLI 与 remote execution 直接切换到 Pi Session。
+3. 删除 LLM Space 自定义 model Session/Run projection。
+4. 删除 Engine 与 Engine-Pi package 及全部产品执行路径。
 
-一个对象只能属于一个 runtime version。Production 代码禁止将同一个 model/tool step 同时写入 Engine 和 Pi Session。只读 migration tool 可以比较两种格式。
+Production 代码禁止将同一个 model/tool step 同时写入 Engine 和 Pi Session；cutover 完成后不存在 Engine runtime version。
 
-旧数据通过显式 import 进入一个带 provenance metadata 的新 Pi Session。Import 不删除或修改旧 Engine/App/Studio rows。应用启动时不得自动全盘扫描或删除用户数据。
-
-Rollback 只将新对象创建切回旧 runtime，已有 Pi Session 保持不变。Pi Session 不自动反向转换为 Engine Thread。
+代码不读取、迁移、导入、检测或删除旧 Engine/App/Studio 数据；部署前由维护者自行清理 data root。本实现只支持全新 Pi-backed schema，不保留 runtime rollback path。
 
 ### 22. 交付阶段
 
@@ -521,7 +517,9 @@ Rollback 只将新对象创建切回旧 runtime，已有 Pi Session 保持不变
 
 - 实现 watch/reconnect 和 committed event cursor。
 - 验证 close 与 abort 语义。
-- 集成 Desktop/CLI runtime composition。
+- 新增独立 `@llm-space/acp`，精确锁定官方 SDK 1.3.0 的 experimental v2 boundary。
+- 建立共享 ACP application 与 reconnect contract；生产 host 在 Phase 4、5
+  对 authoritative consumer cutover 时再激活。
 
 退出条件：process restart、competing writer、lease takeover 和 RPC disconnect 测试全部通过。
 
@@ -530,15 +528,16 @@ Rollback 只将新对象创建切回旧 runtime，已有 Pi Session 保持不变
 - 将新 Playground/Experiment execution reference 替换为 Pi identity。
 - 适配 Draft commit、run history、evaluation target 和 UI event。
 - 将 Step/Continue/Abort 切到新 facade。
-- 增加显式 old-data import。
+- 让 Desktop UI execution 通过 Electrobun custom transport envelope 使用 ACP 语义。
 
 退出条件：新 Studio 对象不再写 Engine Thread、Run 或 Checkpoint，并且能够完全从 Pi Session 恢复。
 
 #### Phase 5：App/CLI cutover 与退休旧实现
 
 - 将 App model Session projection 替换为 Pi-backed facade。
-- 将 CLI 路由到共享 runtime。
-- 在 data support policy 允许后，移除过时的本地 Engine execution composition 和 store。
+- 将 CLI 路由到共享 runtime，提供标准 NDJSON stdio ACP v2 endpoint，并让 SSH
+  remote execution 切到该 endpoint。
+- 删除过时的 Engine/Engine-Pi package、composition 和 store。
 
 退出条件：所有受支持本地执行界面使用同一个 Pi Session runtime，不再存在重复 authoritative transcript。
 
@@ -587,7 +586,7 @@ Metrics 包含：
 14. Streaming overlay 会在 commit/reconnect 后与 Session entry 对账。
 15. Studio run history 和 Evaluation 能通过 Pi identity 解析。
 16. 新迁移对象不写 Engine Thread、Run 或 Checkpoint state。
-17. 除非用户显式执行 import，否则旧数据保持不变。
+17. 产品代码不包含旧数据 reader、import、migration、schema detection 或 cleanup。
 18. Focused/full test、typecheck、zero-warning lint 和 production build 全部通过。
 
 ## 测试决策
@@ -677,7 +676,7 @@ Desktop RPC tests 验证 correlation、reconnect、duplicate response handling �
 - 将 provider-hosted tool 当作可独立执行的本地 tool step。
 - 自动破坏性迁移或删除旧 Engine/App/Studio data。
 - 为同一个 execution 同时维护 Engine 和 Pi 两套写入。
-- 在单独兼容方案完成前迁移 remote legacy workspace execution 和 static shared-thread viewer。
+- 修改 static shared-thread viewer 的展示数据格式；它继续使用 `@llm-space/core.Thread`。
 - 除了替换 execution reference 之外，修改 Studio 的 Project、Experiment、Draft、Evaluation 或 Task 产品概念。
 - 持久化 ACP payload，或让 Harness 依赖 ACP。ACP 是后续 UI/协议边缘；内核只持久化 Pi `AgentMessage`。
 

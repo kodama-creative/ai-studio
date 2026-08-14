@@ -1,0 +1,17 @@
+{
+  "name": "@llm-space/acp",
+  "version": "4.0.1",
+  "type": "module",
+  "private": true,
+  "license": "Apache-2.0",
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "catalog:",
+    "@earendil-works/pi-agent-core": "catalog:",
+    "@llm-space/pi-runtime": "workspace:*",
+    "zod": "catalog:"
+  }
+}

@@ -97,8 +97,8 @@ authoritative transcript or execution cursor.
 15. As an Agent author, I want usage and cost to survive restart, so that accounting is not reconstructed from transient UI events.
 16. As an Agent author, I want errors from the provider or tool to become durable run outcomes, so that reopening Studio explains why execution stopped.
 17. As an Agent author, I want storage corruption and writer conflicts to fail loudly, so that the runtime never guesses the next side effect.
-18. As a Studio user, I want existing Playgrounds and Experiments to remain accessible during migration, so that the runtime change does not delete my work.
-19. As a Studio user, I want old execution data imported explicitly, so that migration is auditable and reversible.
+18. As a maintainer, I want a direct cutover that supports only fresh Pi-backed data, so that code retains no old-runtime reader or migration path.
+19. As a maintainer, I will clean the old data root before deployment; product code must not scan, migrate, or delete old data.
 20. As a CLI user, I want CLI and Studio to use the same Pi Session runtime, so that behavior does not depend on the host surface.
 21. As an application integrator, I want one stable facade instead of direct Harness access, so that Pi upgrades are isolated from product code.
 22. As a tool author, I want to declare `safe` or `never` replay semantics, so that recovery treats my side effects correctly.
@@ -207,6 +207,11 @@ The snippet captures the decision-rich boundary, not the final syntax. The
 facade uses caller-provided `operationId` for idempotent run admission.
 `expectedActionId` protects a Step click from stale UI state and makes a retry
 of a lost Step response converge on the already-committed result.
+
+The ACP edge keeps only in-flight command coalescing state. After settlement,
+Step retries reconstruct from stable Pi action/result identity; host-owned
+metadata durably receipts Continue `commandId` values in the same physical
+database. No ACP response or transcript cache is persisted in the Pi log.
 
 The facade never exposes raw `SessionStorage`, mutable lane state, an
 `AbortController`, a parked Promise, or a stock `Agent`.
@@ -652,31 +657,20 @@ snapshots using the same reconciliation rule as Desktop.
 
 ### 21. Migration and rollout
 
-Migration is entity-based, never dual-write:
+Migration is a direct cutover, never dual-write:
 
-1. Introduce the Pi runtime and tests without changing existing Playgrounds.
-2. Create new development-only Playgrounds on runtime version `pi-session-v1`.
-3. Enable new Playgrounds and Experiments to use only Pi Session execution.
-4. Import selected old objects into new Pi Sessions and compare externally
-   visible transcripts and run outcomes.
-5. Switch default creation to Pi runtime.
-6. Migrate App and CLI composition to the same runtime.
-7. Remove Studio/App writes to Engine execution state after all supported
-   objects use Pi runtime.
-8. Retire Engine and Engine-Pi from local product execution once no supported
-   reader requires their tables.
+1. Introduce Pi runtime, the ACP v2 boundary, and host lifecycle.
+2. Switch Playground, Experiment, App, CLI, and remote execution directly to
+   Pi Session.
+3. Delete the LLM Space model Session/Run projection.
+4. Delete the Engine and Engine-Pi packages and every product execution path.
 
-An object belongs to exactly one runtime version. Production code never writes
-the same model/tool step to Engine and Pi Session. Read-only migration tools may
-compare both formats.
+Production code never writes the same model/tool step to Engine and Pi Session;
+after cutover there is no Engine runtime version.
 
-Existing data is imported explicitly into a new Pi Session with provenance
-metadata. Import does not delete or mutate the old Engine/App/Studio rows.
-Automatic startup upgrade does not broadly scan or delete user data.
-
-Rollback switches new object creation back to the old runtime while leaving
-Pi Sessions intact. A Pi Session is not automatically converted back into an
-Engine Thread.
+Code does not read, migrate, import, detect, or delete legacy Engine/App/Studio
+data. The maintainer cleans the data root before deployment. This implementation
+supports only the fresh Pi-backed schema and keeps no runtime rollback path.
 
 ### 22. Delivery phases
 
@@ -719,7 +713,10 @@ unsafe tool is automatically replayed.
 
 - Implement watch/reconnect and committed event cursoring.
 - Verify close versus abort semantics.
-- Integrate Desktop/CLI runtime composition.
+- Add an isolated `@llm-space/acp` package pinned to the official 1.3.0 SDK's
+  experimental v2 boundary.
+- Establish the shared ACP application and reconnect contract. Production host
+  activation follows the authoritative consumer cutovers in Phases 4 and 5.
 
 Exit criterion: process restart, competing writer, lease takeover, and RPC
 disconnect tests pass.
@@ -729,7 +726,8 @@ disconnect tests pass.
 - Replace new Playground/Experiment execution references with Pi identity.
 - Adapt Draft commit, run history, evaluation targets, and UI events.
 - Ship Step/Continue/Abort against the new facade.
-- Add explicit old-data import.
+- Route Desktop UI execution through ACP semantics over the Electrobun custom
+  transport envelope.
 
 Exit criterion: new Studio objects have no Engine Thread, Run, or Checkpoint
 writes and recover entirely from Pi Session.
@@ -737,9 +735,9 @@ writes and recover entirely from Pi Session.
 #### Phase 5: App/CLI cutover and retirement
 
 - Replace App model Session projection with Pi-backed facade.
-- Route CLI through the shared runtime.
-- Remove obsolete local Engine execution composition and stores after data
-  support policy permits.
+- Route CLI through the shared runtime, expose ACP v2 over standard NDJSON
+  stdio, and move SSH remote execution to that endpoint.
+- Delete obsolete Engine/Engine-Pi packages, composition, and stores.
 
 Exit criterion: all supported local execution surfaces use one Pi Session
 runtime and no duplicate authoritative transcript remains.
@@ -799,7 +797,8 @@ The design is complete when all of the following are true:
 14. Streaming overlays reconcile to Session entries after commit/reconnect.
 15. Studio run history and evaluations resolve from Pi identities.
 16. New migrated objects write no Engine Thread, Run, or Checkpoint state.
-17. Old data remains untouched unless the user invokes explicit import.
+17. Product code contains no legacy reader, import, migration, schema detection,
+    or cleanup path.
 18. Focused, full test, typecheck, lint, and production build gates pass.
 
 ## Testing Decisions
@@ -909,8 +908,8 @@ all workspace typechecks, and production renderer build.
 - Treating provider-hosted tools as separately executable local tool steps.
 - Automatic destructive migration or deletion of old Engine/App/Studio data.
 - Maintaining simultaneous Engine and Pi writes for the same execution.
-- Remote legacy workspace execution and the static shared-thread viewer until
-  a separate compatibility plan includes them.
+- Changing the static shared-thread viewer's display data format; it continues
+  to use `@llm-space/core.Thread`.
 - Changing Studio's Project, Experiment, Draft, Evaluation, or Task product
   concepts beyond replacing their execution references.
 - Persisting ACP payloads or making ACP a dependency of the Harness. ACP is the

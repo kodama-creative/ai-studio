@@ -21,7 +21,7 @@
     "test": "bun test --parallel=4",
     "lint": "NODE_OPTIONS=--max-old-space-size=8192 eslint --max-warnings 0 .",
     "lint:fix": "NODE_OPTIONS=--max-old-space-size=8192 eslint --fix .",
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p packages/agent/tsconfig.json && tsc --noEmit -p packages/engine/tsconfig.json && tsc --noEmit -p packages/engine-pi/tsconfig.json && tsc --noEmit -p packages/pi-runtime/tsconfig.json && tsc --noEmit -p packages/app/tsconfig.json && tsc --noEmit -p packages/studio/tsconfig.json && tsc --noEmit -p packages/cli/tsconfig.json && tsc --noEmit -p packages/runtime/tsconfig.json && tsc --noEmit -p packages/ui/tsconfig.json && tsc --noEmit -p apps/desktop/tsconfig.json && tsc --noEmit -p apps/web/tsconfig.json && tsc --noEmit -p apps/server/tsconfig.json && tsc --noEmit -p examples/atlas-plugin/tsconfig.json && tsc --noEmit -p examples/basic-agent/tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p packages/agent/tsconfig.json && tsc --noEmit -p packages/engine/tsconfig.json && tsc --noEmit -p packages/engine-pi/tsconfig.json && tsc --noEmit -p packages/pi-runtime/tsconfig.json && tsc --noEmit -p packages/acp/tsconfig.json && tsc --noEmit -p packages/app/tsconfig.json && tsc --noEmit -p packages/studio/tsconfig.json && tsc --noEmit -p packages/cli/tsconfig.json && tsc --noEmit -p packages/runtime/tsconfig.json && tsc --noEmit -p packages/ui/tsconfig.json && tsc --noEmit -p apps/desktop/tsconfig.json && tsc --noEmit -p apps/web/tsconfig.json && tsc --noEmit -p apps/server/tsconfig.json && tsc --noEmit -p examples/atlas-plugin/tsconfig.json && tsc --noEmit -p examples/basic-agent/tsconfig.json",
     "prepare": "husky",
     "dev:server": "bun --filter @llm-space/server dev",
     "dev:agent": "bun --filter @llm-space/example-basic-agent dev"
@@ -30,6 +30,7 @@
     "*.{js,mjs,cjs,ts,mts,cts,jsx,tsx}": "eslint --fix"
   },
   "catalog": {
+    "@agentclientprotocol/sdk": "1.3.0",
     "@standard-schema/spec": "1.1.0",
     "@earendil-works/pi-ai": "0.84.1",
     "@earendil-works/pi-agent-core": "0.84.1",

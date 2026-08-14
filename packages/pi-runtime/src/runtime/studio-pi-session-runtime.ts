@@ -2,6 +2,7 @@ import {
   type AgentMessage,
   type Entry,
   type LaneRecord,
+  type LogItem,
   type OperationStartedRecord,
   type ProvisionedEntry,
   type Session,
@@ -128,6 +129,8 @@ export type SemanticAction =
     };
 
 export interface PiSessionSnapshot {
+  /** Latest committed Pi log sequence observed while reducing this snapshot. */
+  readonly cursor: number;
   readonly sessionId: string;
   readonly lane: string;
   readonly operationId?: string;
@@ -146,6 +149,15 @@ export interface PiSessionSnapshot {
       | "tool_identity_mismatch";
     readonly message: string;
   };
+}
+
+export interface PiCommittedChange {
+  /** Cursor from which this frame was read; replay uses it until the frame barrier. */
+  readonly fromCursor: number;
+  /** Last sequence included in `items`; pass it back as `afterSeq` on reconnect. */
+  readonly cursor: number;
+  readonly items: readonly LogItem[];
+  readonly snapshot: PiSessionSnapshot;
 }
 
 export class StaleSemanticActionError extends Error {
@@ -213,6 +225,9 @@ export class StudioPiSessionRuntime {
     string,
     Set<(event: RuntimeEphemeralEvent) => void | Promise<void>>
   >();
+  private readonly _closeController = new AbortController();
+  private _closed = false;
+  private _closePromise: Promise<void> | undefined;
 
   constructor(options: {
     readonly repository: SessionRepo;
@@ -249,6 +264,7 @@ export class StudioPiSessionRuntime {
   async createSession(
     options: { readonly id?: string } = {}
   ): Promise<PiSessionSnapshot> {
+    this._requireOpen();
     const session = await this._repository.create(options);
     const metadata = await session.getMetadata();
     this._sessions.set(metadata.id, session);
@@ -260,6 +276,7 @@ export class StudioPiSessionRuntime {
     readonly sessionId: string;
     readonly lane?: string;
   }): Promise<PiSessionSnapshot> {
+    this._requireOpen();
     const session = await this._session(input.sessionId);
     return this._snapshot(session, input.lane ?? DEFAULT_LANE);
   }
@@ -275,6 +292,7 @@ export class StudioPiSessionRuntime {
     readonly messages: AgentMessage[];
     readonly binding: RuntimeBinding;
   }): Promise<PiSessionSnapshot> {
+    this._requireOpen();
     const lane = input.lane ?? DEFAULT_LANE;
     const session = await this._session(input.sessionId);
     const binding = this._bindings.put({
@@ -336,10 +354,24 @@ export class StudioPiSessionRuntime {
     readonly expectedActionId: string;
     readonly kind: "model" | "tool";
   }): Promise<PiSessionSnapshot> {
+    this._requireOpen();
     const lane = input.lane ?? DEFAULT_LANE;
     const session = await this._session(input.sessionId);
     const before = await this._snapshot(session, lane);
     if (before.nextAction?.id !== input.expectedActionId) {
+      // A transport may lose the response after the durable result commits.
+      // Reconstructing from Pi identities makes that retry effect-free even
+      // after this runtime and the ACP process have both restarted.
+      if (
+        await this._wasSemanticActionCommitted(
+          session,
+          lane,
+          input.expectedActionId,
+          input.kind
+        )
+      ) {
+        return before;
+      }
       throw new StaleSemanticActionError(
         input.expectedActionId,
         before.nextAction?.id
@@ -379,6 +411,7 @@ export class StudioPiSessionRuntime {
     readonly sessionId: string;
     readonly lane?: string;
   }): Promise<PiSessionSnapshot> {
+    this._requireOpen();
     let snapshot = await this.open(input);
     if (await this._isAbortRecovery(snapshot)) {
       return this.abort(input);
@@ -402,6 +435,7 @@ export class StudioPiSessionRuntime {
     readonly sessionId: string;
     readonly lane?: string;
   }): Promise<PiSessionSnapshot> {
+    this._requireOpen();
     const lane = input.lane ?? DEFAULT_LANE;
     const session = await this._session(input.sessionId);
     const operation = await this._operation(session, lane);
@@ -437,6 +471,7 @@ export class StudioPiSessionRuntime {
     readonly lane?: string;
     readonly binding?: RuntimeBinding;
   }): DurablePiAgentHarness {
+    this._requireOpen();
     return new DurablePiAgentHarness(
       this,
       input.sessionId,
@@ -450,6 +485,7 @@ export class StudioPiSessionRuntime {
     sessionId: string,
     listener: (event: RuntimeEphemeralEvent) => void | Promise<void>
   ): () => void {
+    this._requireOpen();
     const listeners = this._listeners.get(sessionId) ?? new Set();
     listeners.add(listener);
     this._listeners.set(sessionId, listeners);
@@ -457,6 +493,87 @@ export class StudioPiSessionRuntime {
       listeners.delete(listener);
       if (listeners.size === 0) this._listeners.delete(sessionId);
     };
+  }
+
+  /** Reads committed Pi changes immediately without waiting for another write. */
+  async readCommitted(input: {
+    readonly sessionId: string;
+    readonly lane?: string;
+    readonly afterSeq?: number;
+  }): Promise<PiCommittedChange> {
+    this._requireOpen();
+    const session = await this._session(input.sessionId);
+    const items = await session.getLog(
+      input.afterSeq === undefined ? {} : { afterSeq: input.afterSeq }
+    );
+    const snapshot = await this._snapshot(session, input.lane ?? DEFAULT_LANE);
+    // The log and snapshot are separate public Pi reads. Advancing only through
+    // returned items prevents a concurrent commit from being skipped.
+    const fromCursor = Math.min(snapshot.cursor, input.afterSeq ?? 0);
+    const cursor = items.at(-1)?.seq ?? fromCursor;
+    return { fromCursor, cursor, items, snapshot };
+  }
+
+  /**
+   * Observes committed Pi log items from a durable sequence. Notifications are
+   * only a delivery mechanism: reconnect always resumes from `Session.getLog`.
+   */
+  async *watch(input: {
+    readonly sessionId: string;
+    readonly lane?: string;
+    readonly afterSeq?: number;
+    readonly signal?: AbortSignal;
+    readonly pollIntervalMs?: number;
+  }): AsyncGenerator<PiCommittedChange, void, void> {
+    this._requireOpen();
+    const pollIntervalMs = input.pollIntervalMs ?? 50;
+    if (!Number.isFinite(pollIntervalMs) || pollIntervalMs < 0) {
+      throw new RangeError("pollIntervalMs must be a non-negative number.");
+    }
+    const session = await this._session(input.sessionId);
+    const lane = input.lane ?? DEFAULT_LANE;
+    let cursor = input.afterSeq ?? 0;
+    const signals = [this._closeController.signal, input.signal].filter(
+      (signal): signal is AbortSignal => signal !== undefined
+    );
+    while (!signals.some((signal) => signal.aborted)) {
+      const fromCursor = cursor;
+      const items = await session.getLog({ afterSeq: cursor });
+      if (items.length > 0) {
+        // Advancing by delivered items prevents a reconnect from skipping a
+        // commit that races with the separately reduced snapshot.
+        cursor = items.at(-1)!.seq;
+        yield {
+          fromCursor,
+          cursor,
+          items,
+          snapshot: await this._snapshot(session, lane),
+        };
+        continue;
+      }
+      await _waitForPoll(pollIntervalMs, signals);
+    }
+  }
+
+  /**
+   * Stops process-local observation and in-flight effects without recording a
+   * user abort. Repository and binding-store ownership stays with the host.
+   */
+  close(): Promise<void> {
+    if (this._closePromise !== undefined) return this._closePromise;
+    this._closed = true;
+    this._closeController.abort(new Error("Pi Session runtime is closed."));
+    const effects = [...this._activeEffects.values()];
+    for (const effect of effects)
+      effect.controller.abort(this._closeController.signal.reason);
+    this._closePromise = Promise.allSettled(
+      effects.map((effect) => effect.settled)
+    ).then(() => {
+      this._activeEffects.clear();
+      this._listeners.clear();
+      this._sessions.clear();
+    });
+    return this._closePromise;
   }
 
   /**
@@ -534,6 +651,9 @@ export class StudioPiSessionRuntime {
         signal,
         onDelta: (event) => this._publish(snapshot.sessionId, event),
       });
+      // Host close and durable user abort both stop process-local materialization.
+      // The abort owner decides separately whether to append a terminal record.
+      signal.throwIfAborted();
       await session.appendRecord({
         type: "usage",
         id: `${resultEntryId}:usage:${attempt}`,
@@ -682,6 +802,7 @@ export class StudioPiSessionRuntime {
         }
         effectiveArgs = structuredClone(validated as Record<string, unknown>);
       } catch (error) {
+        signal.throwIfAborted();
         await this._appendDirectToolError(
           session,
           lane,
@@ -734,6 +855,7 @@ export class StudioPiSessionRuntime {
           }
         }
       } catch (error) {
+        signal.throwIfAborted();
         await this._appendDirectToolError(
           session,
           lane,
@@ -807,6 +929,7 @@ export class StudioPiSessionRuntime {
       isError = prepared.isErrorResult?.(output) ?? false;
       details = { output: _jsonSafe(output), replay, idempotencyKey };
     } catch (error) {
+      signal.throwIfAborted();
       if (error instanceof DurableEffectCrash) throw error;
       modelOutput = {
         type: "text",
@@ -834,6 +957,7 @@ export class StudioPiSessionRuntime {
         usage = finalized.usage;
       }
     } catch (error) {
+      signal.throwIfAborted();
       modelOutput = {
         type: "text",
         value: error instanceof Error ? error.message : String(error),
@@ -841,6 +965,7 @@ export class StudioPiSessionRuntime {
       details = { replay, idempotencyKey, afterPolicyFailed: true };
       isError = true;
     }
+    signal.throwIfAborted();
     if (usage !== undefined)
       await this._appendToolUsage(
         session,
@@ -984,6 +1109,7 @@ export class StudioPiSessionRuntime {
     session: Session,
     lane: string
   ): Promise<PiSessionSnapshot> {
+    const cursor = (await session.getLog()).at(-1)?.seq ?? 0;
     const view = session.view(lane);
     const entries = await view.findEntriesOnBranch({ order: "oldestFirst" });
     const messages = entries.flatMap((entry) =>
@@ -1003,6 +1129,7 @@ export class StudioPiSessionRuntime {
         })
       )[0];
       return {
+        cursor,
         sessionId: (await session.getMetadata()).id,
         lane,
         ...(finished === undefined ? {} : { operationId: finished.runId }),
@@ -1024,6 +1151,7 @@ export class StudioPiSessionRuntime {
     } catch (error) {
       if (!(error instanceof RuntimeBindingResolutionError)) throw error;
       return {
+        cursor,
         sessionId: (await session.getMetadata()).id,
         lane,
         operationId: operation.id,
@@ -1064,6 +1192,7 @@ export class StudioPiSessionRuntime {
         );
         if (frozen === undefined || current === undefined) {
           return {
+            cursor,
             sessionId: (await session.getMetadata()).id,
             lane,
             operationId: operation.id,
@@ -1078,6 +1207,7 @@ export class StudioPiSessionRuntime {
         }
         if (current.implementationId !== frozen.implementationId) {
           return {
+            cursor,
             sessionId: (await session.getMetadata()).id,
             lane,
             operationId: operation.id,
@@ -1101,6 +1231,7 @@ export class StudioPiSessionRuntime {
         await this._assistantExecutor.checkAvailability(binding);
       if (!availability.available) {
         return {
+          cursor,
           sessionId: (await session.getMetadata()).id,
           lane,
           operationId: operation.id,
@@ -1115,6 +1246,7 @@ export class StudioPiSessionRuntime {
       }
     }
     return {
+      cursor,
       sessionId: (await session.getMetadata()).id,
       lane,
       operationId: operation.id,
@@ -1152,6 +1284,9 @@ export class StudioPiSessionRuntime {
 
   /** Registers the one abortable effect allowed for a sequential debug lane. */
   private _beginEffect(sessionId: string, lane: string): ActiveLaneEffect {
+    // This check and registration are synchronous, so close either rejects the
+    // new effect or observes and aborts it in `_activeEffects`.
+    this._requireOpen();
     const key = _laneKey(sessionId, lane);
     if (this._activeEffects.has(key)) {
       throw new Error(`Lane "${lane}" already has an active effect.`);
@@ -1171,6 +1306,7 @@ export class StudioPiSessionRuntime {
     sessionId: string,
     lane: string = DEFAULT_LANE
   ): Promise<void> {
+    this._requireOpen();
     await this._activeEffects.get(_laneKey(sessionId, lane))?.settled;
   }
 
@@ -1180,12 +1316,14 @@ export class StudioPiSessionRuntime {
     lane: string,
     callback: () => void | Promise<void>
   ): Promise<void> {
+    this._requireOpen();
     await this.waitForIdle(sessionId, lane);
     await callback();
   }
 
   /** Returns the Pi tree view for the already-open durable Session. */
   sessionTree(sessionId: string, lane: string = DEFAULT_LANE): SessionTree {
+    this._requireOpen();
     const session = this._sessions.get(sessionId);
     if (session === undefined) {
       throw new Error(
@@ -1256,6 +1394,81 @@ export class StudioPiSessionRuntime {
     ).some((record) => record.type === "abort_requested");
   }
 
+  /**
+   * Proves a lost-response retry from committed Pi entries only. Unknown or
+   * merely-started actions stay stale so this check can never admit an effect.
+   */
+  private async _wasSemanticActionCommitted(
+    session: Session,
+    lane: string,
+    expectedActionId: string,
+    kind: "model" | "tool"
+  ): Promise<boolean> {
+    const entries = await session
+      .view(lane)
+      .findEntriesOnBranch({ order: "oldestFirst" });
+    const records = await session.findRecords({ lane, order: "oldestFirst" });
+    const operations = records.filter(
+      (record): record is Extract<LaneRecord, { type: "operation_started" }> =>
+        record.type === "operation_started"
+    );
+    for (
+      let operationIndex = 0;
+      operationIndex < operations.length;
+      operationIndex += 1
+    ) {
+      const operation = operations[operationIndex]!;
+      const operationEntries = _entriesForRecordedOperation(
+        operation,
+        operations[operationIndex + 1],
+        entries
+      );
+      const assistants = operationEntries.filter(
+        (
+          entry
+        ): entry is Extract<Entry, { type: "message" }> & {
+          message: AssistantMessage;
+        } => entry.type === "message" && entry.message.role === "assistant"
+      );
+      if (kind === "model") {
+        for (let turn = 0; turn < assistants.length; turn += 1) {
+          const assistant = assistants[turn]!;
+          const attempts = records
+            .filter(_isAssistantAttempt)
+            .filter(
+              (record) =>
+                record.runId === operation.id &&
+                record.resultEntryId === assistant.id
+            );
+          if (
+            attempts.some(
+              (attempt) =>
+                _modelActionId(operation.id, turn + 1, attempt.attempt) ===
+                expectedActionId
+            )
+          ) {
+            return true;
+          }
+        }
+        continue;
+      }
+      for (const assistant of assistants) {
+        const calls = _toolCalls(assistant.message);
+        for (let toolIndex = 0; toolIndex < calls.length; toolIndex += 1) {
+          const resultEntryId = `${assistant.id}:tool:${toolIndex}:result`;
+          if (
+            _toolActionId(operation.id, assistant.id, toolIndex) ===
+              expectedActionId &&
+            operationEntries.some((entry) => entry.id === resultEntryId)
+          ) {
+            return true;
+          }
+        }
+      }
+    }
+    return false;
+  }
+
   /** Opens and caches one fenced Pi Session writer for this process runtime. */
   private async _session(sessionId: string): Promise<Session> {
     const active = this._sessions.get(sessionId);
@@ -1284,6 +1497,11 @@ export class StudioPiSessionRuntime {
         Promise.resolve().then(() => listener(event))
       )
     );
+  }
+
+  /** Rejects new work after lifecycle shutdown while allowing started work to unwind. */
+  private _requireOpen(): void {
+    if (this._closed) throw new Error("Pi Session runtime is closed.");
   }
 }
 
@@ -1382,6 +1600,30 @@ export class DurablePiAgentHarness {
   }
 }
 
+/** Resolves after the polling interval or immediately when observation stops. */
+function _waitForPoll(
+  durationMs: number,
+  signals: readonly AbortSignal[]
+): Promise<void> {
+  if (durationMs === 0 || signals.some((signal) => signal.aborted)) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    const timer = setTimeout(finish, durationMs);
+    for (const signal of signals) {
+      signal.addEventListener("abort", finish, { once: true });
+    }
+
+    function finish(): void {
+      clearTimeout(timer);
+      for (const signal of signals) {
+        signal.removeEventListener("abort", finish);
+      }
+      resolve();
+    }
+  });
+}
+
 /**
  * Derives the one semantic boundary that may execute next from durable state.
  * Tool calls take precedence over another model turn, while an abort request
@@ -1398,7 +1640,11 @@ function _nextAction(
   const pendingTool = _pendingTool(operation, entries);
   if (pendingTool !== undefined) {
     return {
-      id: `${operation.id}:tool:${pendingTool.assistantEntry.id}:${pendingTool.toolIndex}`,
+      id: _toolActionId(
+        operation.id,
+        pendingTool.assistantEntry.id,
+        pendingTool.toolIndex
+      ),
       kind: "tool",
       assistantEntryId: pendingTool.assistantEntry.id,
       toolIndex: pendingTool.toolIndex,
@@ -1412,7 +1658,30 @@ function _nextAction(
     lastAttempt === undefined ||
     entries.some((entry) => entry.id === lastAttempt.resultEntryId);
   const attempt = lastAttemptSettled ? 1 : lastAttempt.attempt + 1;
-  return { id: `${operation.id}:model:${attempt}`, kind: "model", attempt };
+  const turn = _assistantCount(_entriesForOperation(operation, entries)) + 1;
+  return {
+    id: _modelActionId(operation.id, turn, attempt),
+    kind: "model",
+    attempt,
+  };
+}
+
+/** Gives every provider turn/retry a stable identity within one operation. */
+function _modelActionId(
+  operationId: string,
+  turn: number,
+  attempt: number
+): string {
+  return `${operationId}:model:${turn}:${attempt}`;
+}
+
+/** Gives every sequential tool call a stable identity within one operation. */
+function _toolActionId(
+  operationId: string,
+  assistantEntryId: string,
+  toolIndex: number
+): string {
+  return `${operationId}:tool:${assistantEntryId}:${toolIndex}`;
 }
 
 /**
@@ -1473,6 +1742,27 @@ function _entriesForOperation(
     );
   }
   return entries.slice(sourceIndex + 1);
+}
+
+/** Bounds a historical operation at the next admission's immutable source. */
+function _entriesForRecordedOperation(
+  operation: OperationStartedRecord,
+  nextOperation: OperationStartedRecord | undefined,
+  entries: readonly Entry[]
+): readonly Entry[] {
+  const suffix = _entriesForOperation(operation, entries);
+  if (nextOperation?.sourceLeafId === null || nextOperation === undefined) {
+    return suffix;
+  }
+  const lastOwnedIndex = suffix.findIndex(
+    (entry) => entry.id === nextOperation.sourceLeafId
+  );
+  if (lastOwnedIndex < 0) {
+    throw new DurableSessionCorruptionError(
+      `Operation "${nextOperation.id}" source leaf "${nextOperation.sourceLeafId}" is not on the active branch.`
+    );
+  }
+  return suffix.slice(0, lastOwnedIndex + 1);
 }
 
 /** Narrows one assistant message to its ordered local tool-call parts. */

@@ -15,6 +15,7 @@ import {
   DurableEffectCrash,
   DurableSessionCorruptionError,
   OperationAdmissionConflictError,
+  StaleSemanticActionError,
   runtimeTool,
   type AssistantExecutor,
 } from "./studio-pi-session-runtime";
@@ -100,6 +101,356 @@ test("opens without effects and commits exactly one durable model step", async (
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("reconstructs a committed step response after process restart", async () => {
+  const root = await mkdtemp(join(tmpdir(), "llm-space-pi-step-retry-"));
+  const path = join(root, "studio.sqlite");
+  let repository = new BunSqliteSessionRepository({ path });
+  let bindings = new BunSqliteRuntimeBindingStore({ path });
+  let modelCalls = 0;
+  const createRuntime = () =>
+    new StudioPiSessionRuntime({
+      repository,
+      bindings,
+      assistantExecutor: {
+        execute() {
+          modelCalls += 1;
+          return Promise.resolve(structuredClone(ASSISTANT));
+        },
+      },
+    });
+  let runtime = createRuntime();
+  try {
+    await runtime.createSession({ id: "step-retry" });
+    const paused = await runtime.start({
+      operationId: "run-step-retry",
+      sessionId: "step-retry",
+      messages: [{ role: "user", content: "retry", timestamp: 1 }],
+      binding: {
+        formatVersion: 1,
+        agent: { agentSpecId: "assistant", sourceRevision: "abc123" },
+        model: { provider: "openai", modelId: "gpt-5" },
+        systemPrompt: "Reconstruct a lost response.",
+        tools: [],
+      },
+    });
+    const expectedActionId = paused.nextAction!.id;
+    const completed = await runtime.step({
+      sessionId: "step-retry",
+      expectedActionId,
+      kind: "model",
+    });
+    expect(completed.status).toBe("completed");
+
+    await runtime.close();
+    bindings.close();
+    await repository.close();
+    repository = new BunSqliteSessionRepository({ path });
+    bindings = new BunSqliteRuntimeBindingStore({ path });
+    runtime = createRuntime();
+
+    const replayed = await runtime.step({
+      sessionId: "step-retry",
+      expectedActionId,
+      kind: "model",
+    });
+    expect(replayed).toEqual(completed);
+    expect(modelCalls).toBe(1);
+    expect(
+      await _rejectionOf(
+        runtime.step({
+          sessionId: "step-retry",
+          expectedActionId: "unknown-action",
+          kind: "model",
+        })
+      )
+    ).toBeInstanceOf(StaleSemanticActionError);
+  } finally {
+    await runtime.close();
+    bindings.close();
+    await repository.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("reconnects a committed watcher from the last durable sequence", async () => {
+  const root = await mkdtemp(join(tmpdir(), "llm-space-pi-watch-"));
+  const path = join(root, "studio.sqlite");
+  const repository = new BunSqliteSessionRepository({ path });
+  const bindings = new BunSqliteRuntimeBindingStore({ path });
+  const runtime = new StudioPiSessionRuntime({
+    repository,
+    bindings,
+    assistantExecutor: { execute: () => Promise.resolve(ASSISTANT) },
+  });
+  try {
+    const created = await runtime.createSession({ id: "watch" });
+    await runtime.start({
+      operationId: "run-watch",
+      sessionId: "watch",
+      messages: [{ role: "user", content: "watch", timestamp: 1 }],
+      binding: {
+        formatVersion: 1,
+        agent: { agentSpecId: "assistant", sourceRevision: "abc123" },
+        model: { provider: "openai", modelId: "gpt-5" },
+        systemPrompt: "Watch commits.",
+        tools: [],
+      },
+    });
+
+    const inspected = await runtime.readCommitted({
+      sessionId: "watch",
+      afterSeq: created.cursor,
+    });
+    expect(inspected.cursor).toBeGreaterThan(created.cursor);
+    expect(inspected.fromCursor).toBe(created.cursor);
+    expect(inspected.items.length).toBeGreaterThan(0);
+    expect(inspected.snapshot.status).toBe("paused");
+
+    const firstWatch = runtime.watch({
+      sessionId: "watch",
+      afterSeq: created.cursor,
+      pollIntervalMs: 1,
+    });
+    const admitted = await firstWatch.next();
+    expect(admitted.done).toBe(false);
+    expect(admitted.value?.fromCursor).toBe(created.cursor);
+    expect(admitted.value?.snapshot.status).toBe("paused");
+    expect(admitted.value?.items.length).toBeGreaterThan(0);
+    await firstWatch.return(undefined);
+
+    const paused = await runtime.open({ sessionId: "watch" });
+    await runtime.step({
+      sessionId: "watch",
+      expectedActionId: paused.nextAction!.id,
+      kind: "model",
+    });
+    const resumedWatch = runtime.watch({
+      sessionId: "watch",
+      afterSeq: admitted.value!.cursor,
+      pollIntervalMs: 1,
+    });
+    const completed = await resumedWatch.next();
+    expect(completed.value?.cursor).toBeGreaterThan(admitted.value!.cursor);
+    expect(completed.value?.snapshot.status).toBe("completed");
+    expect(
+      completed.value?.items.some(
+        (item) =>
+          item.kind === "record" && item.record.type === "operation_finished"
+      )
+    ).toBe(true);
+    await resumedWatch.return(undefined);
+  } finally {
+    await runtime.close();
+    bindings.close();
+    await repository.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("close interrupts live effects without persisting user abort intent", async () => {
+  const root = await mkdtemp(join(tmpdir(), "llm-space-pi-close-"));
+  const path = join(root, "studio.sqlite");
+  const repository = new BunSqliteSessionRepository({ path });
+  const bindings = new BunSqliteRuntimeBindingStore({ path });
+  let effectStarted!: () => void;
+  const started = new Promise<void>((resolve) => {
+    effectStarted = resolve;
+  });
+  const runtime = new StudioPiSessionRuntime({
+    repository,
+    bindings,
+    assistantExecutor: {
+      execute({ signal }) {
+        effectStarted();
+        return new Promise<AssistantMessage>((resolve) => {
+          signal.addEventListener(
+            "abort",
+            () => resolve({ ...ASSISTANT, stopReason: "aborted" }),
+            { once: true }
+          );
+        });
+      },
+    },
+  });
+  try {
+    await runtime.createSession({ id: "close" });
+    const paused = await runtime.start({
+      operationId: "run-close",
+      sessionId: "close",
+      messages: [{ role: "user", content: "close", timestamp: 1 }],
+      binding: {
+        formatVersion: 1,
+        agent: { agentSpecId: "assistant", sourceRevision: "abc123" },
+        model: { provider: "openai", modelId: "gpt-5" },
+        systemPrompt: "Close cleanly.",
+        tools: [],
+      },
+    });
+    const step = runtime.step({
+      sessionId: "close",
+      expectedActionId: paused.nextAction!.id,
+      kind: "model",
+    });
+    await started;
+    await runtime.close();
+    expect(await _rejectionOf(step)).toBeDefined();
+
+    const inspected = await repository.open((await repository.list())[0]!);
+    const records = await inspected.findRecords({ runId: "run-close" });
+    expect(records.some((record) => record.type === "abort_requested")).toBe(
+      false
+    );
+    expect(records.some((record) => record.type === "operation_finished")).toBe(
+      false
+    );
+    expect(
+      (await _rejectionOf(runtime.open({ sessionId: "close" }))) as Error
+    ).toHaveProperty("message", "Pi Session runtime is closed.");
+  } finally {
+    bindings.close();
+    await repository.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("close preserves a started tool prefix for durable recovery", async () => {
+  const root = await mkdtemp(join(tmpdir(), "llm-space-pi-close-tool-"));
+  const path = join(root, "studio.sqlite");
+  let repository = new BunSqliteSessionRepository({ path });
+  let bindings = new BunSqliteRuntimeBindingStore({ path });
+  let toolCalls = 0;
+  let effectStarted!: () => void;
+  const started = new Promise<void>((resolve) => {
+    effectStarted = resolve;
+  });
+  const tool = defineTool({
+    description: "Wait for runtime shutdown",
+    inputSchema: { type: "object", additionalProperties: false },
+    execute(_input, context) {
+      toolCalls += 1;
+      effectStarted();
+      return new Promise<string>((resolve) => {
+        context.abortSignal.addEventListener("abort", () => resolve("late"), {
+          once: true,
+        });
+      });
+    },
+  });
+  const createRuntime = () =>
+    new StudioPiSessionRuntime({
+      repository,
+      bindings,
+      assistantExecutor: {
+        execute: () =>
+          Promise.resolve({
+            ...ASSISTANT,
+            content: [
+              {
+                type: "toolCall",
+                id: "close-tool-call",
+                name: "close-tool",
+                arguments: {},
+              },
+            ],
+            stopReason: "toolUse",
+          }),
+      },
+      resolveTools: () =>
+        new Map([
+          [
+            "close-tool",
+            runtimeTool(tool, { implementationId: "close-tool@1" }),
+          ],
+        ]),
+      createToolContext: _unusedToolContext,
+    });
+  let runtime = createRuntime();
+  try {
+    await runtime.createSession({ id: "close-tool" });
+    let snapshot = await runtime.start({
+      operationId: "run-close-tool",
+      sessionId: "close-tool",
+      messages: [{ role: "user", content: "close tool", timestamp: 1 }],
+      binding: {
+        formatVersion: 1,
+        agent: { agentSpecId: "assistant", sourceRevision: "abc123" },
+        model: { provider: "openai", modelId: "gpt-5" },
+        systemPrompt: "Close during a tool effect.",
+        tools: [
+          {
+            name: "close-tool",
+            implementationId: "close-tool@1",
+            replay: "never",
+          },
+        ],
+      },
+    });
+    snapshot = await runtime.step({
+      sessionId: "close-tool",
+      expectedActionId: snapshot.nextAction!.id,
+      kind: "model",
+    });
+    const step = runtime.step({
+      sessionId: "close-tool",
+      expectedActionId: snapshot.nextAction!.id,
+      kind: "tool",
+    });
+    await started;
+    await runtime.close();
+    expect(await _rejectionOf(step)).toBeDefined();
+
+    const inspected = await repository.open((await repository.list())[0]!);
+    const records = await inspected.findRecords({ runId: "run-close-tool" });
+    const toolStarted = records.find(
+      (record) => record.type === "tool_started"
+    );
+    if (toolStarted?.type !== "tool_started") {
+      throw new Error("Expected a durable tool_started record.");
+    }
+    expect(records.some((record) => record.type === "abort_requested")).toBe(
+      false
+    );
+    expect(records.some((record) => record.type === "operation_finished")).toBe(
+      false
+    );
+    expect(await inspected.getEntry(toolStarted.resultEntryId)).toBeUndefined();
+
+    bindings.close();
+    await repository.close();
+    repository = new BunSqliteSessionRepository({ path });
+    bindings = new BunSqliteRuntimeBindingStore({ path });
+    runtime = createRuntime();
+
+    const recovered = await runtime.open({ sessionId: "close-tool" });
+    const afterRecovery = await runtime.step({
+      sessionId: "close-tool",
+      expectedActionId: recovered.nextAction!.id,
+      kind: "tool",
+    });
+    expect(toolCalls).toBe(1);
+    expect(afterRecovery.messages.at(-1)).toMatchObject({
+      role: "toolResult",
+      toolCallId: "close-tool-call",
+      isError: true,
+    });
+  } finally {
+    await runtime.close();
+    bindings.close();
+    await repository.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+/** Captures a required rejection so Bun tests await the actual async outcome. */
+async function _rejectionOf(promise: Promise<unknown>): Promise<unknown> {
+  try {
+    await promise;
+  } catch (error) {
+    return error;
+  }
+  throw new Error("Expected the promise to reject.");
+}
 
 test("suspends a missing frozen model before writing a provider attempt", async () => {
   const root = await mkdtemp(join(tmpdir(), "llm-space-pi-model-identity-"));
