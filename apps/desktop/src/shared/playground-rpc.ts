@@ -1,10 +1,7 @@
-import type { RunEventCursor, RunFrame } from "@llm-space/engine";
 import type {
   CreatePlaygroundInput,
   Playground,
-  RunPlaygroundInput,
   SavePlaygroundInput,
-  StudioRunReceipt,
 } from "@llm-space/studio";
 
 import { defineRpcNamespace } from "./namespaced-rpc";
@@ -24,25 +21,13 @@ export interface PlaygroundRequests {
     playgroundId: string,
     document: SavePlaygroundInput
   ): Promise<Playground>;
-  run(
-    playgroundId: string,
-    input: RunPlaygroundInput
-  ): Promise<StudioRunReceipt>;
-  stepRun(
-    runId: string,
-    input?: { readonly toolCallId?: string }
-  ): Promise<StudioRunReceipt>;
-  continueRun(runId: string): Promise<StudioRunReceipt>;
-  cancelRun(runId: string): Promise<void>;
 }
 
-export interface PlaygroundStreams {
-  streamRun(runId: string, cursor?: RunEventCursor): AsyncIterable<RunFrame>;
-}
+export type PlaygroundStreams = Record<never, never>;
 
 export type PlaygroundClient = PlaygroundRequests & PlaygroundStreams;
 
 export const PLAYGROUND_RPC = defineRpcNamespace<PlaygroundRpc>("playground", {
-  streams: ["streamRun"],
+  streams: [],
   events: [],
 });

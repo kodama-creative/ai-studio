@@ -10,9 +10,13 @@ import type {
 } from "../../domain";
 import type { Evaluation, EvaluationRubric } from "../../evaluation";
 import type { PlaygroundRecord } from "../../playground";
-import type { StudioStore, StudioStoreTransaction } from "../studio-store";
+import type {
+  StudioCommandReceipt,
+  StudioStore,
+  StudioStoreTransaction,
+} from "../studio-store";
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 5;
 
 export interface CreateSqliteStudioStoreOptions {
   readonly path: string;
@@ -75,13 +79,13 @@ class SqliteTransaction implements StudioStoreTransaction {
     this._database
       .query(
         `INSERT INTO studio_playgrounds (
-          id, schema_version, engine_thread_id, payload_json, created_at, updated_at
+          id, schema_version, session_id, payload_json, created_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?)`
       )
       .run(
         playground.id,
         playground.schemaVersion,
-        playground.engineThreadId,
+        playground.sessionId,
         _json(playground),
         playground.createdAt,
         playground.updatedAt
@@ -92,11 +96,11 @@ class SqliteTransaction implements StudioStoreTransaction {
     const result = this._database
       .query(
         `UPDATE studio_playgrounds SET
-          engine_thread_id = ?, payload_json = ?, updated_at = ?
+          session_id = ?, payload_json = ?, updated_at = ?
         WHERE id = ?`
       )
       .run(
-        playground.engineThreadId,
+        playground.sessionId,
         _json(playground),
         playground.updatedAt,
         playground.id
@@ -104,6 +108,36 @@ class SqliteTransaction implements StudioStoreTransaction {
     if (result.changes !== 1) {
       throw new Error(`Playground "${playground.id}" was not found.`);
     }
+  }
+
+  getCommandReceipt(
+    sessionId: string,
+    commandId: string
+  ): StudioCommandReceipt | undefined {
+    const row = this._database
+      .query<{ payload_json: string }, [string, string]>(
+        `SELECT payload_json FROM studio_command_receipts
+         WHERE session_id = ? AND command_id = ?`
+      )
+      .get(sessionId, commandId);
+    return row === null ? undefined : _parse(row.payload_json);
+  }
+
+  insertCommandReceipt(receipt: StudioCommandReceipt): void {
+    this._database
+      .query(
+        `INSERT INTO studio_command_receipts (
+          session_id, command_id, method, fingerprint, payload_json, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        receipt.sessionId,
+        receipt.commandId,
+        receipt.method,
+        receipt.fingerprint,
+        _json(receipt),
+        receipt.createdAt
+      );
   }
 
   getExperiment(experimentId: string): StudioExperimentRecord | undefined {
@@ -128,13 +162,13 @@ class SqliteTransaction implements StudioStoreTransaction {
     this._database
       .query(
         `INSERT INTO studio_experiments (
-          id, schema_version, engine_thread_id, payload_json, created_at, updated_at
+          id, schema_version, session_id, payload_json, created_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?)`
       )
       .run(
         experiment.id,
         experiment.schemaVersion,
-        experiment.engineThreadId,
+        experiment.sessionId,
         _json(experiment),
         experiment.createdAt,
         experiment.updatedAt
@@ -145,11 +179,11 @@ class SqliteTransaction implements StudioStoreTransaction {
     const result = this._database
       .query(
         `UPDATE studio_experiments SET
-          engine_thread_id = ?, payload_json = ?, updated_at = ?
+          session_id = ?, payload_json = ?, updated_at = ?
         WHERE id = ?`
       )
       .run(
-        experiment.engineThreadId,
+        experiment.sessionId,
         _json(experiment),
         experiment.updatedAt,
         experiment.id
@@ -159,30 +193,35 @@ class SqliteTransaction implements StudioStoreTransaction {
     }
   }
 
-  listRunReferences(experimentId: string): readonly ThreadRunReference[] {
+  listOperationReferences(experimentId: string): readonly ThreadRunReference[] {
     return this._database
       .query<{ payload_json: string }, [string]>(
-        `SELECT payload_json FROM studio_run_references
+        `SELECT payload_json FROM studio_operation_references
          WHERE experiment_id = ? ORDER BY position`
       )
       .all(experimentId)
       .map((row) => _parse(row.payload_json));
   }
 
-  replaceRunReferences(
+  replaceOperationReferences(
     experimentId: string,
     references: readonly ThreadRunReference[]
   ): void {
     this._database
-      .query("DELETE FROM studio_run_references WHERE experiment_id = ?")
+      .query("DELETE FROM studio_operation_references WHERE experiment_id = ?")
       .run(experimentId);
     const insert = this._database.query(
-      `INSERT INTO studio_run_references (
-        experiment_id, run_id, position, payload_json
+      `INSERT INTO studio_operation_references (
+        experiment_id, operation_id, position, payload_json
       ) VALUES (?, ?, ?, ?)`
     );
     references.forEach((reference, position) => {
-      insert.run(experimentId, reference.runId, position, _json(reference));
+      insert.run(
+        experimentId,
+        reference.operationId,
+        position,
+        _json(reference)
+      );
     });
   }
 
@@ -298,8 +337,10 @@ function _migrate(database: Database): void {
       "studio_evaluations",
       "studio_rubrics",
       "studio_run_references",
+      "studio_operation_references",
       "studio_playgrounds",
       "studio_experiments",
+      "studio_command_receipts",
     ]) {
       database.run(`DROP TABLE IF EXISTS ${table}`);
     }
@@ -308,19 +349,19 @@ function _migrate(database: Database): void {
       CREATE TABLE studio_experiments (
         id TEXT PRIMARY KEY,
         schema_version INTEGER NOT NULL,
-        engine_thread_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
         payload_json TEXT NOT NULL,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL
       )
     `);
     database.run(`
-      CREATE TABLE studio_run_references (
+      CREATE TABLE studio_operation_references (
         experiment_id TEXT NOT NULL,
-        run_id TEXT NOT NULL,
+        operation_id TEXT NOT NULL,
         position INTEGER NOT NULL,
         payload_json TEXT NOT NULL,
-        PRIMARY KEY(experiment_id, run_id),
+        PRIMARY KEY(experiment_id, operation_id),
         UNIQUE(experiment_id, position),
         FOREIGN KEY(experiment_id) REFERENCES studio_experiments(id)
       )
@@ -349,10 +390,21 @@ function _migrate(database: Database): void {
       )
     `);
     database.run(`
+      CREATE TABLE studio_command_receipts (
+        session_id TEXT NOT NULL,
+        command_id TEXT NOT NULL,
+        method TEXT NOT NULL,
+        fingerprint TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY(session_id, command_id)
+      )
+    `);
+    database.run(`
       CREATE TABLE studio_playgrounds (
         id TEXT PRIMARY KEY,
         schema_version INTEGER NOT NULL,
-        engine_thread_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
         payload_json TEXT NOT NULL,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL

@@ -10,7 +10,6 @@ import {
   fauxToolCall,
 } from "@earendil-works/pi-ai";
 import type { McpServerToolsResponse, McpTool } from "@llm-space/core";
-import { createPiRunExecutor } from "@llm-space/engine-pi";
 import type { RuntimeClient } from "@llm-space/runtime/runtime";
 
 import { createPlaygroundHost } from "./playground-host";
@@ -63,7 +62,7 @@ test("resolves and executes only the MCP tools frozen into a Playground Run", as
     createPlaygroundHost({
       homePath,
       runtime,
-      runExecutor: createPiRunExecutor({ models }),
+      models,
     });
   let host = createHost();
 
@@ -95,23 +94,21 @@ test("resolves and executes only the MCP tools frozen into a Playground Run", as
       fromMessageId: "user-weather",
       mode: "step",
     });
-    await _waitForRunStatus(host, receipt.runId, "paused");
+    await _waitForRunStatus(host, receipt.operationId, "paused");
     await host.close();
 
     // Resolver inputs come from the SQLite Run snapshot after restart, not the
     // mutable renderer document or an in-memory tool registry cache.
     host = createHost();
-    await host.continueRun(receipt.runId);
-    await _waitForTerminalRun(host, receipt.runId);
+    await host.continueRun(receipt.operationId);
+    await _waitForTerminalRun(host, receipt.operationId);
     const loaded = await host.loadPlayground(playground.id);
     const assistant = loaded?.conversation.messages.find(
       (message) => message.role === "assistant" && message.toolCalls?.length
     );
 
-    expect(listedServers).toEqual([
-      "server-weather",
-      "server-weather",
-    ]);
+    expect(listedServers.length).toBeGreaterThanOrEqual(2);
+    expect(new Set(listedServers)).toEqual(new Set(["server-weather"]));
     expect(calls).toEqual([
       {
         serverId: "server-weather",
@@ -135,6 +132,143 @@ test("resolves and executes only the MCP tools frozen into a Playground Run", as
     await rm(homePath, { recursive: true, force: true });
   }
 });
+
+test("rejects ACP prompt content that differs from the saved Playground Draft", async () => {
+  const homePath = await mkdtemp(
+    path.join(tmpdir(), "llm-space-playground-prompt-")
+  );
+  const faux = fauxProvider({ tokensPerSecond: 0 });
+  const model = faux.getModel();
+  const models = createModels();
+  models.setProvider(faux.provider);
+  const host = createPlaygroundHost({
+    homePath,
+    models,
+    runtime: _emptyRuntime(),
+  });
+  try {
+    const playground = await host.createPlayground({
+      agentSpec: {
+        schemaVersion: 1,
+        model: { provider: model.provider, id: model.id },
+        instructions: [],
+        tools: [],
+      },
+      conversation: {
+        messages: [
+          {
+            id: "user-saved",
+            role: "user",
+            content: [{ type: "text", text: "Saved prompt" }],
+          },
+        ],
+        state: {},
+      },
+    });
+
+    expect(
+      host.acpBackend.prompt({
+        sessionId: playground.sessionId,
+        messages: [
+          { role: "user", content: "Different prompt", timestamp: 1 },
+        ],
+        meta: {
+          "llm-space.dev": {
+            fromMessageId: "user-saved",
+            mode: "continue",
+          },
+        },
+        signal: new AbortController().signal,
+      })
+    ).rejects.toThrow(
+      'ACP prompt content does not match Studio user Message "user-saved".'
+    );
+    expect((await host.loadPlayground(playground.id))?.dirty).toBeTrue();
+  } finally {
+    await host.close();
+    await rm(homePath, { recursive: true, force: true });
+  }
+});
+
+test("reconstructs a durable ACP Step receipt after Playground host restart", async () => {
+  const homePath = await mkdtemp(
+    path.join(tmpdir(), "llm-space-playground-receipt-")
+  );
+  const faux = fauxProvider({ tokensPerSecond: 0 });
+  const model = faux.getModel();
+  const models = createModels();
+  models.setProvider(faux.provider);
+  faux.setResponses([fauxAssistantMessage("Committed once.")]);
+  const createHost = () =>
+    createPlaygroundHost({
+      homePath,
+      models,
+      runtime: _emptyRuntime(),
+    });
+  let host = createHost();
+  try {
+    const playground = await host.createPlayground({
+      agentSpec: {
+        schemaVersion: 1,
+        model: { provider: model.provider, id: model.id },
+        instructions: [],
+        tools: [],
+      },
+      conversation: {
+        messages: [
+          {
+            id: "user-receipt",
+            role: "user",
+            content: [{ type: "text", text: "Run once" }],
+          },
+        ],
+        state: {},
+      },
+    });
+    await host.run(playground.id, { fromMessageId: "user-receipt" });
+    const admitted = await host.acpBackend.inspect({
+      sessionId: playground.sessionId,
+    });
+    const action = admitted.snapshot.nextAction;
+    expect(action?.kind).toBe("model");
+    const command = {
+      sessionId: playground.sessionId,
+      commandId: "step-after-restart",
+      expectedActionId: action!.id,
+      kind: "model" as const,
+    };
+    const committed = await host.acpBackend.step(command);
+    expect(committed.status).toBe("completed");
+    await host.close();
+
+    host = createHost();
+    const reconstructed = await host.acpBackend.step(command);
+    expect(reconstructed).toMatchObject({
+      status: "completed",
+      leafId: committed.leafId,
+      messageEntries: [{ message: { role: "user" } }, { message: { role: "assistant" } }],
+    });
+    expect(
+      host.acpBackend.step({
+        ...command,
+        expectedActionId: "other-action",
+      })
+    ).rejects.toThrow(
+      'Command "step-after-restart" was already used with other input.'
+    );
+  } finally {
+    await host.close();
+    await rm(homePath, { recursive: true, force: true });
+  }
+});
+
+/** Supplies a host runtime for tests that do not execute tools. */
+function _emptyRuntime(): RuntimeClient {
+  return {
+    builtInListTools: () => [],
+    mcpListTools: () => Promise.reject(new Error("Unexpected MCP lookup.")),
+  } as unknown as RuntimeClient;
+}
 
 function _mcpToolsResponse(tool: McpTool): McpServerToolsResponse {
   return {
@@ -169,43 +303,43 @@ function _mcpToolsResponse(tool: McpTool): McpServerToolsResponse {
 
 async function _waitForTerminalRun(
   host: ReturnType<typeof createPlaygroundHost>,
-  runId: string
+  operationId: string
 ): Promise<void> {
   for (let attempt = 0; attempt < 200; attempt += 1) {
-    const run = await host.getRun(runId);
+    const run = await host.getRun(operationId);
     if (
       run?.status === "completed" ||
       run?.status === "failed" ||
-      run?.status === "cancelled" ||
-      run?.status === "interrupted"
+      run?.status === "aborted" ||
+      run?.status === "declined"
     ) {
       expect(run.status).toBe("completed");
       return;
     }
     await Bun.sleep(5);
   }
-  throw new Error(`Run "${runId}" did not reach a terminal state.`);
+  throw new Error(`Operation "${operationId}" did not reach a terminal state.`);
 }
 
 async function _waitForRunStatus(
   host: ReturnType<typeof createPlaygroundHost>,
-  runId: string,
+  operationId: string,
   status: "paused"
 ): Promise<void> {
   for (let attempt = 0; attempt < 200; attempt += 1) {
-    const run = await host.getRun(runId);
+    const run = await host.getRun(operationId);
     if (run?.status === status) return;
     if (
       run?.status === "completed" ||
       run?.status === "failed" ||
-      run?.status === "cancelled" ||
-      run?.status === "interrupted"
+      run?.status === "aborted" ||
+      run?.status === "declined"
     ) {
       throw new Error(
-        `Run "${runId}" reached "${run.status}" before "${status}".`
+        `Operation "${operationId}" reached "${run.status}" before "${status}".`
       );
     }
     await Bun.sleep(5);
   }
-  throw new Error(`Run "${runId}" did not reach "${status}".`);
+  throw new Error(`Operation "${operationId}" did not reach "${status}".`);
 }

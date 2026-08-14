@@ -585,6 +585,7 @@ function pausedSnapshot(): PiSessionSnapshot {
     lane: "main",
     operationId: "run-1",
     status: "paused",
+    messageEntries: [],
     messages: [],
     leafId: null,
     nextAction: { id: "run-1:model:1", kind: "model", attempt: 1 },

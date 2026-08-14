@@ -6,12 +6,17 @@ import type {
 import type { Evaluation, EvaluationRubric } from "../evaluation";
 import type { PlaygroundRecord } from "../playground";
 
-import type { StudioStore, StudioStoreTransaction } from "./studio-store";
+import type {
+  StudioCommandReceipt,
+  StudioStore,
+  StudioStoreTransaction,
+} from "./studio-store";
 
 interface MemoryState {
   playgrounds: Map<string, PlaygroundRecord>;
+  commandReceipts: Map<string, StudioCommandReceipt>;
   experiments: Map<string, StudioExperimentRecord>;
-  runReferences: Map<string, ThreadRunReference[]>;
+  operationReferences: Map<string, ThreadRunReference[]>;
   evaluations: Map<string, Evaluation[]>;
   rubrics: Map<string, EvaluationRubric[]>;
   events: Map<string, StudioThreadEvent[]>;
@@ -20,8 +25,9 @@ interface MemoryState {
 export class InMemoryStudioStore implements StudioStore {
   private _state: MemoryState = {
     playgrounds: new Map(),
+    commandReceipts: new Map(),
     experiments: new Map(),
-    runReferences: new Map(),
+    operationReferences: new Map(),
     evaluations: new Map(),
     rubrics: new Map(),
     events: new Map(),
@@ -66,6 +72,26 @@ class MemoryTransaction implements StudioStoreTransaction {
     this._state.playgrounds.set(playground.id, structuredClone(playground));
   }
 
+  getCommandReceipt(
+    sessionId: string,
+    commandId: string
+  ): StudioCommandReceipt | undefined {
+    return _clone(
+      this._state.commandReceipts.get(`${sessionId}\0${commandId}`)
+    );
+  }
+
+  insertCommandReceipt(receipt: StudioCommandReceipt): void {
+    const key = `${receipt.sessionId}\0${receipt.commandId}`;
+    const existing = this._state.commandReceipts.get(key);
+    if (existing !== undefined) {
+      throw new Error(
+        `Command "${receipt.commandId}" already has a durable receipt.`
+      );
+    }
+    this._state.commandReceipts.set(key, structuredClone(receipt));
+  }
+
   getExperiment(experimentId: string): StudioExperimentRecord | undefined {
     return _clone(this._state.experiments.get(experimentId));
   }
@@ -90,15 +116,17 @@ class MemoryTransaction implements StudioStoreTransaction {
     this._state.experiments.set(experiment.id, structuredClone(experiment));
   }
 
-  listRunReferences(experimentId: string): readonly ThreadRunReference[] {
-    return structuredClone(this._state.runReferences.get(experimentId) ?? []);
+  listOperationReferences(experimentId: string): readonly ThreadRunReference[] {
+    return structuredClone(
+      this._state.operationReferences.get(experimentId) ?? []
+    );
   }
 
-  replaceRunReferences(
+  replaceOperationReferences(
     experimentId: string,
     references: readonly ThreadRunReference[]
   ): void {
-    this._state.runReferences.set(experimentId, [
+    this._state.operationReferences.set(experimentId, [
       ...structuredClone(references),
     ]);
   }

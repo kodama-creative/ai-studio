@@ -1,154 +1,110 @@
-import type { AssistantMessage } from "@llm-space/core";
-import type {
-  AgentSnapshot,
-  Run,
-  RunExecutionMode,
-  ThreadState,
-} from "@llm-space/engine";
+import type { PiOperationSnapshot } from "@llm-space/pi-runtime";
 
-/** Editable Studio document. Conversation is a core Message-based ThreadState. */
+import type {
+  StudioAgentSnapshot,
+  StudioConversation,
+  StudioOperationReceipt,
+  StudioOperationReference,
+  StudioPiIdentity,
+  StudioStepInput,
+} from "./pi-domain";
+
+/** Editable Project Experiment document; Pi owns every committed message. */
 export interface StudioThreadDocument {
   readonly title: string;
-  readonly agent: AgentSnapshot;
-  readonly conversation: ThreadState;
-  /** Legacy persisted field; new Runs clear it and always use live source. */
-  readonly commitId?: string;
+  readonly agent: StudioAgentSnapshot;
+  readonly conversation: StudioConversation;
 }
 
-/**
- * Studio Experiment read model.
- *
- * Only experiment metadata and an optional dirty Draft are Studio-owned. The
- * returned document is composed from that Draft or Engine's head Checkpoint.
- */
-export interface StudioThread {
+/** Project Experiment read model composed from metadata and one Pi Session. */
+export interface StudioThread extends StudioPiIdentity {
   readonly schemaVersion: 1;
   readonly id: string;
-  readonly engineThreadId: string;
-  readonly headCheckpointId: string;
   readonly document: StudioThreadDocument;
   readonly provenance?: {
     readonly type: "fork";
     readonly threadId: string;
-    readonly checkpointId?: string;
+    readonly entryId?: string;
   };
-  readonly activeRunId?: string;
   readonly createdAt: number;
   readonly updatedAt: number;
 }
 
-/** Internal persisted Studio metadata; `draft` exists only while UI edits are dirty. */
+/** Studio-owned metadata; Draft is the only editable transcript projection. */
 export interface StudioExperimentRecord {
   readonly schemaVersion: 1;
   readonly id: string;
-  readonly engineThreadId: string;
+  readonly sessionId: string;
+  readonly lane: "main";
+  readonly runtimeFormatVersion: 1;
   readonly title: string;
-  readonly agent: AgentSnapshot;
-  /** Legacy persisted field retained only while reading pre-live-source data. */
-  readonly commitId?: string;
-  readonly draft?: ThreadState;
-  readonly pendingRun?: {
-    readonly operationId: string;
-    readonly createdAt: number;
-  };
+  readonly agent: StudioAgentSnapshot;
+  readonly state: StudioConversation["state"];
+  readonly draft?: StudioConversation;
   readonly provenance?: StudioThread["provenance"];
   readonly createdAt: number;
   readonly updatedAt: number;
 }
 
-/** Preferred domain name for new code; StudioThread remains an outward adapter. */
 export type ProjectExperiment = StudioExperimentRecord;
 
+/** Historical editor projection at a Pi operation leaf. */
 export interface ThreadCheckpoint {
   readonly schemaVersion: 1;
   readonly id: string;
-  readonly threadId: string;
-  readonly source: import("@llm-space/engine").CheckpointSource;
+  readonly sessionId: string;
+  readonly operationId: string;
   readonly document: StudioThreadDocument;
   readonly createdAt: number;
 }
 
-export interface ThreadRunReference {
-  readonly threadId: string;
-  readonly runId: string;
-  readonly checkpointId?: string;
-  readonly relation: "executed" | "inherited";
-}
+export type ThreadRunReference = StudioOperationReference;
 
 export interface StudioRunHistoryEntry {
-  readonly reference: ThreadRunReference;
-  readonly run: Run;
+  readonly reference: StudioOperationReference;
+  readonly operation: PiOperationSnapshot;
   readonly checkpoint?: ThreadCheckpoint;
 }
 
-export interface StudioRunReceipt {
-  readonly runId: string;
-}
+export type StudioRunReceipt = StudioOperationReceipt;
 
 export interface StudioRunInput {
   readonly fromMessageId: string;
-  /** Studio-only model selection frozen onto this Run; Agent source is unchanged. */
+  /** Studio-only Pi model override frozen into this operation binding. */
   readonly modelOverride?: string;
-  readonly mode?: RunExecutionMode;
+  readonly mode?: "step" | "continue";
 }
 
-export interface StudioStepRunInput {
-  readonly toolCallId?: string;
-}
+export type StudioStepRunInput = StudioStepInput;
 
 export type StudioThreadEventData =
-  | { readonly type: "run.started"; readonly run: Run }
-  | { readonly type: "run.paused"; readonly run: Run }
   | {
-      readonly type: "message.delta";
-      readonly runId: string;
-      readonly messageId: string;
-      readonly delta: string;
-    }
-  | {
-      readonly type: "thinking.delta";
-      readonly runId: string;
-      readonly messageId: string;
-      readonly delta: string;
-    }
-  | {
-      readonly type: "message.completed";
-      readonly runId: string;
-      readonly message: AssistantMessage;
-    }
-  | {
-      readonly type: "tool.started";
-      readonly runId: string;
-      readonly messageId: string;
-      readonly toolCallId: string;
-      readonly toolName: string;
-    }
-  | {
-      readonly type: "tool.updated";
-      readonly runId: string;
-      readonly messageId: string;
-      readonly toolCallId: string;
-      readonly message: AssistantMessage;
-    }
-  | {
-      readonly type: "tool.completed";
-      readonly runId: string;
-      readonly messageId: string;
-      readonly toolCallId: string;
-      readonly message: AssistantMessage;
+      readonly type: "operation.started";
+      readonly operationId: string;
+      readonly sessionId: string;
     }
   | {
       readonly type: "conversation.updated";
-      readonly runId: string;
+      readonly operationId: string;
       readonly thread: StudioThread;
     }
-  | { readonly type: "run.completed"; readonly runId: string }
   | {
-      readonly type: "run.failed";
-      readonly runId: string;
+      readonly type: "operation.paused";
+      readonly operationId: string;
+    }
+  | {
+      readonly type: "operation.completed";
+      readonly operationId: string;
+    }
+  | {
+      readonly type: "operation.failed";
+      readonly operationId: string;
       readonly message: string;
     }
-  | { readonly type: "run.cancelled"; readonly runId: string };
+  | {
+      readonly type: "operation.aborted";
+      readonly operationId: string;
+    };
 
 export interface StudioThreadEvent {
   readonly threadId: string;

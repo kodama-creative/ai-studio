@@ -27,6 +27,7 @@ export {
   playgroundToThread,
   threadToPlaygroundDocument,
 } from "./playground-adapter";
+export { assertPiPromptMatchesCoreUserMessage } from "./pi-message-projection";
 export {
   createPlaygroundApplication,
   type CreatePlaygroundApplicationOptions,

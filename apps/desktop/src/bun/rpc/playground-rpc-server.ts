@@ -12,6 +12,6 @@ export class PlaygroundRpcServer implements RpcServer<PlaygroundRpc> {
   readonly streams;
   constructor(application: DesktopPlaygroundApplication) {
     this.requests = application;
-    this.streams = application;
+    this.streams = {};
   }
 }

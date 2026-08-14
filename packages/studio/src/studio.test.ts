@@ -44,13 +44,17 @@ test("createStudio owns Project source and SQLite recovery", async () => {
     models,
     runtimeServices: {},
   });
-  expect((await first.listSourceFiles()).some((node) => node.name === "agent"))
-    .toBeTrue();
+  expect(
+    (await first.listSourceFiles()).some((node) => node.name === "agent")
+  ).toBeTrue();
   expect(await first.readSourceFile("agent/instructions.md")).toBe(
     "Reply concisely.\n"
   );
   const thread = await first.createThread({ title: "Experiment" });
-  expect(thread.document.commitId).toBeUndefined();
+  expect(typeof thread.sessionId).toBe("string");
+  expect(thread).toMatchObject({
+    lane: "main",
+  });
 
   await first.close();
   const second = await _studio({
@@ -105,12 +109,14 @@ test("a new Run reloads dirty current source instead of requiring a clean commit
 
   const receipt = await studio.run(saved.id, {
     fromMessageId: "user-current-source",
+    mode: "continue",
   });
-  expect(await _terminalEvent(studio, saved.id, receipt.runId)).toBe(
-    "run.completed"
+  expect(await _terminalEvent(studio, saved.id, receipt.operationId)).toBe(
+    "operation.completed"
   );
-  expect((await studio.loadThread(saved.id))?.document.agent).toMatchObject({
-    generationId: "development",
+  const loadedAgent = (await studio.loadThread(saved.id))?.document.agent;
+  expect(typeof loadedAgent?.sourceRevision).toBe("string");
+  expect(loadedAgent).toMatchObject({
     instructions: ["Use the current dirty source."],
   });
 });
@@ -139,7 +145,7 @@ test("a source-defined Agent tool executes inside one continued Studio Run", asy
     [
       "export default {",
       '  description: "Count words.",',
-      "  inputSchema: { type: \"object\", properties: { text: { type: \"string\" } }, required: [\"text\"] },",
+      '  inputSchema: { type: "object", properties: { text: { type: "string" } }, required: ["text"] },',
       "  execute(input) { return { count: String(input.text).split(/\\s+/u).length }; },",
       "};",
       "",
@@ -171,8 +177,8 @@ test("a source-defined Agent tool executes inside one continued Studio Run", asy
     fromMessageId: "user-tool",
     mode: "continue",
   });
-  expect(await _terminalEvent(studio, saved.id, receipt.runId)).toBe(
-    "run.completed"
+  expect(await _terminalEvent(studio, saved.id, receipt.operationId)).toBe(
+    "operation.completed"
   );
   const messages = (await studio.loadThread(saved.id))?.document.conversation
     .messages;
@@ -202,19 +208,21 @@ test("a source-defined Agent tool executes inside one continued Studio Run", asy
 async function _terminalEvent(
   studio: Studio,
   threadId: string,
-  runId: string
-): Promise<"run.completed" | "run.failed" | "run.cancelled"> {
+  operationId: string
+): Promise<"operation.completed" | "operation.failed" | "operation.aborted"> {
   for await (const item of studio.events(threadId)) {
     if (
-      (item.event.type === "run.completed" ||
-        item.event.type === "run.failed" ||
-        item.event.type === "run.cancelled") &&
-      item.event.runId === runId
+      (item.event.type === "operation.completed" ||
+        item.event.type === "operation.failed" ||
+        item.event.type === "operation.aborted") &&
+      item.event.operationId === operationId
     ) {
       return item.event.type;
     }
   }
-  throw new Error(`Run "${runId}" did not produce a terminal event.`);
+  throw new Error(
+    `Operation "${operationId}" did not produce a terminal event.`
+  );
 }
 
 async function _studio(options: Parameters<typeof createStudio>[0]) {

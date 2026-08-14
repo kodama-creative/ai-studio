@@ -189,6 +189,7 @@ test("projects debugger pause and durable cursor without inventing ACP state", (
     lane: "main",
     operationId: "run-1",
     status: "paused",
+    messageEntries: [],
     messages: [],
     leafId: "assistant-entry",
     nextAction: { id: "run-1:model:1", kind: "model", attempt: 1 },
@@ -242,6 +243,7 @@ test("ends a standard ACP turn when Pi suspends on unavailable runtime identity"
     lane: "main",
     operationId: "run-1",
     status: "suspended",
+    messageEntries: [],
     messages: [],
     leafId: null,
     suspension: {

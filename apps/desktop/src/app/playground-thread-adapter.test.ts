@@ -1,7 +1,13 @@
 import { expect, test } from "bun:test";
 
+import {
+  LLM_SPACE_ACP_METHODS,
+  methods,
+  type ClientConnection,
+  type PiAcpDebugResponse,
+  type UpdateSessionNotification,
+} from "@llm-space/acp";
 import type { AssistantMessage, Thread } from "@llm-space/core";
-import type { Run, RunFrame } from "@llm-space/engine";
 import type { Playground } from "@llm-space/studio";
 
 import type { PlaygroundClient } from "@/client/playground-client";
@@ -17,51 +23,32 @@ const USER_MESSAGE = {
   content: [{ type: "text" as const, text: "hello" }],
 };
 
-test("Playground runtime keeps one Run while step mode auto-executes pending tools", async () => {
+test("Playground runtime starts and steps tools exclusively through ACP", async () => {
   let playground = _playground();
   const calls: string[] = [];
+  let toolCompleted = false;
   const client = _client({
-    load: () => {
-      const assistant = _assistantWithTool(
-        calls.some((call) => call.startsWith("step:"))
-      );
+    save: (_id, document) => {
+      calls.push("metadata.save");
       playground = {
         ...playground,
-        activeRunId: "run-1",
+        ...document,
+        dirty: true,
+      };
+      return Promise.resolve(playground);
+    },
+    load: () => {
+      playground = {
+        ...playground,
+        operationId: toolCompleted ? "operation-1" : undefined,
+        dirty: false,
         conversation: {
           ...playground.conversation,
-          messages: [USER_MESSAGE, assistant],
+          messages: [USER_MESSAGE, _assistantWithTool(toolCompleted)],
         },
       };
       return Promise.resolve(playground);
     },
-    save: (_id, document) => {
-      playground = {
-        ...playground,
-        title: document.title,
-        agentSpec: document.agentSpec,
-        conversation: document.conversation,
-        dirty: true,
-      };
-      calls.push("save");
-      return Promise.resolve(playground);
-    },
-    run: (_id, input) => {
-      expect(input.mode).toBe("step");
-      calls.push("run:step");
-      playground = { ...playground, activeRunId: "run-1", dirty: false };
-      return Promise.resolve({ runId: "run-1" });
-    },
-    stepRun: (runId, input) => {
-      calls.push(`step:${runId}:${input?.toolCallId}`);
-      return Promise.resolve({ runId });
-    },
-    streamRun: (runId) =>
-      _frames(
-        calls.filter((call) => call.startsWith("step:")).length === 0
-          ? _modelPause(runId)
-          : _toolPause(runId)
-      ),
   });
   const runtime = createPlaygroundThreadExecutionRuntime({
     client,
@@ -70,6 +57,25 @@ test("Playground runtime keeps one Run while step mode auto-executes pending too
     onPlayground: (next) => {
       playground = next;
     },
+    openAcpConnection: ({ onSessionUpdate }) =>
+      Promise.resolve(
+        _connection((method) => {
+          calls.push(method);
+          if (method === methods.agent.session.prompt) {
+            playground = { ...playground, operationId: "operation-1" };
+            onSessionUpdate?.(_stoppedUpdate(playground.sessionId));
+            return { _meta: { "llm-space.dev": { accepted: true } } };
+          }
+          if (method === LLM_SPACE_ACP_METHODS.snapshot) {
+            return _debug(toolCompleted ? "model" : "tool");
+          }
+          if (method === LLM_SPACE_ACP_METHODS.step) {
+            toolCompleted = true;
+            return _debug("model");
+          }
+          throw new Error(`Unexpected ACP method: ${method}`);
+        })
+      ),
   });
 
   const updates: Thread[] = [];
@@ -83,83 +89,95 @@ test("Playground runtime keeps one Run while step mode auto-executes pending too
     if (event.type === "thread.updated") updates.push(event.thread);
   }
 
-  expect(calls).toEqual(["save", "run:step", "step:run-1:call-1"]);
+  expect(calls).toEqual([
+    "metadata.save",
+    methods.agent.session.prompt,
+    LLM_SPACE_ACP_METHODS.snapshot,
+    LLM_SPACE_ACP_METHODS.step,
+    LLM_SPACE_ACP_METHODS.snapshot,
+  ]);
   expect(updates.at(-1)?.context?.messages?.at(-1)).toMatchObject({
     id: "assistant-1",
     toolCalls: [{ id: "call-1", output: { isError: false } }],
   });
 });
 
-test("Playground runtime resumes a paused Run instead of creating another Run", async () => {
-  let playground = _playground({
-    activeRunId: "run-1",
-    conversation: {
-      messages: [USER_MESSAGE, _assistantWithTool(true)],
-      state: { preserved: true },
-    },
-  });
+test("Playground runtime resumes the current Pi action through ACP Step", async () => {
+  let playground = _playground({ operationId: "operation-1" });
   const calls: string[] = [];
-  const client = _client({
-    load: () => Promise.resolve(playground),
-    stepRun: (runId) => {
-      calls.push(`step:${runId}`);
-      return Promise.resolve({ runId });
-    },
-    streamRun: (runId) => _frames(_completed(runId)),
-  });
   const runtime = createPlaygroundThreadExecutionRuntime({
-    client,
+    client: _client({ load: () => Promise.resolve(playground) }),
     playgroundId: playground.id,
     getPlayground: () => playground,
     onPlayground: (next) => {
       playground = next;
     },
+    openAcpConnection: () =>
+      Promise.resolve(
+        _connection((method) => {
+          calls.push(method);
+          return Promise.resolve(_debug("model"));
+        })
+      ),
   });
 
   for await (const event of runtime.execute({
     thread: playgroundToEditorThread(playground),
-    fromMessageId: "assistant-1",
     autoRunTools: false,
     reactLoop: false,
     signal: new AbortController().signal,
   })) {
+    // Consume the editor projection.
     void event;
   }
 
-  expect(calls).toEqual(["step:run-1"]);
+  expect(calls).toEqual([
+    LLM_SPACE_ACP_METHODS.snapshot,
+    LLM_SPACE_ACP_METHODS.step,
+  ]);
 });
 
-test("Playground runtime reports a failed durable Run to the editor", () => {
-  let playground = _playground({ activeRunId: "run-1" });
-  const failedRun: Run = {
-    ..._run("run-1", "failed"),
-    error: { code: "model_failed", message: "Model request failed." },
-  };
+test("Playground runtime reports an ACP prompt failure to the editor", () => {
+  let playground = _playground();
   const runtime = createPlaygroundThreadExecutionRuntime({
     client: _client({
-      load: () => Promise.resolve(playground),
-      stepRun: (runId) => Promise.resolve({ runId }),
-      streamRun: () =>
-        _frames([
-          {
-            type: "snapshot",
-            cursor: 0,
-            run: failedRun,
-            outputs: [],
-            headCheckpointId: "checkpoint-2",
-          },
-        ]),
+      save: (_id, document) => {
+        playground = { ...playground, ...document, dirty: true };
+        return Promise.resolve(playground);
+      },
     }),
     playgroundId: playground.id,
     getPlayground: () => playground,
     onPlayground: (next) => {
       playground = next;
     },
+    openAcpConnection: ({ onSessionUpdate }) =>
+      Promise.resolve(
+        _connection((method) => {
+          if (method !== methods.agent.session.prompt) {
+            throw new Error(`Unexpected ACP method: ${method}`);
+          }
+          onSessionUpdate?.({
+            sessionId: playground.sessionId,
+            update: {
+              sessionUpdate: "state_update",
+              state: "idle",
+              stopReason: "error",
+              _meta: {
+                "llm-space.dev": {
+                  status: "failed",
+                  error: "Model request failed.",
+                },
+              },
+            },
+          });
+          return Promise.resolve({});
+        })
+      ),
   });
 
-  return expect(
+  expect(
     (async () => {
-      await Promise.resolve();
       for await (const event of runtime.execute({
         thread: playgroundToEditorThread(playground),
         fromMessageId: USER_MESSAGE.id,
@@ -167,31 +185,28 @@ test("Playground runtime reports a failed durable Run to the editor", () => {
         reactLoop: false,
         signal: new AbortController().signal,
       })) {
+        // Consume until the ACP failure rejects.
         void event;
       }
     })()
   ).rejects.toThrow("Model request failed.");
 });
 
+/** Creates a Pi-backed Playground projection without Engine compatibility fields. */
 function _playground(overrides: Partial<Playground> = {}): Playground {
   return {
     schemaVersion: 1,
     id: "playground-1",
     title: "Example",
-    engineThreadId: "thread-1",
-    headCheckpointId: "checkpoint-1",
+    sessionId: "session-1",
+    lane: "main",
+    leafId: null,
+    runtimeFormatVersion: 1,
     agentSpec: {
       schemaVersion: 1,
       model: { provider: "test", id: "model" },
       instructions: ["Answer."],
-      tools: [
-        {
-          type: "function",
-          name: "lookup",
-          description: "Lookup",
-          parameters: {},
-        },
-      ],
+      tools: [],
     },
     conversation: { messages: [USER_MESSAGE], state: { preserved: true } },
     dirty: false,
@@ -201,6 +216,7 @@ function _playground(overrides: Partial<Playground> = {}): Playground {
   };
 }
 
+/** Builds one assistant projection with a pending or committed tool result. */
 function _assistantWithTool(completed: boolean): AssistantMessage {
   return {
     id: "assistant-1",
@@ -223,150 +239,73 @@ function _assistantWithTool(completed: boolean): AssistantMessage {
   };
 }
 
-function _run(runId: string, status: Run["status"]): Run {
+/** Supplies a minimal debugger response for adapter control-flow tests. */
+function _debug(kind: "model" | "tool"): PiAcpDebugResponse {
   return {
-    schemaVersion: 1,
-    id: runId,
-    threadId: "thread-1",
-    operationId: "operation-1",
-    inputMessages: [USER_MESSAGE],
-    baseCheckpointId: "checkpoint-1",
-    inputCheckpointId: "checkpoint-2",
-    agentSnapshot: {
-      schemaVersion: 1,
-      agentId: "playground:playground-1",
-      generationId: "playground:playground-1",
-      model: "test/model",
-      instructions: ["Answer."],
-      tools: [],
+    fromCursor: 0,
+    cursor: 1,
+    updates: [],
+    snapshot: {
+      cursor: 1,
+      sessionId: "session-1",
+      lane: "main",
+      operationId: "operation-1",
+      status: "paused",
+      messageEntries: [],
+      messages: [],
+      leafId: "leaf-1",
+      nextAction:
+        kind === "model"
+          ? { id: "operation-1:model:2:1", kind: "model", attempt: 1 }
+          : {
+              id: "operation-1:tool:assistant-1:0",
+              kind: "tool",
+              assistantEntryId: "assistant-1",
+              toolIndex: 0,
+              toolCallId: "call-1",
+              toolName: "lookup",
+            },
     },
-    control: { mode: "step" },
-    status,
-    createdAt: 1,
   };
 }
 
-function _modelPause(runId: string): RunFrame[] {
-  return [
-    {
-      type: "snapshot",
-      cursor: 0,
-      run: _run(runId, "running"),
-      outputs: [],
-      headCheckpointId: "checkpoint-2",
-    },
-    {
-      type: "event",
-      cursor: 1,
-      event: {
-        type: "message.completed",
-        message: _assistantWithTool(false),
-      },
-    },
-    {
-      type: "event",
-      cursor: 2,
-      event: {
-        type: "checkpoint.committed",
-        checkpointId: "checkpoint-3",
-        reason: "step",
-      },
-    },
-    {
-      type: "event",
-      cursor: 3,
-      event: {
-        type: "run.updated",
-        run: {
-          ..._run(runId, "paused"),
-          pause: {
-            reason: "step.completed",
-            step: "model.completed",
-            checkpointId: "checkpoint-3",
-            pausedAt: 2,
-          },
-        },
-      },
-    },
-  ];
-}
-
-function _toolPause(runId: string): RunFrame[] {
-  return [
-    {
-      type: "snapshot",
-      cursor: 3,
-      run: _run(runId, "running"),
-      outputs: [],
-      headCheckpointId: "checkpoint-3",
-    },
-    {
-      type: "event",
-      cursor: 4,
-      event: {
-        type: "tool.completed",
-        messageId: "assistant-1",
-        toolCallId: "call-1",
-        message: _assistantWithTool(true),
-      },
-    },
-    {
-      type: "event",
-      cursor: 5,
-      event: {
-        type: "checkpoint.committed",
-        checkpointId: "checkpoint-4",
-        reason: "step",
-      },
-    },
-    {
-      type: "event",
-      cursor: 6,
-      event: {
-        type: "run.updated",
-        run: {
-          ..._run(runId, "paused"),
-          pause: {
-            reason: "step.completed",
-            step: "tool.completed",
-            checkpointId: "checkpoint-4",
-            pausedAt: 3,
-          },
-        },
-      },
-    },
-  ];
-}
-
-function _completed(runId: string): RunFrame[] {
-  return [
-    {
-      type: "snapshot",
-      cursor: 0,
-      run: _run(runId, "completed"),
-      outputs: [],
-      headCheckpointId: "checkpoint-4",
-    },
-  ];
-}
-
-async function* _frames(frames: readonly RunFrame[]): AsyncIterable<RunFrame> {
-  await Promise.resolve();
-  for (const frame of frames) yield frame;
-}
-
-function _client(overrides: Partial<PlaygroundClient>): PlaygroundClient {
-  const unsupported = () => new Error("Unexpected PlaygroundClient call.");
+/** Creates a structural ACP connection whose AgentContext is test-controlled. */
+function _connection(
+  request: (method: string, params: unknown) => unknown
+): ClientConnection {
+  const controller = new AbortController();
   return {
-    list: () => Promise.reject(unsupported()),
-    create: () => Promise.reject(unsupported()),
-    load: () => Promise.reject(unsupported()),
-    save: () => Promise.reject(unsupported()),
-    run: () => Promise.reject(unsupported()),
-    stepRun: () => Promise.reject(unsupported()),
-    continueRun: () => Promise.reject(unsupported()),
-    cancelRun: () => Promise.reject(unsupported()),
-    streamRun: () => _frames([]),
+    signal: controller.signal,
+    closed: Promise.resolve(),
+    close: () => controller.abort(),
+    agent: {
+      request: (method: string, params: unknown) =>
+        Promise.resolve(request(method, params)),
+      notify: () => Promise.resolve(),
+    },
+  } as unknown as ClientConnection;
+}
+
+/** Emits the standard ACP state transition used after an accepted prompt. */
+function _stoppedUpdate(sessionId: string): UpdateSessionNotification {
+  return {
+    sessionId,
+    update: {
+      sessionUpdate: "state_update",
+      state: "requires_action",
+      _meta: { "llm-space.dev": { status: "paused" } },
+    },
+  };
+}
+
+/** Fills the metadata-only Playground client methods used by the adapter. */
+function _client(overrides: Partial<PlaygroundClient> = {}): PlaygroundClient {
+  const playground = _playground();
+  return {
+    list: () => Promise.resolve([playground]),
+    create: () => Promise.resolve(playground),
+    load: () => Promise.resolve(playground),
+    save: () => Promise.resolve(playground),
     ...overrides,
   };
 }

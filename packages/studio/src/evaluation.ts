@@ -17,7 +17,7 @@ export interface EvaluationCriterionScore {
 }
 
 export interface EvaluationRunScores {
-  readonly runId: string;
+  readonly operationId: string;
   readonly scores: readonly EvaluationCriterionScore[];
 }
 
@@ -28,8 +28,8 @@ interface EvaluationBase {
   readonly schemaVersion: 1;
   readonly id: string;
   readonly threadId: string;
-  readonly leftRunId: string;
-  readonly rightRunId: string;
+  readonly leftOperationId: string;
+  readonly rightOperationId: string;
   readonly verdict: EvaluationVerdict;
   readonly note?: string;
   readonly createdAt: number;

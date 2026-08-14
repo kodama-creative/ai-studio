@@ -18,8 +18,12 @@ export interface RuntimeBinding {
   systemPrompt: string;
   tools: {
     name: string;
+    description?: string;
+    inputSchema?: Record<string, unknown>;
+    outputSchema?: Record<string, unknown>;
     implementationId: string;
     replay: "never" | "safe";
+    hostBinding?: Record<string, unknown>;
   }[];
 }
 

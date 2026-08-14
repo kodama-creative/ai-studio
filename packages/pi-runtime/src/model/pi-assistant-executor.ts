@@ -21,6 +21,22 @@ export interface PiAssistantExecutorOptions {
     binding: RuntimeBinding
   ) => readonly Tool[] | Promise<readonly Tool[]>;
   readonly streamOptions?: SimpleStreamOptions;
+  /** Resolves request-local credentials without persisting them in bindings. */
+  readonly resolveConnection?: (
+    input: PiProviderConnectionInput
+  ) => PiProviderConnection | Promise<PiProviderConnection>;
+}
+
+export interface PiProviderConnectionInput {
+  readonly operationId: string;
+  readonly providerId: string;
+  readonly signal: AbortSignal;
+}
+
+export interface PiProviderConnection {
+  readonly apiKey?: string;
+  readonly baseUrl?: string;
+  readonly headers?: Record<string, string>;
 }
 
 /** Executes one Pi provider stream directly, without `Agent` or `agentLoopContinue`. */
@@ -48,8 +64,17 @@ export class PiAssistantExecutor implements AssistantExecutor {
     const models = await this._models();
     const model = this._resolveModel(models, input.binding);
     const tools = await this._options.resolveTools?.(input.binding);
+    const connection = await this._options.resolveConnection?.({
+      operationId: input.operationId,
+      providerId: model.provider,
+      signal: input.signal,
+    });
+    const requestModel =
+      connection?.baseUrl === undefined
+        ? model
+        : { ...model, baseUrl: connection.baseUrl };
     const stream = models.streamSimple(
-      model,
+      requestModel,
       {
         systemPrompt: input.binding.systemPrompt,
         messages: convertToLlm([...input.messages]),
@@ -58,6 +83,17 @@ export class PiAssistantExecutor implements AssistantExecutor {
       {
         ...this._options.streamOptions,
         signal: input.signal,
+        ...(connection?.apiKey === undefined
+          ? {}
+          : { apiKey: connection.apiKey }),
+        ...(connection?.headers === undefined
+          ? {}
+          : {
+              headers: {
+                ...connection.headers,
+                ...this._options.streamOptions?.headers,
+              },
+            }),
         ...(_reasoning(input.binding.model.thinkingLevel) === undefined
           ? {}
           : { reasoning: _reasoning(input.binding.model.thinkingLevel) }),

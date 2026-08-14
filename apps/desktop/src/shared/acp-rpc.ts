@@ -1,0 +1,30 @@
+import type { AnyWireMessage } from "@llm-space/acp";
+
+import { defineRpcNamespace } from "./namespaced-rpc";
+
+/** Electrobun envelope carrying an otherwise unchanged ACP v2 wire stream. */
+export interface AcpRpc {
+  readonly requests: AcpRequests;
+  readonly streams: AcpStreams;
+  readonly events: Record<never, never>;
+}
+
+export interface AcpRequests {
+  open(connectionId: string): Promise<void>;
+  send(connectionId: string, message: AnyWireMessage): Promise<void>;
+  close(connectionId: string): Promise<void>;
+}
+
+export interface AcpStreams {
+  receive(
+    connectionId: string,
+    options?: { readonly signal?: AbortSignal }
+  ): AsyncIterable<AnyWireMessage>;
+}
+
+export type AcpClient = AcpRequests & AcpStreams;
+
+export const ACP_RPC = defineRpcNamespace<AcpRpc>("acp", {
+  streams: ["receive"],
+  events: [],
+});

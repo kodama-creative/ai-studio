@@ -723,6 +723,10 @@ disconnect tests pass.
 
 #### Phase 4: Studio cutover
 
+Status: implemented. Playground and Project Experiment execution now use Pi
+Session identity and official ACP v2 semantics over Electrobun; Studio keeps
+only product metadata, Drafts, Pi references, evaluations, and command receipts.
+
 - Replace new Playground/Experiment execution references with Pi identity.
 - Adapt Draft commit, run history, evaluation targets, and UI events.
 - Ship Step/Continue/Abort against the new facade.
@@ -733,6 +737,8 @@ Exit criterion: new Studio objects have no Engine Thread, Run, or Checkpoint
 writes and recover entirely from Pi Session.
 
 #### Phase 5: App/CLI cutover and retirement
+
+Status: pending.
 
 - Replace App model Session projection with Pi-backed facade.
 - Route CLI through the shared runtime, expose ACP v2 over standard NDJSON

@@ -342,8 +342,8 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
             name: project.name,
             rootPath: project.rootPath,
             agentRoot: project.agentRoot,
-            agentId: projectStudio.agent.agentId,
-            generationId: projectStudio.agent.generationId,
+            agentId: projectStudio.agent.agentSpecId,
+            generationId: projectStudio.agent.sourceRevision,
           };
           scope.load(projectWindowIdentityModule(projectView));
           const closed = new Set<() => void>();

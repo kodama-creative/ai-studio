@@ -91,28 +91,6 @@ export class ProjectRpcServer
     return this._studio.saveDocument(threadId, document);
   }
 
-  run(
-    threadId: string,
-    input: Parameters<Studio["run"]>[1]
-  ): ReturnType<Studio["run"]> {
-    return this._studio.run(threadId, input);
-  }
-
-  stepRun(
-    runId: string,
-    input: Parameters<Studio["stepRun"]>[1] = {}
-  ): ReturnType<Studio["stepRun"]> {
-    return this._studio.stepRun(runId, input);
-  }
-
-  continueRun(runId: string): ReturnType<Studio["continueRun"]> {
-    return this._studio.continueRun(runId);
-  }
-
-  cancelRun(runId: string): ReturnType<Studio["cancelRun"]> {
-    return this._studio.cancelRun(runId);
-  }
-
   events(
     threadId: string,
     cursor: Parameters<Studio["events"]>[1] = {}

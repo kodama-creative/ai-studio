@@ -1,4 +1,4 @@
-import { createPiRunExecutor } from "@llm-space/engine-pi";
+import { createPiAcpAgent } from "@llm-space/acp";
 import type { ModelManager } from "@llm-space/runtime/models";
 import type { RuntimeRouter } from "@llm-space/runtime/runtime";
 import { createStudio, type Studio } from "@llm-space/studio/server";
@@ -9,12 +9,14 @@ import {
   type ServiceIdentifier,
 } from "inversify";
 
+import desktopPackage from "../../../package.json";
 import type { AgentProjectView } from "../../shared/agent-project";
 import { DesktopPlaygroundApplicationImpl } from "../application/playground-application";
 import { createPlaygroundHost } from "../playgrounds/playground-host";
 import type { AgentProject } from "../projects/agent-project";
 import { ProjectSandbox } from "../projects/project-sandbox";
 import type { MainWindowRPCController } from "../rpc";
+import { AcpRpcServer } from "../rpc/acp-rpc-server";
 import { PlaygroundRpcServer } from "../rpc/playground-rpc-server";
 import { ProjectRpcServer } from "../rpc/project-rpc-server";
 
@@ -27,8 +29,8 @@ import type { RpcRegistry } from "./rpc-registry";
 import {
   PROCESS_TOKENS,
   PROJECT_WINDOW_TOKENS,
-  type DesktopToken,
   WINDOW_TOKENS,
+  type DesktopToken,
 } from "./tokens";
 
 type TokenValue<T> = T extends DesktopToken<infer TValue> ? TValue : never;
@@ -58,11 +60,9 @@ export function processModule(services: ProcessServices): ContainerModule {
         );
         return createPlaygroundHost({
           homePath: context.get(PROCESS_TOKENS.homePath),
-          runExecutor: createPiRunExecutor({
-            models: () => modelManager.getAvailableModels(),
-            resolveConnection: ({ providerId }) =>
-              modelManager.resolveConnection({ providerId }),
-          }),
+          models: () => modelManager.getAvailableModels(),
+          resolveConnection: ({ providerId }) =>
+            modelManager.resolveConnection({ providerId }),
           runtime: runtimeRouter.get("local"),
         });
       })
@@ -138,12 +138,21 @@ export function projectWindowIdentityModule(
 
 class PlaygroundContribution implements RpcContributionApi {
   constructor(
-    private readonly _application: DesktopPlaygroundApplicationImpl
+    private readonly _application: DesktopPlaygroundApplicationImpl,
+    private readonly _host: ReturnType<typeof createPlaygroundHost>
   ) {}
 
   /** Register durable Playground operations for the Main window. */
   registerRpc(rpc: RpcRegistry): void {
     rpc.registerServer(new PlaygroundRpcServer(this._application));
+    rpc.registerServer(
+      new AcpRpcServer(
+        createPiAcpAgent({
+          backend: this._host.acpBackend,
+          version: desktopPackage.version,
+        })
+      )
+    );
   }
 }
 
@@ -153,6 +162,14 @@ class ProjectContribution implements RpcContributionApi {
   /** Register Studio operations for one Agent Project window. */
   registerRpc(rpc: RpcRegistry): void {
     rpc.registerServer(new ProjectRpcServer(this._studio));
+    rpc.registerServer(
+      new AcpRpcServer(
+        createPiAcpAgent({
+          backend: this._studio.acpBackend,
+          version: desktopPackage.version,
+        })
+      )
+    );
   }
 }
 
@@ -165,7 +182,8 @@ export function playgroundContributionsModule(
       .toDynamicValue(
         () =>
           new PlaygroundContribution(
-            scope.get(PROCESS_TOKENS.playgroundApplication)
+            scope.get(PROCESS_TOKENS.playgroundApplication),
+            scope.get(PROCESS_TOKENS.playgroundHost)
           )
       )
       .inSingletonScope();

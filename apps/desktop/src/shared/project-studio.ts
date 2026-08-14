@@ -2,10 +2,7 @@ import type {
   ProjectSourceNode,
   ProjectSourceSnapshot,
   StudioEventCursor,
-  StudioRunReceipt,
   StudioRunHistoryEntry,
-  StudioRunInput,
-  StudioStepRunInput,
   StudioThread,
   StudioThreadDocument,
   StudioThreadEvent,
@@ -41,7 +38,7 @@ export interface ProjectStudioRequests {
   ): Promise<StudioEvaluationMetadata>;
   forkThread(
     threadId: string,
-    input?: { readonly checkpointId?: string }
+    input?: { readonly entryId?: string }
   ): Promise<StudioThread>;
   createThread(input?: { readonly title?: string }): Promise<StudioThread>;
   loadThread(threadId: string): Promise<StudioThread | undefined>;
@@ -49,10 +46,6 @@ export interface ProjectStudioRequests {
     threadId: string,
     document: StudioThreadDocument
   ): Promise<StudioThread>;
-  run(threadId: string, input: StudioRunInput): Promise<StudioRunReceipt>;
-  stepRun(runId: string, input?: StudioStepRunInput): Promise<StudioRunReceipt>;
-  continueRun(runId: string): Promise<StudioRunReceipt>;
-  cancelRun(runId: string): Promise<void>;
 }
 
 export interface ProjectStudioStreams {

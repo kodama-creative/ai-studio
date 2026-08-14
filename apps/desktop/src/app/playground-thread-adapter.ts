@@ -1,5 +1,15 @@
-import type { AssistantMessage, Thread } from "@llm-space/core";
-import type { Run } from "@llm-space/engine";
+import {
+  LLM_SPACE_ACP_METHODS,
+  methods,
+  type ClientConnection,
+  type ContentBlock,
+  type PiAcpDebugResponse,
+  type PiAcpSnapshotRequest,
+  type PiAcpStepRequest,
+  type PiAcpContinueRequest,
+  type UpdateSessionNotification,
+} from "@llm-space/acp";
+import type { Message, Thread } from "@llm-space/core";
 import {
   playgroundToThread,
   threadToPlaygroundDocument,
@@ -8,6 +18,7 @@ import {
 } from "@llm-space/studio";
 import type { ExternalThreadExecutionRuntime } from "@llm-space/ui/components/thread-playground";
 
+import type { OpenDesktopAcpConnectionOptions } from "@/client/acp-client";
 import type { PlaygroundClient } from "@/client/playground-client";
 
 export interface PlaygroundThreadRuntimeOptions {
@@ -17,30 +28,30 @@ export interface PlaygroundThreadRuntimeOptions {
   readonly onPlayground: (playground: Playground) => void;
   readonly beforeExecute?: () => void | Promise<void>;
   readonly onSettled?: () => void | Promise<void>;
+  readonly openAcpConnection?: (
+    options: OpenDesktopAcpConnectionOptions
+  ) => Promise<ClientConnection>;
 }
 
-/** Present a durable Studio Playground through the existing editor model. */
+/** Presents a durable Studio Playground through the editor-only Thread model. */
 export function playgroundToEditorThread(playground: Playground): Thread {
   return playgroundToThread(playground);
 }
 
-/**
- * Adapt the editor's Run controls to one durable Engine Run.
- *
- * Step mode executes one model step and optionally all tool calls produced by
- * that model step. ReAct mode delegates the complete loop to Engine Continue.
- * Every follow-up command resumes the same active `runId`.
- */
+/** Adapts editor controls to ACP prompt, Step, Continue, and Cancel methods. */
 export function createPlaygroundThreadExecutionRuntime(
   options: PlaygroundThreadRuntimeOptions
 ): ExternalThreadExecutionRuntime {
   return {
     async *execute(request) {
       await options.beforeExecute?.();
-      let runId: string | undefined;
+      const updates = new SessionUpdateWaiter();
+      const connection = await (
+        options.openAcpConnection ?? _openDesktopAcpConnection
+      )({ onSessionUpdate: (update) => updates.accept(update) });
+      let playground = options.getPlayground();
       try {
-        let playground = options.getPlayground();
-        if (playground.activeRunId === undefined) {
+        if (playground.operationId === undefined) {
           playground = await options.client.save(
             options.playgroundId,
             _document(request.thread, playground)
@@ -50,45 +61,59 @@ export function createPlaygroundThreadExecutionRuntime(
             request.fromMessageId ??
             request.thread.context?.messages?.at(-1)?.id;
           if (fromMessageId === undefined) {
-            throw new Error("A Playground Run requires at least one Message.");
+            throw new Error(
+              "A Playground operation requires at least one Message."
+            );
           }
-          const receipt = await options.client.run(options.playgroundId, {
-            fromMessageId,
-            mode: request.reactLoop ? "continue" : "step",
+          const message = request.thread.context?.messages?.find(
+            (candidate) => candidate.id === fromMessageId
+          );
+          if (message?.role !== "user") {
+            throw new Error(
+              `Playground operation input "${fromMessageId}" must be a user Message.`
+            );
+          }
+          const stopped = updates.waitForStop(playground.sessionId);
+          await connection.agent.request(methods.agent.session.prompt, {
+            sessionId: playground.sessionId,
+            prompt: _promptContent(message),
+            _meta: {
+              "llm-space.dev": {
+                fromMessageId,
+                mode: request.reactLoop ? "continue" : "step",
+              },
+            },
           });
-          runId = receipt.runId;
+          await stopped;
+        } else if (request.reactLoop) {
+          const snapshot = await _snapshot(connection, playground.sessionId);
+          await connection.agent.request<
+            PiAcpDebugResponse,
+            PiAcpContinueRequest
+          >(LLM_SPACE_ACP_METHODS.continue, {
+            sessionId: playground.sessionId,
+            afterSeq: snapshot.cursor,
+            commandId: crypto.randomUUID(),
+          });
         } else {
-          runId = playground.activeRunId;
-          if (request.reactLoop) {
-            await options.client.continueRun(runId);
-          } else {
-            await options.client.stepRun(runId);
-          }
+          await _stepCurrent(connection, playground.sessionId);
         }
 
-        let attempt = yield* _streamAttempt(options, runId, request.signal);
-        if (
-          !request.reactLoop &&
-          request.autoRunTools &&
-          attempt.status === "paused" &&
-          attempt.pause?.step === "model.completed"
-        ) {
-          // A Step command intentionally executes one tool at a time. Select
-          // each pending call explicitly so the UI's "Auto-call tools" mode
-          // finishes this tool phase without advancing to the next model turn.
+        if (!request.reactLoop && request.autoRunTools) {
           while (true) {
-            playground = options.getPlayground();
-            const call = _pendingToolCalls(playground)[0];
-            if (call === undefined) break;
-            await options.client.stepRun(runId, { toolCallId: call.id });
-            attempt = yield* _streamAttempt(options, runId, request.signal);
-            if (attempt.status !== "paused") break;
+            const snapshot = await _snapshot(connection, playground.sessionId);
+            if (snapshot.snapshot.nextAction?.kind !== "tool") break;
+            await _stepCurrent(connection, playground.sessionId, snapshot);
           }
         }
+        yield* _refresh(options);
       } finally {
-        if (request.signal.aborted && runId !== undefined) {
-          await options.client.cancelRun(runId);
+        if (request.signal.aborted) {
+          await connection.agent.notify(methods.agent.session.cancel, {
+            sessionId: playground.sessionId,
+          });
         }
+        connection.close();
         await options.onSettled?.();
       }
     },
@@ -96,189 +121,163 @@ export function createPlaygroundThreadExecutionRuntime(
     async *executeToolCall(request) {
       await options.beforeExecute?.();
       const playground = options.getPlayground();
-      const runId = playground.activeRunId;
-      if (runId === undefined) {
-        throw new Error("The tool call does not belong to an active Run.");
-      }
-      const ownsCall = playground.conversation.messages.some(
-        (message) =>
-          message.id === request.messageId &&
-          message.role === "assistant" &&
-          message.toolCalls?.some(
-            (call) =>
-              call.id === request.toolCallId && call.output === undefined
-          )
-      );
-      if (!ownsCall) {
+      if (playground.operationId === undefined) {
         throw new Error(
-          `Tool call "${request.toolCallId}" is not pending on the active Playground Run.`
+          "The tool call does not belong to an active operation."
         );
       }
+      const connection = await (
+        options.openAcpConnection ?? _openDesktopAcpConnection
+      )({});
       try {
-        await options.client.stepRun(runId, {
-          toolCallId: request.toolCallId,
-        });
-        yield* _streamAttempt(options, runId, request.signal);
+        const snapshot = await _snapshot(connection, playground.sessionId);
+        const action = snapshot.snapshot.nextAction;
+        if (
+          action?.kind !== "tool" ||
+          action.toolCallId !== request.toolCallId
+        ) {
+          throw new Error(
+            `Tool call "${request.toolCallId}" is not the current Pi action.`
+          );
+        }
+        yield { type: "tool.started", toolCallId: request.toolCallId };
+        await _stepCurrent(connection, playground.sessionId, snapshot);
+        yield { type: "tool.completed", toolCallId: request.toolCallId };
+        yield* _refresh(options);
       } finally {
-        if (request.signal.aborted) await options.client.cancelRun(runId);
+        if (request.signal.aborted) {
+          await connection.agent.notify(methods.agent.session.cancel, {
+            sessionId: playground.sessionId,
+          });
+        }
+        connection.close();
         await options.onSettled?.();
       }
     },
   };
 }
 
-/** Preserve Agent state because the editor Thread intentionally does not own it. */
+/** Preserves Studio-owned state while splitting the editor document. */
 function _document(
   thread: Thread,
   playground: Playground
 ): SavePlaygroundInput {
-  const document = threadToPlaygroundDocument(
-    thread,
-    playground.conversation.state
+  return threadToPlaygroundDocument(thread, playground.conversation.state);
+}
+
+/** Converts the selected editor user message to standard ACP content blocks. */
+function _promptContent(
+  message: Extract<Message, { role: "user" }>
+): ContentBlock[] {
+  const content = message.content.flatMap((item) =>
+    item.type === "text" ? [{ type: "text" as const, text: item.text }] : []
   );
-  return {
-    ...document,
-  };
-}
-
-async function* _streamAttempt(
-  options: PlaygroundThreadRuntimeOptions,
-  runId: string,
-  signal: AbortSignal
-): AsyncGenerator<
-  | { readonly type: "thread.updated"; readonly thread: Thread }
-  | {
-      readonly type: "message.delta";
-      readonly message: AssistantMessage;
-    },
-  Run
-> {
-  const streaming = new Map<string, AssistantMessage>();
-  for await (const frame of options.client.streamRun(runId, { signal })) {
-    if (frame.type === "snapshot") {
-      for (const output of frame.outputs) {
-        streaming.set(output.message.id, structuredClone(output.message));
-        if (output.status === "streaming") {
-          yield { type: "message.delta", message: output.message };
-        }
-      }
-      if (_settled(frame.run)) {
-        yield* _refresh(options);
-        return _terminalResult(frame.run);
-      }
-      continue;
-    }
-    const event = frame.event;
-    if (event.type === "message.delta") {
-      const current = _streamingMessage(streaming, event.messageId);
-      const next = {
-        ...current,
-        content: [
-          { type: "text" as const, text: _text(current) + event.delta },
-        ],
-      };
-      streaming.set(event.messageId, next);
-      yield { type: "message.delta", message: next };
-    } else if (event.type === "thinking.delta") {
-      const current = _streamingMessage(streaming, event.messageId);
-      const next = {
-        ...current,
-        thinking: `${current.thinking ?? ""}${event.delta}`,
-      };
-      streaming.set(event.messageId, next);
-      yield { type: "message.delta", message: next };
-    } else if (event.type === "message.completed") {
-      streaming.set(event.message.id, structuredClone(event.message));
-      yield {
-        type: "thread.updated",
-        thread: _withAssistant(options.getPlayground(), event.message),
-      };
-    } else if (
-      event.type === "tool.updated" ||
-      event.type === "tool.completed"
-    ) {
-      streaming.set(event.message.id, structuredClone(event.message));
-      yield {
-        type: "thread.updated",
-        thread: _withAssistant(options.getPlayground(), event.message),
-      };
-    } else if (event.type === "checkpoint.committed") {
-      yield* _refresh(options);
-    } else if (event.type === "run.updated" && _settled(event.run)) {
-      yield* _refresh(options);
-      return _terminalResult(event.run);
-    }
+  if (content.length === 0) {
+    throw new Error("ACP Playground prompts currently require text content.");
   }
-  throw new Error(`Run "${runId}" stream ended before it settled.`);
+  return content;
 }
 
-/** Failed/interrupted Runs are terminal in storage but errors in the UI command. */
-function _terminalResult(run: Run): Run {
-  if (run.status === "failed" || run.status === "interrupted") {
-    throw new Error(run.error?.message ?? `Run ended as ${run.status}.`);
+/** Reads the committed debugger projection at the current Pi cursor. */
+function _snapshot(
+  connection: ClientConnection,
+  sessionId: string
+): Promise<PiAcpDebugResponse> {
+  return connection.agent.request<PiAcpDebugResponse, PiAcpSnapshotRequest>(
+    LLM_SPACE_ACP_METHODS.snapshot,
+    { sessionId }
+  );
+}
+
+/** Releases exactly the current stable semantic action through ACP. */
+async function _stepCurrent(
+  connection: ClientConnection,
+  sessionId: string,
+  known?: PiAcpDebugResponse
+): Promise<PiAcpDebugResponse> {
+  const snapshot = known ?? (await _snapshot(connection, sessionId));
+  const action = snapshot.snapshot.nextAction;
+  if (action === undefined) {
+    throw new Error(`Pi Session "${sessionId}" has no action to Step.`);
   }
-  return run;
+  return connection.agent.request<PiAcpDebugResponse, PiAcpStepRequest>(
+    LLM_SPACE_ACP_METHODS.step,
+    {
+      sessionId,
+      afterSeq: snapshot.cursor,
+      commandId: crypto.randomUUID(),
+      expectedActionId: action.id,
+      kind: action.kind,
+    }
+  );
 }
 
-async function* _refresh(
-  options: PlaygroundThreadRuntimeOptions
-): AsyncGenerator<{
-  readonly type: "thread.updated";
-  readonly thread: Thread;
-}> {
+/** Refreshes Studio metadata after ACP has committed Pi state. */
+async function* _refresh(options: PlaygroundThreadRuntimeOptions) {
   const latest = await options.client.load(options.playgroundId);
   if (latest === undefined) {
     throw new Error(`Playground "${options.playgroundId}" was not found.`);
   }
   options.onPlayground(latest);
-  yield { type: "thread.updated", thread: playgroundToEditorThread(latest) };
-}
-
-function _withAssistant(
-  playground: Playground,
-  assistant: AssistantMessage
-): Thread {
-  const thread = playgroundToEditorThread(playground);
-  const messages = [...(thread.context?.messages ?? [])];
-  const index = messages.findIndex((message) => message.id === assistant.id);
-  if (index === -1) messages.push(structuredClone(assistant));
-  else messages[index] = structuredClone(assistant);
-  return {
-    ...thread,
-    context: { ...thread.context, messages },
+  yield {
+    type: "thread.updated" as const,
+    thread: playgroundToEditorThread(latest),
   };
 }
 
-function _pendingToolCalls(playground: Playground) {
-  const last = playground.conversation.messages.at(-1);
-  return last?.role === "assistant"
-    ? (last.toolCalls ?? []).filter((call) => call.output === undefined)
-    : [];
-}
+/** Resolves the accepted ACP prompt when its final state notification arrives. */
+class SessionUpdateWaiter {
+  private readonly _waiters = new Map<
+    string,
+    { resolve(): void; reject(error: Error): void }
+  >();
 
-function _streamingMessage(
-  messages: Map<string, AssistantMessage>,
-  messageId: string
-): AssistantMessage {
-  return (
-    messages.get(messageId) ?? {
-      id: messageId,
-      role: "assistant",
-      content: [],
+  /** Waits for the next non-running state update for one ACP Session. */
+  waitForStop(sessionId: string): Promise<void> {
+    if (this._waiters.has(sessionId)) {
+      throw new Error(`ACP Session "${sessionId}" already has a waiter.`);
     }
-  );
+    return new Promise<void>((resolve, reject) => {
+      this._waiters.set(sessionId, { resolve, reject });
+    });
+  }
+
+  /** Consumes only state updates; transcript updates are rendered after refresh. */
+  accept(notification: UpdateSessionNotification): void {
+    const waiter = this._waiters.get(notification.sessionId);
+    const update = notification.update;
+    if (
+      waiter === undefined ||
+      update.sessionUpdate !== "state_update" ||
+      update.state === "running"
+    ) {
+      return;
+    }
+    this._waiters.delete(notification.sessionId);
+    const metadata = _isRecord(update._meta)
+      ? update._meta["llm-space.dev"]
+      : undefined;
+    if (
+      _isRecord(metadata) &&
+      metadata.status === "failed" &&
+      typeof metadata.error === "string"
+    ) {
+      waiter.reject(new Error(metadata.error));
+    } else {
+      waiter.resolve();
+    }
+  }
 }
 
-function _text(message: AssistantMessage): string {
-  return message.content.map((item) => item.text).join("");
+/** Narrows ACP implementation metadata before reading failure details. */
+function _isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function _settled(run: Run): boolean {
-  return (
-    run.status === "paused" ||
-    run.status === "completed" ||
-    run.status === "failed" ||
-    run.status === "cancelled" ||
-    run.status === "interrupted"
-  );
+/** Loads the Electrobun transport only when production execution actually starts. */
+async function _openDesktopAcpConnection(
+  options: OpenDesktopAcpConnectionOptions
+): Promise<ClientConnection> {
+  const { openDesktopAcpConnection } = await import("@/client/acp-client");
+  return openDesktopAcpConnection(options);
 }

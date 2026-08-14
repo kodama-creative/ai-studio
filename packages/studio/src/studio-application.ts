@@ -1,12 +1,9 @@
-import type { Message } from "@llm-space/core";
 import type {
-  AgentEngine,
-  AgentSnapshot,
-  ExecutableAgent,
-  Run,
-  ThreadCheckpoint as EngineCheckpoint,
-  ThreadState,
-} from "@llm-space/engine";
+  PiOperationSnapshot,
+  PiSessionSnapshot,
+  RuntimeBinding,
+  StudioPiSessionRuntime,
+} from "@llm-space/pi-runtime";
 
 import type {
   StudioEventCursor,
@@ -19,7 +16,6 @@ import type {
   StudioThreadDocument,
   StudioThreadEvent,
   StudioThreadEventData,
-  ThreadCheckpoint,
 } from "./domain";
 import type {
   Evaluation,
@@ -27,23 +23,34 @@ import type {
   StudioEvaluationMetadata,
   StudioEvaluationMetadataInput,
 } from "./evaluation";
+import {
+  STUDIO_PI_LANE,
+  STUDIO_PI_RUNTIME_FORMAT_VERSION,
+  type StudioAgentSnapshot,
+  type StudioConversation,
+  type StudioExecutableAgent,
+  type StudioOperationReference,
+} from "./pi-domain";
+import {
+  coreMessagesToPi,
+  piEntriesToCoreMessages,
+} from "./pi-message-projection";
 import type { StudioStore } from "./storage";
 
 export interface CreateStudioApplicationOptions {
-  readonly engine: AgentEngine;
+  readonly runtime: StudioPiSessionRuntime;
   readonly store: StudioStore;
-  /** Load the current project source for each newly requested Studio Run. */
-  readonly resolveCurrentAgent: () => Promise<ExecutableAgent>;
+  /** Loads current project source for every newly admitted operation. */
+  readonly resolveCurrentAgent: () => Promise<StudioExecutableAgent>;
   readonly clock?: () => number;
   readonly generateId?: (prefix: string) => string;
 }
 
 export interface CreateStudioThreadInput {
   readonly title?: string;
-  readonly agent: AgentSnapshot;
-  readonly conversation?: ThreadState;
+  readonly agent: StudioAgentSnapshot;
+  readonly conversation?: StudioConversation;
   readonly provenance?: StudioThread["provenance"];
-  readonly commitId?: string;
 }
 
 export interface StudioApplication {
@@ -53,7 +60,7 @@ export interface StudioApplication {
   listRunHistory(threadId: string): Promise<readonly StudioRunHistoryEntry[]>;
   saveRunHistory(
     threadId: string,
-    runIds: readonly string[]
+    operationIds: readonly string[]
   ): Promise<readonly StudioRunHistoryEntry[]>;
   listEvaluationMetadata(threadId: string): Promise<StudioEvaluationMetadata>;
   saveEvaluationMetadata(
@@ -62,22 +69,19 @@ export interface StudioApplication {
   ): Promise<StudioEvaluationMetadata>;
   forkThread(
     threadId: string,
-    input?: { readonly checkpointId?: string }
+    input?: { readonly entryId?: string }
   ): Promise<StudioThread>;
   saveDocument(
     threadId: string,
     document: StudioThreadDocument
   ): Promise<StudioThread>;
-  run(
-    threadId: string,
-    input: StudioRunInput
-  ): Promise<StudioRunReceipt>;
+  run(threadId: string, input: StudioRunInput): Promise<StudioRunReceipt>;
   stepRun(
-    runId: string,
-    input?: StudioStepRunInput
+    operationId: string,
+    input: StudioStepRunInput
   ): Promise<StudioRunReceipt>;
-  continueRun(runId: string): Promise<StudioRunReceipt>;
-  cancelRun(runId: string): Promise<void>;
+  continueRun(operationId: string): Promise<StudioRunReceipt>;
+  cancelRun(operationId: string): Promise<void>;
   events(
     threadId: string,
     cursor?: StudioEventCursor
@@ -94,38 +98,33 @@ export function createStudioApplication(
 class StudioApplicationImpl implements StudioApplication {
   private readonly _clock: () => number;
   private readonly _generateId: (prefix: string) => string;
-  private readonly _recovery: Promise<void>;
-  private readonly _projections = new Map<string, Promise<void>>();
   private readonly _waiters = new Map<string, Set<() => void>>();
   private _closed = false;
-  private _closePromise: Promise<void> | undefined;
 
   constructor(private readonly _options: CreateStudioApplicationOptions) {
     this._clock = _options.clock ?? Date.now;
     this._generateId =
       _options.generateId ??
       ((prefix) => `${prefix}_${crypto.randomUUID().replaceAll("-", "")}`);
-    this._recovery = Promise.resolve().then(() =>
-      this._recoverActiveProjections()
-    );
-    void this._recovery.catch(() => undefined);
   }
 
+  /** Creates one Project Experiment backed by one authoritative Pi Session. */
   async createThread(input: CreateStudioThreadInput): Promise<StudioThread> {
-    await this._recovery;
-    const engineThread = await this._options.engine.createThread({
-      ...(input.conversation === undefined
-        ? {}
-        : { initialState: input.conversation }),
-    });
+    this._requireOpen();
+    const session = await this._options.runtime.createSession();
     const now = this._clock();
     const experiment: StudioExperimentRecord = {
       schemaVersion: 1,
       id: this._generateId("experiment"),
-      engineThreadId: engineThread.id,
+      sessionId: session.sessionId,
+      lane: STUDIO_PI_LANE,
+      runtimeFormatVersion: STUDIO_PI_RUNTIME_FORMAT_VERSION,
       title: input.title?.trim() || "New Thread",
       agent: structuredClone(input.agent),
-      ...(input.commitId === undefined ? {} : { commitId: input.commitId }),
+      state: structuredClone(input.conversation?.state ?? {}),
+      ...(input.conversation === undefined
+        ? {}
+        : { draft: structuredClone(input.conversation) }),
       ...(input.provenance === undefined
         ? {}
         : { provenance: structuredClone(input.provenance) }),
@@ -133,11 +132,12 @@ class StudioApplicationImpl implements StudioApplication {
       updatedAt: now,
     };
     this._options.store.transaction((tx) => tx.insertExperiment(experiment));
-    return this._composeThread(experiment);
+    return this._composeThread(experiment, session);
   }
 
+  /** Rebuilds one Experiment view from Studio metadata and committed Pi entries. */
   async loadThread(threadId: string): Promise<StudioThread | undefined> {
-    await this._recovery;
+    this._requireOpen();
     const experiment = this._options.store.transaction((tx) =>
       tx.getExperiment(threadId)
     );
@@ -146,8 +146,9 @@ class StudioApplicationImpl implements StudioApplication {
       : this._composeThread(experiment);
   }
 
+  /** Lists Project Experiments without reading or migrating Engine state. */
   async listThreads(): Promise<readonly StudioThread[]> {
-    await this._recovery;
+    this._requireOpen();
     const experiments = this._options.store.transaction((tx) =>
       tx.listExperiments()
     );
@@ -156,115 +157,136 @@ class StudioApplicationImpl implements StudioApplication {
     );
   }
 
+  /** Resolves Studio ordering references into Pi operation detail projections. */
   async listRunHistory(
     threadId: string
   ): Promise<readonly StudioRunHistoryEntry[]> {
-    await this._recovery;
+    this._requireOpen();
     const experiment = this._requireExperiment(threadId);
     const references = this._options.store.transaction((tx) =>
-      tx.listRunReferences(threadId)
+      tx.listOperationReferences(threadId)
     );
-    const entries = await Promise.all(
-      references.map(
-        async (reference): Promise<StudioRunHistoryEntry | undefined> => {
-          const run = await this._options.engine.getRun(reference.runId);
-          if (run === undefined) return undefined;
-          const checkpointId = run.resultCheckpointId ?? reference.checkpointId;
-          const checkpoint =
-            checkpointId === undefined
-              ? undefined
-              : await this._checkpointView(
-                  experiment,
-                  checkpointId,
-                  _effectiveRunAgent(run)
-                );
-          return {
-            reference: {
-              ...reference,
-              ...(checkpointId === undefined ? {} : { checkpointId }),
-            },
-            run,
-            ...(checkpoint === undefined ? {} : { checkpoint }),
-          };
-        }
-      )
-    );
-    return entries.filter(
-      (entry): entry is StudioRunHistoryEntry => entry !== undefined
-    );
+    const bySession = new Map<string, readonly PiOperationSnapshot[]>();
+    const history: StudioRunHistoryEntry[] = [];
+    for (const reference of references) {
+      let operations = bySession.get(reference.sessionId);
+      if (operations === undefined) {
+        operations = await this._options.runtime.listOperations({
+          sessionId: reference.sessionId,
+          lane: reference.lane,
+        });
+        bySession.set(reference.sessionId, operations);
+      }
+      const operation = operations.find(
+        (candidate) => candidate.operationId === reference.operationId
+      );
+      if (operation === undefined) continue;
+      const document: StudioThreadDocument = {
+        title: experiment.title,
+        agent: structuredClone(reference.agentSnapshot),
+        conversation: {
+          messages: piEntriesToCoreMessages(operation.conversationEntries),
+          state: structuredClone(experiment.state),
+        },
+      };
+      history.push({
+        reference,
+        operation,
+        ...(operation.leafId === null
+          ? {}
+          : {
+              checkpoint: {
+                schemaVersion: 1,
+                id: operation.leafId,
+                sessionId: operation.sessionId,
+                operationId: operation.operationId,
+                document,
+                createdAt: operation.finishedAt ?? operation.startedAt,
+              },
+            }),
+      });
+    }
+    return history;
   }
 
+  /** Reorders/removes Studio references without deleting any Pi operation log. */
   async saveRunHistory(
     threadId: string,
-    runIds: readonly string[]
+    operationIds: readonly string[]
   ): Promise<readonly StudioRunHistoryEntry[]> {
-    await this._recovery;
+    this._requireOpen();
     this._requireExperiment(threadId);
     _assertUniqueIds(
-      runIds.map((id) => ({ id })),
-      "Run"
+      operationIds.map((id) => ({ id })),
+      "Operation"
     );
     this._options.store.transaction((tx) => {
-      const current = tx.listRunReferences(threadId);
+      const current = tx.listOperationReferences(threadId);
       const byId = new Map(
-        current.map((reference) => [reference.runId, reference])
+        current.map((reference) => [reference.operationId, reference])
       );
-      const next = runIds.map((runId) => {
-        const reference = byId.get(runId);
+      const next = operationIds.map((operationId) => {
+        const reference = byId.get(operationId);
         if (reference === undefined) {
           throw new Error(
-            `Run "${runId}" does not belong to Studio Thread "${threadId}".`
+            `Operation "${operationId}" does not belong to Studio Thread "${threadId}".`
           );
         }
         return reference;
       });
-      tx.replaceRunReferences(threadId, next);
-      const retained = new Set(runIds);
+      tx.replaceOperationReferences(threadId, next);
+      const retained = new Set(operationIds);
       tx.replaceEvaluations(
         threadId,
         tx
           .listEvaluations(threadId)
           .filter(
             (evaluation) =>
-              retained.has(evaluation.leftRunId) &&
-              retained.has(evaluation.rightRunId)
+              retained.has(evaluation.leftOperationId) &&
+              retained.has(evaluation.rightOperationId)
           )
       );
     });
     return this.listRunHistory(threadId);
   }
 
-  async listEvaluationMetadata(
+  /** Returns Studio-owned evaluation metadata over Pi operation identities. */
+  listEvaluationMetadata(
     threadId: string
   ): Promise<StudioEvaluationMetadata> {
-    await this._recovery;
+    this._requireOpen();
     this._requireExperiment(threadId);
-    return this._options.store.transaction((tx) => ({
-      evaluations: tx.listEvaluations(threadId),
-      rubrics: tx.listRubrics(threadId),
-    }));
+    return Promise.resolve(
+      this._options.store.transaction((tx) => ({
+        evaluations: tx.listEvaluations(threadId),
+        rubrics: tx.listRubrics(threadId),
+      }))
+    );
   }
 
-  async saveEvaluationMetadata(
+  /** Validates evaluation targets against this Experiment's operation index. */
+  saveEvaluationMetadata(
     threadId: string,
     input: StudioEvaluationMetadataInput
   ): Promise<StudioEvaluationMetadata> {
-    await this._recovery;
+    this._requireOpen();
     this._requireExperiment(threadId);
     _assertUniqueIds(input.evaluations, "Evaluation");
     _assertUniqueIds(input.rubrics, "Evaluation Rubric");
-    const metadata = this._options.store.transaction((tx) => {
-      const runIds = new Set(
-        tx.listRunReferences(threadId).map((reference) => reference.runId)
+    return Promise.resolve(this._options.store.transaction((tx) => {
+      const operationIds = new Set(
+        tx
+          .listOperationReferences(threadId)
+          .map((reference) => reference.operationId)
       );
       const evaluations = input.evaluations.map((evaluation): Evaluation => {
         if (
-          evaluation.leftRunId === evaluation.rightRunId ||
-          !runIds.has(evaluation.leftRunId) ||
-          !runIds.has(evaluation.rightRunId)
+          evaluation.leftOperationId === evaluation.rightOperationId ||
+          !operationIds.has(evaluation.leftOperationId) ||
+          !operationIds.has(evaluation.rightOperationId)
         ) {
           throw new Error(
-            `Evaluation "${evaluation.id}" must reference two different Runs in Studio Thread "${threadId}".`
+            `Evaluation "${evaluation.id}" must reference two different operations in Studio Thread "${threadId}".`
           );
         }
         return { ...structuredClone(evaluation), schemaVersion: 1, threadId };
@@ -277,66 +299,78 @@ class StudioApplicationImpl implements StudioApplication {
       tx.replaceEvaluations(threadId, evaluations);
       tx.replaceRubrics(threadId, rubrics);
       return { evaluations, rubrics };
-    });
-    return metadata;
+    }));
   }
 
+  /** Forks a Pi branch and preserves inherited operation ordering references. */
   async forkThread(
     threadId: string,
-    input: { readonly checkpointId?: string } = {}
+    input: { readonly entryId?: string } = {}
   ): Promise<StudioThread> {
-    await this._recovery;
+    this._requireOpen();
     const source = this._requireExperiment(threadId);
     const currentAgent = await this._options.resolveCurrentAgent();
-    const fork = await this._options.engine.forkThread({
-      threadId: source.engineThreadId,
-      ...(input.checkpointId === undefined
-        ? {}
-        : { checkpointId: input.checkpointId }),
+    const fork = await this._options.runtime.forkSession({
+      sessionId: source.sessionId,
+      ...(input.entryId === undefined ? {} : { entryId: input.entryId }),
     });
-    if (source.draft !== undefined && input.checkpointId === undefined) {
-      await this._replaceThreadState(fork.id, source.draft);
-    }
     const now = this._clock();
     const experiment: StudioExperimentRecord = {
       schemaVersion: 1,
       id: this._generateId("experiment"),
-      engineThreadId: fork.id,
+      sessionId: fork.sessionId,
+      lane: STUDIO_PI_LANE,
+      runtimeFormatVersion: STUDIO_PI_RUNTIME_FORMAT_VERSION,
       title: `${source.title} (Fork)`,
       agent: structuredClone(currentAgent.snapshot),
+      state: structuredClone(source.state),
+      ...(source.draft === undefined || input.entryId !== undefined
+        ? {}
+        : { draft: structuredClone(source.draft) }),
       provenance: {
         type: "fork",
         threadId,
-        ...(input.checkpointId === undefined
-          ? {}
-          : { checkpointId: input.checkpointId }),
+        ...(input.entryId === undefined ? {} : { entryId: input.entryId }),
       },
       createdAt: now,
       updatedAt: now,
     };
     this._options.store.transaction((tx) => {
       tx.insertExperiment(experiment);
-      tx.replaceRunReferences(
+      const references = tx.listOperationReferences(threadId);
+      const inherited =
+        input.entryId === undefined
+          ? references
+          : references.slice(
+              0,
+              references.findIndex(
+                (reference) => reference.leafId === input.entryId
+              ) + 1
+            );
+      tx.replaceOperationReferences(
         experiment.id,
-        tx.listRunReferences(threadId).map((reference) => ({
+        inherited.map((reference) => ({
           ...reference,
-          threadId: experiment.id,
           relation: "inherited",
         }))
       );
     });
-    return this._composeThread(experiment);
+    return this._composeThread(experiment, fork);
   }
 
+  /** Saves a dirty editable Draft without mutating the Pi Session branch. */
   async saveDocument(
     threadId: string,
     document: StudioThreadDocument
   ): Promise<StudioThread> {
-    await this._recovery;
+    this._requireOpen();
     const experiment = this._requireExperiment(threadId);
-    const active = await this._activeRun(experiment.engineThreadId);
-    if (active !== undefined) {
-      throw new Error(`Studio Thread "${threadId}" is running.`);
+    const snapshot = await this._options.runtime.open({
+      sessionId: experiment.sessionId,
+      lane: experiment.lane,
+    });
+    if (_hasActiveOperation(snapshot)) {
+      throw new Error(`Studio Thread "${threadId}" has an active operation.`);
     }
     const next: StudioExperimentRecord = {
       ...experiment,
@@ -345,321 +379,344 @@ class StudioApplicationImpl implements StudioApplication {
       updatedAt: this._clock(),
     };
     this._options.store.transaction((tx) => tx.saveExperiment(next));
-    return this._composeThread(next);
+    return this._composeThread(next, snapshot);
   }
 
+  /** Admits one Pi operation, clears the Draft, then applies the requested drive mode. */
   async run(
     threadId: string,
     input: StudioRunInput
   ): Promise<StudioRunReceipt> {
-    await this._recovery;
+    this._requireOpen();
     let experiment = this._requireExperiment(threadId);
     const view = await this._composeThread(experiment);
-    if (view.activeRunId !== undefined) {
-      throw new Error(`Studio Thread "${threadId}" is already running.`);
+    if (view.operationId !== undefined) {
+      throw new Error(`Studio Thread "${threadId}" has an active operation.`);
     }
     const currentAgent = await this._options.resolveCurrentAgent();
-    experiment = {
-      ...experiment,
-      agent: structuredClone(currentAgent.snapshot),
-      // Old SQLite rows may still carry the removed commit binding. A new Run
-      // adopts live development source and clears that legacy field lazily.
-      commitId: undefined,
-      updatedAt: this._clock(),
+    const effectiveAgent: StudioAgentSnapshot = {
+      ...structuredClone(currentAgent.snapshot),
+      ...(input.modelOverride === undefined
+        ? {}
+        : { model: input.modelOverride }),
     };
-    this._options.store.transaction((tx) => tx.saveExperiment(experiment));
     const messages = view.document.conversation.messages;
     const inputIndex = messages.findIndex(
       (message) => message.id === input.fromMessageId
     );
-    if (inputIndex === -1) {
-      throw new Error(`Message "${input.fromMessageId}" was not found.`);
-    }
     const inputMessage = messages[inputIndex];
     if (inputMessage?.role !== "user") {
-      throw new Error("A Studio Run must start from a user Message.");
+      throw new Error(
+        `Studio operation input "${input.fromMessageId}" must be a user Message.`
+      );
     }
-    const desiredBase: ThreadState = {
+    const prepared = await this._prepareSession(experiment, {
       messages: messages.slice(0, inputIndex),
       state: structuredClone(view.document.conversation.state),
-    };
-    const target = await this._prepareRunThread(experiment, desiredBase);
-    if (target.id !== experiment.engineThreadId) {
-      experiment = {
-        ...experiment,
-        engineThreadId: target.id,
-        updatedAt: this._clock(),
-      };
-    }
-    const operationId = this._generateId("operation");
-    experiment = this._stageRunIntent(experiment, operationId);
-    let run: Run;
-    try {
-      run = await this._options.engine.startRun({
-        threadId: target.id,
-        expectedHeadCheckpointId: target.headCheckpointId,
-        inputMessages: [inputMessage],
-        agentSnapshot: experiment.agent,
-        ...(input.modelOverride === undefined
-          ? {}
-          : { modelOverride: input.modelOverride }),
-        ...(input.mode === undefined ? {} : { mode: input.mode }),
-        operationId,
-      });
-    } catch (error) {
-      this._clearRunIntent(threadId, operationId);
-      throw error;
-    }
-    this._recordRun(threadId, experiment, run);
-    return { runId: run.id };
-  }
-
-  /** Execute one model or selected tool step on the same paused Run. */
-  async stepRun(
-    runId: string,
-    input: StudioStepRunInput = {}
-  ): Promise<StudioRunReceipt> {
-    await this._recovery;
-    const threadId = this._requireRunThreadId(runId);
-    const run = await this._options.engine.stepRun({ runId, ...input });
-    this._scheduleProjection(threadId, run.id);
-    return { runId: run.id };
-  }
-
-  /** Continue the same paused Run until it completes or pauses again. */
-  async continueRun(runId: string): Promise<StudioRunReceipt> {
-    await this._recovery;
-    const threadId = this._requireRunThreadId(runId);
-    const run = await this._options.engine.continueRun(runId);
-    this._scheduleProjection(threadId, run.id);
-    return { runId: run.id };
-  }
-
-  private _recordRun(
-    threadId: string,
-    experiment: StudioExperimentRecord,
-    run: Run
-  ): void {
-    const now = this._clock();
-    this._options.store.transaction((tx) => {
-      const references = [...tx.listRunReferences(threadId)];
-      references.push({ threadId, runId: run.id, relation: "executed" });
-      tx.replaceRunReferences(threadId, references);
-      tx.saveExperiment({
-        ...experiment,
-        draft: undefined,
-        pendingRun: undefined,
-        updatedAt: now,
-      });
     });
-    this._emit(threadId, { type: "run.started", run });
-    this._scheduleProjection(threadId, run.id);
-  }
-
-  private _stageRunIntent(
-    experiment: StudioExperimentRecord,
-    operationId: string
-  ): StudioExperimentRecord {
-    const staged: StudioExperimentRecord = {
-      ...experiment,
-      pendingRun: { operationId, createdAt: this._clock() },
+    experiment = prepared.experiment;
+    const operationId = this._generateId("operation");
+    const binding = _runtimeBinding(effectiveAgent);
+    let snapshot = await this._options.runtime.start({
+      operationId,
+      sessionId: experiment.sessionId,
+      lane: experiment.lane,
+      messages: coreMessagesToPi(
+        [...prepared.baseMessages, inputMessage],
+        binding.model,
+        this._clock()
+      ),
+      binding,
+    });
+    const { draft: _consumedDraft, ...committedExperiment } = experiment;
+    void _consumedDraft;
+    const next: StudioExperimentRecord = {
+      ...committedExperiment,
+      agent: structuredClone(effectiveAgent),
+      state: structuredClone(view.document.conversation.state),
       updatedAt: this._clock(),
     };
-    this._options.store.transaction((tx) => tx.saveExperiment(staged));
-    return staged;
-  }
-
-  private _clearRunIntent(threadId: string, operationId: string): void {
+    const reference: StudioOperationReference = {
+      sessionId: experiment.sessionId,
+      lane: experiment.lane,
+      operationId,
+      ...(snapshot.leafId === null ? {} : { leafId: snapshot.leafId }),
+      agentSnapshot: structuredClone(effectiveAgent),
+      relation: "executed",
+    };
     this._options.store.transaction((tx) => {
-      const experiment = tx.getExperiment(threadId);
-      if (experiment?.pendingRun?.operationId !== operationId) return;
-      tx.saveExperiment({
-        ...experiment,
-        pendingRun: undefined,
-        updatedAt: this._clock(),
-      });
+      tx.saveExperiment(next);
+      tx.replaceOperationReferences(threadId, [
+        ...tx.listOperationReferences(threadId),
+        reference,
+      ]);
     });
+    this._emit(threadId, {
+      type: "operation.started",
+      operationId,
+      sessionId: experiment.sessionId,
+    });
+    if (input.mode === "continue") {
+      snapshot = await this._options.runtime.continue({
+        sessionId: experiment.sessionId,
+        lane: experiment.lane,
+      });
+    } else if (input.mode === "step" && snapshot.nextAction !== undefined) {
+      snapshot = await this._options.runtime.step({
+        sessionId: experiment.sessionId,
+        lane: experiment.lane,
+        expectedActionId: snapshot.nextAction.id,
+        kind: snapshot.nextAction.kind,
+      });
+    }
+    await this._recordSnapshot(threadId, snapshot);
+    return { sessionId: experiment.sessionId, operationId };
   }
 
-  async cancelRun(runId: string): Promise<void> {
-    await this._recovery;
-    await this._options.engine.cancelRun(runId);
+  /** Releases exactly one stable semantic action for an owned Pi operation. */
+  async stepRun(
+    operationId: string,
+    input: StudioStepRunInput
+  ): Promise<StudioRunReceipt> {
+    this._requireOpen();
+    const owner = this._requireOperation(operationId);
+    const snapshot = await this._options.runtime.step({
+      sessionId: owner.reference.sessionId,
+      lane: owner.reference.lane,
+      expectedActionId: input.expectedActionId,
+      kind: input.kind,
+    });
+    await this._recordSnapshot(owner.threadId, snapshot);
+    return { sessionId: owner.reference.sessionId, operationId };
   }
 
+  /** Drives the same owned Pi operation to its next durable stop state. */
+  async continueRun(operationId: string): Promise<StudioRunReceipt> {
+    this._requireOpen();
+    const owner = this._requireOperation(operationId);
+    const snapshot = await this._options.runtime.continue({
+      sessionId: owner.reference.sessionId,
+      lane: owner.reference.lane,
+    });
+    await this._recordSnapshot(owner.threadId, snapshot);
+    return { sessionId: owner.reference.sessionId, operationId };
+  }
+
+  /** Persists cancellation for the owning Pi Session and emits its projection. */
+  async cancelRun(operationId: string): Promise<void> {
+    this._requireOpen();
+    const owner = this._requireOperation(operationId);
+    const snapshot = await this._options.runtime.abort({
+      sessionId: owner.reference.sessionId,
+      lane: owner.reference.lane,
+    });
+    await this._recordSnapshot(owner.threadId, snapshot);
+  }
+
+  /** Replays Studio product events; execution detail itself travels over ACP. */
   async *events(
     threadId: string,
     cursor: StudioEventCursor = {}
   ): AsyncIterable<StudioThreadEvent> {
-    await this._recovery;
+    this._requireOpen();
     this._requireExperiment(threadId);
-    let afterSequence = cursor.afterSequence ?? 0;
+    let sequence = cursor.afterSequence ?? 0;
     while (!cursor.signal?.aborted) {
       const events = this._options.store.transaction((tx) =>
-        tx.listEvents(threadId, afterSequence)
+        tx.listEvents(threadId, sequence)
       );
-      if (events.length > 0) {
-        for (const event of events) {
-          afterSequence = event.sequence;
-          yield event;
-        }
-        continue;
+      for (const event of events) {
+        sequence = event.sequence;
+        yield event;
       }
-      if (cursor.follow !== true) return;
+      if (!cursor.follow) return;
       await this._waitForEvent(threadId, cursor.signal);
     }
   }
 
-  close(): Promise<void> {
-    this._closePromise ??= this._close();
-    return this._closePromise;
-  }
-
-  private async _close(): Promise<void> {
+  /** Stops process-local effects before closing the Studio metadata store. */
+  async close(): Promise<void> {
+    if (this._closed) return;
     this._closed = true;
+    for (const waiters of this._waiters.values()) {
+      for (const wake of waiters) wake();
+    }
+    this._waiters.clear();
     try {
-      // Recovery owns short-lived Engine reads. Wait for it to observe
-      // `_closed` before closing either dependency.
-      await Promise.allSettled([this._recovery]);
-      await this._options.engine.close();
-      await Promise.allSettled(this._projections.values());
+      await this._options.runtime.close();
     } finally {
-      try {
-        this._options.store.close();
-      } finally {
-        this._notify();
-      }
+      this._options.store.close();
     }
   }
 
+  /** Composes Draft-first document state and active identity from Pi. */
   private async _composeThread(
-    experiment: StudioExperimentRecord
+    experiment: StudioExperimentRecord,
+    known?: PiSessionSnapshot
   ): Promise<StudioThread> {
-    const engineThread = await this._options.engine.getThread(
-      experiment.engineThreadId
-    );
-    if (engineThread === undefined) {
-      throw new Error(
-        `Engine Thread "${experiment.engineThreadId}" was not found.`
-      );
-    }
-    const checkpoint = await this._options.engine.getCheckpoint(
-      engineThread.headCheckpointId
-    );
-    if (checkpoint === undefined) {
-      throw new Error(
-        `Checkpoint "${engineThread.headCheckpointId}" was not found.`
-      );
-    }
-    const activeRun = await this._activeRun(engineThread.id);
+    const snapshot =
+      known ??
+      (await this._options.runtime.open({
+        sessionId: experiment.sessionId,
+        lane: experiment.lane,
+      }));
     return {
       schemaVersion: 1,
       id: experiment.id,
-      engineThreadId: engineThread.id,
-      headCheckpointId: engineThread.headCheckpointId,
+      sessionId: experiment.sessionId,
+      lane: experiment.lane,
+      leafId: snapshot.leafId,
+      ...(_hasActiveOperation(snapshot) && snapshot.operationId !== undefined
+        ? { operationId: snapshot.operationId }
+        : {}),
+      runtimeFormatVersion: experiment.runtimeFormatVersion,
       document: {
         title: experiment.title,
         agent: structuredClone(experiment.agent),
         conversation: structuredClone(
-          experiment.draft ?? checkpoint.threadState
+          experiment.draft ?? {
+            messages: piEntriesToCoreMessages(snapshot.messageEntries),
+            state: experiment.state,
+          }
         ),
-        ...(experiment.commitId === undefined
-          ? {}
-          : { commitId: experiment.commitId }),
       },
       ...(experiment.provenance === undefined
         ? {}
         : { provenance: structuredClone(experiment.provenance) }),
-      ...(activeRun === undefined ? {} : { activeRunId: activeRun.id }),
       createdAt: experiment.createdAt,
       updatedAt: experiment.updatedAt,
     };
   }
 
-  private async _prepareRunThread(
+  /** Matches an edited base by reuse, Pi branch fork, or a replacement Session. */
+  private async _prepareSession(
     experiment: StudioExperimentRecord,
-    desiredBase: ThreadState
-  ) {
-    const current = await this._options.engine.getThread(
-      experiment.engineThreadId
-    );
-    if (current === undefined) {
-      throw new Error(
-        `Engine Thread "${experiment.engineThreadId}" was not found.`
-      );
-    }
-    const head = await this._options.engine.getCheckpoint(
-      current.headCheckpointId
-    );
-    if (head === undefined)
-      throw new Error(
-        `Checkpoint "${current.headCheckpointId}" was not found.`
-      );
-    if (_sameState(head.threadState, desiredBase)) return current;
-
-    const checkpoints = await this._options.engine.listCheckpoints(current.id);
-    const matching = checkpoints.findLast((checkpoint) =>
-      _sameState(checkpoint.threadState, desiredBase)
-    );
-    const child = await this._options.engine.forkThread({
-      threadId: current.id,
-      ...(matching === undefined ? {} : { checkpointId: matching.id }),
+    desiredBase: StudioConversation
+  ): Promise<{
+    readonly experiment: StudioExperimentRecord;
+    readonly baseMessages: StudioConversation["messages"];
+  }> {
+    const snapshot = await this._options.runtime.open({
+      sessionId: experiment.sessionId,
+      lane: experiment.lane,
     });
-    if (matching !== undefined) return child;
-    const checkpoint = await this._replaceThreadState(child.id, desiredBase);
+    const committed = piEntriesToCoreMessages(snapshot.messageEntries);
+    if (_sameMessages(committed, desiredBase.messages)) {
+      return { experiment, baseMessages: [] };
+    }
+    if (committed.length === 0) {
+      return { experiment, baseMessages: desiredBase.messages };
+    }
+    const prefixLength = _commonPrefixLength(committed, desiredBase.messages);
+    const exactPrefix = prefixLength === desiredBase.messages.length;
+    const forkEntry = exactPrefix
+      ? snapshot.messageEntries[prefixLength - 1]
+      : undefined;
+    const replacement =
+      exactPrefix && forkEntry !== undefined
+        ? await this._options.runtime.forkSession({
+            sessionId: experiment.sessionId,
+            entryId: forkEntry.id,
+          })
+        : await this._options.runtime.createSession();
+    const next: StudioExperimentRecord = {
+      ...experiment,
+      sessionId: replacement.sessionId,
+      draft: desiredBase,
+      updatedAt: this._clock(),
+    };
+    this._options.store.transaction((tx) => tx.saveExperiment(next));
     return {
-      ...child,
-      headCheckpointId: checkpoint.id,
-      updatedAt: checkpoint.createdAt,
+      experiment: next,
+      baseMessages: exactPrefix ? [] : desiredBase.messages,
     };
   }
 
-  private async _replaceThreadState(threadId: string, state: ThreadState) {
-    const thread = await this._options.engine.getThread(threadId);
-    if (thread === undefined)
-      throw new Error(`Engine Thread "${threadId}" was not found.`);
-    return this._options.engine.commitThreadState({
-      threadId,
-      expectedHeadCheckpointId: thread.headCheckpointId,
-      threadState: state,
+  /** Updates the Studio reference leaf and emits committed conversation/outcome views. */
+  private async _recordSnapshot(
+    threadId: string,
+    snapshot: PiSessionSnapshot
+  ): Promise<void> {
+    if (snapshot.operationId === undefined) return;
+    this._options.store.transaction((tx) =>
+      tx.replaceOperationReferences(
+        threadId,
+        tx.listOperationReferences(threadId).map((reference) =>
+          reference.operationId === snapshot.operationId
+            ? {
+                ...reference,
+                ...(snapshot.leafId === null
+                  ? { leafId: undefined }
+                  : { leafId: snapshot.leafId }),
+              }
+            : reference
+        )
+      )
+    );
+    const thread = await this.loadThread(threadId);
+    if (thread !== undefined) {
+      this._emit(threadId, {
+        type: "conversation.updated",
+        operationId: snapshot.operationId,
+        thread,
+      });
+    }
+    if (snapshot.status === "paused" || snapshot.status === "suspended") {
+      this._emit(threadId, {
+        type: "operation.paused",
+        operationId: snapshot.operationId,
+      });
+    } else if (snapshot.status === "completed") {
+      this._emit(threadId, {
+        type: "operation.completed",
+        operationId: snapshot.operationId,
+      });
+    } else if (snapshot.status === "aborted") {
+      this._emit(threadId, {
+        type: "operation.aborted",
+        operationId: snapshot.operationId,
+      });
+    } else if (snapshot.status === "failed") {
+      this._emit(threadId, {
+        type: "operation.failed",
+        operationId: snapshot.operationId,
+        message: snapshot.suspension?.message ?? "Pi operation failed.",
+      });
+    }
+  }
+
+  /** Appends one product event and wakes all followers for that Experiment. */
+  private _emit(threadId: string, event: StudioThreadEventData): void {
+    this._options.store.transaction((tx) =>
+      tx.appendEvent({ threadId, timestamp: this._clock(), event })
+    );
+    const waiters = this._waiters.get(threadId);
+    if (waiters === undefined) return;
+    this._waiters.delete(threadId);
+    for (const wake of waiters) wake();
+  }
+
+  /** Waits without polling until an event, abort, or close wakes the follower. */
+  private _waitForEvent(
+    threadId: string,
+    signal: AbortSignal | undefined
+  ): Promise<void> {
+    if (signal?.aborted || this._closed) return Promise.resolve();
+    return new Promise((resolve) => {
+      const waiters = this._waiters.get(threadId) ?? new Set();
+      const wake = () => {
+        signal?.removeEventListener("abort", wake);
+        waiters.delete(wake);
+        if (waiters.size === 0) this._waiters.delete(threadId);
+        resolve();
+      };
+      waiters.add(wake);
+      this._waiters.set(threadId, waiters);
+      signal?.addEventListener("abort", wake, { once: true });
     });
   }
 
-  private async _checkpointView(
-    experiment: StudioExperimentRecord,
-    checkpointId: string,
-    agent: AgentSnapshot = experiment.agent
-  ): Promise<ThreadCheckpoint | undefined> {
-    const checkpoint = await this._options.engine.getCheckpoint(checkpointId);
-    if (checkpoint === undefined) return undefined;
-    return _checkpointView(experiment, checkpoint, agent);
-  }
-
-  private async _activeRun(engineThreadId: string): Promise<Run | undefined> {
-    return (await this._options.engine.listRuns(engineThreadId)).find(
-      (run) =>
-        run.status === "queued" ||
-        run.status === "running" ||
-        run.status === "paused"
-    );
-  }
-
-  /** Resolve Studio ownership without leaking Engine Thread ids to callers. */
-  private _requireRunThreadId(runId: string): string {
-    const experiment = this._options.store.transaction((tx) =>
-      tx
-        .listExperiments()
-        .find((candidate) =>
-          tx
-            .listRunReferences(candidate.id)
-            .some((reference) => reference.runId === runId)
-        )
-    );
-    if (experiment === undefined) {
-      throw new Error(`Run "${runId}" does not belong to this Studio.`);
-    }
-    return experiment.id;
-  }
-
+  /** Loads one Studio-owned Experiment record or fails with product identity. */
   private _requireExperiment(threadId: string): StudioExperimentRecord {
     const experiment = this._options.store.transaction((tx) =>
       tx.getExperiment(threadId)
@@ -670,230 +727,106 @@ class StudioApplicationImpl implements StudioApplication {
     return experiment;
   }
 
-  private _scheduleProjection(threadId: string, runId: string): void {
-    if (this._closed || this._projections.has(runId)) return;
-    const projection = this._projectRun(threadId, runId).finally(() => {
-      this._projections.delete(runId);
-    });
-    this._projections.set(runId, projection);
-    void projection.catch((error: unknown) => {
-      this._emit(threadId, {
-        type: "run.failed",
-        runId,
-        message: _errorMessage(error),
-      });
-    });
-  }
-
-  private async _projectRun(threadId: string, runId: string): Promise<void> {
-    for await (const frame of this._options.engine.streamRun(runId, {
-      follow: true,
-    })) {
-      if (frame.type === "snapshot") {
-        for (const output of frame.outputs) {
-          if (output.status !== "streaming") continue;
-          const text = _messageText(output.message);
-          if (text.length > 0) {
-            this._emit(threadId, {
-              type: "message.delta",
-              runId,
-              messageId: output.message.id,
-              delta: text,
-            });
-          }
-        }
-        if (_isTerminal(frame.run.status)) {
-          await this._emitTerminal(threadId, frame.run);
-        } else if (frame.run.status === "paused") {
-          this._emit(threadId, { type: "run.paused", run: frame.run });
-        }
-        continue;
-      }
-      if (
-        frame.event.type === "message.delta" ||
-        frame.event.type === "thinking.delta" ||
-        frame.event.type === "message.completed" ||
-        frame.event.type === "tool.started" ||
-        frame.event.type === "tool.updated" ||
-        frame.event.type === "tool.completed"
-      ) {
-        this._emit(threadId, { ...frame.event, runId });
-      } else if (frame.event.type === "checkpoint.committed") {
-        const thread = await this.loadThread(threadId);
-        if (thread !== undefined) {
-          this._emit(threadId, { type: "conversation.updated", runId, thread });
-        }
-      } else if (frame.event.type === "run.updated") {
-        if (frame.event.run.status === "paused") {
-          this._emit(threadId, {
-            type: "run.paused",
-            run: frame.event.run,
-          });
-        } else if (_isTerminal(frame.event.run.status)) {
-          await this._emitTerminal(threadId, frame.event.run);
-        }
-      }
-    }
-  }
-
-  private async _emitTerminal(threadId: string, run: Run): Promise<void> {
-    const experiment = this._requireExperiment(threadId);
-    this._options.store.transaction((tx) => {
-      const references = tx
-        .listRunReferences(threadId)
-        .map((reference) =>
-          reference.runId === run.id && run.resultCheckpointId !== undefined
-            ? { ...reference, checkpointId: run.resultCheckpointId }
-            : reference
-        );
-      tx.replaceRunReferences(threadId, references);
-      tx.saveExperiment({
-        ...experiment,
-        updatedAt: this._clock(),
-      });
-    });
-    const thread = await this.loadThread(threadId);
-    if (thread !== undefined) {
-      this._emit(threadId, {
-        type: "conversation.updated",
-        runId: run.id,
-        thread,
-      });
-    }
-    if (run.status === "completed") {
-      this._emit(threadId, { type: "run.completed", runId: run.id });
-    } else if (run.status === "cancelled") {
-      this._emit(threadId, { type: "run.cancelled", runId: run.id });
-    } else {
-      this._emit(threadId, {
-        type: "run.failed",
-        runId: run.id,
-        message: run.error?.message ?? `Run ended as ${run.status}.`,
-      });
-    }
-  }
-
-  private _emit(threadId: string, event: StudioThreadEventData): void {
-    this._options.store.transaction((tx) => {
-      tx.appendEvent({ threadId, timestamp: this._clock(), event });
-    });
-    this._notify(threadId);
-  }
-
-  private _waitForEvent(threadId: string, signal?: AbortSignal): Promise<void> {
-    if (signal?.aborted) return Promise.resolve();
-    return new Promise((resolve) => {
-      let waiters = this._waiters.get(threadId);
-      if (waiters === undefined) {
-        waiters = new Set();
-        this._waiters.set(threadId, waiters);
-      }
-      const wake = () => {
-        signal?.removeEventListener("abort", wake);
-        waiters?.delete(wake);
-        resolve();
-      };
-      waiters.add(wake);
-      signal?.addEventListener("abort", wake, { once: true });
-    });
-  }
-
-  private _notify(threadId?: string): void {
-    const entries =
-      threadId === undefined
-        ? [...this._waiters.values()]
-        : [this._waiters.get(threadId) ?? new Set()];
-    if (threadId === undefined) this._waiters.clear();
-    else this._waiters.delete(threadId);
-    for (const waiters of entries) for (const wake of waiters) wake();
-  }
-
-  private async _recoverActiveProjections(): Promise<void> {
-    if (this._closed) return;
-    for (let experiment of this._options.store.transaction((tx) =>
+  /** Finds the Experiment and reference that own one Pi operation identity. */
+  private _requireOperation(operationId: string): {
+    readonly threadId: string;
+    readonly reference: StudioOperationReference;
+  } {
+    for (const experiment of this._options.store.transaction((tx) =>
       tx.listExperiments()
     )) {
-      if (experiment.pendingRun !== undefined) {
-        const run = await this._options.engine.getRunByOperationId(
-          experiment.pendingRun.operationId
-        );
-        if (run === undefined) {
-          this._clearRunIntent(
-            experiment.id,
-            experiment.pendingRun.operationId
-          );
-        } else {
-          experiment = { ...experiment, engineThreadId: run.threadId };
-          this._recordRun(experiment.id, experiment, run);
-        }
+      const reference = this._options.store.transaction((tx) =>
+        tx
+          .listOperationReferences(experiment.id)
+          .find((candidate) => candidate.operationId === operationId)
+      );
+      if (reference !== undefined) {
+        return { threadId: experiment.id, reference };
       }
-      const active = await this._activeRun(experiment.engineThreadId);
-      if (active !== undefined)
-        this._scheduleProjection(experiment.id, active.id);
     }
+    throw new Error(
+      `Operation "${operationId}" does not belong to a Studio Thread.`
+    );
+  }
+
+  /** Rejects API use after the Studio lifecycle has closed. */
+  private _requireOpen(): void {
+    if (this._closed) throw new Error("Studio application is closed.");
   }
 }
 
-function _checkpointView(
-  experiment: StudioExperimentRecord,
-  checkpoint: EngineCheckpoint,
-  agent: AgentSnapshot = experiment.agent
-): ThreadCheckpoint {
+/** Freezes current source, model, prompt, and tool identities for one Pi operation. */
+function _runtimeBinding(agent: StudioAgentSnapshot): RuntimeBinding {
+  const separator = agent.model.indexOf("/");
+  if (separator <= 0 || separator === agent.model.length - 1) {
+    throw new Error(
+      `Pi model "${agent.model}" must use provider/model format.`
+    );
+  }
   return {
-    schemaVersion: 1,
-    id: checkpoint.id,
-    threadId: experiment.id,
-    source: checkpoint.source,
-    document: {
-      title: experiment.title,
-      agent: structuredClone(agent),
-      conversation: structuredClone(checkpoint.threadState),
-      ...(experiment.commitId === undefined
-        ? {}
-        : { commitId: experiment.commitId }),
+    formatVersion: STUDIO_PI_RUNTIME_FORMAT_VERSION,
+    agent: {
+      agentSpecId: agent.agentSpecId,
+      sourceRevision: agent.sourceRevision,
     },
-    createdAt: checkpoint.createdAt,
+    model: {
+      provider: agent.model.slice(0, separator),
+      modelId: agent.model.slice(separator + 1),
+    },
+    systemPrompt: agent.instructions.join("\n\n"),
+    tools: agent.tools.map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      inputSchema: structuredClone(tool.inputSchema),
+      ...(tool.outputSchema === undefined
+        ? {}
+        : { outputSchema: structuredClone(tool.outputSchema) }),
+      implementationId: tool.implementationId,
+      replay: tool.replay,
+      hostBinding: structuredClone(tool.hostBinding),
+    })),
   };
 }
 
-function _sameState(left: ThreadState, right: ThreadState): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
+/** Active identity exists only while Pi exposes a next action or suspension. */
+function _hasActiveOperation(snapshot: PiSessionSnapshot): boolean {
+  return snapshot.nextAction !== undefined || snapshot.status === "suspended";
 }
 
-/** Agent definition as actually presented by one Run after Studio overrides. */
-function _effectiveRunAgent(run: Run): AgentSnapshot {
-  return run.control.modelOverride === undefined
-    ? run.agentSnapshot
-    : { ...run.agentSnapshot, model: run.control.modelOverride };
-}
-
-function _messageText(
-  message: Extract<Message, { role: "assistant" }>
-): string {
-  return message.content.map((content) => content.text).join("\n");
-}
-
-function _isTerminal(status: Run["status"]): boolean {
-  return (
-    status === "completed" ||
-    status === "failed" ||
-    status === "cancelled" ||
-    status === "interrupted"
-  );
-}
-
+/** Validates stable resource ids before replacing ordered metadata. */
 function _assertUniqueIds(
-  values: readonly { readonly id: string }[],
+  resources: readonly { readonly id: string }[],
   label: string
 ): void {
   const ids = new Set<string>();
-  for (const value of values) {
-    if (ids.has(value.id))
-      throw new Error(`${label} "${value.id}" is duplicated.`);
-    ids.add(value.id);
+  for (const resource of resources) {
+    if (ids.has(resource.id)) {
+      throw new Error(`${label} "${resource.id}" appears more than once.`);
+    }
+    ids.add(resource.id);
   }
 }
 
-function _errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+/** Compares message content independently from object identity. */
+function _sameMessages(
+  left: StudioConversation["messages"],
+  right: StudioConversation["messages"]
+): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+/** Finds the unchanged prefix used to select a Pi branch fork. */
+function _commonPrefixLength(
+  left: StudioConversation["messages"],
+  right: StudioConversation["messages"]
+): number {
+  const length = Math.min(left.length, right.length);
+  let index = 0;
+  while (
+    index < length &&
+    JSON.stringify(left[index]) === JSON.stringify(right[index])
+  ) {
+    index += 1;
+  }
+  return index;
 }

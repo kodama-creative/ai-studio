@@ -5,11 +5,14 @@ import type {
   Thread,
   Tool,
 } from "@llm-space/core";
+
 import type {
-  AgentSnapshot,
-  ModelToolDefinition,
-  ThreadState,
-} from "@llm-space/engine";
+  StudioAgentSnapshot,
+  StudioConversation,
+  StudioOperationReference,
+  StudioPiIdentity,
+  StudioToolSnapshot,
+} from "./pi-domain";
 
 /** Serializable Agent declaration authored by the ordinary Studio Playground. */
 export interface AgentSpec {
@@ -18,21 +21,20 @@ export interface AgentSpec {
   readonly instructions: readonly string[];
   readonly tools: readonly Tool[];
   readonly variables?: NonNullable<Thread["context"]>["variables"];
-  readonly variableVariants?: NonNullable<Thread["context"]>["variableVariants"];
+  readonly variableVariants?: NonNullable<
+    Thread["context"]
+  >["variableVariants"];
 }
 
-/** Ordinary Studio workbench identity; execution state remains in Engine. */
-export interface Playground {
+/** Ordinary Studio workbench metadata projected over one Pi Session. */
+export interface Playground extends StudioPiIdentity {
   readonly schemaVersion: 1;
   readonly id: string;
   readonly title: string;
-  readonly engineThreadId: string;
-  readonly headCheckpointId: string;
   readonly agentSpec: AgentSpec;
-  /** Editable view: dirty Draft when present, otherwise Engine head state. */
-  readonly conversation: ThreadState;
+  /** Editable view: dirty Draft when present, otherwise the Pi projection. */
+  readonly conversation: StudioConversation;
   readonly dirty: boolean;
-  readonly activeRunId?: string;
   readonly createdAt: number;
   readonly updatedAt: number;
 }
@@ -41,18 +43,22 @@ export interface PlaygroundRecord {
   readonly schemaVersion: 1;
   readonly id: string;
   readonly title: string;
-  readonly engineThreadId: string;
+  readonly sessionId: string;
+  readonly lane: "main";
+  readonly runtimeFormatVersion: 1;
   readonly agentSpec: AgentSpec;
-  readonly draft?: ThreadState;
+  readonly draft?: StudioConversation;
+  readonly state: StudioConversation["state"];
+  readonly operationReferences: readonly StudioOperationReference[];
   readonly createdAt: number;
   readonly updatedAt: number;
 }
 
-/** Convert the editable declaration into the immutable shape frozen on a Run. */
+/** Convert the editable declaration into product metadata frozen on a Pi operation. */
 export function agentSpecSnapshot(
   playgroundId: string,
   spec: AgentSpec
-): AgentSnapshot {
+): StudioAgentSnapshot {
   if (spec.model === undefined) {
     throw new Error(`Playground "${playgroundId}" does not have a model.`);
   }
@@ -64,55 +70,65 @@ export function agentSpecSnapshot(
   );
   if (unsupported.length > 0) {
     throw new Error(
-      `Playground "${playgroundId}" uses tools that Engine v1 cannot execute: ${unsupported
+      `Playground "${playgroundId}" uses tools that the Pi runtime cannot execute: ${unsupported
         .map((tool) =>
           tool.type === "provider-hosted" ? tool.config.type : tool.name
         )
         .join(", ")}.`
     );
   }
-  const tools = spec.tools.flatMap(_modelTool);
+  const tools = spec.tools.flatMap(_runtimeTool);
   return {
-    schemaVersion: 1,
-    agentId: `playground:${playgroundId}`,
-    generationId: `playground:${playgroundId}`,
+    agentSpecId: `playground:${playgroundId}`,
+    sourceRevision: _fingerprint(spec),
     model: `${spec.model.provider}/${spec.model.id}`,
     instructions: [...spec.instructions],
     tools,
   };
 }
 
-function _modelTool(tool: Tool): ModelToolDefinition[] {
+function _runtimeTool(tool: Tool): StudioToolSnapshot[] {
   if (tool.type !== "builtin" && tool.type !== "mcp") return [];
+  const implementation =
+    tool.type === "mcp"
+      ? {
+          type: "studio.playground-mcp",
+          serverId: tool.serverId,
+          serverName: tool.serverName,
+          toolName: tool.toolName,
+        }
+      : {
+          type: "studio.playground-builtin",
+          ...(tool.config === undefined
+            ? {}
+            : {
+                config: _cloneJsonObject(
+                  tool.config,
+                  `Built-in tool "${tool.name}" config`
+                ),
+              }),
+        };
   return [
     {
       name: tool.name,
       description: tool.description,
       inputSchema: tool.parameters as Readonly<Record<string, unknown>>,
-      // A display name is not a durable execution identity. The opaque
-      // binding lets a host recover the exact MCP/built-in target after
-      // restart without teaching Engine about any Studio tool kind.
-      hostBinding:
-        tool.type === "mcp"
-          ? {
-              type: "studio.playground-mcp",
-              serverId: tool.serverId,
-              serverName: tool.serverName,
-              toolName: tool.toolName,
-            }
-          : {
-              type: "studio.playground-builtin",
-              ...(tool.config === undefined
-                ? {}
-                : {
-                    config: _cloneJsonObject(
-                      tool.config,
-                      `Built-in tool "${tool.name}" config`
-                    ),
-                  }),
-            },
+      implementationId: _fingerprint(implementation),
+      replay: "never",
+      hostBinding: implementation,
     },
   ];
+}
+
+/** Small deterministic content fingerprint; no runtime-specific crypto import. */
+function _fingerprint(value: unknown): string {
+  const source = JSON.stringify(value) ?? "undefined";
+  let hash = 2166136261;
+  for (let index = 0; index < source.length; index += 1) {
+    hash ^= source.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `fnv1a:${(hash >>> 0).toString(16).padStart(8, "0")}`;
 }
 
 /** Reject values SQLite JSON cannot preserve exactly in an immutable Run. */
@@ -137,7 +153,11 @@ function _cloneJsonValue(
   value: unknown,
   seen: WeakSet<object>
 ): JsonValue | undefined {
-  if (value === null || typeof value === "string" || typeof value === "boolean") {
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "boolean"
+  ) {
     return value;
   }
   if (typeof value === "number") {

@@ -69,6 +69,7 @@ export interface PiAcpSessionBackend {
   prompt(input: {
     readonly sessionId: string;
     readonly messages: AgentMessage[];
+    readonly meta?: Readonly<Record<string, unknown>>;
     readonly signal: AbortSignal;
   }): Promise<PiSessionSnapshot>;
   /**
@@ -177,6 +178,9 @@ export function createPiAcpAgent(options: CreatePiAcpAgentOptions): AgentApp {
         sessionId: params.sessionId,
         afterSeq: before.cursor,
         messages: _promptMessages(params.prompt, now()),
+        ...(params._meta === undefined || params._meta === null
+          ? {}
+          : { meta: params._meta }),
         signal: controller.signal,
       })
         .catch(() => undefined)
@@ -293,12 +297,14 @@ async function _drivePrompt(input: {
   readonly sessionId: string;
   readonly afterSeq: number;
   readonly messages: AgentMessage[];
+  readonly meta?: Readonly<Record<string, unknown>>;
   readonly signal: AbortSignal;
 }): Promise<void> {
   try {
     await input.backend.prompt({
       sessionId: input.sessionId,
       messages: input.messages,
+      ...(input.meta === undefined ? {} : { meta: input.meta }),
       signal: input.signal,
     });
     await _notifyFrame(

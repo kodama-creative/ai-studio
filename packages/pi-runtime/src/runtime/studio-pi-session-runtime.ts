@@ -34,6 +34,7 @@ export interface AssistantExecutor {
   ): AssistantAvailability | Promise<AssistantAvailability>;
   /** Executes exactly one provider turn and never executes local tools. */
   execute(input: {
+    readonly operationId: string;
     readonly binding: RuntimeBinding;
     readonly messages: readonly AgentMessage[];
     readonly signal: AbortSignal;
@@ -136,6 +137,8 @@ export interface PiSessionSnapshot {
   readonly operationId?: string;
   readonly status:
     "idle" | "paused" | "suspended" | "completed" | "failed" | "aborted";
+  /** Stable Pi message entries used by product and protocol projections. */
+  readonly messageEntries: readonly Extract<Entry, { type: "message" }>[];
   readonly messages: readonly AgentMessage[];
   readonly leafId: string | null;
   readonly nextAction?: SemanticAction;
@@ -158,6 +161,22 @@ export interface PiCommittedChange {
   readonly cursor: number;
   readonly items: readonly LogItem[];
   readonly snapshot: PiSessionSnapshot;
+}
+
+export interface PiOperationSnapshot {
+  readonly sessionId: string;
+  readonly lane: string;
+  readonly operationId: string;
+  readonly status:
+    "paused" | "suspended" | "completed" | "failed" | "aborted" | "declined";
+  readonly sourceLeafId: string | null;
+  readonly leafId: string | null;
+  /** Complete active-branch transcript through this operation's leaf. */
+  readonly conversationEntries: readonly Extract<Entry, { type: "message" }>[];
+  /** Entries committed specifically by this operation. */
+  readonly messageEntries: readonly Extract<Entry, { type: "message" }>[];
+  readonly startedAt: number;
+  readonly finishedAt?: number;
 }
 
 export class StaleSemanticActionError extends Error {
@@ -269,6 +288,28 @@ export class StudioPiSessionRuntime {
     const metadata = await session.getMetadata();
     this._sessions.set(metadata.id, session);
     return this._snapshot(session, DEFAULT_LANE);
+  }
+
+  /** Forks one committed Pi branch into a new independently writable Session. */
+  async forkSession(input: {
+    readonly sessionId: string;
+    readonly entryId?: string;
+    readonly id?: string;
+  }): Promise<PiSessionSnapshot> {
+    this._requireOpen();
+    const source = await this._session(input.sessionId);
+    const metadata = await source.getMetadata();
+    const fork = await this._repository.fork(metadata, {
+      scope: "branch",
+      ...(input.entryId === undefined
+        ? {}
+        : { entryId: input.entryId, position: "at" }),
+      ...(input.id === undefined ? {} : { id: input.id }),
+      parentSessionId: input.sessionId,
+    });
+    const forkMetadata = await fork.getMetadata();
+    this._sessions.set(forkMetadata.id, fork);
+    return this._snapshot(fork, DEFAULT_LANE);
   }
 
   /** Reconstructs a snapshot from committed Pi data with zero writes/effects. */
@@ -514,6 +555,75 @@ export class StudioPiSessionRuntime {
     return { fromCursor, cursor, items, snapshot };
   }
 
+  /** Projects ordered operation history from Pi records and branch entries. */
+  async listOperations(input: {
+    readonly sessionId: string;
+    readonly lane?: string;
+  }): Promise<readonly PiOperationSnapshot[]> {
+    this._requireOpen();
+    const lane = input.lane ?? DEFAULT_LANE;
+    const session = await this._session(input.sessionId);
+    const entries = await session
+      .view(lane)
+      .findEntriesOnBranch({ order: "oldestFirst" });
+    const records = await session.findRecords({ lane, order: "oldestFirst" });
+    const operations = records.filter(
+      (record): record is Extract<LaneRecord, { type: "operation_started" }> =>
+        record.type === "operation_started"
+    );
+    const current = await this._snapshot(session, lane);
+    return operations.map((operation, index) => {
+      const operationEntries = _entriesForRecordedOperation(
+        operation,
+        operations[index + 1],
+        entries
+      ).flatMap((entry) =>
+        entry.type === "message" ? [structuredClone(entry)] : []
+      );
+      const operationLeaf =
+        operationEntries.at(-1)?.id ?? operation.sourceLeafId;
+      const leafIndex =
+        operationLeaf === null
+          ? -1
+          : entries.findIndex((entry) => entry.id === operationLeaf);
+      const conversationEntries = entries
+        .slice(0, leafIndex + 1)
+        .flatMap((entry) =>
+          entry.type === "message" ? [structuredClone(entry)] : []
+        );
+      const finished = records.find(
+        (record) =>
+          record.type === "operation_finished" && record.runId === operation.id
+      );
+      const status =
+        finished?.type === "operation_finished"
+          ? finished.outcome
+          : current.operationId === operation.id
+            ? current.status === "completed" ||
+              current.status === "failed" ||
+              current.status === "aborted"
+              ? current.status
+              : current.status === "suspended"
+                ? "suspended"
+                : "paused"
+            : "failed";
+      return {
+        sessionId: input.sessionId,
+        lane,
+        operationId: operation.id,
+        status,
+        sourceLeafId: operation.sourceLeafId,
+        leafId: operationLeaf,
+        conversationEntries,
+        messageEntries: operationEntries,
+        startedAt: operation.timestamp,
+        ...(finished?.type === "operation_finished"
+          ? { finishedAt: finished.timestamp }
+          : {}),
+      };
+    });
+  }
+
   /**
    * Observes committed Pi log items from a durable sequence. Notifications are
    * only a delivery mechanism: reconnect always resumes from `Session.getLog`.
@@ -642,6 +752,7 @@ export class StudioPiSessionRuntime {
       });
       signal.throwIfAborted();
       assistant = await this._assistantExecutor.execute({
+        operationId,
         binding,
         messages: (
           await session.view(lane).findEntriesOnBranch({ order: "oldestFirst" })
@@ -651,6 +762,7 @@ export class StudioPiSessionRuntime {
         signal,
         onDelta: (event) => this._publish(snapshot.sessionId, event),
       });
+      assistant = _jsonSafe(assistant) as AssistantMessage;
       // Host close and durable user abort both stop process-local materialization.
       // The abort owner decides separately whether to append a terminal record.
       signal.throwIfAborted();
@@ -1115,6 +1227,9 @@ export class StudioPiSessionRuntime {
     const messages = entries.flatMap((entry) =>
       entry.type === "message" ? [structuredClone(entry.message)] : []
     );
+    const messageEntries = entries.flatMap((entry) =>
+      entry.type === "message" ? [structuredClone(entry)] : []
+    );
     const open = await session.findOpenOperations(lane, { limit: 2 });
     if (open.length > 1) {
       throw new Error(`Lane "${lane}" has multiple open operations.`);
@@ -1141,6 +1256,7 @@ export class StudioPiSessionRuntime {
               : finished.outcome === "aborted"
                 ? "aborted"
                 : "failed",
+        messageEntries,
         messages,
         leafId: await view.getLeafId(),
       };
@@ -1156,6 +1272,7 @@ export class StudioPiSessionRuntime {
         lane,
         operationId: operation.id,
         status: "suspended",
+        messageEntries,
         messages,
         leafId: await view.getLeafId(),
         suspension: {
@@ -1197,6 +1314,7 @@ export class StudioPiSessionRuntime {
             lane,
             operationId: operation.id,
             status: "suspended",
+            messageEntries,
             messages,
             leafId: await view.getLeafId(),
             suspension: {
@@ -1212,6 +1330,7 @@ export class StudioPiSessionRuntime {
             lane,
             operationId: operation.id,
             status: "suspended",
+            messageEntries,
             messages,
             leafId: await view.getLeafId(),
             suspension: {
@@ -1236,6 +1355,7 @@ export class StudioPiSessionRuntime {
           lane,
           operationId: operation.id,
           status: "suspended",
+          messageEntries,
           messages,
           leafId: await view.getLeafId(),
           suspension: {
@@ -1251,6 +1371,7 @@ export class StudioPiSessionRuntime {
       lane,
       operationId: operation.id,
       status: "paused",
+      messageEntries,
       messages,
       leafId: await view.getLeafId(),
       nextAction,

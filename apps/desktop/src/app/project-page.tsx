@@ -259,9 +259,9 @@ export function ProjectPage({ project }: { project: AgentProjectView }) {
   }, [client, openThreadTab, subscribeToThreadEvents, refreshThreads]);
 
   const forkThread = useCallback(
-    async (threadId: string, checkpointId?: string) => {
+    async (threadId: string, entryId?: string) => {
       const fork = await client.forkThread(threadId, {
-        ...(checkpointId === undefined ? {} : { checkpointId }),
+        ...(entryId === undefined ? {} : { entryId }),
       });
       await refreshThreads();
       await openThread(fork.id);
@@ -703,9 +703,9 @@ function _sourceTreeItems(
 
 function _isTerminalRunEvent(event: StudioThreadEventData): boolean {
   return (
-    event.type === "run.completed" ||
-    event.type === "run.failed" ||
-    event.type === "run.cancelled"
+    event.type === "operation.completed" ||
+    event.type === "operation.failed" ||
+    event.type === "operation.aborted"
   );
 }
 

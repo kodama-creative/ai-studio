@@ -1,103 +1,153 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 import {
-  createAgentEngine,
-  type AgentSnapshot,
-  InMemoryEngineStore,
-  type RunExecutor,
-} from "@llm-space/engine";
+  BunSqliteRuntimeBindingStore,
+  BunSqliteSessionRepository,
+  StudioPiSessionRuntime,
+  type AssistantExecutor,
+} from "@llm-space/pi-runtime";
 
 import { createPlaygroundApplication } from "./playground-application";
-import { InMemoryStudioStore } from "./storage";
+import { InMemoryStudioStore, type StudioStore } from "./storage";
 import { createSqliteStudioStore } from "./storage/sqlite";
 
-describe.each([
-  ["memory", () => new InMemoryStudioStore()],
-  ["sqlite", () => createSqliteStudioStore({ path: ":memory:" })],
-] as const)("PlaygroundApplication with %s storage", (_name, createStore) => {
-  test("persists AgentSpec separately and executes messages through Engine", async () => {
-    const store = createStore();
-    const engine = _engine();
-    const app = createPlaygroundApplication({ engine, store });
-    try {
-      const created = await app.createPlayground({
-        title: "General Agent",
-        agentSpec: {
-          schemaVersion: 1,
-          model: { provider: "test", id: "local" },
-          instructions: ["Answer concisely."],
-          tools: [],
-        },
-      });
-      const headBeforeDraft = created.headCheckpointId;
-      await app.savePlayground(created.id, {
-        title: "General Agent",
-        agentSpec: created.agentSpec,
-        conversation: {
-          messages: [
+const ASSISTANT: AssistantMessage = {
+  role: "assistant",
+  content: [{ type: "text", text: "Playground answer" }],
+  api: "openai-responses",
+  provider: "test",
+  model: "local",
+  usage: {
+    input: 1,
+    output: 1,
+    cacheRead: 0,
+    cacheWrite: 0,
+    totalTokens: 2,
+    cost: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      total: 0,
+    },
+  },
+  stopReason: "stop",
+  timestamp: 2,
+};
+
+describe.each(["memory", "sqlite"] as const)(
+  "PlaygroundApplication with %s Studio storage",
+  (storageKind) => {
+    test("persists only Studio metadata while Pi owns transcript and operation state", async () => {
+      const fixture = await _fixture(storageKind);
+      try {
+        const created = await fixture.app.createPlayground({
+          title: "General Agent",
+          agentSpec: {
+            schemaVersion: 1,
+            model: { provider: "test", id: "local" },
+            instructions: ["Answer concisely."],
+            tools: [],
+          },
+        });
+        expect(typeof created.sessionId).toBe("string");
+        expect(created).toMatchObject({
+          lane: "main",
+          leafId: null,
+          runtimeFormatVersion: 1,
+        });
+
+        await fixture.app.savePlayground(created.id, {
+          title: created.title,
+          agentSpec: created.agentSpec,
+          conversation: {
+            messages: [
+              {
+                id: "user-1",
+                role: "user",
+                content: [{ type: "text", text: "hello" }],
+              },
+            ],
+            state: { debug: true },
+          },
+        });
+        expect(
+          (await fixture.app.loadPlayground(created.id))?.leafId
+        ).toBeNull();
+
+        const receipt = await fixture.app.run(created.id, {
+          fromMessageId: "user-1",
+        });
+        const paused = await fixture.runtime.open({
+          sessionId: receipt.sessionId,
+        });
+        expect(paused.nextAction?.kind).toBe("model");
+        await fixture.app.stepRun(receipt.operationId, {
+          commandId: "step-1",
+          expectedActionId: paused.nextAction!.id,
+          kind: "model",
+        });
+
+        const loaded = await fixture.app.loadPlayground(created.id);
+        expect(typeof loaded?.conversation.messages[0]?.id).toBe("string");
+        expect(typeof loaded?.conversation.messages[1]?.id).toBe("string");
+        expect(loaded).toMatchObject({
+          title: "General Agent",
+          sessionId: receipt.sessionId,
+          agentSpec: {
+            model: { provider: "test", id: "local" },
+            instructions: ["Answer concisely."],
+          },
+          conversation: {
+            messages: [
+              { role: "user" },
+              {
+                role: "assistant",
+                content: [{ type: "text", text: "Playground answer" }],
+              },
+            ],
+          },
+        });
+        expect(loaded).not.toHaveProperty("operationId");
+        expect(
+          fixture.store.transaction((tx) => tx.getPlayground(created.id))
+        ).toMatchObject({
+          sessionId: receipt.sessionId,
+          operationReferences: [
             {
-              id: "user-1",
-              role: "user",
-              content: [{ type: "text", text: "hello" }],
+              operationId: receipt.operationId,
+              leafId: loaded?.leafId,
+              relation: "executed",
             },
           ],
-          state: { debug: true },
-        },
-      });
-      expect((await app.loadPlayground(created.id))?.headCheckpointId).toBe(
-        headBeforeDraft
-      );
+        });
+        expect(
+          fixture.store.transaction((tx) => tx.getPlayground(created.id))
+        ).not.toHaveProperty("draft");
+        expect(await fixture.app.listRuns(created.id)).toMatchObject([
+          { operationId: receipt.operationId, status: "completed" },
+        ]);
+      } finally {
+        await fixture.close();
+      }
+    });
+  }
+);
 
-      const receipt = await app.run(created.id, {
-        fromMessageId: "user-1",
-      });
-      const completed = await _waitForTerminal(engine, receipt.runId);
-      expect(completed.status).toBe("completed");
-
-      const loaded = await app.loadPlayground(created.id);
-      expect(loaded).toMatchObject({
-        title: "General Agent",
-        agentSpec: {
-          model: { provider: "test", id: "local" },
-          instructions: ["Answer concisely."],
-        },
-      });
-      const checkpoint = await engine.getCheckpoint(loaded!.headCheckpointId);
-      expect(checkpoint?.threadState).toMatchObject({
-        state: { debug: true },
-        messages: [
-          { id: "user-1", role: "user" },
-          {
-            role: "assistant",
-            content: [{ type: "text", text: "Playground answer" }],
-          },
-        ],
-      });
-      expect(store.transaction((tx) => tx.getPlayground(created.id))).not.toHaveProperty(
-        "messages"
-      );
-      expect(loaded?.conversation.messages).toHaveLength(2);
-    } finally {
-      await app.close();
-    }
-  });
-});
-
-test("rejects Playground tool kinds without an Engine v1 execution path", async () => {
-  const store = new InMemoryStudioStore();
-  const engine = _engine();
-  const app = createPlaygroundApplication({ engine, store });
+test("rejects Playground tool kinds without a Pi runtime execution path", async () => {
+  const fixture = await _fixture("memory");
   try {
-    const created = await app.createPlayground({
+    const created = await fixture.app.createPlayground({
       agentSpec: {
         schemaVersion: 1,
         model: { provider: "test", id: "local" },
         instructions: [],
         tools: [
-          {
-            type: "provider-hosted",
-            config: { type: "web_search" },
-          },
+          { type: "provider-hosted", config: { type: "web_search" } },
           {
             type: "plugin",
             pluginId: "plugin-search",
@@ -121,23 +171,19 @@ test("rejects Playground tool kinds without an Engine v1 execution path", async 
     });
 
     expect(
-      app.run(created.id, { fromMessageId: "user-native" })
+      fixture.app.run(created.id, { fromMessageId: "user-native" })
     ).rejects.toThrow(
-      'Playground "' +
-        created.id +
-        '" uses tools that Engine v1 cannot execute: web_search, plugin_search.'
+      `Playground "${created.id}" uses tools that the Pi runtime cannot execute: web_search, plugin_search.`
     );
   } finally {
-    await app.close();
+    await fixture.close();
   }
 });
 
-test("rejects non-JSON built-in config before creating a durable Run", async () => {
-  const store = new InMemoryStudioStore();
-  const engine = _engine();
-  const app = createPlaygroundApplication({ engine, store });
+test("rejects non-JSON built-in config before admitting a Pi operation", async () => {
+  const fixture = await _fixture("memory");
   try {
-    const created = await app.createPlayground({
+    const created = await fixture.app.createPlayground({
       agentSpec: {
         schemaVersion: 1,
         model: { provider: "test", id: "local" },
@@ -165,77 +211,43 @@ test("rejects non-JSON built-in config before creating a durable Run", async () 
     });
 
     expect(
-      app.run(created.id, { fromMessageId: "user-config" })
-    ).rejects.toThrow('Built-in tool "broken_config" config must be a JSON object.');
+      fixture.app.run(created.id, { fromMessageId: "user-config" })
+    ).rejects.toThrow(
+      'Built-in tool "broken_config" config must be a JSON object.'
+    );
   } finally {
-    await app.close();
+    await fixture.close();
   }
 });
 
-function _engine() {
-  const executor: RunExecutor = {
-    async executeStep(input, sink) {
-      const message = {
-        id: input.createMessageId(),
-        role: "assistant" as const,
-        content: [{ type: "text" as const, text: "Playground answer" }],
-      };
-      await sink.accept({
-        type: "assistant.delta",
-        message,
-        textDelta: "Playground answer",
-      });
-      await sink.accept({ type: "assistant.completed", message });
+/** Creates all adapters over one physical SQLite path where applicable. */
+async function _fixture(storageKind: "memory" | "sqlite") {
+  const root = await mkdtemp(join(tmpdir(), "llm-space-studio-pi-"));
+  const path = join(root, "studio.sqlite");
+  const repository = new BunSqliteSessionRepository({ path });
+  const bindings = new BunSqliteRuntimeBindingStore({ path });
+  const assistantExecutor: AssistantExecutor = {
+    execute: () => Promise.resolve(structuredClone(ASSISTANT)),
+  };
+  const runtime = new StudioPiSessionRuntime({
+    repository,
+    bindings,
+    assistantExecutor,
+  });
+  const store: StudioStore =
+    storageKind === "memory"
+      ? new InMemoryStudioStore()
+      : createSqliteStudioStore({ path });
+  const app = createPlaygroundApplication({ runtime, store });
+  return {
+    app,
+    runtime,
+    store,
+    async close() {
+      await app.close();
+      bindings.close();
+      await repository.close();
+      await rm(root, { recursive: true, force: true });
     },
   };
-  return createAgentEngine({
-    store: new InMemoryEngineStore(),
-    runExecutor: executor,
-    agentResolver: {
-      resolve(snapshot: AgentSnapshot) {
-        return Promise.resolve({ snapshot, tools: new Map() });
-      },
-    },
-    createToolContext: ({ execution, signal }) => ({
-      execution,
-      abortSignal: signal,
-      getSandbox() {
-        throw new Error("No sandbox in Playground tests.");
-      },
-      getSkill() {
-        throw new Error("No skills in Playground tests.");
-      },
-      getToken() {
-        return Promise.reject(new Error("No auth in Playground tests."));
-      },
-      requireAuth() {
-        throw new Error("No auth in Playground tests.");
-      },
-    }),
-  });
-}
-
-async function _waitForTerminal(
-  engine: ReturnType<typeof createAgentEngine>,
-  runId: string
-) {
-  for await (const frame of engine.streamRun(runId, { follow: true })) {
-    const run = frame.type === "snapshot" ? frame.run : undefined;
-    if (
-      run !== undefined &&
-      ["completed", "failed", "cancelled", "interrupted"].includes(run.status)
-    ) {
-      return run;
-    }
-    if (frame.type === "event" && frame.event.type === "run.updated") {
-      if (
-        ["completed", "failed", "cancelled", "interrupted"].includes(
-          frame.event.run.status
-        )
-      ) {
-        return frame.event.run;
-      }
-    }
-  }
-  throw new Error("Run stream ended before terminal state.");
 }

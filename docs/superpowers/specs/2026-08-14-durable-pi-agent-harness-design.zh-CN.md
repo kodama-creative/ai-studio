@@ -525,6 +525,10 @@ Production 代码禁止将同一个 model/tool step 同时写入 Engine 和 Pi S
 
 #### Phase 4：Studio cutover
 
+状态：已实现。Playground 与 Project Experiment execution 已切到 Pi Session
+identity，并通过 Electrobun 使用官方 ACP v2 语义；Studio 只保留产品元数据、
+Draft、Pi reference、evaluation 与 command receipt。
+
 - 将新 Playground/Experiment execution reference 替换为 Pi identity。
 - 适配 Draft commit、run history、evaluation target 和 UI event。
 - 将 Step/Continue/Abort 切到新 facade。
@@ -533,6 +537,8 @@ Production 代码禁止将同一个 model/tool step 同时写入 Engine 和 Pi S
 退出条件：新 Studio 对象不再写 Engine Thread、Run 或 Checkpoint，并且能够完全从 Pi Session 恢复。
 
 #### Phase 5：App/CLI cutover 与退休旧实现
+
+状态：待实现。
 
 - 将 App model Session projection 替换为 Pi-backed facade。
 - 将 CLI 路由到共享 runtime，提供标准 NDJSON stdio ACP v2 endpoint，并让 SSH
