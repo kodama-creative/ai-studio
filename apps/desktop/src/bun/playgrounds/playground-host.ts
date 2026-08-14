@@ -27,7 +27,9 @@ export interface CreatePlaygroundHostOptions {
   readonly runtime: RuntimeClient;
 }
 
-export interface PlaygroundHost extends PlaygroundApplication {}
+export interface PlaygroundHost extends PlaygroundApplication {
+  dispose(): Promise<void>;
+}
 
 /** Compose the main-window Playground application over one user-level SQLite. */
 export function createPlaygroundHost(
@@ -57,7 +59,13 @@ export function createPlaygroundHost(
     void engine.close();
     throw error;
   }
-  return createPlaygroundApplication({ engine, store: studioStore });
+  const application = createPlaygroundApplication({
+    engine,
+    store: studioStore,
+  });
+  return Object.assign(application, {
+    dispose: () => application.close(),
+  });
 }
 
 async function _resolveAgent(

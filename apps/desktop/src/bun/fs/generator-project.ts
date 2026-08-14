@@ -14,9 +14,6 @@ import { expandHomePath } from "@llm-space/core/server";
  * 2. The only command that can be spawned is `uv` — never an arbitrary command.
  */
 
-/** Directories the user picked this session; only these may be written/run in. */
-const _authorized = new Set<string>();
-
 /** Files `uv init` may drop that don't count against the "empty dir" gate. */
 const _IGNORED_ENTRIES = new Set([".DS_Store", ".git", ".idea", ".vscode"]);
 
@@ -28,83 +25,160 @@ const OPEN_DEV_TERMINAL_SCRIPT = `on run argv
   end tell
 end run`;
 
-/** Record a user-picked directory as authorized for writes + `uv` runs. */
-export function authorizeGeneratorDir(dir: string): void {
-  _authorized.add(path.resolve(dir));
-}
+/** Process-owned access boundary for directories selected by the Generator. */
+export class GeneratorProjectWorkspace {
+  private readonly _authorized = new Set<string>();
 
-function _assertAuthorized(rootDir: string): string {
-  const resolved = path.resolve(rootDir);
-  if (!_authorized.has(resolved)) {
-    throw new Error("Directory is not authorized for project generation.");
+  /** Record a user-confirmed directory for writes and subprocess execution. */
+  authorize(dir: string): void {
+    this._authorized.add(path.resolve(dir));
   }
-  return resolved;
-}
 
-/**
- * Resolve `parentDir/projectName`, validate it can hold a fresh project, create
- * it, and authorize it for the generator's writes + `uv` runs. This is the
- * wizard's "Next" gate on the directory step — it fails loudly (rather than
- * silently overwriting) so the user can fix the parent or name first.
- */
-export async function prepareGeneratorDir(
-  parentDir: string,
-  projectName: string
-): Promise<{ ok: true; dir: string } | { ok: false; error: string }> {
-  const name = projectName.trim();
-  if (!name) {
-    return { ok: false, error: "Enter a project name." };
-  }
-  if (name === "." || name === ".." || /[/\\]/.test(name)) {
-    return { ok: false, error: "Project name can't contain path separators." };
-  }
-  const parent = path.resolve(expandHomePath(parentDir.trim() || "~"));
-  const target = path.join(parent, name);
-  try {
-    const parentStat = await stat(parent);
-    if (!parentStat.isDirectory()) {
-      return { ok: false, error: `${parent} is not a directory.` };
+  /** Resolve, validate, create, and authorize a fresh generated project root. */
+  async prepare(
+    parentDir: string,
+    projectName: string
+  ): Promise<{ ok: true; dir: string } | { ok: false; error: string }> {
+    const name = projectName.trim();
+    if (!name) {
+      return { ok: false, error: "Enter a project name." };
     }
-  } catch {
-    return { ok: false, error: `Parent directory doesn't exist: ${parent}` };
-  }
-  try {
-    const targetStat = await stat(target).catch(() => null);
-    if (targetStat) {
-      if (!targetStat.isDirectory()) {
-        return { ok: false, error: `${target} already exists as a file.` };
-      }
-      if (!(await isGeneratorDirEmpty(target))) {
-        return {
-          ok: false,
-          error: `${name} already exists and isn't empty. Pick another name.`,
-        };
-      }
+    if (name === "." || name === ".." || /[/\\]/.test(name)) {
+      return {
+        ok: false,
+        error: "Project name can't contain path separators.",
+      };
     }
-    await mkdir(target, { recursive: true });
-  } catch (e) {
-    return {
-      ok: false,
-      error: e instanceof Error ? e.message : "Could not create the directory.",
-    };
+    const parent = path.resolve(expandHomePath(parentDir.trim() || "~"));
+    const target = path.join(parent, name);
+    try {
+      const parentStat = await stat(parent);
+      if (!parentStat.isDirectory()) {
+        return { ok: false, error: `${parent} is not a directory.` };
+      }
+    } catch {
+      return { ok: false, error: `Parent directory doesn't exist: ${parent}` };
+    }
+    try {
+      const targetStat = await stat(target).catch(() => null);
+      if (targetStat) {
+        if (!targetStat.isDirectory()) {
+          return { ok: false, error: `${target} already exists as a file.` };
+        }
+        if (!(await _isGeneratorDirEmpty(target))) {
+          return {
+            ok: false,
+            error: `${name} already exists and isn't empty. Pick another name.`,
+          };
+        }
+      }
+      await mkdir(target, { recursive: true });
+    } catch (error) {
+      return {
+        ok: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Could not create the directory.",
+      };
+    }
+    this.authorize(target);
+    return { ok: true, dir: target };
   }
-  authorizeGeneratorDir(target);
-  return { ok: true, dir: target };
-}
 
-/** Whether `dir` has no meaningful entries (ignoring editor/OS cruft). */
-export async function isGeneratorDirEmpty(dir: string): Promise<boolean> {
-  try {
-    const entries = await readdir(dir);
-    return entries.every((entry) => _IGNORED_ENTRIES.has(entry));
-  } catch {
-    // A missing directory is effectively empty.
+  /** Run only `uv` in an explicitly authorized generated project. */
+  async runUv(
+    rootDir: string,
+    args: string[],
+    opts?: { timeoutMs?: number }
+  ): Promise<{
+    code: number;
+    stdout: string;
+    stderr: string;
+    timedOut: boolean;
+  }> {
+    const resolved = this._assertAuthorized(rootDir);
+    const proc = Bun.spawn(["uv", ...args], {
+      cwd: resolved,
+      stdout: "pipe",
+      stderr: "pipe",
+      env: process.env,
+    });
+    let timedOut = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    if (opts?.timeoutMs && opts.timeoutMs > 0) {
+      timer = setTimeout(() => {
+        timedOut = true;
+        proc.kill();
+      }, opts.timeoutMs);
+    }
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ]);
+    const code = await proc.exited;
+    if (timer) clearTimeout(timer);
+    return { code, stdout, stderr, timedOut };
+  }
+
+  /** Write UTF-8 content below an authorized root; traversal is rejected. */
+  async writeFile(
+    rootDir: string,
+    relativePath: string,
+    contents: string
+  ): Promise<void> {
+    const target = this._resolveInRoot(rootDir, relativePath);
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, contents, "utf8");
+  }
+
+  /** Delete one file below an authorized root; missing files are ignored. */
+  async removeFile(rootDir: string, relativePath: string): Promise<void> {
+    const target = this._resolveInRoot(rootDir, relativePath);
+    await rm(target, { force: true });
+  }
+
+  /** Open Terminal in an authorized project; unsupported platforms return false. */
+  async openDevTerminal(
+    rootDir: string,
+    dependencies: {
+      platform?: NodeJS.Platform;
+      runAppleScript?: (script: string, args: string[]) => Promise<void>;
+    } = {}
+  ): Promise<boolean> {
+    if ((dependencies.platform ?? process.platform) !== "darwin") return false;
+    const resolved = this._assertAuthorized(rootDir);
+    await (dependencies.runAppleScript ?? _runAppleScript)(
+      OPEN_DEV_TERMINAL_SCRIPT,
+      [resolved]
+    );
     return true;
   }
+
+  private _assertAuthorized(rootDir: string): string {
+    const resolved = path.resolve(rootDir);
+    if (!this._authorized.has(resolved)) {
+      throw new Error("Directory is not authorized for project generation.");
+    }
+    return resolved;
+  }
+
+  private _resolveInRoot(rootDir: string, relativePath: string): string {
+    const resolved = this._assertAuthorized(rootDir);
+    const target = path.resolve(resolved, relativePath);
+    const rel = path.relative(resolved, target);
+    if (rel === "" || rel.startsWith("..") || path.isAbsolute(rel)) {
+      throw new Error("Path escapes the project root.");
+    }
+    return target;
+  }
 }
 
-/** Whether `uv` is on PATH, and its version string when detectable. */
-export async function checkUv(): Promise<{ installed: boolean; version?: string }> {
+/** Whether `uv` is on PATH, and its version when detectable. */
+export async function checkUv(): Promise<{
+  installed: boolean;
+  version?: string;
+}> {
   try {
     const proc = Bun.spawn(["uv", "--version"], {
       stdout: "pipe",
@@ -113,104 +187,21 @@ export async function checkUv(): Promise<{ installed: boolean; version?: string 
     });
     const output = await new Response(proc.stdout).text();
     const code = await proc.exited;
-    if (code !== 0) {
-      return { installed: false };
-    }
+    if (code !== 0) return { installed: false };
     return { installed: true, version: output.trim() || undefined };
   } catch {
     return { installed: false };
   }
 }
 
-/**
- * Run `uv <args>` with cwd = an authorized `rootDir`. Never runs another binary.
- * When `timeoutMs` is set, the process is killed after that long and the result
- * comes back with `timedOut: true` (rather than hanging until the RPC layer
- * rejects, which would leave `uv` running as an orphan).
- */
-export async function runUv(
-  rootDir: string,
-  args: string[],
-  opts?: { timeoutMs?: number }
-): Promise<{ code: number; stdout: string; stderr: string; timedOut: boolean }> {
-  const resolved = _assertAuthorized(rootDir);
-  const proc = Bun.spawn(["uv", ...args], {
-    cwd: resolved,
-    stdout: "pipe",
-    stderr: "pipe",
-    env: process.env,
-  });
-  let timedOut = false;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  if (opts?.timeoutMs && opts.timeoutMs > 0) {
-    timer = setTimeout(() => {
-      timedOut = true;
-      proc.kill();
-    }, opts.timeoutMs);
+/** Whether a directory contains only ignorable editor or OS metadata. */
+async function _isGeneratorDirEmpty(dir: string): Promise<boolean> {
+  try {
+    const entries = await readdir(dir);
+    return entries.every((entry) => _IGNORED_ENTRIES.has(entry));
+  } catch {
+    return true;
   }
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ]);
-  const code = await proc.exited;
-  if (timer) {
-    clearTimeout(timer);
-  }
-  return { code, stdout, stderr, timedOut };
-}
-
-/** Resolve `relativePath` under an authorized `rootDir`, rejecting traversal. */
-function _resolveInRoot(rootDir: string, relativePath: string): string {
-  const resolved = _assertAuthorized(rootDir);
-  const target = path.resolve(resolved, relativePath);
-  const rel = path.relative(resolved, target);
-  if (rel === "" || rel.startsWith("..") || path.isAbsolute(rel)) {
-    throw new Error("Path escapes the project root.");
-  }
-  return target;
-}
-
-/** Write a UTF-8 file under an authorized `rootDir`; rejects path traversal. */
-export async function writeProjectFile(
-  rootDir: string,
-  relativePath: string,
-  contents: string
-): Promise<void> {
-  const target = _resolveInRoot(rootDir, relativePath);
-  await mkdir(path.dirname(target), { recursive: true });
-  await writeFile(target, contents, "utf8");
-}
-
-/** Delete a file under an authorized `rootDir`; a no-op when it's missing. */
-export async function removeProjectFile(
-  rootDir: string,
-  relativePath: string
-): Promise<void> {
-  const target = _resolveInRoot(rootDir, relativePath);
-  await rm(target, { force: true });
-}
-
-/**
- * On macOS, open Terminal in an authorized generated project and start its
- * Makefile development target. Other platforms report unsupported so the UI
- * can fall back to revealing the generated directory.
- */
-export async function openGeneratorDevTerminal(
-  rootDir: string,
-  dependencies: {
-    platform?: NodeJS.Platform;
-    runAppleScript?: (script: string, args: string[]) => Promise<void>;
-  } = {}
-): Promise<boolean> {
-  if ((dependencies.platform ?? process.platform) !== "darwin") {
-    return false;
-  }
-  const resolved = _assertAuthorized(rootDir);
-  await (dependencies.runAppleScript ?? _runAppleScript)(
-    OPEN_DEV_TERMINAL_SCRIPT,
-    [resolved]
-  );
-  return true;
 }
 
 function _runAppleScript(script: string, args: string[]): Promise<void> {

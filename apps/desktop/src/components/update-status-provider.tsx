@@ -13,9 +13,9 @@ import {
 } from "react";
 import { toast } from "sonner";
 
+import { updatesClient } from "@/client/application-rpc-clients";
 import { useCommands } from "@/commands";
 import { UpdateDialog } from "@/components/update-dialog";
-import { electrobun } from "@/lib/electrobun";
 import type {
   UpdateStatus,
   UpdateStatusChangedPayload,
@@ -149,11 +149,11 @@ export function UpdateStatusProvider({ children }: { children: ReactNode }) {
   const dismissedRef = useRef(false);
 
   const restart = useCallback(
-    () => executeCommand({ type: "applyUpdateAndRestart", args: {} }),
+    () => executeCommand({ type: "updates.applyAndRestart", args: {} }),
     [executeCommand]
   );
   const recheck = useCallback(
-    () => executeCommand({ type: "checkForUpdates", args: {} }),
+    () => executeCommand({ type: "updates.check", args: {} }),
     [executeCommand]
   );
   const handleDialogOpenChange = useCallback((open: boolean) => {
@@ -162,9 +162,6 @@ export function UpdateStatusProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    const rpc = electrobun.rpc;
-    if (!rpc) return;
-
     const handle = ({ status, manual }: UpdateStatusChangedPayload) => {
       // Keep the persistent badge in sync no matter how the check started.
       if (status.state === "ready") {
@@ -217,7 +214,8 @@ export function UpdateStatusProvider({ children }: { children: ReactNode }) {
         case "ready": {
           toast.dismiss(DOWNLOADING_TOAST_ID);
           setDialogOpen(false);
-          const alreadyAnnounced = lastNotifiedVersion.current === status.version;
+          const alreadyAnnounced =
+            lastNotifiedVersion.current === status.version;
           if (!manual && alreadyAnnounced) return;
           lastNotifiedVersion.current = status.version;
           toast.custom(
@@ -239,24 +237,24 @@ export function UpdateStatusProvider({ children }: { children: ReactNode }) {
       }
     };
 
-    rpc.addMessageListener("updateStatusChanged", handle);
-    return () => rpc.removeMessageListener("updateStatusChanged", handle);
+    const subscription = updatesClient.on("statusChanged", handle);
+    return () => {
+      void subscription.dispose();
+    };
   }, [restart]);
 
   // "We just updated" — pulled once on mount, race-free vs. the fire-and-forget
   // status messages (the bun signal is computed at startup, before we listen).
   useEffect(() => {
-    const rpc = electrobun.rpc;
-    if (!rpc) return;
     let cancelled = false;
-    void rpc.request.pendingInstalledVersion({}).then((version) => {
+    void updatesClient.takeInstalledVersion().then((version) => {
       if (cancelled || !version) return;
       toast.success(`Updated to v${version}`, {
         action: {
           label: "Release notes",
           onClick: () =>
             executeCommand({
-              type: "openLink",
+              type: "shell.openLink",
               args: { url: `${RELEASE_TAG_URL}/v${version}` },
             }),
         },

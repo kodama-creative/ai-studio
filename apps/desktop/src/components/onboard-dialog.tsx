@@ -96,11 +96,11 @@ export function OnboardDialog({
       properties: { choice: "configure_models" },
     });
     onOpenChange(false);
-    executeCommand({ type: "openSettings", args: { tab: "models" } });
+    executeCommand({ type: "app.openSettings", args: { tab: "models" } });
   }, [executeCommand, onOpenChange]);
   const handleLearnMore = useCallback(() => {
     track({ event: "onboarding_choice", properties: { choice: "learn_more" } });
-    executeCommand({ type: "openDocument", args: {} });
+    executeCommand({ type: "shell.openDocument", args: {} });
   }, [executeCommand]);
   const handleOpenAnalyticsSettings = useCallback(() => {
     track({
@@ -108,7 +108,7 @@ export function OnboardDialog({
       properties: { choice: "analytics_settings" },
     });
     onOpenChange(false);
-    executeCommand({ type: "openSettings", args: { tab: "general" } });
+    executeCommand({ type: "app.openSettings", args: { tab: "general" } });
   }, [executeCommand, onOpenChange]);
 
   const handleAddProvider = useCallback(

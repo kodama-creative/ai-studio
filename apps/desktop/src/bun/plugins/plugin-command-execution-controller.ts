@@ -4,7 +4,8 @@ import type {
   PluginCommandReport,
 } from "@llm-space/core";
 
-import type { PluginCommandExecutionEvent } from "../../shared/rpc";
+import type { Disposable } from "../../shared/disposable";
+import type { PluginCommandExecutionEvent } from "../../shared/plugin-command-execution";
 
 export interface PluginCommandExecutionInput {
   executionId: string;
@@ -26,15 +27,15 @@ interface PluginCommandExecutionDependencies {
     args: string[],
     executionId: string
   ): Promise<PluginCommandExecutionResult>;
-  send(event: PluginCommandExecutionEvent): void;
 }
 
-export class PluginCommandExecutionController {
+export class PluginCommandExecutionController implements Disposable {
   private readonly _commandExecutions = new Map<string, string>();
   private readonly _executionCommands = new Map<string, string>();
 
   constructor(
-    private readonly _dependencies: PluginCommandExecutionDependencies
+    private readonly _dependencies: PluginCommandExecutionDependencies,
+    private readonly _onEvent: (event: PluginCommandExecutionEvent) => void
   ) {}
 
   async execute(
@@ -97,8 +98,14 @@ export class PluginCommandExecutionController {
     this._send({ executionId, commandId, type: "phase", report });
   }
 
+  /** Stop publishing transient execution feedback during process teardown. */
+  dispose(): void {
+    this._commandExecutions.clear();
+    this._executionCommands.clear();
+  }
+
   private _send(event: PluginCommandExecutionEvent): void {
-    this._dependencies.send(event);
+    this._onEvent(event);
   }
 }
 

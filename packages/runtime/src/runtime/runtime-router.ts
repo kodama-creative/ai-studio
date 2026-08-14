@@ -1,4 +1,10 @@
+import {
+  RuntimeCapabilityUnavailableError,
+  RuntimeNotFoundError,
+} from "./errors";
 import type { RuntimeClient, RuntimeId } from "./types";
+import type { RuntimeCapability } from "./types";
+
 
 export class RuntimeRouter {
   private readonly _runtimes = new Map<RuntimeId, RuntimeClient>();
@@ -35,7 +41,20 @@ export class RuntimeRouter {
     const id = runtimeId ?? this._defaultRuntimeId;
     const runtime = this._runtimes.get(id);
     if (!runtime) {
-      throw new Error(`Runtime not found: ${id}`);
+      throw new RuntimeNotFoundError(id);
+    }
+    return runtime;
+  }
+
+  /** Resolve a Runtime and authoritatively require one advertised capability. */
+  require(
+    runtimeId: RuntimeId | undefined,
+    capability: RuntimeCapability
+  ): RuntimeClient {
+    const runtime = this.get(runtimeId);
+    const info = runtime.info();
+    if (!info.capabilities.includes(capability)) {
+      throw new RuntimeCapabilityUnavailableError(info.id, capability);
     }
     return runtime;
   }
@@ -46,7 +65,7 @@ export class RuntimeRouter {
 
   private _assertRuntime(id: RuntimeId): void {
     if (!this._runtimes.has(id)) {
-      throw new Error(`Runtime not found: ${id}`);
+      throw new RuntimeNotFoundError(id);
     }
   }
 }

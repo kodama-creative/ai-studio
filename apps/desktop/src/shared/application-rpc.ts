@@ -1,0 +1,91 @@
+import type { Thread } from "@llm-space/core";
+
+import type { AnalyticsEvent, AnalyticsStatus } from "./analytics";
+import type { GithubAuthState } from "./auth";
+import type { FeatureReminder } from "./feature-reminders";
+import { defineRpcNamespace } from "./namespaced-rpc";
+import type { RuntimeId } from "./runtime";
+import type { UpdateMode, UpdateStatusChangedPayload } from "./updates";
+
+export interface ThreadSharingRequests {
+  read(runtimeId: RuntimeId, path: string): Promise<Thread>;
+  publish(
+    runtimeId: RuntimeId,
+    path: string,
+    meta?: { title?: string; description?: string }
+  ): Promise<{ shareUrl: string; gistId: string }>;
+}
+export interface ThreadSharingRpc {
+  readonly requests: ThreadSharingRequests;
+  readonly streams: Record<never, never>;
+  readonly events: Record<never, never>;
+}
+export const THREAD_SHARING_RPC = defineRpcNamespace<ThreadSharingRpc>(
+  "threadSharing",
+  { streams: [], events: [] }
+);
+
+export interface GithubAccountRequests {
+  getState(): Promise<GithubAuthState>;
+}
+export interface GithubAccountEvents {
+  changed: GithubAuthState;
+}
+export interface GithubAccountRpc {
+  readonly requests: GithubAccountRequests;
+  readonly streams: Record<never, never>;
+  readonly events: GithubAccountEvents;
+}
+export const GITHUB_ACCOUNT_RPC = defineRpcNamespace<GithubAccountRpc>(
+  "githubAccount",
+  { streams: [], events: ["changed"] }
+);
+
+export interface UpdatesRequests {
+  getMode(): Promise<UpdateMode>;
+  setMode(mode: UpdateMode): Promise<void>;
+  takeInstalledVersion(): Promise<string | null>;
+}
+export interface UpdatesEvents {
+  statusChanged: UpdateStatusChangedPayload;
+}
+export interface UpdatesRpc {
+  readonly requests: UpdatesRequests;
+  readonly streams: Record<never, never>;
+  readonly events: UpdatesEvents;
+}
+export const UPDATES_RPC = defineRpcNamespace<UpdatesRpc>("updates", {
+  streams: [],
+  events: ["statusChanged"],
+});
+
+export interface RemindersRequests {
+  shouldShowGithubStar(): Promise<{ show: boolean }>;
+  dismissGithubStarForever(): Promise<void>;
+  nextFeature(): Promise<FeatureReminder | null>;
+  markFeatureSeen(id: string): Promise<void>;
+}
+export interface RemindersRpc {
+  readonly requests: RemindersRequests;
+  readonly streams: Record<never, never>;
+  readonly events: Record<never, never>;
+}
+export const REMINDERS_RPC = defineRpcNamespace<RemindersRpc>("reminders", {
+  streams: [],
+  events: [],
+});
+
+export interface AnalyticsRequests {
+  getSettings(): Promise<AnalyticsStatus>;
+  setEnabled(enabled: boolean): Promise<AnalyticsStatus>;
+  capture(event: AnalyticsEvent): Promise<void>;
+}
+export interface AnalyticsRpc {
+  readonly requests: AnalyticsRequests;
+  readonly streams: Record<never, never>;
+  readonly events: Record<never, never>;
+}
+export const ANALYTICS_RPC = defineRpcNamespace<AnalyticsRpc>("analytics", {
+  streams: [],
+  events: [],
+});

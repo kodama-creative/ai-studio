@@ -2,8 +2,8 @@ import { cn } from "@llm-space/ui/lib/utils";
 import { XIcon } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
+import { remindersClient } from "@/client/application-rpc-clients";
 import { useCommands } from "@/commands";
-import { electrobun } from "@/lib/electrobun";
 
 /** The repository we nudge users to star. */
 const STAR_URL = "https://github.com/deer-flow/llm-space";
@@ -31,11 +31,9 @@ export function GithubStarReminder() {
   // fire-once. When it says show, wait 5s so the card slides in after the UI
   // has settled rather than fighting first paint.
   useEffect(() => {
-    const rpc = electrobun.rpc;
-    if (!rpc) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    void rpc.request.githubStarReminderShouldShow({}).then((result) => {
+    void remindersClient.shouldShowGithubStar().then((result) => {
       if (cancelled || !result.show) return;
       timer = setTimeout(() => setOpen(true), SHOW_DELAY_MS);
     });
@@ -48,8 +46,8 @@ export function GithubStarReminder() {
   const close = useCallback(() => setLeaving(true), []);
 
   const handleStar = useCallback(() => {
-    executeCommand({ type: "openLink", args: { url: STAR_URL } });
-    void electrobun.rpc?.request.githubStarReminderDismissForever({});
+    executeCommand({ type: "shell.openLink", args: { url: STAR_URL } });
+    void remindersClient.dismissGithubStarForever();
     close();
   }, [executeCommand, close]);
 

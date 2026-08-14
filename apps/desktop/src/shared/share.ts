@@ -27,5 +27,5 @@ export function buildShareThreadCommand(
   path: string,
   runtimeId: RuntimeId
 ): ShareThreadCommand {
-  return { type: "shareThread", args: { path, runtimeId } };
+  return { type: "thread.share", args: { path, runtimeId } };
 }

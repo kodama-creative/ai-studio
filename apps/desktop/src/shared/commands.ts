@@ -8,10 +8,15 @@
  */
 
 import type { RuntimeId } from "./runtime";
-import type { TraceConnectedProjectInput, TraceImportFile } from "./traces";
 
-/** Base shape for every command: a string `type` and typed `args`. */
-export interface GenericCommand<T extends string, A = Record<string, never>> {
+/** Command identity always includes its owning business namespace. */
+export type NamespacedCommandType = `${string}.${string}`;
+
+/** Base shape for every command: a namespaced `type` and typed `args`. */
+export interface GenericCommand<
+  T extends NamespacedCommandType,
+  A = Record<string, never>,
+> {
   type: T;
   args: A;
 }
@@ -25,7 +30,7 @@ export interface GenericCommand<T extends string, A = Record<string, never>> {
  * immediately (used by the ⌘N menu, the tab-bar "+", and the welcome screen).
  */
 export interface NewFileCommand extends GenericCommand<
-  "newFile",
+  "workspace.newFile",
   { parent?: string; rename?: boolean; runtimeId?: RuntimeId }
 > {}
 
@@ -36,7 +41,7 @@ export interface NewFileCommand extends GenericCommand<
  * `getPromptExample`. `parent` defaults to the workspace root.
  */
 export interface NewFileFromPromptExampleCommand extends GenericCommand<
-  "newFileFromPromptExample",
+  "workspace.newFileFromPromptExample",
   { parent?: string; exampleId: string; runtimeId?: RuntimeId }
 > {}
 
@@ -45,37 +50,37 @@ export interface NewFileFromPromptExampleCommand extends GenericCommand<
  * where the chosen example's thread will be created.
  */
 export interface OpenStartFromExampleCommand extends GenericCommand<
-  "openStartFromExample",
+  "workspace.openStartFromExample",
   { parent?: string; runtimeId?: RuntimeId }
 > {}
 
 /** Create a new folder (with in-place rename). `parent` defaults to the root. */
 export interface NewFolderCommand extends GenericCommand<
-  "newFolder",
+  "workspace.newFolder",
   { parent?: string; runtimeId?: RuntimeId }
 > {}
 
 /** Start an in-place rename of the node at `path`. */
 export interface RenameFileCommand extends GenericCommand<
-  "renameFile",
+  "workspace.rename",
   { path: string; runtimeId?: RuntimeId }
 > {}
 
 /** Duplicate the node at `path`. */
 export interface DuplicateFileCommand extends GenericCommand<
-  "duplicateFile",
+  "workspace.duplicate",
   { path: string; runtimeId?: RuntimeId }
 > {}
 
 /** Move the node at `path` to the OS trash (via a confirm dialog). */
 export interface DeleteFileCommand extends GenericCommand<
-  "deleteFile",
+  "workspace.delete",
   { path: string; runtimeId?: RuntimeId }
 > {}
 
 /** Reveal the node at `path` in the OS file manager (`""` = the root). */
 export interface RevealFileCommand extends GenericCommand<
-  "revealFile",
+  "workspace.reveal",
   { path: string; runtimeId?: RuntimeId }
 > {}
 
@@ -85,13 +90,13 @@ export interface RevealFileCommand extends GenericCommand<
  * bun process (native clipboard). macOS/Windows only.
  */
 export interface CopyFileCommand extends GenericCommand<
-  "copyFile",
+  "workspace.copyFile",
   { path: string; runtimeId?: RuntimeId }
 > {}
 
 /** Refresh (re-list) the file tree. */
 export interface RefreshTreeCommand extends GenericCommand<
-  "refreshTree",
+  "workspace.refresh",
   { runtimeId?: RuntimeId }
 > {}
 
@@ -101,7 +106,7 @@ export interface RefreshTreeCommand extends GenericCommand<
  * deep-link import writes into `shared/`).
  */
 export interface RevealInTreeCommand extends GenericCommand<
-  "revealInTree",
+  "workspace.revealInTree",
   { path: string; runtimeId?: RuntimeId }
 > {}
 
@@ -116,7 +121,7 @@ export interface ImportFilePayload {
  * opens its hidden picker; native menu actions fill `files` from the OS dialog.
  */
 export interface ImportFilesCommand extends GenericCommand<
-  "importFiles",
+  "workspace.importFiles",
   { parent?: string; files?: ImportFilePayload[]; runtimeId?: RuntimeId }
 > {}
 
@@ -126,55 +131,18 @@ export interface ImportFilesCommand extends GenericCommand<
  * parsing/writing stays shared with file imports.
  */
 export interface ImportFromClipboardCommand extends GenericCommand<
-  "importFromClipboard",
+  "workspace.importFromClipboard",
   { parent?: string; runtimeId?: RuntimeId }
-> {}
-
-// --- Traces ----------------------------------------------------------------
-
-/**
- * Create a trace project in `LLM_SPACE_HOME/traces`. The caller supplies a
- * non-empty display `name`; the trace panel handler selects the created project
- * and refreshes the trace-project list.
- */
-export interface CreateTraceProjectCommand extends GenericCommand<
-  "createTraceProject",
-  { name: string; runtimeId?: RuntimeId }
-> {}
-
-/**
- * Create a connected Langfuse trace project after testing credentials. The full
- * secret is carried only to the Bun process; renderer feedback must be redacted.
- */
-export interface CreateConnectedTraceProjectCommand extends GenericCommand<
-  "createConnectedTraceProject",
-  TraceConnectedProjectInput & { runtimeId?: RuntimeId }
-> {}
-
-/**
- * Import Langfuse observation export files into one trace project. `files` are
- * already read by the renderer picker; the bun-side trace manager writes
- * `raw.json` / `trace.json` and reports skipped files plus source warnings.
- */
-export interface ImportLangfuseTraceFilesCommand extends GenericCommand<
-  "importLangfuseTraceFiles",
-  { projectId: string; files: TraceImportFile[]; runtimeId?: RuntimeId }
-> {}
-
-/** Sync selected remote Langfuse trace ids into a connected trace project. */
-export interface SyncLangfuseTraceIdsCommand extends GenericCommand<
-  "syncLangfuseTraceIds",
-  { projectId: string; traceIds: string[]; runtimeId?: RuntimeId }
 > {}
 
 // --- Tabs ------------------------------------------------------------------
 
 /**
- * Close a tab. `id` is the app-tab id (`thread:{path}` or `trace:{project}:{key}`);
+ * Close a tab. `id` is the app-tab id;
  * `path` is kept for legacy thread callers; omitting both closes the active tab.
  */
 export interface CloseTabCommand extends GenericCommand<
-  "closeTab",
+  "tabs.close",
   { id?: string; path?: string; runtimeId?: RuntimeId }
 > {}
 
@@ -183,26 +151,26 @@ export interface CloseTabCommand extends GenericCommand<
  * path; omitting both keeps the active tab.
  */
 export interface CloseOtherTabsCommand extends GenericCommand<
-  "closeOtherTabs",
+  "tabs.closeOthers",
   { id?: string; path?: string; runtimeId?: RuntimeId }
 > {}
 
 /** Close every open tab. */
-export interface CloseAllTabsCommand extends GenericCommand<"closeAllTabs"> {}
+export interface CloseAllTabsCommand extends GenericCommand<"tabs.closeAll"> {}
 
 /** Reopen the most recently closed tab group. */
-export interface ReopenClosedTabCommand extends GenericCommand<"reopenClosedTab"> {}
+export interface ReopenClosedTabCommand extends GenericCommand<"tabs.reopenClosed"> {}
 
 /** Activate the tab after the active one in visual order, wrapping around. */
-export interface SelectNextTabCommand extends GenericCommand<"selectNextTab"> {}
+export interface SelectNextTabCommand extends GenericCommand<"tabs.selectNext"> {}
 
 /** Activate the tab before the active one in visual order, wrapping around. */
-export interface SelectPreviousTabCommand extends GenericCommand<"selectPreviousTab"> {}
+export interface SelectPreviousTabCommand extends GenericCommand<"tabs.selectPrevious"> {}
 
 // --- View / app ------------------------------------------------------------
 
 /** Collapse or expand the left side panel. */
-export interface ToggleSidebarCommand extends GenericCommand<"toggleSidebar"> {}
+export interface ToggleSidebarCommand extends GenericCommand<"layout.toggleSidebar"> {}
 
 /** Which Settings tab to show. */
 export type SettingsTab =
@@ -219,28 +187,28 @@ export type SettingsTab =
 
 /** Open the Settings dialog, optionally on a specific `tab`. */
 export interface OpenSettingsCommand extends GenericCommand<
-  "openSettings",
+  "app.openSettings",
   { tab?: SettingsTab }
 > {}
 
 /** Open the Settings dialog directly on the Models tab. */
-export interface OpenModelSettingsCommand extends GenericCommand<"openModelSettings"> {}
+export interface OpenModelSettingsCommand extends GenericCommand<"app.openModelSettings"> {}
 
 /** Open the command palette. */
-export interface OpenCommandPaletteCommand extends GenericCommand<"openCommandPalette"> {}
+export interface OpenCommandPaletteCommand extends GenericCommand<"app.openCommandPalette"> {}
 
 /** Open the first-run onboarding dialog. */
-export interface OpenOnboardCommand extends GenericCommand<"openOnboard"> {}
+export interface OpenOnboardCommand extends GenericCommand<"app.openOnboard"> {}
 
 /** Run the active thread. No-op when there is no active thread tab. */
-export interface RunThreadCommand extends GenericCommand<"runThread"> {}
+export interface RunThreadCommand extends GenericCommand<"thread.run"> {}
 
 /** Create a new Studio Thread in the active Agent Project window. */
-export interface CreateProjectThreadCommand extends GenericCommand<"createProjectThread"> {}
+export interface CreateProjectThreadCommand extends GenericCommand<"project.createThread"> {}
 
 /** Fork a Studio Thread onto the Agent Project's current Git HEAD. */
 export interface ForkProjectThreadCommand extends GenericCommand<
-  "forkProjectThread",
+  "project.forkThread",
   { threadId: string; checkpointId?: string }
 > {}
 
@@ -251,7 +219,7 @@ export interface ForkProjectThreadCommand extends GenericCommand<
  * is no active thread tab. Webview only.
  */
 export interface ShareThreadCommand extends GenericCommand<
-  "shareThread",
+  "thread.share",
   { path?: string; runtimeId?: RuntimeId }
 > {}
 
@@ -261,24 +229,24 @@ export interface ShareThreadCommand extends GenericCommand<
  * selection. Webview only, and intentionally excluded from the command palette.
  */
 export interface OpenVariablesCommand extends GenericCommand<
-  "openVariables",
+  "thread.openVariables",
   { variableName?: string }
 > {}
 
 // --- Window (bun-side) -----------------------------------------------------
 
 /** Zoom the page in one step. */
-export interface ZoomInCommand extends GenericCommand<"zoomIn"> {}
+export interface ZoomInCommand extends GenericCommand<"window.zoomIn"> {}
 /** Zoom the page out one step. */
-export interface ZoomOutCommand extends GenericCommand<"zoomOut"> {}
+export interface ZoomOutCommand extends GenericCommand<"window.zoomOut"> {}
 /** Reset the page zoom to 100%. */
-export interface ResetZoomCommand extends GenericCommand<"resetZoom"> {}
+export interface ResetZoomCommand extends GenericCommand<"window.resetZoom"> {}
 /** Reload the webview. */
-export interface ReloadCommand extends GenericCommand<"reload"> {}
+export interface ReloadCommand extends GenericCommand<"window.reload"> {}
 
 /** Open a URL in the user's default browser (via the OS). */
 export interface OpenLinkCommand extends GenericCommand<
-  "openLink",
+  "shell.openLink",
   { url: string }
 > {}
 
@@ -287,18 +255,18 @@ export interface OpenLinkCommand extends GenericCommand<
  * at a specific doc page (currently ignored — always opens the docs home).
  */
 export interface OpenDocumentCommand extends GenericCommand<
-  "openDocument",
+  "shell.openDocument",
   { path?: string; runtimeId?: RuntimeId }
 > {}
 
 /** Open the GitHub issues page in the user's default browser to report a bug. */
-export interface ReportBugsCommand extends GenericCommand<"reportBugs"> {}
+export interface ReportBugsCommand extends GenericCommand<"shell.reportBugs"> {}
 
 /** Open the workspace folder (`LLM_SPACE_HOME/workspace`) in the OS file manager. */
-export interface OpenWorkspaceFolderCommand extends GenericCommand<"openWorkspaceFolder"> {}
+export interface OpenWorkspaceFolderCommand extends GenericCommand<"shell.openWorkspaceFolder"> {}
 
 /** Pick and open a code-first Agent project in its own desktop window. */
-export interface OpenAgentProjectCommand extends GenericCommand<"openAgentProject"> {}
+export interface OpenAgentProjectCommand extends GenericCommand<"agentProjects.open"> {}
 
 // --- GitHub auth (bun-side) ------------------------------------------------
 
@@ -307,10 +275,10 @@ export interface OpenAgentProjectCommand extends GenericCommand<"openAgentProjec
  * verification window, and polls for the token. Modelled as a command so any
  * surface (Account page, a future "sign in to share" prompt) can trigger it.
  */
-export interface GithubLoginCommand extends GenericCommand<"githubLogin"> {}
+export interface GithubLoginCommand extends GenericCommand<"githubAccount.login"> {}
 
 /** Sign out of GitHub: forget the stored token. */
-export interface GithubLogoutCommand extends GenericCommand<"githubLogout"> {}
+export interface GithubLogoutCommand extends GenericCommand<"githubAccount.logout"> {}
 
 // --- Updates ---------------------------------------------------------------
 
@@ -319,10 +287,10 @@ export interface GithubLogoutCommand extends GenericCommand<"githubLogout"> {}
  * bun-side updater reports progress back over the `updateStatusChanged` RPC
  * message; see `shared/updates.ts`.
  */
-export interface CheckForUpdatesCommand extends GenericCommand<"checkForUpdates"> {}
+export interface CheckForUpdatesCommand extends GenericCommand<"updates.check"> {}
 
 /** Apply a downloaded update: quit, swap the app bundle, relaunch. */
-export interface ApplyUpdateAndRestartCommand extends GenericCommand<"applyUpdateAndRestart"> {}
+export interface ApplyUpdateAndRestartCommand extends GenericCommand<"updates.applyAndRestart"> {}
 
 /** The discriminated union of every command. */
 export type Command =
@@ -339,10 +307,6 @@ export type Command =
   | RevealInTreeCommand
   | ImportFilesCommand
   | ImportFromClipboardCommand
-  | CreateTraceProjectCommand
-  | CreateConnectedTraceProjectCommand
-  | ImportLangfuseTraceFilesCommand
-  | SyncLangfuseTraceIdsCommand
   | CloseTabCommand
   | CloseOtherTabsCommand
   | CloseAllTabsCommand
@@ -392,62 +356,61 @@ export const COMMAND_META: Record<
   CommandType,
   { label: string; target: "webview" | "bun" }
 > = {
-  newFile: { label: "New File", target: "webview" },
-  newFileFromPromptExample: {
+  "workspace.newFile": { label: "New File", target: "webview" },
+  "workspace.newFileFromPromptExample": {
     label: "Start from Example",
     target: "webview",
   },
-  openStartFromExample: {
+  "workspace.openStartFromExample": {
     label: "New from Examples...",
     target: "webview",
   },
-  newFolder: { label: "New Folder", target: "webview" },
-  renameFile: { label: "Rename", target: "webview" },
-  duplicateFile: { label: "Duplicate", target: "webview" },
-  deleteFile: { label: "Move to Trash", target: "webview" },
-  revealFile: { label: "Reveal in Finder", target: "webview" },
-  copyFile: { label: "Copy", target: "bun" },
-  refreshTree: { label: "Refresh", target: "webview" },
-  revealInTree: { label: "Reveal in Tree", target: "webview" },
-  importFiles: { label: "Import from Files...", target: "webview" },
-  importFromClipboard: { label: "Import from Clipboard", target: "bun" },
-  createTraceProject: { label: "New Trace Project", target: "webview" },
-  createConnectedTraceProject: {
-    label: "Connect Langfuse",
+  "workspace.newFolder": { label: "New Folder", target: "webview" },
+  "workspace.rename": { label: "Rename", target: "webview" },
+  "workspace.duplicate": { label: "Duplicate", target: "webview" },
+  "workspace.delete": { label: "Move to Trash", target: "webview" },
+  "workspace.reveal": { label: "Reveal in Finder", target: "webview" },
+  "workspace.copyFile": { label: "Copy", target: "bun" },
+  "workspace.refresh": { label: "Refresh", target: "webview" },
+  "workspace.revealInTree": { label: "Reveal in Tree", target: "webview" },
+  "workspace.importFiles": { label: "Import from Files...", target: "webview" },
+  "workspace.importFromClipboard": {
+    label: "Import from Clipboard",
+    target: "bun",
+  },
+  "tabs.close": { label: "Close Tab", target: "webview" },
+  "tabs.closeOthers": { label: "Close Other Tabs", target: "webview" },
+  "tabs.closeAll": { label: "Close All Tabs", target: "webview" },
+  "tabs.reopenClosed": { label: "Reopen Closed Tab", target: "webview" },
+  "tabs.selectNext": { label: "Select Next Tab", target: "webview" },
+  "tabs.selectPrevious": { label: "Select Previous Tab", target: "webview" },
+  "layout.toggleSidebar": { label: "Toggle Sidebar", target: "webview" },
+  "app.openSettings": { label: "Settings", target: "webview" },
+  "app.openModelSettings": {
+    label: "Configure Model Settings",
     target: "webview",
   },
-  importLangfuseTraceFiles: {
-    label: "Import Langfuse Export...",
-    target: "webview",
+  "app.openCommandPalette": { label: "Command Palette", target: "webview" },
+  "app.openOnboard": { label: "Onboard...", target: "webview" },
+  "thread.run": { label: "Run Thread", target: "webview" },
+  "project.createThread": { label: "New Project Thread", target: "webview" },
+  "project.forkThread": { label: "Fork Thread", target: "webview" },
+  "thread.share": { label: "Share...", target: "webview" },
+  "thread.openVariables": { label: "Variables", target: "webview" },
+  "window.zoomIn": { label: "Zoom In", target: "bun" },
+  "window.zoomOut": { label: "Zoom Out", target: "bun" },
+  "window.resetZoom": { label: "Reset Zoom", target: "bun" },
+  "window.reload": { label: "Reload", target: "bun" },
+  "shell.openLink": { label: "Open Link", target: "bun" },
+  "shell.openDocument": { label: "Documents", target: "bun" },
+  "shell.reportBugs": { label: "Report Bug", target: "bun" },
+  "shell.openWorkspaceFolder": {
+    label: "Open Workspace Folder",
+    target: "bun",
   },
-  syncLangfuseTraceIds: { label: "Sync Langfuse Traces", target: "webview" },
-  closeTab: { label: "Close Tab", target: "webview" },
-  closeOtherTabs: { label: "Close Other Tabs", target: "webview" },
-  closeAllTabs: { label: "Close All Tabs", target: "webview" },
-  reopenClosedTab: { label: "Reopen Closed Tab", target: "webview" },
-  selectNextTab: { label: "Select Next Tab", target: "webview" },
-  selectPreviousTab: { label: "Select Previous Tab", target: "webview" },
-  toggleSidebar: { label: "Toggle Sidebar", target: "webview" },
-  openSettings: { label: "Settings", target: "webview" },
-  openModelSettings: { label: "Configure Model Settings", target: "webview" },
-  openCommandPalette: { label: "Command Palette", target: "webview" },
-  openOnboard: { label: "Onboard...", target: "webview" },
-  runThread: { label: "Run Thread", target: "webview" },
-  createProjectThread: { label: "New Project Thread", target: "webview" },
-  forkProjectThread: { label: "Fork Thread", target: "webview" },
-  shareThread: { label: "Share...", target: "webview" },
-  openVariables: { label: "Variables", target: "webview" },
-  zoomIn: { label: "Zoom In", target: "bun" },
-  zoomOut: { label: "Zoom Out", target: "bun" },
-  resetZoom: { label: "Reset Zoom", target: "bun" },
-  reload: { label: "Reload", target: "bun" },
-  openLink: { label: "Open Link", target: "bun" },
-  openDocument: { label: "Documents", target: "bun" },
-  reportBugs: { label: "Report Bug", target: "bun" },
-  openWorkspaceFolder: { label: "Open Workspace Folder", target: "bun" },
-  openAgentProject: { label: "Open Agent Project...", target: "bun" },
-  githubLogin: { label: "Sign in with GitHub", target: "bun" },
-  githubLogout: { label: "Sign out of GitHub", target: "bun" },
-  checkForUpdates: { label: "Check for Updates...", target: "bun" },
-  applyUpdateAndRestart: { label: "Restart to Update", target: "bun" },
+  "agentProjects.open": { label: "Open Agent Project...", target: "bun" },
+  "githubAccount.login": { label: "Sign in with GitHub", target: "bun" },
+  "githubAccount.logout": { label: "Sign out of GitHub", target: "bun" },
+  "updates.check": { label: "Check for Updates...", target: "bun" },
+  "updates.applyAndRestart": { label: "Restart to Update", target: "bun" },
 };

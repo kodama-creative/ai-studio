@@ -88,7 +88,7 @@ function SignedIn({
       <DropdownMenuContent align="start" side="top" className="w-56">
         <DropdownMenuItem
           onSelect={() =>
-            executeCommand({ type: "openLink", args: { url: user.htmlUrl } })
+            executeCommand({ type: "shell.openLink", args: { url: user.htmlUrl } })
           }
         >
           <GitHubIcon />

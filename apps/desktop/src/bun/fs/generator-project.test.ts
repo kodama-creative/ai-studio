@@ -1,10 +1,7 @@
 import { expect, mock, test } from "bun:test";
 import path from "node:path";
 
-import {
-  authorizeGeneratorDir,
-  openGeneratorDevTerminal,
-} from "./generator-project";
+import { GeneratorProjectWorkspace } from "./generator-project";
 
 test("generated project terminal launch is unsupported outside macOS", async () => {
   const runAppleScript = mock<
@@ -12,10 +9,13 @@ test("generated project terminal launch is unsupported outside macOS", async () 
   >(() => Promise.resolve());
 
   expect(
-    await openGeneratorDevTerminal("/untrusted/project", {
-      platform: "linux",
-      runAppleScript,
-    })
+    await new GeneratorProjectWorkspace().openDevTerminal(
+      "/untrusted/project",
+      {
+        platform: "linux",
+        runAppleScript,
+      }
+    )
   ).toBe(false);
   expect(runAppleScript).not.toHaveBeenCalled();
 });
@@ -24,13 +24,14 @@ test("macOS opens Terminal in an authorized project and runs make dev", async ()
   const projectDir = path.resolve(
     "/tmp/llm-space-project with spaces and 'quote'"
   );
-  authorizeGeneratorDir(projectDir);
+  const workspace = new GeneratorProjectWorkspace();
+  workspace.authorize(projectDir);
   const runAppleScript = mock<
     (script: string, args: string[]) => Promise<void>
   >(() => Promise.resolve());
 
   expect(
-    await openGeneratorDevTerminal(projectDir, {
+    await workspace.openDevTerminal(projectDir, {
       platform: "darwin",
       runAppleScript,
     })
@@ -44,7 +45,7 @@ test("macOS opens Terminal in an authorized project and runs make dev", async ()
 
 test("macOS refuses to launch an unauthorized project directory", () => {
   expect(
-    openGeneratorDevTerminal("/tmp/not-authorized", {
+    new GeneratorProjectWorkspace().openDevTerminal("/tmp/not-authorized", {
       platform: "darwin",
       runAppleScript: () => Promise.resolve(),
     })

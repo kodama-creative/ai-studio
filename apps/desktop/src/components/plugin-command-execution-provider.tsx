@@ -12,8 +12,7 @@ import {
   PluginCommandExecutionManager,
   type PluginCommandRunInput,
 } from "@/client/plugin-command-execution";
-import { executePluginCommand } from "@/client/plugins";
-import { electrobun } from "@/lib/electrobun";
+import { executePluginCommand, pluginCommandsClient } from "@/client/plugins";
 
 interface PluginCommandExecutionContextValue {
   runPluginCommand: (input: PluginCommandRunInput) => string;
@@ -51,12 +50,11 @@ export function PluginCommandExecutionProvider({
   );
 
   useEffect(() => {
-    const rpc = electrobun.rpc;
-    if (!rpc) return;
     const handle = manager.handleEvent.bind(manager);
-    rpc.addMessageListener("pluginCommandExecutionChanged", handle);
-    return () =>
-      rpc.removeMessageListener("pluginCommandExecutionChanged", handle);
+    const subscription = pluginCommandsClient.on("executionChanged", handle);
+    return () => {
+      void subscription.dispose();
+    };
   }, [manager]);
 
   const runPluginCommand = useCallback(

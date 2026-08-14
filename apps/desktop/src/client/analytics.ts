@@ -1,19 +1,13 @@
-import { electrobun } from "@/lib/electrobun";
 import type { AnalyticsStatus } from "@/shared/analytics";
 
-function _rpc() {
-  if (!electrobun.rpc) {
-    throw new Error("Electrobun RPC is not initialized");
-  }
-  return electrobun.rpc;
-}
+import { analyticsClient } from "./application-rpc-clients";
 
 export async function getAnalyticsSettings(): Promise<AnalyticsStatus> {
-  return _rpc().request.getAnalyticsSettings({});
+  return analyticsClient.getSettings();
 }
 
 export async function setAnalyticsSettings(
   enabled: boolean
 ): Promise<AnalyticsStatus> {
-  return _rpc().request.setAnalyticsSettings({ enabled });
+  return analyticsClient.setEnabled(enabled);
 }

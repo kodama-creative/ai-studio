@@ -15,13 +15,19 @@ import type {
   StudioEvaluationMetadataInput,
 } from "@llm-space/studio/evaluation";
 
-export interface ProjectStudioTransport {
+import { defineRpcNamespace } from "./namespaced-rpc";
+
+/** Shared Project Studio contract implemented by RPC server and client proxy. */
+export interface ProjectStudioRpc {
+  readonly requests: ProjectStudioRequests;
+  readonly streams: ProjectStudioStreams;
+  readonly events: Record<never, never>;
+}
+
+export interface ProjectStudioRequests {
   getSourceRevision(): Promise<string>;
   listSourceFiles(): Promise<readonly ProjectSourceNode[]>;
   readSourceFile(path: string): Promise<string>;
-  watchSourceFiles(input?: {
-    readonly signal?: AbortSignal;
-  }): AsyncIterable<ProjectSourceSnapshot>;
   listThreads(): Promise<readonly StudioThread[]>;
   listRunHistory(threadId: string): Promise<readonly StudioRunHistoryEntry[]>;
   saveRunHistory(
@@ -47,10 +53,24 @@ export interface ProjectStudioTransport {
   stepRun(runId: string, input?: StudioStepRunInput): Promise<StudioRunReceipt>;
   continueRun(runId: string): Promise<StudioRunReceipt>;
   cancelRun(runId: string): Promise<void>;
+}
+
+export interface ProjectStudioStreams {
+  watchSourceFiles(input?: {
+    readonly signal?: AbortSignal;
+  }): AsyncIterable<ProjectSourceSnapshot>;
   events(
     threadId: string,
     cursor?: StudioEventCursor
   ): AsyncIterable<StudioThreadEvent>;
 }
+
+export type ProjectStudioTransport = ProjectStudioRequests &
+  ProjectStudioStreams;
+
+export const PROJECT_STUDIO_RPC = defineRpcNamespace<ProjectStudioRpc>(
+  "project",
+  { streams: ["watchSourceFiles", "events"], events: [] }
+);
 
 export type { ProjectSourceNode, ProjectSourceSnapshot };

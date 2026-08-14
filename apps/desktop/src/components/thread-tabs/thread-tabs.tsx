@@ -27,7 +27,7 @@ import {
   type ReactNode,
 } from "react";
 
-import { electrobun } from "@/lib/electrobun";
+import { windowClient } from "@/client/native-files";
 import type { RuntimeId } from "@/shared/runtime";
 
 import type { PaneLifecycleHost } from "./pane-lifecycle-host";
@@ -35,7 +35,6 @@ import { PlaygroundTabPane } from "./playground-tab-pane";
 import { RuntimePaneHost } from "./runtime-pane-host";
 import { ShareThreadMenuItem } from "./share-thread-menu-item";
 import { ThreadTabPane } from "./thread-tab-pane";
-import { TraceTabPane } from "./trace-tab-pane";
 import { tabLabel, type AppTab } from "./use-thread-tabs";
 
 const _isWindows =
@@ -47,7 +46,7 @@ const MOVE_TO_TRASH_LABEL = _isWindows
   : "Move to Trash";
 
 function _getPaneKey(tab: AppTab): string {
-  return tab.type === "trace" ? tab.id : tab.paneId;
+  return tab.paneId;
 }
 
 // Suppress focus on mouse-down so a click doesn't leave these toolbar icons
@@ -85,12 +84,6 @@ interface ThreadTabsProps {
   /** Create a new thread at the workspace root (auto-named, opened, selected). */
   onNewFile?: () => void;
   onMove?: (from: string, to: string, runtimeId: RuntimeId) => void;
-  onTraceTitleChange?: (
-    projectId: string,
-    traceKey: string,
-    title: string,
-    runtimeId: RuntimeId
-  ) => void;
   onPlaygroundTitleChange?: (playgroundId: string, title: string) => void;
   onToggleSidebar?: () => void;
   lifecycleHost: PaneLifecycleHost;
@@ -121,7 +114,6 @@ export function ThreadTabs({
   reorder,
   onNewFile,
   onMove,
-  onTraceTitleChange,
   onPlaygroundTitleChange,
   onToggleSidebar,
   lifecycleHost,
@@ -162,14 +154,11 @@ export function ThreadTabs({
   }, [tabs, activeId]);
 
   const handleTabsHeaderDoubleClick = useCallback((e: Event) => {
-    if (!electrobun.rpc) {
-      return;
-    }
     if (
       e.target instanceof HTMLElement &&
       e.target.classList.contains("chrome-tabs")
     ) {
-      void electrobun.rpc.request.toggleMaximized({});
+      void windowClient.toggleMaximized();
     }
   }, []);
 
@@ -264,7 +253,7 @@ export function ThreadTabs({
           onTitleChange={onPlaygroundTitleChange}
           onThreadStateChange={onThreadStateChange}
         />
-      ) : tab.type === "thread" ? (
+      ) : (
         <ThreadTabPane
           tabId={tab.id}
           paneId={tab.paneId}
@@ -279,18 +268,6 @@ export function ThreadTabs({
           consumeDiscardedPane={consumeDiscardedPane}
           onThreadStateChange={onThreadStateChange}
         />
-      ) : (
-        <TraceTabPane
-          projectId={tab.projectId}
-          traceKey={tab.traceKey}
-          runtimeId={tab.runtimeId}
-          active={active}
-          lifecycleHost={lifecycleHost}
-          mutationRevision={mutationRevision}
-          refreshNonce={tab.refreshNonce ?? 0}
-          onClose={close}
-          onRenameTitle={onTraceTitleChange}
-        />
       ),
     [
       close,
@@ -300,7 +277,6 @@ export function ThreadTabs({
       onMove,
       onPlaygroundTitleChange,
       onThreadStateChange,
-      onTraceTitleChange,
     ]
   );
 

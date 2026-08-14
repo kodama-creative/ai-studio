@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { electrobun } from "@/lib/electrobun";
+import { windowClient } from "@/client/native-files";
 
 /**
  * Track the window's OS-level (Electrobun) fullscreen state. Seeds the initial
@@ -11,12 +11,10 @@ export function useFullScreen(): boolean {
   const [fullScreen, setFullScreen] = useState(false);
 
   useEffect(() => {
-    const rpc = electrobun.rpc;
-    if (!rpc) return;
     let cancelled = false;
 
-    void rpc.request
-      .isFullScreen({})
+    void windowClient
+      .getFullscreenState()
       .then((res) => {
         if (!cancelled) setFullScreen(res.fullScreen);
       })
@@ -26,10 +24,10 @@ export function useFullScreen(): boolean {
 
     const onChange = ({ fullScreen }: { fullScreen: boolean }) =>
       setFullScreen(fullScreen);
-    rpc.addMessageListener("fullScreenChanged", onChange);
+    const subscription = windowClient.on("fullScreenChanged", onChange);
     return () => {
       cancelled = true;
-      rpc.removeMessageListener("fullScreenChanged", onChange);
+      void subscription.dispose();
     };
   }, []);
 

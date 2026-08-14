@@ -11,7 +11,6 @@ import type { SearchSettingsManager } from "../search";
 import type { SkillsManager } from "../skills";
 import type { StreamThreadController } from "../streaming";
 import type { ToolRegistry } from "../tools/tool-registry";
-import type { TraceManager } from "../traces";
 
 import { getModelProviderGroups } from "./model-groups";
 import type {
@@ -31,7 +30,6 @@ export interface LocalRuntimeClientDependencies {
   skillsManager: SkillsManager;
   streaming: StreamThreadController;
   tools: ToolRegistry;
-  traceManager: TraceManager;
   rmPath?: (path: string) => Promise<void>;
 }
 
@@ -53,7 +51,6 @@ export class LocalRuntimeClient implements RuntimeClient {
         "skills",
         "search",
         "network",
-        "traces",
       ],
     };
   }
@@ -355,63 +352,6 @@ export class LocalRuntimeClient implements RuntimeClient {
 
   skillsReadSkill(path: string) {
     return this._deps.skillsManager.readSkill(path);
-  }
-
-  traceListProjects() {
-    return this._deps.traceManager.listProjects();
-  }
-
-  traceCreateProject(name: string) {
-    return this._deps.traceManager.createProject(name);
-  }
-
-  traceCreateConnectedProject(
-    input: Parameters<RuntimeClient["traceCreateConnectedProject"]>[0]
-  ) {
-    return this._deps.traceManager.createConnectedProject(input);
-  }
-
-  traceListTraces(projectId: string) {
-    return this._deps.traceManager.listTraces(projectId);
-  }
-
-  traceImportLangfuseJson(
-    projectId: string,
-    files: Parameters<RuntimeClient["traceImportLangfuseJson"]>[1]
-  ) {
-    return this._deps.traceManager.importLangfuseJson(projectId, files);
-  }
-
-  traceSearchLangfuseTraces(
-    input: Parameters<RuntimeClient["traceSearchLangfuseTraces"]>[0]
-  ) {
-    return this._deps.traceManager.searchLangfuseTraces(input);
-  }
-
-  traceSyncLangfuseTraces(
-    input: Parameters<RuntimeClient["traceSyncLangfuseTraces"]>[0]
-  ) {
-    return this._deps.traceManager.syncLangfuseTraces(input);
-  }
-
-  traceReadTrace(projectId: string, traceKey: string) {
-    return this._deps.traceManager.readTrace(projectId, traceKey);
-  }
-
-  traceReadOrCreateWorkbench(projectId: string, traceKey: string) {
-    return this._deps.traceManager.readOrCreateWorkbench(projectId, traceKey);
-  }
-
-  traceUpdateTraceTitle(projectId: string, traceKey: string, title: string) {
-    return this._deps.traceManager.updateTraceTitle(projectId, traceKey, title);
-  }
-
-  async traceWriteWorkbench(
-    projectId: string,
-    traceKey: string,
-    thread: Parameters<RuntimeClient["traceWriteWorkbench"]>[2]
-  ) {
-    await this._deps.traceManager.writeWorkbench(projectId, traceKey, thread);
   }
 
   streamThread(

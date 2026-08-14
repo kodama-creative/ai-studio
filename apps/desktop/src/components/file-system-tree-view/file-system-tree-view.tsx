@@ -194,12 +194,12 @@ function _FileSystemTreeView({
   // auto-named flow; the tree/root "New file" icons pass `rename: true` for the
   // in-place rename flow.
   useRegisterCommands({
-    newFile: ({ parent = "", rename, runtimeId: commandRuntimeId }) => {
+    "workspace.newFile": ({ parent = "", rename, runtimeId: commandRuntimeId }) => {
       if (commandRuntimeId && commandRuntimeId !== runtimeId) return;
       if (rename) void create(parent, "file");
       else void createThread(parent);
     },
-    newFileFromPromptExample: ({
+    "workspace.newFileFromPromptExample": ({
       parent = "",
       exampleId,
       runtimeId: commandRuntimeId,
@@ -226,28 +226,28 @@ function _FileSystemTreeView({
         );
       })();
     },
-    newFolder: ({ parent = "", runtimeId: commandRuntimeId }) => {
+    "workspace.newFolder": ({ parent = "", runtimeId: commandRuntimeId }) => {
       if (commandRuntimeId && commandRuntimeId !== runtimeId) return;
       void create(parent, "folder");
     },
-    renameFile: ({ path, runtimeId: commandRuntimeId }) => {
+    "workspace.rename": ({ path, runtimeId: commandRuntimeId }) => {
       if (commandRuntimeId && commandRuntimeId !== runtimeId) return;
       startRenameByPath(path);
     },
-    duplicateFile: ({ path, runtimeId: commandRuntimeId }) => {
+    "workspace.duplicate": ({ path, runtimeId: commandRuntimeId }) => {
       if (commandRuntimeId && commandRuntimeId !== runtimeId) return;
       void duplicateNode(path);
     },
-    deleteFile: ({ path, runtimeId: commandRuntimeId }) => {
+    "workspace.delete": ({ path, runtimeId: commandRuntimeId }) => {
       if (commandRuntimeId && commandRuntimeId !== runtimeId) return;
       setDeleting(path);
     },
-    revealFile: ({ path, runtimeId: commandRuntimeId }) => {
+    "workspace.reveal": ({ path, runtimeId: commandRuntimeId }) => {
       if (commandRuntimeId && commandRuntimeId !== runtimeId) return;
       void reveal(path);
     },
-    refreshTree: () => refresh(),
-    revealInTree: ({ path, runtimeId: commandRuntimeId }) => {
+    "workspace.refresh": () => refresh(),
+    "workspace.revealInTree": ({ path, runtimeId: commandRuntimeId }) => {
       if (commandRuntimeId && commandRuntimeId !== runtimeId) return;
       // Expand every ancestor folder so the file's row can render, refresh so a
       // just-written file appears, then reuse the reveal flow (select + open +

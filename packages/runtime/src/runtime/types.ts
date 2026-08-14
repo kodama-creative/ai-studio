@@ -23,18 +23,6 @@ import type {
   Thread,
 } from "@llm-space/core";
 
-import type {
-  TraceConnectedProjectInput,
-  TraceImportFile,
-  TraceImportResult,
-  TraceLangfuseSearchInput,
-  TraceProject,
-  TraceRecord,
-  TraceRemoteTraceSummary,
-  TraceSyncResult,
-  TraceWorkbenchResponse,
-} from "../traces";
-
 import type { RuntimeId } from "./runtime-id";
 
 export type { RuntimeId };
@@ -47,8 +35,7 @@ export type RuntimeCapability =
   | "builtinTools"
   | "skills"
   | "search"
-  | "network"
-  | "traces";
+  | "network";
 
 export interface RuntimeInfo {
   id: RuntimeId;
@@ -215,43 +202,6 @@ export interface RuntimeClient {
   skillsListPluginSkills(): MaybePromise<SkillInfo[]>;
   skillsListSkills(path: string): MaybePromise<SkillInfo[]>;
   skillsReadSkill(path: string): MaybePromise<SkillContent>;
-
-  traceListProjects(): MaybePromise<TraceProject[]>;
-  traceCreateProject(name: string): MaybePromise<TraceProject>;
-  traceCreateConnectedProject(
-    input: TraceConnectedProjectInput
-  ): MaybePromise<TraceProject>;
-  traceListTraces(projectId: string): MaybePromise<TraceRecord[]>;
-  traceImportLangfuseJson(
-    projectId: string,
-    files: TraceImportFile[]
-  ): MaybePromise<TraceImportResult>;
-  traceSearchLangfuseTraces(input: {
-    projectId: string;
-    filters?: TraceLangfuseSearchInput;
-  }): MaybePromise<TraceRemoteTraceSummary[]>;
-  traceSyncLangfuseTraces(input: {
-    projectId: string;
-    traceIds: string[];
-  }): MaybePromise<TraceSyncResult>;
-  traceReadTrace(
-    projectId: string,
-    traceKey: string
-  ): MaybePromise<TraceRecord>;
-  traceReadOrCreateWorkbench(
-    projectId: string,
-    traceKey: string
-  ): MaybePromise<TraceWorkbenchResponse>;
-  traceUpdateTraceTitle(
-    projectId: string,
-    traceKey: string,
-    title: string
-  ): MaybePromise<TraceWorkbenchResponse>;
-  traceWriteWorkbench(
-    projectId: string,
-    traceKey: string,
-    thread: Thread
-  ): MaybePromise<void>;
 
   streamThread(
     payload: RuntimeStreamRequestPayload,

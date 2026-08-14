@@ -32,7 +32,7 @@ export function PageShareThreadController({
   });
 
   useRegisterCommands({
-    shareThread: createShareThreadCommandHandler({
+    "thread.share": createShareThreadCommandHandler({
       getWorkspaceRuntimeId: () => workspaceRuntimeId,
       getActiveThread,
       openDialog: (nextTarget) => {

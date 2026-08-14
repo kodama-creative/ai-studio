@@ -232,58 +232,6 @@ async function _dispatch(
       return runtime.skillsListSkills(_stringParam(params, "path"));
     case "skills.readSkill":
       return runtime.skillsReadSkill(_stringParam(params, "path"));
-    case "trace.listProjects":
-      return runtime.traceListProjects();
-    case "trace.createProject":
-      return runtime.traceCreateProject(_stringParam(params, "name"));
-    case "trace.createConnectedProject":
-      return runtime.traceCreateConnectedProject(
-        params as unknown as Parameters<
-          RuntimeClient["traceCreateConnectedProject"]
-        >[0]
-      );
-    case "trace.listTraces":
-      return runtime.traceListTraces(_stringParam(params, "projectId"));
-    case "trace.importLangfuseJson":
-      return runtime.traceImportLangfuseJson(
-        _stringParam(params, "projectId"),
-        (
-          params as unknown as {
-            files: Parameters<RuntimeClient["traceImportLangfuseJson"]>[1];
-          }
-        ).files
-      );
-    case "trace.searchLangfuseTraces":
-      return runtime.traceSearchLangfuseTraces(
-        params as Parameters<RuntimeClient["traceSearchLangfuseTraces"]>[0]
-      );
-    case "trace.syncLangfuseTraces":
-      return runtime.traceSyncLangfuseTraces(
-        params as Parameters<RuntimeClient["traceSyncLangfuseTraces"]>[0]
-      );
-    case "trace.readTrace":
-      return runtime.traceReadTrace(
-        _stringParam(params, "projectId"),
-        _stringParam(params, "traceKey")
-      );
-    case "trace.readOrCreateWorkbench":
-      return runtime.traceReadOrCreateWorkbench(
-        _stringParam(params, "projectId"),
-        _stringParam(params, "traceKey")
-      );
-    case "trace.updateTraceTitle":
-      return runtime.traceUpdateTraceTitle(
-        _stringParam(params, "projectId"),
-        _stringParam(params, "traceKey"),
-        _stringParam(params, "title")
-      );
-    case "trace.writeWorkbench":
-      await runtime.traceWriteWorkbench(
-        _stringParam(params, "projectId"),
-        _stringParam(params, "traceKey"),
-        _threadParam(params)
-      );
-      return null;
     default:
       throw new ServerError(
         "method_not_found",

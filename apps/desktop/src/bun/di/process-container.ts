@@ -4,11 +4,41 @@ import {
   type ServiceIdentifier,
 } from "inversify";
 
+import { isDisposable, type Disposable } from "../../shared/disposable";
+
 type Disposer = () => void | Promise<void>;
+
+class DisposableTracker {
+  private readonly _resources: Disposable[] = [];
+  private readonly _seen = new Set<Disposable>();
+
+  /** Adopt a resolved resource once, preserving construction order. */
+  track<T>(value: T): T {
+    if (isDisposable(value) && !this._seen.has(value)) {
+      this._seen.add(value);
+      this._resources.push(value);
+    }
+    return value;
+  }
+
+  /** Dispose adopted resources in reverse construction order. */
+  async dispose(errors: unknown[]): Promise<void> {
+    for (const resource of this._resources.reverse()) {
+      try {
+        await resource.dispose();
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+    this._resources.length = 0;
+    this._seen.clear();
+  }
+}
 
 /** One explicitly-owned child container for a native desktop window. */
 export class DesktopWindowScope {
   private readonly _disposers: Disposer[] = [];
+  private readonly _disposables = new DisposableTracker();
   private readonly _disposedListeners = new Set<() => void>();
   private _disposePromise: Promise<void> | undefined;
   private _disposed = false;
@@ -16,6 +46,7 @@ export class DesktopWindowScope {
   constructor(
     readonly id: string,
     private readonly _container: Container,
+    private readonly _trackInherited: <T>(value: T) => T,
     private readonly _onDisposed: () => void
   ) {}
 
@@ -23,6 +54,7 @@ export class DesktopWindowScope {
   bindConstant<T>(token: ServiceIdentifier<T>, value: T): void {
     this._assertOpen();
     this._container.bind(token).toConstantValue(value);
+    this._disposables.track(value);
   }
 
   /** Load one explicit window composition module. */
@@ -34,7 +66,36 @@ export class DesktopWindowScope {
   /** Resolve dependencies only while composing the window object graph. */
   get<T>(token: ServiceIdentifier<T>): T {
     this._assertOpen();
-    return this._container.get(token);
+    const value = this._container.get(token);
+    // A process singleton may be instantiated for the first time while a
+    // window contribution resolves it. Keep that resource owned by the
+    // process; only bindings declared in the child belong to this window.
+    return this._container.isCurrentBound(token)
+      ? this._disposables.track(value)
+      : this._trackInherited(value);
+  }
+
+  /** Resolve one async factory and adopt only window-owned resources. */
+  async getAsync<T>(token: ServiceIdentifier<T>): Promise<T> {
+    this._assertOpen();
+    const value = await this._container.getAsync(token);
+    return this._container.isCurrentBound(token)
+      ? this._disposables.track(value)
+      : this._trackInherited(value);
+  }
+
+  /** Resolve every local + inherited contribution in registration order. */
+  getAll<T>(token: ServiceIdentifier<T>): T[] {
+    this._assertOpen();
+    return this._container
+      .getAll(token, { chained: true })
+      .map((value) => value);
+  }
+
+  /** Adopt a factory-created window resource for automatic disposal. */
+  own<T>(value: T): T {
+    this._assertOpen();
+    return this._disposables.track(value);
   }
 
   /** Register explicit async cleanup; callbacks run in reverse ownership order. */
@@ -74,6 +135,7 @@ export class DesktopWindowScope {
         errors.push(error);
       }
     }
+    await this._disposables.dispose(errors);
     try {
       await this._container.unbindAllAsync();
     } catch (error) {
@@ -104,12 +166,14 @@ export class DesktopProcessContainer {
   private readonly _container = new Container();
   private readonly _windows = new Map<string, DesktopWindowScope>();
   private readonly _disposers: Disposer[] = [];
+  private readonly _disposables = new DisposableTracker();
   private _disposePromise: Promise<void> | undefined;
 
   /** Bind one process-wide singleton value at the composition root. */
   bindConstant<T>(token: ServiceIdentifier<T>, value: T): void {
     this._assertOpen();
     this._container.bind(token).toConstantValue(value);
+    this._disposables.track(value);
   }
 
   /** Load one explicit process composition module. */
@@ -121,7 +185,15 @@ export class DesktopProcessContainer {
   /** Resolve dependencies only while composing a process or window module. */
   get<T>(token: ServiceIdentifier<T>): T {
     this._assertOpen();
-    return this._container.get(token);
+    return this._disposables.track(this._container.get(token));
+  }
+
+  /** Resolve all process contributions and track disposable instances once. */
+  getAll<T>(token: ServiceIdentifier<T>): T[] {
+    this._assertOpen();
+    return this._container
+      .getAll(token)
+      .map((value) => this._disposables.track(value));
   }
 
   /** Create one uniquely-owned window child scope inheriting process services. */
@@ -131,9 +203,14 @@ export class DesktopProcessContainer {
       throw new Error(`Desktop window scope "${id}" already exists.`);
     }
     const child = new Container({ parent: this._container });
-    const scope = new DesktopWindowScope(id, child, () => {
-      this._windows.delete(id);
-    });
+    const scope = new DesktopWindowScope(
+      id,
+      child,
+      (value) => this._disposables.track(value),
+      () => {
+        this._windows.delete(id);
+      }
+    );
     this._windows.set(id, scope);
     return scope;
   }
@@ -166,6 +243,7 @@ export class DesktopProcessContainer {
         errors.push(error);
       }
     }
+    await this._disposables.dispose(errors);
     try {
       await this._container.unbindAllAsync();
     } catch (error) {

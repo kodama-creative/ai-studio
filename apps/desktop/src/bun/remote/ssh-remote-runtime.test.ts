@@ -740,7 +740,6 @@ function _healthResponse() {
       "skills",
       "search",
       "network",
-      "traces",
     ],
     homePath: "/home/test/.llm-space-server",
     workspacePath: "/home/test/.llm-space-server/workspace",

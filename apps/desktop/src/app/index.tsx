@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 
+import { windowClient } from "@/client/native-files";
 import { CommandProvider } from "@/commands";
 import {
   createElectrobunModelClient,
   DesktopHostProvider,
 } from "@/host/host-services";
-import { electrobun } from "@/lib/electrobun";
 import type { DesktopWindowContext } from "@/shared/agent-project";
 
 import { Layout } from "./layout";
@@ -18,12 +18,7 @@ export function App() {
   const [error, setError] = useState<string>();
 
   useEffect(() => {
-    const rpc = electrobun.rpc;
-    if (rpc === undefined) {
-      setError("Electrobun RPC is not initialized.");
-      return;
-    }
-    void rpc.request.windowContext({}).then(setContext, (cause) => {
+    void windowClient.getContext().then(setContext, (cause) => {
       setError(cause instanceof Error ? cause.message : String(cause));
     });
   }, []);

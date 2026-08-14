@@ -18,9 +18,8 @@ import {
 } from "lucide-react";
 import { useCallback, type MouseEvent } from "react";
 
+import { windowClient } from "@/client/native-files";
 import { useCommands } from "@/commands";
-import { electrobun } from "@/lib/electrobun";
-
 
 interface WelcomeProps {
   className?: string;
@@ -38,13 +37,13 @@ export function Welcome({
   const { executeCommand } = useCommands();
 
   const handleHeaderDoubleClick = useCallback(() => {
-    void electrobun.rpc?.request.toggleMaximized({});
+    void windowClient.toggleMaximized();
   }, []);
 
   const handleLearnMore = useCallback(
     (event: MouseEvent<HTMLAnchorElement>) => {
       event.preventDefault();
-      executeCommand({ type: "openDocument", args: {} });
+      executeCommand({ type: "shell.openDocument", args: {} });
     },
     [executeCommand]
   );

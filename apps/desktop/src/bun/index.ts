@@ -16,7 +16,7 @@ async function _bootstrapDesktopApp(): Promise<void> {
   const { seedSkills } = await import("./skills/seed");
   seedSkills();
 
-  const { startDesktopApp } = await import("./app");
+  const { startDesktopApp } = await import("./app/start-desktop-app");
   await startDesktopApp();
 }
 

@@ -183,7 +183,7 @@ Releases ship for **macOS arm64 + x64** (so four build jobs per tag: 2 arches ×
 
 ### The command layer
 
-Every cross-boundary user action (menus, context menus, toolbar buttons, shortcuts) is a `Command` — a `type` discriminant + typed `args` — defined in `src/shared/commands.ts`. `COMMAND_META` tags each with a `target` of `"webview"` or `"bun"`. A single `executeCommand` on each side routes it: the bun side (`bun/commands.ts` `executeCommandInBun`) runs `bun`-target commands locally (window zoom/reload, open external links) and forwards `webview`-target ones over RPC; the renderer (`commands/index.tsx` `CommandProvider`) does the reverse. The native menu (`bun/app/menu.ts`) maps its string actions into commands.
+Every cross-boundary user action (menus, context menus, toolbar buttons, shortcuts) is a `Command` — a namespaced `type` discriminant (`workspace.newFile`, `window.reload`, `updates.check`) plus typed `args` — defined in `src/shared/commands.ts`. `COMMAND_META` tags each with a target of `"webview"` or `"bun"`; the single `executeCommand` RPC message is only a transport envelope. On the Bun side, `WindowCommandBus` is assembled from `CommandHandlerContribution`s registered by the owning application module (`native`, `agent-projects`, `github-account`, `updates`) rather than one central switch. On the renderer side, the state-owning UI module registers its handlers through `CommandProvider`. The native menu maps shell action ids into commands. DI symbols use `desktopToken(namespace, name)` so every service identity has an explicit namespace.
 
 ### App layout (`apps/desktop/src`)
 
@@ -227,7 +227,7 @@ Prefer dropping new images into the existing `src/mainview/public/images/` folde
 - **File names** are **kebab-case** for every `.ts`/`.tsx` file, including component files (e.g. `tool-call-list-item.tsx`, `model-provider.tsx`). No PascalCase or camelCase filenames. One primary component/export per file, named after the file.
 - **Identifiers**:
   - React components, classes, types, and interfaces are **PascalCase** (`ThreadPlayground`, `ModelManager`, `Command`, `FileNode`).
-  - Functions, variables, hooks, and command `type` discriminants are **camelCase** (`createMainWindowRPC`, `useThreadTabs`, `newFile`, `closeTab`).
+  - Functions, variables, and hooks are **camelCase** (`createMainWindowRPC`, `useThreadTabs`). Command discriminants are namespaced camelCase segments (`workspace.newFile`, `tabs.close`).
   - Module-level constants are **UPPER_SNAKE_CASE** (`DOCS_URL`, `ZOOM_STEP`, `COMMAND_META`, `BUILTIN_PROVIDERS`).
 - **Leading underscore for what's private**:
   - Module-private (non-exported) functions: `_foo()`.
@@ -240,7 +240,7 @@ Prefer dropping new images into the existing `src/mainview/public/images/` folde
 - Prefer the **app-level wrappers** in `components/` over the raw shadcn primitives. In particular, **Tooltips must use `@/components/tooltip`** (`<Tooltip content={...}>…</Tooltip>`) — do **not** import `Tooltip`/`TooltipTrigger`/`TooltipContent` from `ui/tooltip` directly. The only direct use of the primitive is `TooltipProvider`, wired once in `app/layout.tsx`.
 - **Confirmations**: gate destructive or irreversible actions (delete a file, remove a provider) behind `ConfirmDialog` from `@/components/confirm-dialog` — don't fire them straight from a click.
 - **Empty states**: every list or collection view must define an intentional empty state. Prefer the shared `Empty`, `EmptyHeader`, `EmptyMedia`, `EmptyTitle`, `EmptyDescription`, and `EmptyContent` primitives from `@llm-space/ui/ui/empty` over ad hoc centered text or blank space. Include a concise explanation and, when useful, the primary action that helps the user populate or recover the list; also handle filtered/search results that contain no matches.
-- **Menus and commands**: every cross-boundary action is a `Command` (`shared/commands.ts`); its `type` is camelCase. Labels in `COMMAND_META`, native menus (`bun/app/menu.ts`), context menus, dropdown menus, and similar menu-like surfaces are **Title Case** ("Add New Method", "New File", "Close Tab"). Route everything through `executeCommand` rather than calling handlers directly.
+- **Menus and commands**: every cross-boundary action is a `Command` (`shared/commands.ts`); its `type` is `<namespace>.<camelCaseAction>`. Labels in `COMMAND_META`, native menus (`bun/app/menu.ts`), context menus, dropdown menus, and similar menu-like surfaces are **Title Case** ("Add New Method", "New File", "Close Tab"). Route cross-boundary dispatch through `executeCommand`; register Bun handlers from the owning application module.
 - **General UI copy**: ordinary buttons, headings, helper text, empty states, dialogs, and other non-menu labels use sentence case ("Add new method", "Start from example", "No tools yet").
 
 ### Performance

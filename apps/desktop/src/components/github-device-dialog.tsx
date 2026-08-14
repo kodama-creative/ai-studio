@@ -50,7 +50,7 @@ export function GithubDeviceDialog() {
       }
     }
     if (verificationUri) {
-      executeCommand({ type: "openLink", args: { url: verificationUri } });
+      executeCommand({ type: "shell.openLink", args: { url: verificationUri } });
       setOpened(true);
     }
   };

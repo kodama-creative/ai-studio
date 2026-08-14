@@ -34,17 +34,6 @@ import type {
   RuntimeStreamRequestPayload,
   RuntimeStreamResponsePayload,
 } from "@llm-space/runtime/runtime";
-import type {
-  TraceConnectedProjectInput,
-  TraceImportFile,
-  TraceImportResult,
-  TraceLangfuseSearchInput,
-  TraceProject,
-  TraceRecord,
-  TraceRemoteTraceSummary,
-  TraceSyncResult,
-  TraceWorkbenchResponse,
-} from "@llm-space/runtime/traces";
 
 import {
   currentDesktopVersion,
@@ -413,64 +402,6 @@ export class RemoteRuntimeClient implements RuntimeClient {
   }
   skillsReadSkill(path: string) {
     return this._rpc<SkillContent>("skills.readSkill", { path });
-  }
-
-  traceListProjects() {
-    return this._rpc<TraceProject[]>("trace.listProjects");
-  }
-  traceCreateProject(name: string) {
-    return this._rpc<TraceProject>("trace.createProject", { name });
-  }
-  traceCreateConnectedProject(input: TraceConnectedProjectInput) {
-    return this._rpc<TraceProject>("trace.createConnectedProject", input);
-  }
-  traceListTraces(projectId: string) {
-    return this._rpc<TraceRecord[]>("trace.listTraces", { projectId });
-  }
-  traceImportLangfuseJson(projectId: string, files: TraceImportFile[]) {
-    return this._rpc<TraceImportResult>("trace.importLangfuseJson", {
-      projectId,
-      files,
-    });
-  }
-  traceSearchLangfuseTraces(input: {
-    projectId: string;
-    filters?: TraceLangfuseSearchInput;
-  }) {
-    return this._rpc<TraceRemoteTraceSummary[]>(
-      "trace.searchLangfuseTraces",
-      input
-    );
-  }
-  traceSyncLangfuseTraces(input: { projectId: string; traceIds: string[] }) {
-    return this._rpc<TraceSyncResult>("trace.syncLangfuseTraces", input);
-  }
-  traceReadTrace(projectId: string, traceKey: string) {
-    return this._rpc<TraceRecord>("trace.readTrace", { projectId, traceKey });
-  }
-  traceReadOrCreateWorkbench(projectId: string, traceKey: string) {
-    return this._rpc<TraceWorkbenchResponse>("trace.readOrCreateWorkbench", {
-      projectId,
-      traceKey,
-    });
-  }
-  traceUpdateTraceTitle(projectId: string, traceKey: string, title: string) {
-    return this._rpc<TraceWorkbenchResponse>("trace.updateTraceTitle", {
-      projectId,
-      traceKey,
-      title,
-    });
-  }
-  async traceWriteWorkbench(
-    projectId: string,
-    traceKey: string,
-    thread: Thread
-  ) {
-    await this._rpc<null>("trace.writeWorkbench", {
-      projectId,
-      traceKey,
-      thread,
-    });
   }
 
   private async _fetchHealth(): Promise<RemoteRuntimeHealthResponse> {

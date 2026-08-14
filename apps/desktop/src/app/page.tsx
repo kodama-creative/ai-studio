@@ -15,14 +15,12 @@ import {
   readLocalStorage,
   writeLocalStorage,
 } from "@llm-space/ui/lib/local-storage";
-import { Button } from "@llm-space/ui/ui/button";
 import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
 } from "@llm-space/ui/ui/resizable";
 import { useQueryClient } from "@tanstack/react-query";
-import { FileTextIcon, GitBranchIcon } from "lucide-react";
 import {
   lazy,
   useCallback,
@@ -39,18 +37,15 @@ import { flushSync } from "react-dom";
 import { usePanelRef } from "react-resizable-panels";
 import { toast } from "sonner";
 
-import {
-  createAgentProjectClient,
-  createFileSystemClient,
-  createPlaygroundClient,
-} from "@/client";
+import { createAgentProjectClient } from "@/client/agent-project-client";
+import { createFileSystemClient } from "@/client/local-file-system";
+import { createPlaygroundClient } from "@/client/playground-client";
 import type { PluginActiveTab } from "@/client/plugins";
 import { getDefaultRuntime, listRuntimes } from "@/client/remote-servers";
 import { CommandProvider, useCommands, useRegisterCommands } from "@/commands";
 import { AccountStatus } from "@/components/account-status";
-import { useExperimental } from "@/components/experimental-provider";
 import { FeatureReminderDialog } from "@/components/feature-reminder-dialog";
-import { FileSystemTreeView } from "@/components/file-system-tree-view";
+import { FileSystemTreeView } from "@/components/file-system-tree-view/file-system-tree-view";
 import { GithubAuthProvider } from "@/components/github-auth-provider";
 import { GithubDeviceDialog } from "@/components/github-device-dialog";
 import { GithubStarReminder } from "@/components/github-star-reminder";
@@ -96,7 +91,6 @@ import { useFullScreen } from "@/lib/use-full-screen";
 import type { SettingsTab } from "@/shared/commands";
 import type { RuntimeId } from "@/shared/runtime";
 import { buildShareThreadCommand } from "@/shared/share";
-import type { TraceRecord } from "@/shared/traces";
 
 import { invalidateRuntimeSwitchQueries } from "./runtime-switch-queries";
 import { WorkspaceModelScope } from "./workspace-model-scope";
@@ -130,47 +124,6 @@ const ThreadStorageDialog = lazy(() =>
     default: m.ThreadStorageDialog,
   }))
 );
-const LazyTracePanel = lazy(() =>
-  import("@/components/trace-panel").then((m) => ({
-    default: m.TracePanel,
-  }))
-);
-
-function _SidebarModeSwitch({
-  mode,
-  onModeChange,
-}: {
-  mode: "files" | "traces";
-  onModeChange: (mode: "files" | "traces") => void;
-}) {
-  return (
-    <div className="bg-muted/60 grid w-full grid-cols-2 rounded-md p-0.5">
-      <Button
-        className="h-6 justify-center px-2"
-        variant={mode === "files" ? "secondary" : "ghost"}
-        size="sm"
-        aria-pressed={mode === "files"}
-        onClick={() => onModeChange("files")}
-      >
-        <FileTextIcon className="size-3" />
-        Files
-      </Button>
-      <Button
-        className="relative h-6 justify-center px-2"
-        variant={mode === "traces" ? "secondary" : "ghost"}
-        size="sm"
-        aria-pressed={mode === "traces"}
-        onClick={() => onModeChange("traces")}
-      >
-        <GitBranchIcon className="size-3" />
-        Traces
-        <span className="border-primary/30 bg-primary/10 text-primary absolute top-1 right-2 rounded px-1 py-px text-[0.5rem] leading-none font-semibold tracking-wide uppercase">
-          Beta
-        </span>
-      </Button>
-    </div>
-  );
-}
 
 export function Page() {
   return (
@@ -189,27 +142,23 @@ export function Page() {
 // Commands that need context the palette can't supply (a file path / URL) or
 // that make no sense to invoke from the palette itself.
 const COMMAND_PALETTE_BLACKLIST = [
-  "renameFile",
-  "duplicateFile",
-  "deleteFile",
-  "revealFile",
-  "revealInTree",
-  "copyFile",
-  "openLink",
-  "openCommandPalette",
-  "openVariables",
-  "newFileFromPromptExample",
-  "closeTab",
-  "closeOtherTabs",
-  "createTraceProject",
-  "createConnectedTraceProject",
-  "importLangfuseTraceFiles",
-  "syncLangfuseTraceIds",
-  "createProjectThread",
-  "forkProjectThread",
+  "workspace.rename",
+  "workspace.duplicate",
+  "workspace.delete",
+  "workspace.reveal",
+  "workspace.revealInTree",
+  "workspace.copyFile",
+  "shell.openLink",
+  "app.openCommandPalette",
+  "thread.openVariables",
+  "workspace.newFileFromPromptExample",
+  "tabs.close",
+  "tabs.closeOthers",
+  "project.createThread",
+  "project.forkThread",
   // Only meaningful from the "ready to install" toast; a bare palette
   // invocation would silently no-op (or restart mid-work).
-  "applyUpdateAndRestart",
+  "updates.applyAndRestart",
 ];
 
 /** Whether a drag carries OS files (vs. the tree's internal node-reorder drag). */
@@ -248,7 +197,6 @@ function clearRuntimeQueries(
 ): void {
   void queryClient.removeQueries({ queryKey: ["thread", runtimeId] });
   void queryClient.removeQueries({ queryKey: ["fs", runtimeId] });
-  void queryClient.removeQueries({ queryKey: ["trace", runtimeId] });
 }
 
 function threadTabId(path: string, runtimeId: RuntimeId): string {
@@ -311,7 +259,6 @@ function PageWorkspace({
   const models = useModels();
   const refreshModels = useRefreshModels();
   const queryClient = useQueryClient();
-  const { tracingEnabled } = useExperimental();
 
   const {
     close,
@@ -320,7 +267,6 @@ function PageWorkspace({
     closeOthersInRuntime,
     handleMove,
     handleRemove,
-    openTrace,
     reopenClosed,
     openPlayground,
   } = tabs;
@@ -514,7 +460,6 @@ function PageWorkspace({
   >(null);
   const [onboardOpen, setOnboardOpen] = useState(false);
   const [examplesOpen, setExamplesOpen] = useState(false);
-  const [sidebarMode, setSidebarMode] = useState<"files" | "traces">("files");
   // Which folder a chosen example's thread is created into (default: root).
   const examplesParentRef = useRef("");
   const createLocalPlayground = useCallback(
@@ -560,7 +505,6 @@ function PageWorkspace({
         onSwitch: () => {
           workspaceRuntimeIdRef.current = nextRuntimeId;
           setWorkspaceRuntimeId(nextRuntimeId);
-          setSidebarMode("files");
           void invalidateRuntimeSwitchQueries(queryClient, nextRuntimeId);
         },
       });
@@ -705,7 +649,7 @@ function PageWorkspace({
         });
         return;
       }
-      executeCommand({ type: "refreshTree", args: { runtimeId } });
+      executeCommand({ type: "workspace.refresh", args: { runtimeId } });
       for (const path of created) openTab(path, runtimeId);
       const skipped = total - created.length;
       toast.success(
@@ -779,11 +723,11 @@ function PageWorkspace({
   // settings). `newFile` / `newFolder` / the tree ops are registered by the
   // file tree, which owns that state.
   useRegisterCommands({
-    newFile: ({ runtimeId }) => {
+    "workspace.newFile": ({ runtimeId }) => {
       const targetRuntimeId = runtimeId ?? workspaceRuntimeIdRef.current;
       if (targetRuntimeId === "local") void createLocalPlayground();
     },
-    newFileFromPromptExample: ({ exampleId, runtimeId }) => {
+    "workspace.newFileFromPromptExample": ({ exampleId, runtimeId }) => {
       const targetRuntimeId = runtimeId ?? workspaceRuntimeIdRef.current;
       if (targetRuntimeId !== "local") return;
       const example = getPromptExample(exampleId);
@@ -815,7 +759,7 @@ function PageWorkspace({
         });
       })();
     },
-    closeTab: ({ id, path, runtimeId }) => {
+    "tabs.close": ({ id, path, runtimeId }) => {
       const targetRuntimeId = runtimeId ?? workspaceRuntimeIdRef.current;
       const target =
         id ??
@@ -829,7 +773,7 @@ function PageWorkspace({
         close,
       });
     },
-    closeOtherTabs: ({ id, path, runtimeId }) => {
+    "tabs.closeOthers": ({ id, path, runtimeId }) => {
       const targetRuntimeId = runtimeId ?? workspaceRuntimeIdRef.current;
       const target =
         id ??
@@ -844,7 +788,7 @@ function PageWorkspace({
         closeOthers: closeOthersInRuntime,
       });
     },
-    closeAllTabs: () => {
+    "tabs.closeAll": () => {
       const runtimeId = workspaceRuntimeIdRef.current;
       closeAllTabsIfAllowed({
         tracker: runtimeRunTrackerRef.current,
@@ -854,26 +798,26 @@ function PageWorkspace({
         closeAll: closeAllInRuntime,
       });
     },
-    reopenClosedTab: () => void reopenClosed(),
-    selectNextTab: () => activateVisibleSibling(1),
-    selectPreviousTab: () => activateVisibleSibling(-1),
-    toggleSidebar: () => toggleSidebar(),
-    openSettings: ({ tab }) => {
+    "tabs.reopenClosed": () => void reopenClosed(),
+    "tabs.selectNext": () => activateVisibleSibling(1),
+    "tabs.selectPrevious": () => activateVisibleSibling(-1),
+    "layout.toggleSidebar": () => toggleSidebar(),
+    "app.openSettings": ({ tab }) => {
       if (tab) setSettingsTab(tab);
       setSettingsOpen(true);
     },
-    openModelSettings: () => {
+    "app.openModelSettings": () => {
       setSettingsTab("models");
       setSettingsOpen(true);
     },
-    openCommandPalette: () => setCommandPaletteOpen(true),
-    openOnboard: () => setOnboardOpen(true),
-    openStartFromExample: ({ parent = "", runtimeId }) => {
+    "app.openCommandPalette": () => setCommandPaletteOpen(true),
+    "app.openOnboard": () => setOnboardOpen(true),
+    "workspace.openStartFromExample": ({ parent = "", runtimeId }) => {
       if (runtimeId && runtimeId !== workspaceRuntimeId) return;
       examplesParentRef.current = parent;
       setExamplesOpen(true);
     },
-    importFiles: ({ parent = "", files, runtimeId }) => {
+    "workspace.importFiles": ({ parent = "", files, runtimeId }) => {
       const targetRuntimeId = runtimeId ?? workspaceRuntimeIdRef.current;
       if (targetRuntimeId !== workspaceRuntimeIdRef.current) return;
       if (files) {
@@ -904,27 +848,16 @@ function PageWorkspace({
   }, [executeCommand]);
 
   const fullScreen = useFullScreen();
-  const handleOpenTrace = useCallback(
-    (trace: TraceRecord) => {
-      openTrace({
-        projectId: trace.projectId,
-        traceKey: trace.key,
-        title: trace.title,
-        runtimeId: workspaceRuntimeId,
-      });
-    },
-    [openTrace, workspaceRuntimeId]
-  );
   const handleCloseTab = useCallback(
-    (id: string) => executeCommand({ type: "closeTab", args: { id } }),
+    (id: string) => executeCommand({ type: "tabs.close", args: { id } }),
     [executeCommand]
   );
   const handleCloseOtherTabs = useCallback(
-    (id: string) => executeCommand({ type: "closeOtherTabs", args: { id } }),
+    (id: string) => executeCommand({ type: "tabs.closeOthers", args: { id } }),
     [executeCommand]
   );
   const handleCloseAllTabs = useCallback(
-    () => executeCommand({ type: "closeAllTabs", args: {} }),
+    () => executeCommand({ type: "tabs.closeAll", args: {} }),
     [executeCommand]
   );
   const refreshReservationsRef = useRef(new Map<string, () => void>());
@@ -1035,12 +968,12 @@ function PageWorkspace({
   );
   const handleRevealFile = useCallback(
     (path: string, runtimeId: RuntimeId) =>
-      executeCommand({ type: "revealFile", args: { path, runtimeId } }),
+      executeCommand({ type: "workspace.reveal", args: { path, runtimeId } }),
     [executeCommand]
   );
   const handleMoveToTrash = useCallback(
     (path: string, runtimeId: RuntimeId) =>
-      executeCommand({ type: "deleteFile", args: { path, runtimeId } }),
+      executeCommand({ type: "workspace.delete", args: { path, runtimeId } }),
     [executeCommand]
   );
   const handleShareThread = useCallback(
@@ -1054,7 +987,7 @@ function PageWorkspace({
     async (path: string, runtimeId: RuntimeId) => {
       try {
         const absolute = await createFileSystemClient(runtimeId).realpath(path);
-        executeCommand({ type: "copyFile", args: { path: absolute } });
+        executeCommand({ type: "workspace.copyFile", args: { path: absolute } });
       } catch (err) {
         toast.error((err as Error).message);
       }
@@ -1064,7 +997,7 @@ function PageWorkspace({
   const handleNewFile = useCallback(() => {
     if (workspaceRuntimeId !== "local") {
       executeCommand({
-        type: "newFile",
+        type: "workspace.newFile",
         args: { runtimeId: workspaceRuntimeId },
       });
       return;
@@ -1072,13 +1005,9 @@ function PageWorkspace({
     void createLocalPlayground();
   }, [createLocalPlayground, executeCommand, workspaceRuntimeId]);
   const handleToggleSidebar = useCallback(
-    () => executeCommand({ type: "toggleSidebar", args: {} }),
+    () => executeCommand({ type: "layout.toggleSidebar", args: {} }),
     [executeCommand]
   );
-  // The Traces sidebar is gated behind the tracing (beta) experiment. With it
-  // off, hide the mode switch and pin the sidebar to files.
-  const effectiveSidebarMode = tracingEnabled ? sidebarMode : "files";
-
   return (
     <div
       className="relative flex size-full flex-col"
@@ -1161,35 +1090,12 @@ function PageWorkspace({
             ) : (
               <FileSystemTreeView
                 runtimeId={workspaceRuntimeId}
-                className={
-                  effectiveSidebarMode === "files" ? "min-h-0 flex-1" : "hidden"
-                }
+                className="min-h-0 flex-1"
                 onSelectFile={tabs.open}
                 onRemove={reconcileFileRemove}
                 onMove={reconcileFileMove}
                 acquireMutation={acquireFileMutation}
               />
-            )}
-            {tracingEnabled && (
-              <LazyMount open={effectiveSidebarMode === "traces"}>
-                <LazyTracePanel
-                  className={
-                    effectiveSidebarMode === "traces"
-                      ? "min-h-0 flex-1"
-                      : "hidden"
-                  }
-                  onOpenTrace={handleOpenTrace}
-                  runtimeId={workspaceRuntimeId}
-                />
-              </LazyMount>
-            )}
-            {tracingEnabled && (
-              <div className="border-border/70 electrobun-webkit-app-region-no-drag flex shrink-0 border-t px-3 py-2">
-                <_SidebarModeSwitch
-                  mode={sidebarMode}
-                  onModeChange={setSidebarMode}
-                />
-              </div>
             )}
             <RemoteStatus
               runtimeId={workspaceRuntimeId}
@@ -1211,13 +1117,13 @@ function PageWorkspace({
                     workspaceRuntimeId === "local"
                       ? void createLocalPlayground()
                       : executeCommand({
-                          type: "newFile",
+                          type: "workspace.newFile",
                           args: { runtimeId: workspaceRuntimeId },
                         })
                   }
                   onModels={() =>
                     executeCommand({
-                      type: "openSettings",
+                      type: "app.openSettings",
                       args: { tab: "models" },
                     })
                   }
@@ -1239,7 +1145,6 @@ function PageWorkspace({
               reorder={reorderVisibleTabs}
               onNewFile={handleNewFile}
               onMove={reconcileFileMove}
-              onTraceTitleChange={tabs.handleTraceTitleChange}
               onPlaygroundTitleChange={tabs.handlePlaygroundTitleChange}
               onToggleSidebar={handleToggleSidebar}
               lifecycleHost={paneLifecycleHost}
@@ -1306,7 +1211,7 @@ function PageWorkspace({
           onSelectExample={(example) => {
             if (workspaceRuntimeId !== "local") {
               executeCommand({
-                type: "newFileFromPromptExample",
+                type: "workspace.newFileFromPromptExample",
                 args: {
                   exampleId: example.id,
                   parent: examplesParentRef.current,

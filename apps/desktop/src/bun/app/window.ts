@@ -41,9 +41,11 @@ async function _getMainViewUrl(): Promise<string> {
 export async function createMainWindow({
   rpc,
   windowStates,
+  onFullScreenChange,
 }: {
   rpc: MainWindowRPC;
   windowStates: WindowStateManager;
+  onFullScreenChange?: (fullScreen: boolean) => void;
 }): Promise<BrowserWindow> {
   const url = await _getMainViewUrl();
   const windowStateStore = await WindowStateStore.load();
@@ -69,7 +71,7 @@ export async function createMainWindow({
     isFullScreen: getWindowFullScreen(windowState),
     zoom: savedZoom,
     onFullScreenChange: (fullScreen) => {
-      rpc.send.fullScreenChanged({ fullScreen });
+      onFullScreenChange?.(fullScreen);
     },
   });
   return window;
@@ -80,11 +82,13 @@ export async function createAgentProjectWindow({
   project,
   stateStore,
   windowStates,
+  onFullScreenChange,
 }: {
   rpc: MainWindowRPC;
   project: AgentProjectView;
   stateStore: WindowStatePersistenceStore;
   windowStates: WindowStateManager;
+  onFullScreenChange?: (fullScreen: boolean) => void;
 }): Promise<BrowserWindow> {
   const state = stateStore.state;
   const baseUrl = await _getMainViewUrl();
@@ -107,7 +111,7 @@ export async function createAgentProjectWindow({
     isFullScreen: getWindowFullScreen(state),
     zoom: getWindowZoom(state) ?? 1,
     onFullScreenChange: (fullScreen) => {
-      rpc.send.fullScreenChanged({ fullScreen });
+      onFullScreenChange?.(fullScreen);
     },
   });
   return window;

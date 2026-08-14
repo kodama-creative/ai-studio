@@ -38,7 +38,7 @@ export async function importFilesWithNativePicker(
 
   const files = await Promise.all(paths.map((path) => _readImportFile(path)));
   sendCommand({
-    type: "importFiles",
+    type: "workspace.importFiles",
     args: { parent, files },
   });
 }
@@ -50,7 +50,7 @@ export async function importFilesWithNativePicker(
 export function importTextFromClipboard(sendCommand: SendCommand, parent = "") {
   const text = Utils.clipboardReadText();
   sendCommand({
-    type: "importFiles",
+    type: "workspace.importFiles",
     args: {
       parent,
       files: [{ name: "clipboard.json", text: text ?? "" }],

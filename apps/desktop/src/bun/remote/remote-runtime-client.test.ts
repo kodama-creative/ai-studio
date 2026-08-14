@@ -16,7 +16,6 @@ const CAPABILITIES: RuntimeCapability[] = [
   "skills",
   "search",
   "network",
-  "traces",
 ];
 
 const HEALTH_BODY = {

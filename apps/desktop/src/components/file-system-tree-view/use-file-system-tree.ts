@@ -21,7 +21,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
 
-import { createFileSystemClient } from "@/client";
+import { createFileSystemClient } from "@/client/local-file-system";
 import type { RuntimeId } from "@/shared/runtime";
 
 import {

@@ -1,12 +1,7 @@
-import { electrobun } from "@/lib/electrobun";
 import type { RuntimeId } from "@/shared/runtime";
 
-function _rpc() {
-  if (!electrobun.rpc) {
-    throw new Error("Electrobun RPC is not initialized");
-  }
-  return electrobun.rpc;
-}
+import { appDirectoriesClient, nativeFilesClient, nativeDialogsClient } from "./native-files";
+import { promptFilesClient } from "./runtime-rpc-clients";
 
 /**
  * Resolve a directory under the llm-space root, creating it (recursively) if
@@ -14,8 +9,7 @@ function _rpc() {
  * filesystem or read the root, so it asks the bun main process.
  */
 export async function ensureRootDir(relativePath: string): Promise<string> {
-  const { path } = await _rpc().request.ensureRootDir({ relativePath });
-  return path;
+  return appDirectoriesClient.ensure(relativePath);
 }
 
 /** Absolute path to `LLM_SPACE_HOME/workspace`, creating it if missing. */
@@ -34,11 +28,7 @@ export async function readTextFile(
   if (!runtimeId) {
     throw new Error("Prompt file runtimeId is required.");
   }
-  const { text } = await _rpc().request.fsReadText({
-    runtimeId,
-    path,
-  });
-  return text;
+  return promptFilesClient.readText(runtimeId, path);
 }
 
 /** Whether a path points to a readable regular file (`~` expands to home). */
@@ -49,27 +39,20 @@ export async function textFileExists(
   if (!runtimeId) {
     throw new Error("Prompt file runtimeId is required.");
   }
-  const { exists } = await _rpc().request.fsTextFileExists({
-    runtimeId,
-    path,
-  });
-  return exists;
+  return promptFilesClient.exists(runtimeId, path);
 }
 
 /** Whether a path points to an existing directory (`~` expands to home). */
 export async function directoryExists(path: string): Promise<boolean> {
-  const { exists } = await _rpc().request.fsDirectoryExists({ path });
-  return exists;
+  return nativeFilesClient.directoryExists(path);
 }
 
 /** Open the native file picker; resolves to the chosen path or `null`. */
 export async function pickFile(): Promise<string | null> {
-  const { path } = await _rpc().request.fsPickFile({});
-  return path;
+  return nativeDialogsClient.pickFile();
 }
 
 /** Open the native directory picker; resolves to the chosen path or `null`. */
 export async function pickDirectory(): Promise<string | null> {
-  const { path } = await _rpc().request.fsPickDirectory({});
-  return path;
+  return nativeDialogsClient.pickDirectory();
 }

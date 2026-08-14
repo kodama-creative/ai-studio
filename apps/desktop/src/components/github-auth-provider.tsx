@@ -11,9 +11,8 @@ import {
 } from "react";
 import { toast } from "sonner";
 
-import { getGithubAuthStatus } from "@/client/github-auth";
+import { getGithubAuthStatus, githubAccountClient } from "@/client/github-auth";
 import { useCommands } from "@/commands";
-import { electrobun } from "@/lib/electrobun";
 import type { GithubAuthState } from "@/shared/auth";
 
 interface GithubAuthValue {
@@ -35,9 +34,6 @@ export function GithubAuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<GithubAuthState>({ status: "signedOut" });
 
   useEffect(() => {
-    const rpc = electrobun.rpc;
-    if (!rpc) return;
-
     const handle = (next: GithubAuthState) => {
       setState(next);
       // A failed / cancelled Device Flow comes back as signed-out with a reason.
@@ -45,13 +41,14 @@ export function GithubAuthProvider({ children }: { children: ReactNode }) {
         toast.error(next.error);
       }
     };
-    rpc.addMessageListener("githubAuthChanged", handle);
+    const subscription = githubAccountClient.on("changed", handle);
 
     let cancelled = false;
     void getGithubAuthStatus()
       .then((initial) => {
         // Don't clobber a live transition that arrived before the initial fetch.
-        if (!cancelled) setState((prev) => (prev.status === "signedOut" ? initial : prev));
+        if (!cancelled)
+          setState((prev) => (prev.status === "signedOut" ? initial : prev));
       })
       .catch(() => {
         // Non-fatal: leave the signed-out default in place.
@@ -59,16 +56,16 @@ export function GithubAuthProvider({ children }: { children: ReactNode }) {
 
     return () => {
       cancelled = true;
-      rpc.removeMessageListener("githubAuthChanged", handle);
+      void subscription.dispose();
     };
   }, []);
 
   const signIn = useCallback(
-    () => executeCommand({ type: "githubLogin", args: {} }),
+    () => executeCommand({ type: "githubAccount.login", args: {} }),
     [executeCommand]
   );
   const signOut = useCallback(
-    () => executeCommand({ type: "githubLogout", args: {} }),
+    () => executeCommand({ type: "githubAccount.logout", args: {} }),
     [executeCommand]
   );
 

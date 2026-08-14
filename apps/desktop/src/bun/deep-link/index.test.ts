@@ -7,8 +7,7 @@ import { LocalFileSystem } from "@llm-space/core/server";
 import { ThreadStorageRegistry } from "@llm-space/runtime/plugins";
 
 import { DEVELOPMENT_DEEP_LINK_SCHEME } from "../../shared/deep-link-scheme";
-import type { GitHubAuthManager } from "../auth";
-import type { MainWindowRPC } from "../rpc";
+import type { GitHubAuthManager } from "../auth/github-auth-manager";
 
 import { createDeepLinkHandler, isStudioOpenDeepLink } from ".";
 
@@ -53,7 +52,7 @@ describe("Thread Storage deep links", () => {
       localFs: new LocalFileSystem(path.join(root, "workspace")),
       threadStorages: new ThreadStorageRegistry(),
       githubAuth: {} as GitHubAuthManager,
-      getRpc: () => ({}) as MainWindowRPC,
+      notifySharedImport: () => undefined,
       openAgentProject: (projectRoot) => {
         opened.push(projectRoot);
         return Promise.resolve();
@@ -98,16 +97,11 @@ describe("Thread Storage deep links", () => {
       },
     });
     const statuses: unknown[] = [];
-    const rpc = {
-      send: {
-        sharedImportStatusChanged: (payload: unknown) => statuses.push(payload),
-      },
-    } as unknown as MainWindowRPC;
     const handler = createDeepLinkHandler({
       localFs,
       threadStorages,
       githubAuth: {} as GitHubAuthManager,
-      getRpc: () => rpc,
+      notifySharedImport: (payload) => statuses.push(payload),
     });
     const url = "llm-space://threads/aurora/folder/task-uuid?revision=2#output";
 
@@ -141,16 +135,11 @@ describe("Thread Storage deep links", () => {
     const root = mkdtempSync(path.join(os.tmpdir(), "llm-space-deep-link-"));
     roots.push(root);
     const statuses: unknown[] = [];
-    const rpc = {
-      send: {
-        sharedImportStatusChanged: (payload: unknown) => statuses.push(payload),
-      },
-    } as unknown as MainWindowRPC;
     const handler = createDeepLinkHandler({
       localFs: new LocalFileSystem(path.join(root, "workspace")),
       threadStorages: new ThreadStorageRegistry(),
       githubAuth: {} as GitHubAuthManager,
-      getRpc: () => rpc,
+      notifySharedImport: (payload) => statuses.push(payload),
     });
 
     await handler.handle("llm-space://threads/missing/task-uuid");
@@ -168,16 +157,11 @@ describe("Thread Storage deep links", () => {
     const root = mkdtempSync(path.join(os.tmpdir(), "llm-space-deep-link-"));
     roots.push(root);
     const statuses: unknown[] = [];
-    const rpc = {
-      send: {
-        sharedImportStatusChanged: (payload: unknown) => statuses.push(payload),
-      },
-    } as unknown as MainWindowRPC;
     const handler = createDeepLinkHandler({
       localFs: new LocalFileSystem(path.join(root, "workspace")),
       threadStorages: new ThreadStorageRegistry(),
       githubAuth: {} as GitHubAuthManager,
-      getRpc: () => rpc,
+      notifySharedImport: (payload) => statuses.push(payload),
       scheme: DEVELOPMENT_DEEP_LINK_SCHEME,
     });
 

@@ -13,8 +13,8 @@ import { Loader2Icon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
+import { sharedImportClient } from "@/client/shared-import-client";
 import { useCommands } from "@/commands";
-import { electrobun } from "@/lib/electrobun";
 import type { SharedImportStatusPayload } from "@/shared/shared-import";
 
 /**
@@ -31,9 +31,6 @@ export function SharedImportProvider() {
   const cancelledRef = useRef(false);
 
   useEffect(() => {
-    const rpc = electrobun.rpc;
-    if (!rpc) return;
-
     const handle = (payload: SharedImportStatusPayload) => {
       if (payload.status === "importing") {
         cancelledRef.current = false;
@@ -44,7 +41,7 @@ export function SharedImportProvider() {
       if (cancelledRef.current) return;
       if (payload.status === "success") {
         executeCommand({
-          type: "revealInTree",
+          type: "workspace.revealInTree",
           args: { path: payload.path },
         });
         toast.success(
@@ -55,14 +52,16 @@ export function SharedImportProvider() {
       }
     };
 
-    rpc.addMessageListener("sharedImportStatusChanged", handle);
-    return () => rpc.removeMessageListener("sharedImportStatusChanged", handle);
+    const subscription = sharedImportClient.on("statusChanged", handle);
+    return () => {
+      void subscription.dispose();
+    };
   }, [executeCommand]);
 
   const handleCancel = useCallback(() => {
     cancelledRef.current = true;
     setImporting(false);
-    electrobun.rpc?.send.cancelSharedImport({});
+    void sharedImportClient.cancel();
   }, []);
 
   return (

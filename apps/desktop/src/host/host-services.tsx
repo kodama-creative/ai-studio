@@ -29,6 +29,7 @@ import {
 } from "@/client/paths";
 import { listPluginTools } from "@/client/plugins";
 import { createRpcTransport } from "@/client/rpc-transport";
+import { modelsClient } from "@/client/runtime-rpc-clients";
 import { getSearchSettings } from "@/client/search";
 import {
   getSkillsSettings,
@@ -37,64 +38,43 @@ import {
 } from "@/client/skills";
 import { executeTool } from "@/client/tool-execution";
 import { useCommands } from "@/commands";
-import { electrobun } from "@/lib/electrobun";
 import type { SettingsTab } from "@/shared/commands";
 import type { RuntimeId } from "@/shared/runtime";
 
 import { createDesktopShareThreadAction } from "./share-thread-action";
-function _rpc() {
-  if (!electrobun.rpc) {
-    throw new Error("Electrobun RPC is not initialized");
-  }
-  return electrobun.rpc;
-}
-
 /** The desktop {@link ModelClient}, backed by Electrobun RPC. */
 export function createElectrobunModelClient(
   runtimeId?: RuntimeId
 ): ModelClient {
-  const scope = () => (runtimeId ? { runtimeId } : {});
   return {
-    availableModels: () => _rpc().request.availableModels(scope()),
-    builtinProviders: () => _rpc().request.builtinProviders(scope()),
-    getDefaultModel: () => _rpc().request.getDefaultModel(scope()),
-    setDefaultModel: (model) =>
-      _rpc().request.setDefaultModel({ ...scope(), model }),
+    availableModels: () => modelsClient.list(runtimeId),
+    builtinProviders: () => modelsClient.listBuiltin(runtimeId),
+    getDefaultModel: () => modelsClient.getDefault(runtimeId),
+    setDefaultModel: (model) => modelsClient.setDefault(runtimeId, model),
     removeProvider: (providerId) =>
-      _rpc().request.removeProvider({ ...scope(), providerId }),
+      modelsClient.removeProvider(runtimeId, providerId),
     addProvider: (providerId) =>
-      _rpc().request.addProvider({ ...scope(), providerId }),
+      modelsClient.addProvider(runtimeId, providerId),
     addCustomProvider: (input) =>
-      _rpc().request.addCustomProvider({ ...scope(), ...input }),
+      modelsClient.addCustomProvider(runtimeId, input),
     addProviderProfile: (providerId) =>
-      _rpc().request.addProviderProfile({ ...scope(), providerId }),
+      modelsClient.addProfile(runtimeId, providerId),
     updateProviderProfile: (providerId, profileId, fields) =>
-      _rpc().request.updateProviderProfile({
-        ...scope(),
+      modelsClient.updateProfile(runtimeId, {
         providerId,
         profileId,
         ...fields,
       }),
     removeProviderProfile: (providerId, profileId) =>
-      _rpc().request.removeProviderProfile({
-        ...scope(),
-        providerId,
-        profileId,
-      }),
+      modelsClient.removeProfile(runtimeId, providerId, profileId),
     updateProvider: (providerId, fields) =>
-      _rpc().request.updateProvider({ ...scope(), providerId, ...fields }),
+      modelsClient.updateProvider(runtimeId, { providerId, ...fields }),
     setModelEnabled: (providerId, modelId, enabled) =>
-      _rpc().request.setModelEnabled({
-        ...scope(),
-        providerId,
-        modelId,
-        enabled,
-      }),
+      modelsClient.setEnabled(runtimeId, providerId, modelId, enabled),
     setAllModelsEnabled: (providerId, enabled) =>
-      _rpc().request.setAllModelsEnabled({ ...scope(), providerId, enabled }),
+      modelsClient.setAllEnabled(runtimeId, providerId, enabled),
     testModelConnection: async (providerId, modelId, candidate, profileId) => {
-      await _rpc().request.testModelConnection({
-        ...scope(),
+      await modelsClient.testConnection(runtimeId, {
         providerId,
         profileId,
         modelId,
@@ -102,14 +82,9 @@ export function createElectrobunModelClient(
       });
     },
     removeCustomModel: (providerId, modelId) =>
-      _rpc().request.removeCustomModel({ ...scope(), providerId, modelId }),
+      modelsClient.removeCustom(runtimeId, providerId, modelId),
     upsertCustomModel: (providerId, model, originalId) =>
-      _rpc().request.upsertCustomModel({
-        ...scope(),
-        providerId,
-        model,
-        originalId,
-      }),
+      modelsClient.upsertCustom(runtimeId, providerId, model, originalId),
   };
 }
 
@@ -187,19 +162,20 @@ export function DesktopHostProvider({ children }: { children: ReactNode }) {
       actions: {
         openSettings: (tab) =>
           executeCommand({
-            type: "openSettings",
+            type: "app.openSettings",
             args: { tab: tab as SettingsTab },
           }),
-        openLink: (url) => executeCommand({ type: "openLink", args: { url } }),
+        openLink: (url) => executeCommand({ type: "shell.openLink", args: { url } }),
         shareThread: createDesktopShareThreadAction(executeCommand),
         openVariables: (variableName) =>
-          executeCommand({ type: "openVariables", args: { variableName } }),
+          executeCommand({ type: "thread.openVariables", args: { variableName } }),
         registerOpenVariables: (handler) =>
           registerCommandHandlers({
-            openVariables: ({ variableName }) => handler(variableName),
+            "thread.openVariables": ({ variableName }) =>
+              handler(variableName),
           }),
         registerRunThread: (run) =>
-          registerCommandHandlers({ runThread: () => run() }),
+          registerCommandHandlers({ "thread.run": () => run() }),
       },
     }),
     [executeCommand, registerCommandHandlers]

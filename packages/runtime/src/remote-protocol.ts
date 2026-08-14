@@ -1,6 +1,7 @@
 import type { RuntimeCapability } from "./runtime";
 
-export const REMOTE_RUNTIME_PROTOCOL_VERSION = 3;
+// v4 removes the legacy Trace capability and trace.* RPC methods.
+export const REMOTE_RUNTIME_PROTOCOL_VERSION = 4;
 
 export interface RemoteRuntimeHealthResponse {
   ok: true;
@@ -69,18 +70,7 @@ export type RemoteRuntimeRpcMethod =
   | "skills.listAvailable"
   | "skills.listPluginSkills"
   | "skills.listSkills"
-  | "skills.readSkill"
-  | "trace.listProjects"
-  | "trace.createProject"
-  | "trace.createConnectedProject"
-  | "trace.listTraces"
-  | "trace.importLangfuseJson"
-  | "trace.searchLangfuseTraces"
-  | "trace.syncLangfuseTraces"
-  | "trace.readTrace"
-  | "trace.readOrCreateWorkbench"
-  | "trace.updateTraceTitle"
-  | "trace.writeWorkbench";
+  | "skills.readSkill";
 
 export interface RemoteRuntimeRpcRequest<TParams = unknown> {
   id: string;

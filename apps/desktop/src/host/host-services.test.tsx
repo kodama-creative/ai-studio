@@ -1,117 +1,104 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 
-import type { ModelConfig } from "@llm-space/core";
-import { createOneShotRunner } from "@llm-space/core/workflow";
+import type { AgentEvent, AgentStreamRequest } from "@llm-space/core";
 import type { HostServices } from "@llm-space/ui/host";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import type {
-  AbortStreamThreadPayload,
-  StreamThreadRequestPayload,
-  StreamThreadResponsePayload,
-} from "@/shared/rpc";
+  NamespacedRpcRequest,
+  NamespacedRpcStreamEvent,
+  NamespacedRpcStreamSubscribe,
+} from "@/shared/namespaced-rpc";
 import type { RuntimeId } from "@/shared/runtime";
 
-type ResponseListener = (message: StreamThreadResponsePayload) => void;
-
 class ControllableRpc {
-  readonly aborts: AbortStreamThreadPayload[] = [];
-  readonly envRequests: Record<string, unknown>[] = [];
-  readonly mcpRequests: Record<string, unknown>[] = [];
-  readonly searchRequests: Record<string, unknown>[] = [];
-  readonly skillAvailableRequests: Record<string, unknown>[] = [];
-  readonly skillListRequests: Record<string, unknown>[] = [];
-  readonly skillSettingsRequests: Record<string, unknown>[] = [];
-  readonly starts: StreamThreadRequestPayload[] = [];
-  private readonly _listeners = new Set<ResponseListener>();
+  readonly requests: NamespacedRpcRequest[] = [];
+  readonly streams: NamespacedRpcStreamSubscribe[] = [];
+  readonly unsubscribed: string[] = [];
+  private readonly _streamListeners = new Set<
+    (event: NamespacedRpcStreamEvent) => void
+  >();
 
   readonly request = {
-    generatorResolveEnv: (payload: Record<string, unknown>) => {
-      this.envRequests.push(payload);
-      return Promise.resolve({ modelApiKey: "remote-secret", envValues: {} });
-    },
-    getSearchSettings: (payload: Record<string, unknown>) => {
-      this.searchRequests.push(payload);
-      return Promise.resolve({ provider: "builtin" as const });
-    },
-    mcpListServers: (payload: Record<string, unknown>) => {
-      this.mcpRequests.push(payload);
-      return Promise.resolve([]);
-    },
-    skillsGetSettings: (payload: Record<string, unknown>) => {
-      this.skillSettingsRequests.push(payload);
-      return Promise.resolve({
-        discoveryPaths: [{ path: "/remote/skills", hiddenSkills: [] }],
-      });
-    },
-    skillsListAvailable: (payload: Record<string, unknown>) => {
-      this.skillAvailableRequests.push(payload);
-      return Promise.resolve([]);
-    },
-    skillsListSkills: (payload: Record<string, unknown>) => {
-      this.skillListRequests.push(payload);
-      return Promise.resolve([]);
+    rpcNamespaceRequest: (input: NamespacedRpcRequest) => {
+      this.requests.push(input);
+      return Promise.resolve({ ok: true as const, value: this._value(input) });
     },
   };
 
   readonly send = {
-    abortStreamThread: (payload: AbortStreamThreadPayload) => {
-      this.aborts.push(payload);
+    rpcNamespaceStreamSubscribe: (input: NamespacedRpcStreamSubscribe) => {
+      this.streams.push(input);
     },
-    sendStreamThreadRequest: (payload: StreamThreadRequestPayload) => {
-      this.starts.push(payload);
+    rpcNamespaceStreamUnsubscribe: ({
+      subscriptionId,
+    }: {
+      subscriptionId: string;
+    }) => {
+      this.unsubscribed.push(subscriptionId);
     },
   };
 
   addMessageListener(
-    message: "receiveStreamThreadResponse",
-    listener: ResponseListener
+    message: "rpcNamespaceStreamEvent",
+    listener: (event: NamespacedRpcStreamEvent) => void
   ) {
-    expect(message).toBe("receiveStreamThreadResponse");
-    this._listeners.add(listener);
+    expect(message).toBe("rpcNamespaceStreamEvent");
+    this._streamListeners.add(listener);
   }
 
   removeMessageListener(
-    message: "receiveStreamThreadResponse",
-    listener: ResponseListener
+    message: "rpcNamespaceStreamEvent",
+    listener: (event: NamespacedRpcStreamEvent) => void
   ) {
-    expect(message).toBe("receiveStreamThreadResponse");
-    this._listeners.delete(listener);
+    expect(message).toBe("rpcNamespaceStreamEvent");
+    this._streamListeners.delete(listener);
   }
 
-  reset() {
-    this.aborts.length = 0;
-    this.envRequests.length = 0;
-    this.mcpRequests.length = 0;
-    this.searchRequests.length = 0;
-    this.skillAvailableRequests.length = 0;
-    this.skillListRequests.length = 0;
-    this.skillSettingsRequests.length = 0;
-    this.starts.length = 0;
-    this._listeners.clear();
+  emit(event: NamespacedRpcStreamEvent): void {
+    for (const listener of this._streamListeners) listener(event);
+  }
+
+  reset(): void {
+    this.requests.length = 0;
+    this.streams.length = 0;
+    this.unsubscribed.length = 0;
+    this._streamListeners.clear();
+  }
+
+  private _value(input: NamespacedRpcRequest): unknown {
+    if (input.namespace === "skills" && input.method === "getSettings") {
+      return { discoveryPaths: [{ path: "/remote/skills", hiddenSkills: [] }] };
+    }
+    if (input.namespace === "search" && input.method === "get") {
+      return { provider: "builtin" };
+    }
+    if (input.namespace === "generator" && input.method === "resolveEnv") {
+      return { modelApiKey: "remote-secret", envValues: {} };
+    }
+    return [];
   }
 }
 
 const RPC = new ControllableRpc();
-
-await mock.module("@/lib/electrobun", () => ({
-  electrobun: { rpc: RPC },
-}));
+await mock.module("@/lib/electrobun", () => ({ electrobun: { rpc: RPC } }));
 
 const { CommandProvider } = await import("@/commands");
 const { DesktopHostProvider } = await import("./host-services");
 const { useHostServices } = await import("@llm-space/ui/host");
 
 const REMOTE_RUNTIME: RuntimeId = "remote:auxiliary-generation";
+const REQUEST: AgentStreamRequest = {
+  model: { provider: "test", id: "test" },
+  context: { messages: [], tools: [], responseApiNativeTools: [] },
+};
 
 function _captureHost(): HostServices {
   let captured: HostServices | null = null;
-
   function CaptureHost() {
     captured = useHostServices();
     return null;
   }
-
   renderToStaticMarkup(
     <CommandProvider>
       <DesktopHostProvider>
@@ -119,92 +106,38 @@ function _captureHost(): HostServices {
       </DesktopHostProvider>
     </CommandProvider>
   );
-
-  if (!captured) {
-    throw new Error("Desktop host was not rendered");
-  }
+  if (!captured) throw new Error("Desktop host was not rendered");
   return captured;
 }
 
-function _model(provider: string): ModelConfig {
-  return { provider, id: `${provider}-model` };
-}
-
-async function _captureRejection(promise: Promise<unknown>): Promise<unknown> {
-  try {
-    await promise;
-    throw new Error("Expected promise to reject");
-  } catch (error) {
-    return error;
-  }
-}
-
 describe("Desktop runtime-scoped host services", () => {
-  beforeEach(() => {
-    RPC.reset();
+  beforeEach(() => RPC.reset());
+
+  test("streams through the agentExecution namespace with its Runtime owner", async () => {
+    const transport = _captureHost().createTransport(REMOTE_RUNTIME);
+    if (!transport) throw new Error("Desktop host did not provide transport");
+    const iterator = transport(REQUEST, {})[Symbol.asyncIterator]();
+    const pending = iterator.next();
+    const stream = RPC.streams[0];
+    expect(stream).toMatchObject({
+      namespace: "agentExecution",
+      method: "stream",
+      args: [REMOTE_RUNTIME, REQUEST, { connection: undefined }],
+    });
+    const event: AgentEvent = { type: "agent_start" };
+    RPC.emit({
+      subscriptionId: stream.subscriptionId,
+      type: "item",
+      item: event,
+    });
+    expect(await pending).toEqual({ value: event, done: false });
+    await iterator.return?.(undefined);
+    expect(RPC.unsubscribed).toContain(stream.subscriptionId);
   });
 
-  test("transport start and abort payloads keep their requested runtime", async () => {
+  test("runtime-sensitive host calls use typed namespace arguments", async () => {
     const host = _captureHost();
-    const remoteTransport = host.createTransport(REMOTE_RUNTIME);
-    if (!remoteTransport) {
-      throw new Error("Desktop host did not provide a remote transport");
-    }
-    const remoteController = new AbortController();
-    const remoteRun = createOneShotRunner({ transport: remoteTransport })({
-      systemPrompt: "Write a remote project plan",
-      userPrompt: "Generate the remote project",
-      model: _model("remote-project"),
-      signal: remoteController.signal,
-    });
-    await Promise.resolve();
-    const remoteStart = RPC.starts[0];
-
-    expect(remoteStart).toMatchObject({
-      runtimeId: REMOTE_RUNTIME,
-      request: { model: { provider: "remote-project" } },
-    });
-
-    const localTransport = host.createTransport("local");
-    if (!localTransport) {
-      throw new Error("Desktop host did not provide a local transport");
-    }
-    const localController = new AbortController();
-    const localRun = createOneShotRunner({ transport: localTransport })({
-      systemPrompt: "Write a local project plan",
-      userPrompt: "Generate the local project",
-      model: _model("local-project"),
-      signal: localController.signal,
-    });
-    await Promise.resolve();
-
-    expect(RPC.starts[1]).toMatchObject({ runtimeId: "local" });
-
-    remoteController.abort();
-    expect(await _captureRejection(remoteRun)).toMatchObject({
-      name: "AbortError",
-    });
-    expect(RPC.aborts[0]).toEqual({
-      runtimeId: REMOTE_RUNTIME,
-      streamId: remoteStart?.streamId,
-    });
-
-    localController.abort();
-    expect(await _captureRejection(localRun)).toMatchObject({
-      name: "AbortError",
-    });
-    expect(RPC.aborts[1]).toEqual({
-      runtimeId: "local",
-      streamId: RPC.starts[1]?.streamId,
-    });
-  });
-
-  test("runtime-sensitive host calls carry their explicit owner", async () => {
-    const host = _captureHost();
-    if (!host.generator) {
-      throw new Error("Desktop host did not provide generator services");
-    }
-
+    if (!host.generator) throw new Error("Generator services are unavailable");
     await host.skills.getSettings({ runtimeId: REMOTE_RUNTIME });
     await host.skills.listAvailable({ runtimeId: REMOTE_RUNTIME });
     await host.skills.listSkills("/remote/skills", {
@@ -216,18 +149,23 @@ describe("Desktop runtime-scoped host services", () => {
       runtimeId: REMOTE_RUNTIME,
     });
 
-    expect(RPC.skillSettingsRequests).toEqual([{ runtimeId: REMOTE_RUNTIME }]);
-    expect(RPC.skillAvailableRequests).toEqual([{ runtimeId: REMOTE_RUNTIME }]);
-    expect(RPC.skillListRequests).toEqual([
-      { runtimeId: REMOTE_RUNTIME, path: "/remote/skills" },
-    ]);
-    expect(RPC.mcpRequests).toEqual([{ runtimeId: REMOTE_RUNTIME }]);
-    expect(RPC.searchRequests).toEqual([{ runtimeId: REMOTE_RUNTIME }]);
-    expect(RPC.envRequests).toEqual([
+    expect(RPC.requests).toEqual([
+      { namespace: "skills", method: "getSettings", args: [REMOTE_RUNTIME] },
+      { namespace: "skills", method: "listAvailable", args: [REMOTE_RUNTIME] },
       {
-        runtimeId: REMOTE_RUNTIME,
-        providerId: "remote-provider",
-        envNames: ["REMOTE_SEARCH_KEY"],
+        namespace: "skills",
+        method: "list",
+        args: [REMOTE_RUNTIME, "/remote/skills"],
+      },
+      { namespace: "mcp", method: "listServers", args: [REMOTE_RUNTIME] },
+      { namespace: "search", method: "get", args: [REMOTE_RUNTIME] },
+      {
+        namespace: "generator",
+        method: "resolveEnv",
+        args: [
+          REMOTE_RUNTIME,
+          { providerId: "remote-provider", envNames: ["REMOTE_SEARCH_KEY"] },
+        ],
       },
     ]);
   });

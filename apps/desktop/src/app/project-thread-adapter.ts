@@ -18,7 +18,7 @@ import type {
 } from "@llm-space/studio/evaluation";
 import type { ExternalThreadExecutionRuntime } from "@llm-space/ui/components/thread-playground";
 
-import type { ProjectStudioClient } from "@/client/project-studio-client";
+import type { ProjectStudioTransport } from "@/shared/project-studio";
 
 export function studioThreadToPlaygroundThread(
   thread: StudioThread,
@@ -171,7 +171,7 @@ function _isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
 }
 
 export function createProjectThreadExecutionRuntime(input: {
-  readonly client: ProjectStudioClient;
+  readonly client: ProjectStudioTransport;
   readonly threadId: string;
   readonly getThread: () => StudioThread;
   readonly onThread: (thread: StudioThread) => void;

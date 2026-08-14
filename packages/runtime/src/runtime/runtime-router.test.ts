@@ -49,3 +49,22 @@ describe("RuntimeRouter", () => {
     );
   });
 });
+
+test("requires advertised Runtime capabilities", () => {
+  const local = {
+    ...runtime("Local"),
+    info: () => ({
+      id: "local" as const,
+      kind: "local" as const,
+      name: "Local",
+      status: "connected" as const,
+      capabilities: ["models" as const],
+    }),
+  } as RuntimeClient;
+  const router = new RuntimeRouter(local);
+
+  expect(router.require("local", "models")).toBe(local);
+  expect(() => router.require("local", "mcp")).toThrow(
+    'Runtime "local" does not support capability "mcp".'
+  );
+});

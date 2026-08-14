@@ -1,26 +1,37 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 
+import type { NamespacedRpcRequest } from "@/shared/namespaced-rpc";
+
 const REQUESTS: { method: string; params: unknown }[] = [];
 
 await mock.module("@/lib/electrobun", () => ({
   electrobun: {
     rpc: {
       request: {
-        fsReadText: (params: { path: string; runtimeId?: string }) => {
-          REQUESTS.push({ method: "fsReadText", params });
+        rpcNamespaceRequest: (request: NamespacedRpcRequest) => {
+          const [runtimeId, path] = request.args as [string | undefined, string];
+          const params = { path, runtimeId };
+          if (request.namespace !== "promptFiles") {
+            throw new Error(`Unexpected namespace: ${request.namespace}`);
+          }
+          if (request.method === "readText") {
+            REQUESTS.push({ method: "readText", params });
           return Promise.resolve({
-            text:
+              ok: true as const,
+              value:
               params.runtimeId === "remote:test"
                 ? "REMOTE CONTENT"
                 : "LOCAL CONTENT",
           });
-        },
-        fsTextFileExists: (params: {
-          path: string;
-          runtimeId?: string;
-        }) => {
-          REQUESTS.push({ method: "fsTextFileExists", params });
-          return Promise.resolve({ exists: params.runtimeId === "remote:test" });
+          }
+          if (request.method !== "exists") {
+            throw new Error(`Unexpected method: ${request.method}`);
+          }
+          REQUESTS.push({ method: "exists", params });
+          return Promise.resolve({
+            ok: true as const,
+            value: params.runtimeId === "remote:test",
+          });
         },
       },
     },
@@ -48,11 +59,11 @@ describe("runtime-scoped prompt files", () => {
     expect(await exists("/remote-only.md", "remote:test")).toBe(true);
     expect(REQUESTS).toEqual([
       {
-        method: "fsReadText",
+        method: "readText",
         params: { path: "/same/path.md", runtimeId: "remote:test" },
       },
       {
-        method: "fsTextFileExists",
+        method: "exists",
         params: { path: "/remote-only.md", runtimeId: "remote:test" },
       },
     ]);

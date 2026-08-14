@@ -11,12 +11,36 @@ import type {
   ThreadStorageView,
 } from "@llm-space/core";
 
-import { electrobun } from "@/lib/electrobun";
+import { createRpcClientProxy } from "@/shared/namespaced-rpc";
+import {
+  PLUGIN_COMMANDS_RPC,
+  PLUGINS_RPC,
+  PLUGIN_TOOLS_RPC,
+  THREAD_STORAGES_RPC,
+} from "@/shared/plugin-rpc";
 import type { RuntimeId } from "@/shared/runtime";
 
-function _rpc() {
-  if (!electrobun.rpc) throw new Error("Electrobun RPC is not initialized");
-  return electrobun.rpc;
+import { createElectrobunRpcClientTransport } from "./namespaced-rpc-client";
+
+const transport = createElectrobunRpcClientTransport();
+export const pluginsClient = createRpcClientProxy(PLUGINS_RPC, transport);
+export const pluginCommandsClient = createRpcClientProxy(
+  PLUGIN_COMMANDS_RPC,
+  transport
+);
+export const pluginToolsClient = createRpcClientProxy(
+  PLUGIN_TOOLS_RPC,
+  transport
+);
+export const threadStoragesClient = createRpcClientProxy(
+  THREAD_STORAGES_RPC,
+  transport
+);
+
+/** Subscribe to any installed Plugin or contribution change. */
+export function subscribePluginsChanged(listener: () => void): () => void {
+  const subscription = pluginsClient.on("changed", listener);
+  return () => subscription.dispose();
 }
 
 /** The mounted pane snapshot captured when a Plugin Command starts. */
@@ -29,29 +53,26 @@ export interface PluginActiveTab {
   thread: Thread;
 }
 
-export const listPlugins = (): Promise<PluginView[]> =>
-  _rpc().request.pluginsList({});
+export const listPlugins = (): Promise<PluginView[]> => pluginsClient.list();
 
 export const refreshPlugins = (): Promise<PluginView[]> =>
-  _rpc().request.pluginsRefresh({});
+  pluginsClient.refresh();
 
 export const reloadPlugin = (pluginId: string): Promise<PluginView[]> =>
-  _rpc().request.pluginsReload({ pluginId });
+  pluginsClient.reload(pluginId);
 
 export const setPluginEnabled = (
   pluginId: string,
   enabled: boolean
-): Promise<PluginView[]> =>
-  _rpc().request.pluginsSetEnabled({ pluginId, enabled });
+): Promise<PluginView[]> => pluginsClient.setEnabled(pluginId, enabled);
 
 export const setPluginSettings = (
   pluginId: string,
   settings: JsonObject
-): Promise<PluginView[]> =>
-  _rpc().request.pluginsSetSettings({ pluginId, settings });
+): Promise<PluginView[]> => pluginsClient.setSettings(pluginId, settings);
 
 export const listPluginCommands = (): Promise<PluginCommandView[]> =>
-  _rpc().request.pluginCommandsList({});
+  pluginCommandsClient.list();
 
 export const executePluginCommand = (
   executionId: string,
@@ -59,7 +80,7 @@ export const executePluginCommand = (
   activeTab: Pick<PluginActiveTab, "filename" | "thread"> | null,
   args: string[]
 ): Promise<PluginCommandExecutionResult> =>
-  _rpc().request.pluginCommandExecute({
+  pluginCommandsClient.execute({
     executionId,
     commandId,
     activeTab,
@@ -67,7 +88,7 @@ export const executePluginCommand = (
   });
 
 export const listPluginTools = (): Promise<PluginTool[]> =>
-  _rpc().request.pluginToolsList({});
+  pluginToolsClient.list();
 
 export const executePluginTool = (
   tool: PluginTool,
@@ -75,30 +96,25 @@ export const executePluginTool = (
   variables: Record<string, JsonValue>,
   args: Record<string, unknown>
 ): Promise<BuiltinToolCallResponse> =>
-  _rpc().request.pluginToolExecute({
-    tool,
-    thread,
-    variables,
-    arguments: args,
-  });
+  pluginToolsClient.execute(tool, thread, variables, args);
 
 export const listThreadStorages = (): Promise<ThreadStorageView[]> =>
-  _rpc().request.threadStoragesList({});
+  threadStoragesClient.list();
 
 export const resolveLatestThreadStorage = (
   storageId: string,
   resourceId: string
 ): Promise<ThreadLocator> =>
-  _rpc().request.threadStorageResolveLatest({ storageId, resourceId });
+  threadStoragesClient.resolveLatest(storageId, resourceId);
 
 export const readThreadStorage = (
   storageId: string,
   locator: ThreadLocator
-): Promise<Thread> => _rpc().request.threadStorageRead({ storageId, locator });
+): Promise<Thread> => threadStoragesClient.read(storageId, locator);
 
 export const writeThreadStorage = (
   storageId: string,
   thread: Thread,
   resourceId?: string
 ): Promise<ThreadLocator> =>
-  _rpc().request.threadStorageWrite({ storageId, thread, resourceId });
+  threadStoragesClient.write(storageId, thread, resourceId);

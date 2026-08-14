@@ -6,10 +6,10 @@ import type {
 } from "@llm-space/core";
 import { normalizeThreadForPath } from "@llm-space/ui/lib/thread-file";
 
-import { electrobun } from "@/lib/electrobun";
 import type { RuntimeId } from "@/shared/runtime";
 
-import { runtimeScope } from "./runtime-scope";
+import { revealNativeFile } from "./native-files";
+import { workspaceClient } from "./runtime-rpc-clients";
 
 /**
  * Client-side `FileSystem` + `ThreadStorage` that talks to the bun side over
@@ -20,76 +20,47 @@ import { runtimeScope } from "./runtime-scope";
 export class LocalFileSystemClient implements FileSystem, ThreadStorage {
   constructor(private readonly _runtimeId?: RuntimeId) {}
   ls(path: string): Promise<FileNode[]> {
-    return this._rpc().request.fsLs({ ...runtimeScope(this._runtimeId), path });
+    return workspaceClient.list(this._runtimeId, path);
   }
 
   async mkdir(path: string): Promise<void> {
-    await this._rpc().request.fsMkdir({
-      ...runtimeScope(this._runtimeId),
-      path,
-    });
+    await workspaceClient.createDirectory(this._runtimeId, path);
   }
 
   async cp(src: string, dest: string): Promise<void> {
-    await this._rpc().request.fsCp({
-      ...runtimeScope(this._runtimeId),
-      src,
-      dest,
-    });
+    await workspaceClient.copy(this._runtimeId, src, dest);
   }
 
   async mv(src: string, dest: string): Promise<void> {
-    await this._rpc().request.fsMv({
-      ...runtimeScope(this._runtimeId),
-      src,
-      dest,
-    });
+    await workspaceClient.move(this._runtimeId, src, dest);
   }
 
   async rm(path: string): Promise<void> {
-    await this._rpc().request.fsRm({ ...runtimeScope(this._runtimeId), path });
+    await workspaceClient.remove(this._runtimeId, path);
   }
 
   async read(path: string): Promise<Thread> {
-    const thread = await this._rpc().request.fsRead({
-      ...runtimeScope(this._runtimeId),
-      path,
-    });
+    const thread = await workspaceClient.readThread(this._runtimeId, path);
     return normalizeThreadForPath(thread, path);
   }
 
   async write(path: string, thread: Thread): Promise<void> {
-    await this._rpc().request.fsWrite({
-      ...runtimeScope(this._runtimeId),
+    await workspaceClient.writeThread(
+      this._runtimeId,
       path,
-      thread: normalizeThreadForPath(thread, path),
-    });
+      normalizeThreadForPath(thread, path)
+    );
   }
 
   /** Reveal a file/directory in the OS file manager (Finder/Explorer). */
   async reveal(path: string): Promise<void> {
-    const { path: absolutePath } = await this._rpc().request.fsRealpath({
-      ...runtimeScope(this._runtimeId),
-      path,
-    });
-    await this._rpc().request.fsReveal({ path: absolutePath });
+    const absolutePath = await workspaceClient.resolvePath(this._runtimeId, path);
+    await revealNativeFile(absolutePath);
   }
 
   /** Resolve a workspace-relative path to its absolute on-disk path. */
   async realpath(path: string): Promise<string> {
-    const { path: abs } = await this._rpc().request.fsRealpath({
-      ...runtimeScope(this._runtimeId),
-      path,
-    });
-    return abs;
-  }
-
-  private _rpc() {
-    const rpc = electrobun.rpc;
-    if (!rpc) {
-      throw new Error("Electrobun RPC is not initialized");
-    }
-    return rpc;
+    return workspaceClient.resolvePath(this._runtimeId, path);
   }
 }
 

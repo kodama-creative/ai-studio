@@ -8,7 +8,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
-import { createFileSystemClient, createRpcTransport } from "@/client";
+import { createFileSystemClient } from "@/client/local-file-system";
+import { createRpcTransport } from "@/client/rpc-transport";
 import type { RuntimeId } from "@/shared/runtime";
 
 import { runFileMutationWithGuard } from "../file-system-tree-view/file-mutation-guard";

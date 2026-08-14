@@ -13,7 +13,6 @@ import {
   SkillsManager,
   StreamThreadController,
   ToolRegistry,
-  TraceManager,
 } from "@llm-space/runtime";
 
 export interface ServerRuntimeContext {
@@ -41,7 +40,6 @@ export async function createServerRuntime(
   const skillsManager = new SkillsManager();
   const localFs = createLocalFileSystem(homePath);
   const streaming = new StreamThreadController(modelManager);
-  const traceManager = new TraceManager({ homePath });
   const tools = new ToolRegistry();
   createBuiltInToolsModule({
     env: process.env,
@@ -61,7 +59,6 @@ export async function createServerRuntime(
     skillsManager,
     streaming,
     tools,
-    traceManager,
   });
 
   return {

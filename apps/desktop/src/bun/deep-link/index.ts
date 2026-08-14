@@ -11,8 +11,8 @@ import {
   type DeepLinkScheme,
   resolveDeepLinkScheme,
 } from "../../shared/deep-link-scheme";
-import type { GitHubAuthManager } from "../auth";
-import type { MainWindowRPC } from "../rpc";
+import type { SharedImportStatusPayload } from "../../shared/shared-import";
+import type { GitHubAuthManager } from "../auth/github-auth-manager";
 
 /** `shared/<connectorId>/threads/<threadId>` */
 const SHARED_DEEP_LINK_RE = /^shared\/([^/]+)\/threads\/([^/?#]+)/;
@@ -49,7 +49,7 @@ export interface DeepLinkDependencies {
   localFs: LocalFileSystem;
   githubAuth: GitHubAuthManager;
   threadStorages: ThreadStorageRegistry;
-  getRpc: () => MainWindowRPC;
+  notifySharedImport: (payload: SharedImportStatusPayload) => void;
   openAgentProject?: (rootPath: string) => Promise<void>;
   scheme?: DeepLinkScheme;
 }
@@ -63,7 +63,7 @@ export function createDeepLinkHandler({
   localFs,
   githubAuth,
   threadStorages,
-  getRpc,
+  notifySharedImport,
   openAgentProject,
   scheme = resolveDeepLinkScheme(process.env.LLM_SPACE_DEEP_LINK_SCHEME),
 }: DeepLinkDependencies): DeepLinkHandler {
@@ -73,10 +73,6 @@ export function createDeepLinkHandler({
     }),
   };
   let controller: AbortController | null = null;
-
-  const notify = (
-    payload: Parameters<MainWindowRPC["send"]["sharedImportStatusChanged"]>[0]
-  ) => getRpc().send.sharedImportStatusChanged(payload);
 
   return {
     async handle(url) {
@@ -100,7 +96,7 @@ export function createDeepLinkHandler({
       const current = new AbortController();
       controller = current;
 
-      notify({ status: "importing" });
+      notifySharedImport({ status: "importing" });
       try {
         const { path, title } = sharedMatch
           ? await _importShared({
@@ -118,11 +114,11 @@ export function createDeepLinkHandler({
               signal: current.signal,
             });
         if (current.signal.aborted) return;
-        notify({ status: "success", path, title });
+        notifySharedImport({ status: "success", path, title });
       } catch (error) {
         // Cancelled → the renderer already closed the modal; stay silent.
         if (current.signal.aborted) return;
-        notify({
+        notifySharedImport({
           status: "error",
           message: error instanceof Error ? error.message : "Import failed.",
         });

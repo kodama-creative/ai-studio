@@ -45,7 +45,7 @@ function _wiringHarness(input?: {
     },
   });
   const executeCommand = (command: Command) => {
-    if (command.type !== "shareThread") {
+    if (command.type !== "thread.share") {
       throw new Error(`Unexpected command: ${command.type}`);
     }
     pageHandler(command.args);

@@ -50,7 +50,7 @@ export function UpdateIndicator() {
           size="sm"
           className="mt-1 w-full"
           onClick={() =>
-            executeCommand({ type: "applyUpdateAndRestart", args: {} })
+            executeCommand({ type: "updates.applyAndRestart", args: {} })
           }
         >
           Restart Now

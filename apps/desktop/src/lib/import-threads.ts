@@ -8,7 +8,7 @@ import {
   uniqueThreadFileName,
 } from "@llm-space/ui/lib/thread-file";
 
-import { createFileSystemClient } from "@/client";
+import { createFileSystemClient } from "@/client/local-file-system";
 import type { RuntimeId } from "@/shared/runtime";
 
 export interface ThreadImportFile {

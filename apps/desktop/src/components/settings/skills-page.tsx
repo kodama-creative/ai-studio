@@ -29,6 +29,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { fsReveal } from "@/client/built-in-tools";
+import { subscribePluginsChanged } from "@/client/plugins";
 import {
   addSkillsPath,
   browseForSkillsPath,
@@ -41,7 +42,6 @@ import {
   setPluginSkillHidden,
   setSkillHidden,
 } from "@/client/skills";
-import { electrobun } from "@/lib/electrobun";
 import type { RuntimeId } from "@/shared/runtime";
 
 import { SettingsPage } from "./settings-page";
@@ -114,9 +114,7 @@ export function SkillsPage({ runtimeId }: { runtimeId: RuntimeId }) {
 
   useEffect(() => {
     if (runtimeId !== "local") return;
-    const rpc = electrobun.rpc;
-    rpc?.addMessageListener("pluginsChanged", loadSources);
-    return () => rpc?.removeMessageListener("pluginsChanged", loadSources);
+    return subscribePluginsChanged(loadSources);
   }, [loadSources, runtimeId]);
 
   const paths = settings.discoveryPaths;

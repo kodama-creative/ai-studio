@@ -17,7 +17,7 @@ import { isChineseLocale } from "./locales";
 function _appSubmenu(updateReady: boolean): ApplicationMenuItemConfig {
   const updateItem = updateReady
     ? { label: "Restart to Update", action: "restartToUpdate" }
-    : { label: "Check for Updates...", action: "checkForUpdates" };
+    : { label: "Check for Updates...", action: "updates.check" };
   return {
     submenu: [
       { label: "About LLM Space", role: "about" },
@@ -50,7 +50,7 @@ function _buildMenu(updateReady: boolean): ApplicationMenuItemConfig[] {
       submenu: [
         {
           label: "Open Agent Project...",
-          action: "openAgentProject",
+          action: "agentProjects.open",
           accelerator: "CommandOrControl+O",
         },
         { type: "divider" },
@@ -63,25 +63,25 @@ function _buildMenu(updateReady: boolean): ApplicationMenuItemConfig[] {
         { type: "divider" },
         {
           label: "New Folder",
-          action: "newFolder",
+          action: "workspace.newFolder",
           accelerator: "CommandOrControl+Shift+N",
         },
         { type: "divider" },
-        { label: "Import from Files...", action: "importFiles" },
-        { label: "Import from Clipboard", action: "importFromClipboard" },
+        { label: "Import from Files...", action: "workspace.importFiles" },
+        { label: "Import from Clipboard", action: "workspace.importFromClipboard" },
         { type: "divider" },
-        { label: "Share...", action: "shareThread" },
+        { label: "Share...", action: "thread.share" },
         { type: "divider" },
-        { label: "Refresh Workspace", action: "refreshTree" },
+        { label: "Refresh Workspace", action: "workspace.refresh" },
         { label: "Reveal Workspace Folder", action: "revealWorkspaceFolder" },
         { type: "divider" },
         {
           label: "Close Tab",
-          action: "closeTab",
+          action: "tabs.close",
           accelerator: "CommandOrControl+W",
         },
-        { label: "Close Others", action: "closeOtherTabs" },
-        { label: "Close All Tabs", action: "closeAllTabs" },
+        { label: "Close Others", action: "tabs.closeOthers" },
+        { label: "Close All Tabs", action: "tabs.closeAll" },
         { type: "divider" },
         {
           label: "Reopen Closed Tabs",
@@ -115,29 +115,29 @@ function _buildMenu(updateReady: boolean): ApplicationMenuItemConfig[] {
         { type: "divider" },
         {
           label: "Toggle Sidebar",
-          action: "toggleSidebar",
+          action: "layout.toggleSidebar",
           accelerator: "CommandOrControl+B",
         },
         { type: "divider" },
         {
           label: "Reload",
-          action: "reload",
+          action: "window.reload",
           accelerator: "CommandOrControl+Shift+R",
         },
         { type: "divider" },
         {
           label: "Zoom In",
-          action: "zoomIn",
+          action: "window.zoomIn",
           accelerator: "CommandOrControl+Plus",
         },
         {
           label: "Zoom Out",
-          action: "zoomOut",
+          action: "window.zoomOut",
           accelerator: "CommandOrControl+-",
         },
         {
           label: "Reset Zoom",
-          action: "resetZoom",
+          action: "window.resetZoom",
           accelerator: "CommandOrControl+0",
         },
       ],
@@ -151,12 +151,12 @@ function _buildMenu(updateReady: boolean): ApplicationMenuItemConfig[] {
         { type: "divider" },
         {
           label: "Select Previous Tab",
-          action: "selectPreviousTab",
+          action: "tabs.selectPrevious",
           accelerator: "CommandOrControl+Option+Left",
         },
         {
           label: "Select Next Tab",
-          action: "selectNextTab",
+          action: "tabs.selectNext",
           accelerator: "CommandOrControl+Option+Right",
         },
         { type: "divider" },
@@ -166,13 +166,13 @@ function _buildMenu(updateReady: boolean): ApplicationMenuItemConfig[] {
     {
       label: "Help",
       submenu: [
-        { label: "View Documentation", action: "openDocument" },
+        { label: "View Documentation", action: "shell.openDocument" },
         { type: "divider" },
         { label: "Visit Official Website", action: "openOfficialWebsite" },
         { label: "Visit GitHub Project", action: "openGitHubProject" },
         { label: "Visit Agent 101", action: "openAgent101" },
         { type: "divider" },
-        { label: "Report Bug", action: "reportBugs" },
+        { label: "Report Bug", action: "shell.reportBugs" },
         { label: "Donate", action: "donate" },
         { type: "divider" },
         { label: "Onboard", action: "onboard" },
@@ -192,52 +192,52 @@ export function setUpdateReadyInMenu(version: string | null) {
 
 /**
  * The native menu items carry a string `action`; map each to the {@link Command}
- * it dispatches. Everything then flows through the single `executeCommandInBun`
+ * it dispatches. Everything then flows through the window command bus
  * entry point (window-side commands run locally, webview-side ones are
  * forwarded over RPC).
  */
 const MENU_ACTION_COMMANDS: Record<string, Command> = {
-  openAgentProject: { type: "openAgentProject", args: {} },
-  reload: { type: "reload", args: {} },
-  zoomIn: { type: "zoomIn", args: {} },
-  zoomOut: { type: "zoomOut", args: {} },
-  resetZoom: { type: "resetZoom", args: {} },
-  toggleSidebar: { type: "toggleSidebar", args: {} },
-  commandPalette: { type: "openCommandPalette", args: {} },
-  settings: { type: "openSettings", args: {} },
-  newThread: { type: "newFile", args: {} },
-  newFromExamples: { type: "openStartFromExample", args: { parent: "" } },
-  newFolder: { type: "newFolder", args: {} },
-  importFiles: { type: "importFiles", args: {} },
-  importFromClipboard: { type: "importFromClipboard", args: {} },
-  shareThread: { type: "shareThread", args: {} },
-  refreshTree: { type: "refreshTree", args: {} },
-  revealWorkspaceFolder: { type: "openWorkspaceFolder", args: {} },
-  closeTab: { type: "closeTab", args: {} },
-  closeOtherTabs: { type: "closeOtherTabs", args: {} },
-  closeAllTabs: { type: "closeAllTabs", args: {} },
-  reopenClosedTabs: { type: "reopenClosedTab", args: {} },
-  selectNextTab: { type: "selectNextTab", args: {} },
-  selectPreviousTab: { type: "selectPreviousTab", args: {} },
-  openDocument: { type: "openDocument", args: {} },
+  openAgentProject: { type: "agentProjects.open", args: {} },
+  reload: { type: "window.reload", args: {} },
+  zoomIn: { type: "window.zoomIn", args: {} },
+  zoomOut: { type: "window.zoomOut", args: {} },
+  resetZoom: { type: "window.resetZoom", args: {} },
+  toggleSidebar: { type: "layout.toggleSidebar", args: {} },
+  commandPalette: { type: "app.openCommandPalette", args: {} },
+  settings: { type: "app.openSettings", args: {} },
+  newThread: { type: "workspace.newFile", args: {} },
+  newFromExamples: { type: "workspace.openStartFromExample", args: { parent: "" } },
+  newFolder: { type: "workspace.newFolder", args: {} },
+  importFiles: { type: "workspace.importFiles", args: {} },
+  importFromClipboard: { type: "workspace.importFromClipboard", args: {} },
+  shareThread: { type: "thread.share", args: {} },
+  refreshTree: { type: "workspace.refresh", args: {} },
+  revealWorkspaceFolder: { type: "shell.openWorkspaceFolder", args: {} },
+  closeTab: { type: "tabs.close", args: {} },
+  closeOtherTabs: { type: "tabs.closeOthers", args: {} },
+  closeAllTabs: { type: "tabs.closeAll", args: {} },
+  reopenClosedTabs: { type: "tabs.reopenClosed", args: {} },
+  selectNextTab: { type: "tabs.selectNext", args: {} },
+  selectPreviousTab: { type: "tabs.selectPrevious", args: {} },
+  openDocument: { type: "shell.openDocument", args: {} },
   openGitHubProject: {
-    type: "openLink",
+    type: "shell.openLink",
     args: { url: "https://github.com/deer-flow/llm-space/tree/main" },
   },
   openOfficialWebsite: {
-    type: "openLink",
+    type: "shell.openLink",
     args: { url: "https://deer-flow.github.io/llm-space/" },
   },
-  reportBugs: { type: "reportBugs", args: {} },
-  checkForUpdates: { type: "checkForUpdates", args: {} },
-  restartToUpdate: { type: "applyUpdateAndRestart", args: {} },
+  reportBugs: { type: "shell.reportBugs", args: {} },
+  checkForUpdates: { type: "updates.check", args: {} },
+  restartToUpdate: { type: "updates.applyAndRestart", args: {} },
   donate: {
-    type: "openLink",
+    type: "shell.openLink",
     args: { url: "https://my.feishu.cn/wiki/OvLBwVuSkiCR1ik5wGEcBXZfnye" },
   },
-  onboard: { type: "openOnboard", args: {} },
+  onboard: { type: "app.openOnboard", args: {} },
   openAgent101: {
-    type: "openLink",
+    type: "shell.openLink",
     args: {
       url: isChineseLocale()
         ? "https://my.feishu.cn/wiki/L082wubkdie8uMkRUjgceKYQnIe?fromScene=spaceOverview"

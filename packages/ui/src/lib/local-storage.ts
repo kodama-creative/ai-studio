@@ -14,7 +14,6 @@ export const LOCAL_STORAGE_KEYS = {
   reactLoop: "llm-space-react-loop",
   messageStatsSummaryMode: "llm-space-message-stats-summary-mode",
   landingLanguage: "llm-space-lang",
-  experimentalTracing: "llm-space-experimental-tracing",
   experimentalReactScan: "llm-space-experimental-react-scan",
   sidebarSize: "llm-space:sidebar-size",
   openAppTabs: "llm-space:open-app-tabs",

@@ -13,6 +13,7 @@ import {
 import { createRoot, type Root } from "react-dom/client";
 
 import type { CommandHandlers } from "@/commands";
+import type { NamespacedRpcRequest } from "@/shared/namespaced-rpc";
 import type { RuntimeId } from "@/shared/runtime";
 /* eslint-disable @typescript-eslint/require-await -- interface fakes deliberately resolve synchronously */
 import {
@@ -45,32 +46,57 @@ let pendingShare: Deferred<{ shareUrl: string; gistId: string }> | null = null;
 
 const RPC = {
   request: {
-    isFullScreen: async () => ({ fullScreen: false }),
-    listRuntimes: async () => [
-      { id: "local" as const, kind: "local" as const, name: "Local" },
-      {
-        id: "remote:workspace" as const,
-        kind: "remote" as const,
-        name: "Workspace",
-      },
-    ],
-    remoteGetDefaultRuntime: async () => ({
-      runtimeId: "remote:workspace" as const,
-    }),
-    githubAuthStatus: async () => ({
-      status: "signedIn" as const,
-      login: "review-test",
-    }),
-    fsRead: async ({ path }: { path: string }) => ({
-      title: `Remote ${path}`,
-    }),
-    shareThread: async (input: (typeof SHARE_REQUESTS)[number]) => {
-      SHARE_REQUESTS.push(input);
-      if (pendingShare) return pendingShare.promise;
-      return {
-        shareUrl: "https://example.test/shared",
-        gistId: "gist-review-test",
-      };
+    rpcNamespaceRequest: async (request: NamespacedRpcRequest) => {
+      let value: unknown;
+      if (request.namespace === "window" && request.method === "isFullScreen") {
+        value = false;
+      } else if (request.namespace === "runtimes" && request.method === "list") {
+        value = [
+          { id: "local" as const, kind: "local" as const, name: "Local" },
+          {
+            id: "remote:workspace" as const,
+            kind: "remote" as const,
+            name: "Workspace",
+          },
+        ];
+      } else if (
+        request.namespace === "runtimes" &&
+        request.method === "getDefault"
+      ) {
+        value = "remote:workspace" as const;
+      } else if (
+        request.namespace === "githubAccount" &&
+        request.method === "getState"
+      ) {
+        value = { status: "signedIn" as const, login: "review-test" };
+      } else if (
+        request.namespace === "threadSharing" &&
+        request.method === "read"
+      ) {
+        const [, path] = request.args as [RuntimeId, string];
+        value = { title: `Remote ${path}` };
+      } else if (
+        request.namespace === "threadSharing" &&
+        request.method === "publish"
+      ) {
+        const [runtimeId, path, meta] = request.args as [
+          RuntimeId,
+          string,
+          { title?: string; description?: string } | undefined,
+        ];
+        SHARE_REQUESTS.push({ runtimeId, path, ...meta });
+        value = pendingShare
+          ? await pendingShare.promise
+          : {
+              shareUrl: "https://example.test/shared",
+              gistId: "gist-review-test",
+            };
+      } else {
+        throw new Error(
+          `Unexpected RPC request: ${request.namespace}.${request.method}`
+        );
+      }
+      return { ok: true as const, value };
     },
   },
   send: {
@@ -93,7 +119,6 @@ const WORKSPACE_TABS = {
   tabs: [WORKSPACE_TAB],
   activeId: WORKSPACE_TAB.id,
   open: noOp,
-  openTrace: noOp,
   close: noOp,
   closeOthers: noOp,
   closeOthersInRuntime: noOp,
@@ -110,7 +135,6 @@ const WORKSPACE_TABS = {
   handleRemove: noOp,
   handleMove: noOp,
   consumeDiscardedPane: () => false,
-  handleTraceTitleChange: noOp,
   reopenClosed: noOp,
 };
 
@@ -255,7 +279,7 @@ await mock.module("@/components/experimental-provider", () => ({
   ExperimentalProvider: ({ children }: { children?: ReactNode }) => (
     <>{children}</>
   ),
-  useExperimental: () => ({ tracingEnabled: false }),
+  useExperimental: () => ({ reactScanEnabled: false }),
 }));
 
 for (const [moduleName, exportName] of [
@@ -273,9 +297,6 @@ for (const [moduleName, exportName] of [
 }
 await mock.module("./thread-tabs/thread-tab-pane", () => ({
   ThreadTabPane: () => null,
-}));
-await mock.module("./thread-tabs/trace-tab-pane", () => ({
-  TraceTabPane: () => null,
 }));
 
 const [
@@ -349,9 +370,9 @@ async function _findButtonByText(text: string): Promise<TestElement> {
 function _ShareCommandRegistrar({
   onShare,
 }: {
-  onShare: NonNullable<CommandHandlers["shareThread"]>;
+  onShare: NonNullable<CommandHandlers["thread.share"]>;
 }) {
-  useRegisterCommands({ shareThread: onShare });
+  useRegisterCommands({ "thread.share": onShare });
   return null;
 }
 
@@ -368,7 +389,7 @@ function _CommandShareTrigger({
       aria-label="Command share"
       onClick={() =>
         executeCommand({
-          type: "shareThread",
+          type: "thread.share",
           args: path ? { path, runtimeId } : {},
         })
       }

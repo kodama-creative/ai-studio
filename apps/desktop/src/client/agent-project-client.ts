@@ -1,6 +1,8 @@
-import { electrobun } from "@/lib/electrobun";
 import type { AgentProjectSummary } from "@/shared/agent-project";
+import { AGENT_PROJECTS_RPC } from "@/shared/agent-project-rpc";
+import { createRpcClientProxy } from "@/shared/namespaced-rpc";
 
+import { createElectrobunRpcClientTransport } from "./namespaced-rpc-client";
 
 export interface AgentProjectClient {
   list(): Promise<readonly AgentProjectSummary[]>;
@@ -10,15 +12,13 @@ export interface AgentProjectClient {
 
 /** Access the main-process Agent Project catalog and window manager. */
 export function createAgentProjectClient(): AgentProjectClient {
-  const rpc = electrobun.rpc;
-  if (rpc === undefined) throw new Error("Electrobun RPC is not initialized.");
+  const client = createRpcClientProxy(
+    AGENT_PROJECTS_RPC,
+    createElectrobunRpcClientTransport()
+  );
   return {
-    list: () => rpc.request.agentProjectList({}),
-    open: async (rootPath) => {
-      await rpc.request.agentProjectOpen({ rootPath });
-    },
-    pickAndOpen: async () => {
-      await rpc.request.agentProjectPickAndOpen({});
-    },
+    list: () => client.list(),
+    open: (rootPath) => client.open(rootPath),
+    pickAndOpen: () => client.pickAndOpen(),
   };
 }

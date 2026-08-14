@@ -108,7 +108,8 @@ export class RemoteServerManager {
     this._servers = this._load();
   }
 
-  setStatusListener(listener: RemoteServerStatusListener): void {
+  /** Replace or clear the single process-level status observer. */
+  setStatusListener(listener?: RemoteServerStatusListener): void {
     this._onStatusChanged = listener;
   }
 

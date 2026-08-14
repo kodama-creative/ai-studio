@@ -64,6 +64,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
+import { revealNativeFile } from "@/client/native-files";
 import { ensureRootDir } from "@/client/paths";
 import {
   listPlugins,
@@ -71,8 +72,8 @@ import {
   reloadPlugin,
   setPluginEnabled,
   setPluginSettings,
+  subscribePluginsChanged,
 } from "@/client/plugins";
-import { electrobun } from "@/lib/electrobun";
 
 import { SettingsEmptyState } from "./settings-empty-state";
 import { SettingsPage } from "./settings-page";
@@ -150,9 +151,7 @@ export function PluginsPage() {
         .finally(() => setLoading(false));
     };
     loadPlugins();
-    const rpc = electrobun.rpc;
-    rpc?.addMessageListener("pluginsChanged", loadPlugins);
-    return () => rpc?.removeMessageListener("pluginsChanged", loadPlugins);
+    return subscribePluginsChanged(loadPlugins);
   }, []);
 
   const refresh = async () => {
@@ -997,7 +996,7 @@ function _isJsonValue(value: unknown): value is JsonValue {
 }
 
 function _reveal(path: string): void {
-  void electrobun.rpc?.request.fsReveal({ path }).catch(_showError);
+  void revealNativeFile(path).catch(_showError);
 }
 
 function _showError(error: unknown): void {

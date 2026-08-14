@@ -1,19 +1,20 @@
-import { electrobun } from "@/lib/electrobun";
+import { GENERATOR_RPC } from "@/shared/generator-rpc";
+import { createRpcClientProxy } from "@/shared/namespaced-rpc";
 import type { RuntimeId } from "@/shared/runtime";
 
-function _rpc() {
-  if (!electrobun.rpc) {
-    throw new Error("Electrobun RPC is not initialized");
-  }
-  return electrobun.rpc;
-}
+import { createElectrobunRpcClientTransport } from "./namespaced-rpc-client";
+
+const generatorClient = createRpcClientProxy(
+  GENERATOR_RPC,
+  createElectrobunRpcClientTransport()
+);
 
 /**
  * Open the native folder picker for the project's parent directory. `path` is
  * `null` on cancel.
  */
 export function pickGeneratorDirectory(): Promise<{ path: string | null }> {
-  return _rpc().request.generatorPickDirectory({});
+  return generatorClient.pickDirectory().then((path) => ({ path }));
 }
 
 /**
@@ -24,12 +25,12 @@ export function prepareGeneratorDirectory(
   parentDir: string,
   projectName: string
 ): Promise<{ ok: true; dir: string } | { ok: false; error: string }> {
-  return _rpc().request.generatorPrepareDirectory({ parentDir, projectName });
+  return generatorClient.prepareDirectory(parentDir, projectName);
 }
 
 /** Whether `uv` is installed on the host, and its version when detectable. */
 export function checkUv(): Promise<{ installed: boolean; version?: string }> {
-  return _rpc().request.generatorCheckUv({});
+  return generatorClient.checkUv();
 }
 
 /** Run `uv <args>` in an authorized project directory. */
@@ -43,11 +44,7 @@ export function runUv(
   stderr: string;
   timedOut: boolean;
 }> {
-  return _rpc().request.generatorRunUv({
-    rootDir,
-    args,
-    timeoutMs: opts?.timeoutMs,
-  });
+  return generatorClient.runUv(rootDir, args, opts);
 }
 
 /** Write a text file under an authorized project directory. */
@@ -56,7 +53,7 @@ export async function writeProjectFile(
   relativePath: string,
   contents: string
 ): Promise<void> {
-  await _rpc().request.generatorWriteFile({ rootDir, relativePath, contents });
+  await generatorClient.writeFile(rootDir, relativePath, contents);
 }
 
 /** Delete a file under an authorized project directory; no-op when missing. */
@@ -64,12 +61,12 @@ export async function removeProjectFile(
   rootDir: string,
   relativePath: string
 ): Promise<void> {
-  await _rpc().request.generatorRemoveFile({ rootDir, relativePath });
+  await generatorClient.removeFile(rootDir, relativePath);
 }
 
 /** Open macOS Terminal in the generated project and run `make dev`. */
 export function openGeneratorDevTerminal(rootDir: string): Promise<boolean> {
-  return _rpc().request.generatorOpenDevTerminal({ rootDir });
+  return generatorClient.openDevTerminal(rootDir);
 }
 
 /** Resolve the model's real API key + named environment variable values. */
@@ -79,8 +76,7 @@ export function resolveGeneratorEnv(
   profileId?: string,
   runtimeId?: RuntimeId
 ): Promise<{ modelApiKey: string; envValues: Record<string, string> }> {
-  return _rpc().request.generatorResolveEnv({
-    runtimeId,
+  return generatorClient.resolveEnv(runtimeId, {
     providerId,
     profileId,
     envNames,

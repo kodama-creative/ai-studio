@@ -11,11 +11,8 @@ import { threadTitleFromPath } from "@llm-space/ui/lib/thread-file";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { z } from "zod";
 
-import {
-  createFileSystemClient,
-  createPlaygroundClient,
-  traceClient,
-} from "@/client";
+import { createFileSystemClient } from "@/client/local-file-system";
+import { createPlaygroundClient } from "@/client/playground-client";
 import { listRuntimes } from "@/client/remote-servers";
 import type { RuntimeId } from "@/shared/runtime";
 
@@ -45,30 +42,12 @@ export interface PlaygroundTab {
   refreshNonce?: number;
 }
 
-/** An open imported trace workbench tab. `id` is `trace:{runtimeId}:{projectId}:{traceKey}`. */
-export interface TraceTab {
-  id: string;
-  type: "trace";
-  projectId: string;
-  traceKey: string;
-  title: string;
-  runtimeId: RuntimeId;
-  refreshNonce?: number;
-}
-
 /** Any tab shown in the main chrome tab bar. */
-export type AppTab = PlaygroundTab | ThreadTab | TraceTab;
+export type AppTab = PlaygroundTab | ThreadTab;
 
 type PersistedTab =
   | { type: "playground"; playgroundId: string; title?: string }
-  | { type: "thread"; path: string; runtimeId?: RuntimeId }
-  | {
-      type: "trace";
-      projectId: string;
-      traceKey: string;
-      title?: string;
-      runtimeId?: RuntimeId;
-    };
+  | { type: "thread"; path: string; runtimeId?: RuntimeId };
 
 const RuntimeIdSchema: z.ZodType<RuntimeId> = z.union([
   z.literal("local"),
@@ -84,13 +63,6 @@ const PersistedTabsSchema: z.ZodType<PersistedTab[]> = z.array(
     z.object({
       type: z.literal("thread"),
       path: z.string(),
-      runtimeId: RuntimeIdSchema.optional(),
-    }),
-    z.object({
-      type: z.literal("trace"),
-      projectId: z.string(),
-      traceKey: z.string(),
-      title: z.string().optional(),
       runtimeId: RuntimeIdSchema.optional(),
     }),
   ])
@@ -114,16 +86,6 @@ export interface ThreadTabs {
   open: (path: string, runtimeId?: RuntimeId) => void;
   /** Open a local Studio Playground by its durable application identity. */
   openPlayground: (playgroundId: string, title: string) => void;
-  /**
-   * Open an imported trace workbench, adding it if absent and focusing it. The
-   * trace must already be listed by the Trace Panel or restorable from storage.
-   */
-  openTrace: (input: {
-    projectId: string;
-    traceKey: string;
-    title: string;
-    runtimeId?: RuntimeId;
-  }) => void;
   /** Close a tab by app-tab id; if it was active, focus its nearest neighbor. */
   close: (id: string) => void;
   /** Close every open tab except `keep`, which becomes active. */
@@ -156,18 +118,11 @@ export interface ThreadTabs {
   handleMove: (from: string, to: string, runtimeId?: RuntimeId) => void;
   /** Consume the marker that prevents an overwritten editor from writing back. */
   consumeDiscardedPane: (paneId: string) => boolean;
-  /** Trace metadata edit: update labels for already-open trace tabs. */
-  handleTraceTitleChange: (
-    projectId: string,
-    traceKey: string,
-    title: string,
-    runtimeId?: RuntimeId
-  ) => void;
   /** Refresh labels for an already-open local Playground. */
   handlePlaygroundTitleChange: (playgroundId: string, title: string) => void;
   /**
-   * Reopen the most recently closed tab group, silently skipping files or traces
-   * that no longer exist.
+   * Reopen the most recently closed tab group, silently skipping entries that
+   * no longer exist.
    */
   reopenClosed: () => void;
 }
@@ -194,14 +149,6 @@ function _createPlaygroundTab(
   };
 }
 
-function _traceTabId(
-  projectId: string,
-  traceKey: string,
-  runtimeId: RuntimeId = "local"
-): string {
-  return `trace:${runtimeId}:${projectId}:${traceKey}`;
-}
-
 function _createThreadTab(
   path: string,
   runtimeId: RuntimeId = "local"
@@ -215,39 +162,10 @@ function _createThreadTab(
   };
 }
 
-function _createTraceTab({
-  projectId,
-  traceKey,
-  title,
-  runtimeId = "local",
-}: {
-  projectId: string;
-  traceKey: string;
-  title: string;
-  runtimeId?: RuntimeId;
-}): TraceTab {
-  return {
-    id: _traceTabId(projectId, traceKey, runtimeId),
-    type: "trace",
-    projectId,
-    traceKey,
-    title,
-    runtimeId,
-  };
-}
-
 function _persistable(tab: AppTab): PersistedTab {
   return tab.type === "playground"
     ? { type: "playground", playgroundId: tab.playgroundId, title: tab.title }
-    : tab.type === "thread"
-    ? { type: "thread", path: tab.path, runtimeId: tab.runtimeId }
-    : {
-        type: "trace",
-        projectId: tab.projectId,
-        traceKey: tab.traceKey,
-        title: tab.title,
-        runtimeId: tab.runtimeId,
-      };
+    : { type: "thread", path: tab.path, runtimeId: tab.runtimeId };
 }
 
 function _fromPersisted(tab: PersistedTab): AppTab | null {
@@ -262,14 +180,6 @@ function _fromPersisted(tab: PersistedTab): AppTab | null {
     // Local JSON Threads predate Studio Playgrounds and are deliberately not
     // migrated. They remain importable, but never reopen as product state.
     return runtimeId === "local" ? null : _createThreadTab(tab.path, runtimeId);
-  }
-  if (tab.type === "trace" && tab.projectId && tab.traceKey) {
-    return _createTraceTab({
-      projectId: tab.projectId,
-      traceKey: tab.traceKey,
-      title: tab.title || tab.traceKey,
-      runtimeId: tab.runtimeId ?? "local",
-    });
   }
   return null;
 }
@@ -361,15 +271,6 @@ async function _threadFileExists(
   }
 }
 
-async function _traceExists(tab: TraceTab): Promise<boolean> {
-  try {
-    await traceClient.readTrace(tab.projectId, tab.traceKey, tab.runtimeId);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 async function _playgroundExists(tab: PlaygroundTab): Promise<boolean> {
   try {
     return (await createPlaygroundClient().load(tab.playgroundId)) !== undefined;
@@ -386,10 +287,7 @@ async function _tabExists(
     return false;
   }
   if (tab.type === "playground") return _playgroundExists(tab);
-  if (tab.type === "thread") {
-    return _threadFileExists(tab.path, tab.runtimeId);
-  }
-  return _traceExists(tab);
+  return _threadFileExists(tab.path, tab.runtimeId);
 }
 
 async function _availableRuntimeIds(): Promise<Set<RuntimeId> | undefined> {
@@ -505,36 +403,6 @@ export function useThreadTabs(
     ]);
     setActiveId(id);
   }, []);
-
-  const openTrace = useCallback(
-    ({
-      projectId,
-      traceKey,
-      title,
-      runtimeId = "local",
-    }: {
-      projectId: string;
-      traceKey: string;
-      title: string;
-      runtimeId?: RuntimeId;
-    }) => {
-      const id = _traceTabId(projectId, traceKey, runtimeId);
-      if (tabsRef.current.some((tab) => tab.id === id)) {
-        setActiveId(id);
-        return;
-      }
-      setTabs((prev) =>
-        prev.some((tab) => tab.id === id)
-          ? prev
-          : [
-              ...prev,
-              _createTraceTab({ projectId, traceKey, title, runtimeId }),
-            ]
-      );
-      setActiveId(id);
-    },
-    []
-  );
 
   const activate = useCallback((id: string) => {
     setActiveId(id);
@@ -815,23 +683,6 @@ export function useThreadTabs(
     return true;
   }, []);
 
-  const handleTraceTitleChange = useCallback(
-    (
-      projectId: string,
-      traceKey: string,
-      title: string,
-      runtimeId: RuntimeId = "local"
-    ) => {
-      const id = _traceTabId(projectId, traceKey, runtimeId);
-      setTabs((prev) =>
-        prev.map((tab) =>
-          tab.id === id && tab.type === "trace" ? { ...tab, title } : tab
-        )
-      );
-    },
-    []
-  );
-
   const handlePlaygroundTitleChange = useCallback(
     (playgroundId: string, title: string) => {
       const id = _playgroundTabId(playgroundId);
@@ -859,7 +710,6 @@ export function useThreadTabs(
     activeId,
     open,
     openPlayground,
-    openTrace,
     close,
     closeOthers,
     closeOthersInRuntime,
@@ -876,7 +726,6 @@ export function useThreadTabs(
     consumeDiscardedPane,
     handleRemove,
     handleMove,
-    handleTraceTitleChange,
     handlePlaygroundTitleChange,
     reopenClosed,
   };

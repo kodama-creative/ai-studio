@@ -1,6 +1,6 @@
+import { analyticsClient } from "@/client/application-rpc-clients";
 import type { AnalyticsEvent } from "@/shared/analytics";
 
-import { electrobun } from "./electrobun";
 
 /**
  * Record an anonymous, behaviour-only analytics event from the renderer.
@@ -12,7 +12,7 @@ import { electrobun } from "./electrobun";
  */
 export function track(event: AnalyticsEvent): void {
   try {
-    electrobun.rpc?.send.captureAnalyticsEvent(event);
+    void analyticsClient.capture(event);
   } catch {
     // Telemetry must never break the UI.
   }

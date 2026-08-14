@@ -4,9 +4,20 @@ import path from "node:path";
 
 import { getLlmSpaceHomePath } from "@llm-space/core/server";
 import { GistThreadReader, GistThreadWriter } from "@llm-space/core/storage";
-import { createPiRunExecutor } from "@llm-space/engine-pi";
+import { McpManager } from "@llm-space/runtime/mcp";
+import {
+  createConfiguredArkImageGenerator,
+  ModelManager,
+} from "@llm-space/runtime/models";
+import { NetworkSettingsManager } from "@llm-space/runtime/network";
 import { PluginManager } from "@llm-space/runtime/plugins";
-import { createStudio, type Studio } from "@llm-space/studio/server";
+import { LocalRuntimeClient, RuntimeRouter } from "@llm-space/runtime/runtime";
+import { SearchSettingsManager } from "@llm-space/runtime/search";
+import { SkillsManager } from "@llm-space/runtime/skills";
+import { createLocalFileSystem } from "@llm-space/runtime/storage";
+import { StreamThreadController } from "@llm-space/runtime/streaming";
+import { createBuiltInToolsModule } from "@llm-space/runtime/tools/built-in";
+import type { Studio } from "@llm-space/studio/server";
 import Electrobun, {
   app,
   type BrowserWindow,
@@ -16,49 +27,67 @@ import Electrobun, {
 } from "electrobun/bun";
 
 import packageJson from "../../../package.json";
-import type {
-  AgentProjectView,
-  DesktopWindowContext,
-} from "../../shared/agent-project";
+import type { AgentProjectView } from "../../shared/agent-project";
 import type { Command } from "../../shared/commands";
 import { resolveDeepLinkScheme } from "../../shared/deep-link-scheme";
 import { Analytics } from "../analytics";
-import { GitHubAuthManager } from "../auth";
-import { executeCommandInBun } from "../commands";
+import { agentProjectsModule } from "../application/agent-projects-module";
 import {
-  createDeepLinkHandler,
-  isStudioOpenDeepLink,
-  type DeepLinkHandler,
-} from "../deep-link";
+  applicationModule,
+  APPLICATION_TOKENS,
+} from "../application/application-module";
+import type {
+  GithubAccountApplication,
+  UpdatesApplication,
+} from "../application/application-services";
+import { generatorModule } from "../application/generator-module";
+import type { WindowApplication } from "../application/native-applications";
+import { NATIVE_APPLICATION_TOKENS } from "../application/native-module";
+import { nativeApplicationsModule } from "../application/native-module";
+import type {
+  PluginCommandsApplication,
+  PluginsApplication,
+} from "../application/plugin-applications";
+import {
+  pluginModule,
+  PLUGIN_APPLICATION_TOKENS,
+} from "../application/plugin-module";
+import { remoteModule } from "../application/remote-module";
+import { runtimeApplicationsModule } from "../application/runtime-module";
+import type { SharedImportApplication } from "../application/shared-import-application";
+import {
+  sharedImportModule,
+  SHARED_IMPORT_APPLICATION,
+} from "../application/shared-import-module";
+import { GitHubAuthManager } from "../auth/github-auth-manager";
+import { isStudioOpenDeepLink } from "../deep-link";
 import { activateWindowForDeepLink } from "../deep-link/activate-window";
+import { getPendingDeepLinks, setDeepLinkHandler } from "../deep-link/launch";
 import {
-  getPendingDeepLinks,
-  setDeepLinkHandler,
-} from "../deep-link/launch";
+  COMMAND_HANDLER_CONTRIBUTION,
+  WindowCommandBus,
+  type CommandHandlerContribution,
+} from "../di/command-contribution";
 import {
   mainWindowModule,
   processModule,
+  projectWindowIdentityModule,
   projectWindowModule,
   windowModule,
 } from "../di/modules";
 import { createDesktopProcessContainer } from "../di/process-container";
 import {
-  PROCESS_TOKENS,
-  PROJECT_WINDOW_TOKENS,
-  WINDOW_TOKENS,
-} from "../di/tokens";
+  createWindowRpcServers,
+  type DesktopWindowKind,
+} from "../di/rpc-contribution";
+import { PROCESS_TOKENS, PROJECT_WINDOW_TOKENS } from "../di/tokens";
 import { attachWindowScope } from "../di/window-scope";
 import { moveToTrash, openPath, revealInFileManager } from "../fs";
 import { DesktopHost } from "../host/desktop-host";
-import { McpManager } from "../mcp";
-import { createConfiguredArkImageGenerator, ModelManager } from "../models";
-import { NetworkSettingsManager } from "../network";
-import { createPlaygroundHost } from "../playgrounds/playground-host";
 import {
   PluginCommandExecutionController,
   type PluginCommandReportInput,
 } from "../plugins/plugin-command-execution-controller";
-import { ProjectSandbox } from "../projects/project-sandbox";
 import { ProjectWindowManager } from "../projects/project-window-manager";
 import {
   FileAgentProjectCatalogStore,
@@ -74,13 +103,7 @@ import {
   type MainWindowRPC,
   type MainWindowRPCController,
 } from "../rpc";
-import { LocalRuntimeClient, RuntimeRouter } from "../runtime";
-import { SearchSettingsManager } from "../search";
-import { getManagedSkillsDir, SkillsManager } from "../skills";
-import { createLocalFileSystem } from "../storage";
-import { StreamThreadController } from "../streaming";
-import { createBuiltInToolsModule } from "../tools/built-in";
-import { TraceManager } from "../traces";
+import { getManagedSkillsDir } from "../skills/seed";
 import { UpdaterService } from "../updates";
 
 import { MainWindowManager } from "./main-window-manager";
@@ -118,16 +141,12 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
   const skillsManager = new SkillsManager({
     managedSkillsDir: getManagedSkillsDir(),
   });
-  let deepLink: DeepLinkHandler | null = null;
   let mainWindows: MainWindowManager<DesktopMainWindowHandle> | undefined;
-  const getRpc = (): MainWindowRPC => {
-    const main = mainWindows?.current();
-    if (main === undefined) throw new Error("Main window RPC is not ready.");
-    return main.rpc;
-  };
+  let notifyGithubChanged: (
+    state: import("../../shared/auth").GithubAuthState
+  ) => void = () => undefined;
   const githubAuth = new GitHubAuthManager({
-    onChange: (state) =>
-      mainWindows?.current()?.rpc.send.githubAuthChanged(state),
+    onChange: (state) => notifyGithubChanged(state),
   });
   const localFs = createLocalFileSystem(homePath);
   // Write-side gist connector for the "Share thread" flow. Reuses the signed-in
@@ -155,6 +174,10 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
     Promise.reject(
       new Error(`Command reporting is not ready: ${input.commandId}`)
     );
+  let notifyPluginsChanged = (): void => undefined;
+  let notifyPluginCommandExecution: (
+    event: import("../../shared/plugin-command-execution").PluginCommandExecutionEvent
+  ) => void = () => undefined;
   const pluginManager = await PluginManager.create({
     homePath,
     appVersion: packageJson.version,
@@ -164,7 +187,7 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
     skillsManager,
     mcpManager,
     modelManager,
-    onChanged: () => mainWindows?.current()?.rpc.send.pluginsChanged({}),
+    onChanged: () => notifyPluginsChanged(),
     handleHostRequest: async (method, rawParams) => {
       const params = (rawParams ?? {}) as Record<string, unknown>;
       if (method === "notify") {
@@ -174,7 +197,7 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
         });
         return null;
       }
-      if (method === "openLink") {
+      if (method === "shell.openLink") {
         Utils.openExternal(_stringParam(params, "url"));
         return null;
       }
@@ -209,17 +232,18 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
       throw new Error(`Unsupported plugin host operation: ${method}`);
     },
   });
-  const pluginCommandExecutions = new PluginCommandExecutionController({
-    execute: (commandId, context, args, executionId) =>
-      pluginManager.commands.executeWithContext(
-        commandId,
-        context,
-        args,
-        executionId
-      ),
-    send: (event) =>
-      mainWindows?.current()?.rpc.send.pluginCommandExecutionChanged(event),
-  });
+  const pluginCommandExecutions = new PluginCommandExecutionController(
+    {
+      execute: (commandId, context, args, executionId) =>
+        pluginManager.commands.executeWithContext(
+          commandId,
+          context,
+          args,
+          executionId
+        ),
+    },
+    (event) => notifyPluginCommandExecution(event)
+  );
   reportPluginCommand = (input) => {
     pluginCommandExecutions.report(input);
     return Promise.resolve(null);
@@ -231,7 +255,6 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
     reader: gistReader,
     writer: gistWriter,
   });
-  const traceManager = new TraceManager({ homePath });
   const streaming = new StreamThreadController(modelManager, analytics);
   const host = new DesktopHost({
     modules: [
@@ -256,7 +279,6 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
     skillsManager,
     streaming,
     tools: host.tools,
-    traceManager,
     rmPath: async (workspacePath) => {
       const abs = localFs.realpath(workspacePath);
       if (abs === localFs.realpath("")) {
@@ -266,99 +288,56 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
     },
   });
   const runtimeRouter = new RuntimeRouter(localRuntime);
-  const playgroundHost = createPlaygroundHost({
-    homePath,
-    runExecutor: createPiRunExecutor({
-      models: () => modelManager.getAvailableModels(),
-      resolveConnection: ({ providerId }) =>
-        modelManager.resolveConnection({ providerId }),
-    }),
-    runtime: localRuntime,
-  });
   const remoteServerManager = new RemoteServerManager(runtimeRouter);
   const remoteRuntime = await registerConfiguredRemoteRuntime({
     env: process.env,
     runtimeRouter,
   });
 
-  const updater = new UpdaterService((message) =>
-    mainWindows?.current()?.rpc.send.updateStatusChanged(message)
-  );
+  let notifyUpdateChanged: (
+    message: import("../../shared/updates").UpdateStatusChangedPayload
+  ) => void = () => undefined;
+  const updater = new UpdaterService((message) => notifyUpdateChanged(message));
   const windowStates = new WindowStateManager();
   const windowRpcs = new Map<number, MainWindowRPC>();
-  const pickAgentProject = async (): Promise<void> => {
-    const selected = await Utils.openFileDialog({
-      startingFolder: "~/",
-      canChooseFiles: false,
-      canChooseDirectory: true,
-      allowsMultipleSelection: false,
-    });
-    const selectedPath = selected.map((value) => value.trim()).find(Boolean);
-    if (selectedPath === undefined) return;
-    try {
-      await projectWindows.openProject(selectedPath);
-    } catch (error) {
-      console.error("Failed to open agent project:", error);
-      Utils.showNotification({
-        title: "Unable to Open Agent Project",
-        body: _errorMessage(error),
-      });
-    }
-  };
+  const commandBuses = new Map<number, WindowCommandBus>();
   const executeCommand = (command: Command, window: BrowserWindow): void => {
     const targetRpc = windowRpcs.get(window.id);
-    if (targetRpc === undefined) {
+    const commandBus = commandBuses.get(window.id);
+    if (targetRpc === undefined || commandBus === undefined) {
       throw new Error(`Window RPC is unavailable for window ${window.id}.`);
     }
-    executeCommandInBun(command, window, {
-      githubAuth,
-      openAgentProject: pickAgentProject,
-      openExternal: Utils.openExternal,
-      sendToWebview: (nextCommand) =>
-        targetRpc.send.executeCommand(nextCommand),
-      saveWindowZoom: (targetWindow, zoom) =>
-        windowStates.saveZoom(targetWindow, zoom),
-      updater,
-      workspacePath,
-    });
+    commandBus.execute(command);
   };
   const createWindowRpc = (
-    getWindow: () => BrowserWindow,
-    windowContext: DesktopWindowContext,
-    projectStudio?: Studio
-  ): MainWindowRPCController =>
-    createMainWindowRPC({
-      analytics: processContainer.get(PROCESS_TOKENS.analytics),
+    scope: import("../di/process-container").DesktopWindowScope,
+    windowKind: DesktopWindowKind,
+    getWindow: () => BrowserWindow
+  ): MainWindowRPCController => {
+    return createMainWindowRPC({
       executeCommand: (command) => executeCommand(command, getWindow()),
-      onCancelSharedImport: () => deepLink?.cancel(),
-      githubAuth: processContainer.get(PROCESS_TOKENS.githubAuth),
-      getMainWindow: getWindow,
-      gistWriter: processContainer.get(PROCESS_TOKENS.gistWriter),
-      homePath: processContainer.get(PROCESS_TOKENS.homePath),
-      runtimeRouter: processContainer.get(PROCESS_TOKENS.runtimeRouter),
-      remoteServerManager: processContainer.get(
-        PROCESS_TOKENS.remoteServerManager
-      ),
-      skillsManager: processContainer.get(PROCESS_TOKENS.skillsManager),
-      updater: processContainer.get(PROCESS_TOKENS.updater),
-      pluginManager: processContainer.get(PROCESS_TOKENS.pluginManager),
-      pluginCommandExecutions: processContainer.get(
-        PROCESS_TOKENS.pluginCommandExecutions
-      ),
-      playgroundHost: processContainer.get(PROCESS_TOKENS.playgroundHost),
-      windowContext,
-      listAgentProjects: async () =>
-        (await projectWindows.listProjects()).map((project) => ({
-          id: project.id,
-          name: project.name,
-          rootPath: project.rootPath,
-        })),
-      openAgentProject: (rootPath) => projectWindows.openProject(rootPath),
-      pickAgentProject,
-      ...(projectStudio === undefined
-        ? {}
-        : { projectStudio }),
+      rpcServers: createWindowRpcServers(scope, windowKind),
     });
+  };
+  const attachCommandBus = (
+    scope: import("../di/process-container").DesktopWindowScope,
+    windowKind: DesktopWindowKind,
+    window: BrowserWindow,
+    controller: MainWindowRPCController
+  ): void => {
+    const sendToWebview = (command: Command) =>
+      controller.rpc.send.executeCommand(command);
+    commandBuses.set(
+      window.id,
+      new WindowCommandBus(
+        scope,
+        scope.getAll<CommandHandlerContribution>(COMMAND_HANDLER_CONTRIBUTION),
+        windowKind,
+        { window: () => window, sendToWebview }
+      )
+    );
+    scope.onDisposed(() => commandBuses.delete(window.id));
+  };
   const projectWindows = new ProjectWindowManager({
     state: new FileProjectWindowStateStore(homePath),
     catalog: new FileAgentProjectCatalogStore(homePath),
@@ -368,14 +347,10 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
           `project:${project.id}`
         );
         try {
-          const projectStudio = await createStudio({
-            projectRoot: project.rootPath,
-            dataRoot: project.studioStateRoot,
-            models: () => modelManager.getAvailableModels(),
-            resolveConnection: ({ providerId }) =>
-              modelManager.resolveConnection({ providerId }),
-            runtimeServices: { sandbox: new ProjectSandbox(project.rootPath) },
-          });
+          scope.load(projectWindowModule({ source: project }));
+          const projectStudio = scope.own(
+            await scope.getAsync<Studio>(PROJECT_WINDOW_TOKENS.studio)
+          );
           const projectView: AgentProjectView = {
             id: project.id,
             name: project.name,
@@ -384,13 +359,9 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
             agentId: projectStudio.agent.agentId,
             generationId: projectStudio.agent.generationId,
           };
-          scope.load(projectWindowModule({
-            project: projectView,
-            studio: projectStudio,
-          }));
+          scope.load(projectWindowIdentityModule(projectView));
           const closed = new Set<() => void>();
           scope.onDisposed(() => closed.forEach((listener) => listener()));
-          scope.onDispose(() => projectStudio.close());
           const projectWindowRef: { current?: BrowserWindow } = {};
           const getProjectWindow = (): BrowserWindow => {
             if (projectWindowRef.current === undefined) {
@@ -399,9 +370,9 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
             return projectWindowRef.current;
           };
           const controller = createWindowRpc(
-            getProjectWindow,
-            scope.get(WINDOW_TOKENS.context),
-            scope.get(PROJECT_WINDOW_TOKENS.studio)
+            scope,
+            "project",
+            getProjectWindow
           );
           scope.onDispose(() => controller.dispose());
           const stateStore = await ProjectWindowStateFile.load(
@@ -413,8 +384,13 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
             project: scope.get(PROJECT_WINDOW_TOKENS.project),
             stateStore,
             windowStates,
+            onFullScreenChange: (fullScreen) =>
+              scope
+                .get<WindowApplication>(NATIVE_APPLICATION_TOKENS.window)
+                .notifyFullScreenChanged(fullScreen),
           });
           projectWindowRef.current = projectWindow;
+          attachCommandBus(scope, "project", projectWindow, controller);
           scope.load(
             windowModule({ window: projectWindow, rpcController: controller })
           );
@@ -447,10 +423,10 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
       githubAuth,
       gistWriter,
       homePath,
+      localFs,
       mcpManager,
       modelManager,
       networkSettings,
-      playgroundHost,
       pluginCommandExecutions,
       pluginManager,
       projectWindows,
@@ -459,14 +435,45 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
       searchSettings,
       skillsManager,
       streaming,
-      traceManager,
       updater,
       windowStates,
     })
   );
-  processContainer.onDispose(() =>
-    _stopDesktopApp([
-      ["playground host", () => playgroundHost.close()],
+  processContainer.load(runtimeApplicationsModule());
+  processContainer.load(nativeApplicationsModule());
+  processContainer.load(generatorModule());
+  processContainer.load(agentProjectsModule());
+  processContainer.load(remoteModule());
+  processContainer.load(pluginModule());
+  processContainer.load(applicationModule());
+  processContainer.load(sharedImportModule());
+  notifyPluginsChanged = () =>
+    processContainer
+      .get<PluginsApplication>(PLUGIN_APPLICATION_TOKENS.plugins)
+      .notifyChanged();
+  notifyPluginCommandExecution = (event) =>
+    processContainer
+      .get<PluginCommandsApplication>(PLUGIN_APPLICATION_TOKENS.commands)
+      .notifyExecutionChanged(event);
+  notifyGithubChanged = (state) =>
+    processContainer
+      .get<GithubAccountApplication>(APPLICATION_TOKENS.github)
+      .notifyChanged(state);
+  notifyUpdateChanged = (message) =>
+    processContainer
+      .get<UpdatesApplication>(APPLICATION_TOKENS.updates)
+      .notifyStatus(message);
+  // Resolve the lazy application root through DI so its Disposable lifecycle
+  // is adopted by the process scope before any window can request it.
+  processContainer.get(PROCESS_TOKENS.playgroundHost);
+  processContainer.onDispose(() => {
+    // External managers may emit one final callback while shutting down. Stop
+    // them from resolving Applications after the DI root entered disposal.
+    notifyPluginsChanged = () => undefined;
+    notifyPluginCommandExecution = () => undefined;
+    notifyGithubChanged = () => undefined;
+    notifyUpdateChanged = () => undefined;
+    return _stopDesktopApp([
       ["window state", () => windowStates.flush()],
       ["updater", () => updater.stop()],
       ["remote runtime", () => remoteRuntime?.stop()],
@@ -477,10 +484,10 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
       ["plugin manager", () => pluginManager.shutdown()],
       ["GitHub auth", () => githubAuth.cancelSignIn()],
       ["analytics", () => analytics.shutdown()],
-    ])
-  );
+    ]);
+  });
   executePluginHostCommand = async (type) => {
-    if (type !== "openSettings" && type !== "refreshTree") {
+    if (type !== "app.openSettings" && type !== "workspace.refresh") {
       throw new Error(`Plugin host command is not allowed: ${type}`);
     }
     const main = await _requireMainWindows(mainWindows).open();
@@ -509,16 +516,18 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
         }
         return windowRef.current;
       };
-      const controller = createWindowRpc(
-        getWindow,
-        scope.get(WINDOW_TOKENS.context)
-      );
+      const controller = createWindowRpc(scope, "main", getWindow);
       scope.onDispose(() => controller.dispose());
       const window = await createMainWindow({
         rpc: controller.rpc,
         windowStates,
+        onFullScreenChange: (fullScreen) =>
+          scope
+            .get<WindowApplication>(NATIVE_APPLICATION_TOKENS.window)
+            .notifyFullScreenChanged(fullScreen),
       });
       windowRef.current = window;
+      attachCommandBus(scope, "main", window, controller);
       scope.load(windowModule({ window, rpcController: controller }));
       attachWindowScope(scope, windowRpcs);
       return {
@@ -527,21 +536,11 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
         activate: () => window.activate(),
       };
     });
-    remoteServerManager.setStatusListener((payload) =>
-      mainWindows?.current()?.rpc.send.remoteServerStatusChanged(payload)
-    );
-    registerMenuActions(
-      () => mainWindows?.current()?.window,
-      executeCommand
-    );
+    registerMenuActions(() => mainWindows?.current()?.window, executeCommand);
 
-    deepLink = createDeepLinkHandler({
-      localFs,
-      githubAuth,
-      threadStorages: pluginManager.threadStorages,
-      getRpc,
-      openAgentProject: (rootPath) => projectWindows.openProject(rootPath),
-    });
+    const sharedImport = processContainer.get<SharedImportApplication>(
+      SHARED_IMPORT_APPLICATION
+    );
     const deepLinkScheme = resolveDeepLinkScheme(
       process.env.LLM_SPACE_DEEP_LINK_SCHEME
     );
@@ -552,19 +551,21 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
           const main = await _requireMainWindows(mainWindows).open();
           activateWindowForDeepLink(main.window, url, deepLinkScheme);
         }
-        await deepLink?.handle(url);
+        await sharedImport.handle(url);
       })().catch((error) => {
-          console.error("Failed to handle deep link:", error);
-          Utils.showNotification({
-            title: "Unable to Open Agent Project",
-            body: _errorMessage(error),
-          });
+        console.error("Failed to handle deep link:", error);
+        Utils.showNotification({
+          title: "Unable to Open Agent Project",
+          body: _errorMessage(error),
         });
+      });
     });
 
     const studioOnlyLaunch =
       pendingDeepLinks.length > 0 &&
-      pendingDeepLinks.every((url) => isStudioOpenDeepLink(url, deepLinkScheme));
+      pendingDeepLinks.every((url) =>
+        isStudioOpenDeepLink(url, deepLinkScheme)
+      );
     if (!studioOnlyLaunch) await mainWindows.open();
 
     analytics.capture("app_opened", { isFirstOpen: analytics.isFirstRun });
@@ -581,9 +582,11 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
         handleBeforeQuit(event)
     );
     Electrobun.events.on("reopen", () => {
-      void _requireMainWindows(mainWindows).open().catch((error) => {
-        console.error("Failed to reopen Main window:", error);
-      });
+      void _requireMainWindows(mainWindows)
+        .open()
+        .catch((error) => {
+          console.error("Failed to reopen Main window:", error);
+        });
     });
 
     return runtime;

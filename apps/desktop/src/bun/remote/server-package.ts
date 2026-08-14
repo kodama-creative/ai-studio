@@ -17,7 +17,6 @@ export const REQUIRED_REMOTE_CAPABILITIES = [
   "skills",
   "search",
   "network",
-  "traces",
 ] as const;
 
 export interface ServerPackageTarget {

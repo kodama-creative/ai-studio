@@ -31,12 +31,14 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
-import type { ProjectStudioClient } from "@/client/project-studio-client";
 import { createRpcProjectStudioClient } from "@/client/rpc-project-studio-client";
 import { useCommands, useRegisterCommands } from "@/commands";
 import { TreeView, type TreeDataItem } from "@/components/tree-view";
 import type { AgentProjectView } from "@/shared/agent-project";
-import type { ProjectSourceNode } from "@/shared/project-studio";
+import type {
+  ProjectSourceNode,
+  ProjectStudioTransport,
+} from "@/shared/project-studio";
 
 import {
   createProjectThreadExecutionRuntime,
@@ -268,8 +270,8 @@ export function ProjectPage({ project }: { project: AgentProjectView }) {
   );
 
   useRegisterCommands({
-    createProjectThread: createThread,
-    forkProjectThread: ({ threadId, checkpointId }) =>
+    "project.createThread": createThread,
+    "project.forkThread": ({ threadId, checkpointId }) =>
       forkThread(threadId, checkpointId),
   });
 
@@ -411,7 +413,7 @@ export function ProjectPage({ project }: { project: AgentProjectView }) {
               size="icon-sm"
               variant="ghost"
               onClick={() =>
-                executeCommand({ type: "createProjectThread", args: {} })
+                executeCommand({ type: "project.createThread", args: {} })
               }
             >
               <PlusIcon />
@@ -520,7 +522,7 @@ export function ProjectPage({ project }: { project: AgentProjectView }) {
               <EmptyContent>
                 <Button
                   onClick={() =>
-                    executeCommand({ type: "createProjectThread", args: {} })
+                    executeCommand({ type: "project.createThread", args: {} })
                   }
                 >
                   <PlusIcon /> New Thread
@@ -556,7 +558,7 @@ function _ProjectThreadPlaygroundPane({
   onThread,
   onSettled,
 }: {
-  readonly client: ProjectStudioClient;
+  readonly client: ProjectStudioTransport;
   readonly history: readonly StudioRunHistoryEntry[];
   readonly evaluationMetadata: StudioEvaluationMetadata;
   readonly thread: StudioThread;

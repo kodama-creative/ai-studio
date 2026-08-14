@@ -4,7 +4,7 @@ import type { RuntimeRunTracker } from "./runtime-run-tracker";
 import type { AppTab } from "./use-thread-tabs";
 
 export function paneIdForTab(tab: AppTab): string {
-  return tab.type === "trace" ? tab.id : tab.paneId;
+  return tab.paneId;
 }
 
 function _runIfIdle({

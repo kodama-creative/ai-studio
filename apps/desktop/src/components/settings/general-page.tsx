@@ -37,9 +37,9 @@ import {
 import { toast } from "sonner";
 
 import { getAnalyticsSettings, setAnalyticsSettings } from "@/client/analytics";
+import { updatesClient } from "@/client/application-rpc-clients";
 import { getWorkspacePath } from "@/client/paths";
 import { useCommands } from "@/commands";
-import { electrobun } from "@/lib/electrobun";
 import { DEFAULT_ANALYTICS_SETTINGS } from "@/shared/analytics";
 import { DEFAULT_UPDATE_MODE, type UpdateMode } from "@/shared/updates";
 
@@ -267,9 +267,7 @@ function WorkspaceFolderLink() {
   return (
     <button
       type="button"
-      onClick={() =>
-        executeCommand({ type: "openWorkspaceFolder", args: {} })
-      }
+      onClick={() => executeCommand({ type: "shell.openWorkspaceFolder", args: {} })}
       className="text-primary max-w-[50%] cursor-pointer truncate font-mono text-sm underline underline-offset-2 hover:opacity-80"
       title={path}
     >
@@ -282,11 +280,11 @@ function WorkspaceFolderLink() {
 function useUpdateMode(): [UpdateMode, (mode: UpdateMode) => void] {
   const [mode, setMode] = useState<UpdateMode>(DEFAULT_UPDATE_MODE);
   useEffect(() => {
-    void electrobun.rpc?.request.updateMode({}).then(setMode);
+    void updatesClient.getMode().then(setMode);
   }, []);
   const change = (next: UpdateMode) => {
     setMode(next);
-    void electrobun.rpc?.request.setUpdateMode({ mode: next });
+    void updatesClient.setMode(next);
   };
   return [mode, change];
 }
@@ -452,7 +450,7 @@ export function GeneralPage() {
               <Button
                 size="lg"
                 onClick={() =>
-                  executeCommand({ type: "checkForUpdates", args: {} })
+                  executeCommand({ type: "updates.check", args: {} })
                 }
               >
                 Check now

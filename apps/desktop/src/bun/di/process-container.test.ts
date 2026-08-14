@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test";
 
+import { ContainerModule } from "inversify";
+
 import { createDesktopProcessContainer } from "./process-container";
 
 test("window scopes inherit process services and dispose only their own resources", async () => {
@@ -56,4 +58,50 @@ test("process disposal closes remaining window scopes before shared services", a
   expect(() => process.createWindowScope("late")).toThrow(
     "Desktop process scope is disposed."
   );
+});
+
+test("scopes automatically dispose resolved resources once in reverse order", async () => {
+  const events: string[] = [];
+  const process = createDesktopProcessContainer();
+  const firstToken = Symbol.for("test.disposable.first");
+  const secondToken = Symbol.for("test.disposable.second");
+  const first = {
+    dispose: () => {
+      events.push("first");
+    },
+  };
+  const second = {
+    dispose: () => {
+      events.push("second");
+    },
+  };
+  process.bindConstant(firstToken, first);
+  process.bindConstant(secondToken, second);
+
+  expect(process.get<typeof first>(firstToken)).toBe(first);
+  expect(process.get<typeof first>(firstToken)).toBe(first);
+  await process.dispose();
+
+  expect(events).toEqual(["second", "first"]);
+});
+
+test("a process singleton first resolved by a window remains process-owned", async () => {
+  const events: string[] = [];
+  const process = createDesktopProcessContainer();
+  const token = Symbol.for("test.disposable.inherited");
+  process.load(
+    new ContainerModule(({ bind }) => {
+      bind(token)
+        .toDynamicValue(() => ({ dispose: () => events.push("process") }))
+        .inSingletonScope();
+    })
+  );
+  const window = process.createWindowScope("main");
+
+  window.get(token);
+  await window.dispose();
+  expect(events).toEqual([]);
+
+  await process.dispose();
+  expect(events).toEqual(["process"]);
 });

@@ -12,7 +12,7 @@ import {
   createPlaygroundThreadExecutionRuntime,
   playgroundToEditorThread,
 } from "@/app/playground-thread-adapter";
-import { createPlaygroundClient } from "@/client";
+import { createPlaygroundClient } from "@/client/playground-client";
 
 import type { PaneLifecycleHost } from "./pane-lifecycle-host";
 import { SerializedPersistence } from "./serialized-persistence";

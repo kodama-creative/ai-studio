@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 
 import type { StudioThread } from "@llm-space/studio";
 
-import type { ProjectStudioClient } from "@/client/project-studio-client";
+import type { ProjectStudioTransport } from "@/shared/project-studio";
 
 import {
   playgroundThreadToStudioEvaluationMetadata,
@@ -152,7 +152,7 @@ test("Project runtime maps UI step and ReAct controls onto the same durable Run"
     saveDocument: () => Promise.resolve(thread),
     run: (
       _threadId: string,
-      input: Parameters<ProjectStudioClient["run"]>[1]
+      input: Parameters<ProjectStudioTransport["run"]>[1]
     ) => {
       calls.push(`run:${input.mode}:${input.modelOverride}`);
       thread = { ...thread, activeRunId: "run-1" };
@@ -183,7 +183,7 @@ test("Project runtime maps UI step and ReAct controls onto the same durable Run"
       return Promise.resolve({ runId });
     },
     cancelRun: () => Promise.resolve(),
-  } as unknown as ProjectStudioClient;
+  } as unknown as ProjectStudioTransport;
   const runtime = createProjectThreadExecutionRuntime({
     client,
     threadId: thread.id,
@@ -271,7 +271,7 @@ test("Project runtime auto-executes one paused tool phase without advancing the 
     },
     continueRun: (runId: string) => Promise.resolve({ runId }),
     cancelRun: () => Promise.resolve(),
-  } as unknown as ProjectStudioClient;
+  } as unknown as ProjectStudioTransport;
   const runtime = createProjectThreadExecutionRuntime({
     client,
     threadId: thread.id,
@@ -366,7 +366,7 @@ test("Project runtime exposes the automatic Tool lifecycle to the UI", async () 
     stepRun: (runId: string) => Promise.resolve({ runId }),
     continueRun: (runId: string) => Promise.resolve({ runId }),
     cancelRun: () => Promise.resolve(),
-  } as unknown as ProjectStudioClient;
+  } as unknown as ProjectStudioTransport;
   const runtime = createProjectThreadExecutionRuntime({
     client,
     threadId: thread.id,
@@ -474,7 +474,7 @@ test("manual Tool execution ignores the preceding model pause before Continue", 
       Promise.resolve({ evaluations: [], rubrics: [] }),
     loadThread: () => Promise.resolve(thread),
     cancelRun: () => Promise.resolve(),
-  } as unknown as ProjectStudioClient;
+  } as unknown as ProjectStudioTransport;
   const runtime = createProjectThreadExecutionRuntime({
     client,
     threadId: thread.id,

@@ -11,10 +11,9 @@ import {
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
-import { listPluginCommands } from "@/client/plugins";
+import { listPluginCommands, subscribePluginsChanged } from "@/client/plugins";
 import type { PluginActiveTab } from "@/client/plugins";
 import { useCommands } from "@/commands";
-import { electrobun } from "@/lib/electrobun";
 import {
   COMMAND_META,
   type Command as AppCommand,
@@ -72,9 +71,7 @@ export function CommandPalette({
         );
     };
     refresh();
-    const rpc = electrobun.rpc;
-    rpc?.addMessageListener("pluginsChanged", refresh);
-    return () => rpc?.removeMessageListener("pluginsChanged", refresh);
+    return subscribePluginsChanged(refresh);
   }, [open]);
 
   const types = (Object.keys(COMMAND_META) as CommandType[]).filter(

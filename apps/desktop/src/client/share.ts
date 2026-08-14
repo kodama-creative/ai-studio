@@ -1,14 +1,8 @@
 import type { Thread } from "@llm-space/core";
 
-import { electrobun } from "@/lib/electrobun";
 import type { RuntimeId } from "@/shared/runtime";
 
-function _rpc() {
-  if (!electrobun.rpc) {
-    throw new Error("Electrobun RPC is not initialized");
-  }
-  return electrobun.rpc;
-}
+import { threadSharingClient } from "./application-rpc-clients";
 
 /** The result of publishing a thread: the web viewer link + the gist id. */
 export interface ShareThreadResult {
@@ -27,7 +21,7 @@ export function readShareThread(
   runtimeId: RuntimeId,
   path: string
 ): Promise<Thread> {
-  return _rpc().request.fsRead({ runtimeId, path });
+  return threadSharingClient.read(runtimeId, path);
 }
 
 /**
@@ -41,10 +35,5 @@ export async function shareThread(
   path: string,
   meta?: ShareThreadMeta
 ): Promise<ShareThreadResult> {
-  return _rpc().request.shareThread({
-    runtimeId,
-    path,
-    title: meta?.title,
-    description: meta?.description,
-  });
+  return threadSharingClient.publish(runtimeId, path, meta);
 }

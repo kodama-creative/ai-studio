@@ -7,7 +7,7 @@ describe("buildShareThreadCommand", () => {
     expect(
       buildShareThreadCommand("threads/same.json", "remote:server-1")
     ).toEqual({
-      type: "shareThread",
+      type: "thread.share",
       args: {
         path: "threads/same.json",
         runtimeId: "remote:server-1",
@@ -17,7 +17,7 @@ describe("buildShareThreadCommand", () => {
 
   test("keeps explicit local ownership", () => {
     expect(buildShareThreadCommand("threads/local.json", "local")).toEqual({
-      type: "shareThread",
+      type: "thread.share",
       args: { path: "threads/local.json", runtimeId: "local" },
     });
   });

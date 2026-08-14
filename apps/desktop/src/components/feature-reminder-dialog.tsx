@@ -4,8 +4,8 @@ import { Dialog, DialogClose, DialogContent } from "@llm-space/ui/ui/dialog";
 import { ArrowUpRightIcon, XIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { remindersClient } from "@/client/application-rpc-clients";
 import { useCommands } from "@/commands";
-import { electrobun } from "@/lib/electrobun";
 import type { FeatureReminder } from "@/shared/feature-reminders";
 
 /** Wait this long after mount before opening, so it doesn't fight first paint. */
@@ -37,10 +37,9 @@ export function FeatureReminderDialog() {
   const requestedRef = useRef(false);
 
   useEffect(() => {
-    const rpc = electrobun.rpc;
-    if (!rpc || !hasModels || requestedRef.current) return;
+    if (!hasModels || requestedRef.current) return;
     requestedRef.current = true;
-    void rpc.request.featureReminderNext({}).then((next) => {
+    void remindersClient.nextFeature().then((next) => {
       if (next) setReminder(next);
     });
   }, [hasModels]);
@@ -56,7 +55,7 @@ export function FeatureReminderDialog() {
 
   const markSeen = useCallback(() => {
     if (reminder) {
-      void electrobun.rpc?.request.featureReminderMarkSeen({ id: reminder.id });
+      void remindersClient.markFeatureSeen(reminder.id);
     }
   }, [reminder]);
 
@@ -70,9 +69,9 @@ export function FeatureReminderDialog() {
 
   const handleLearnMore = useCallback(() => {
     if (reminder?.link) {
-      executeCommand({ type: "openLink", args: { url: reminder.link } });
+      executeCommand({ type: "shell.openLink", args: { url: reminder.link } });
     } else {
-      executeCommand({ type: "openDocument", args: {} });
+      executeCommand({ type: "shell.openDocument", args: {} });
     }
     markSeen();
     setOpen(false);

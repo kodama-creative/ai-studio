@@ -272,7 +272,7 @@ export function ShareThreadDialog({
               copied={copied}
               onCopy={handleCopy}
               onOpen={() =>
-                executeCommand({ type: "openLink", args: { url: shareUrl } })
+                executeCommand({ type: "shell.openLink", args: { url: shareUrl } })
               }
             />
           ) : (

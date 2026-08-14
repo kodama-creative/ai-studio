@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, mock, test } from "bun:test";
 
 import type { Thread } from "@llm-space/core";
 
+import type { NamespacedRpcRequest } from "@/shared/namespaced-rpc";
+
 const READS: { runtimeId?: string; path: string }[] = [];
 const SHARES: {
   runtimeId?: string;
@@ -12,32 +14,49 @@ const SHARES: {
 
 const RPC = {
   request: {
-    fsRead: (input: { runtimeId?: string; path: string }) => {
+    rpcNamespaceRequest: (request: NamespacedRpcRequest) => {
+      const [runtimeId, path, meta] = request.args as [
+        string | undefined,
+        string,
+        { title?: string; description?: string } | undefined,
+      ];
+      if (request.namespace !== "threadSharing") {
+        throw new Error(`Unexpected namespace: ${request.namespace}`);
+      }
+      if (request.method === "read") {
+        const input = { runtimeId, path };
       READS.push(input);
       if (input.runtimeId === "remote:alpha") {
-        return Promise.resolve({
-          title: "Remote title",
-          context: { systemPrompt: "REMOTE CONTENT" },
-        } satisfies Thread);
+          return Promise.resolve({
+            ok: true as const,
+            value: {
+              title: "Remote title",
+              context: { systemPrompt: "REMOTE CONTENT" },
+            } satisfies Thread,
+          });
       }
       if (input.path === "remote-only.json") {
         return Promise.reject(new Error("File not found: remote-only.json"));
       }
       return Promise.resolve({
-        title: "Local title",
-        context: { systemPrompt: "LOCAL CONTENT" },
-      } satisfies Thread);
-    },
-    shareThread: (input: {
-      runtimeId?: string;
-      path: string;
-      title?: string;
-      description?: string;
-    }) => {
+          ok: true as const,
+          value: {
+            title: "Local title",
+            context: { systemPrompt: "LOCAL CONTENT" },
+          } satisfies Thread,
+        });
+      }
+      if (request.method !== "publish") {
+        throw new Error(`Unexpected method: ${request.method}`);
+      }
+      const input = { runtimeId, path, ...meta };
       SHARES.push(input);
       return Promise.resolve({
-        shareUrl: "https://example.test/shared",
-        gistId: "gist-1",
+        ok: true as const,
+        value: {
+          shareUrl: "https://example.test/shared",
+          gistId: "gist-1",
+        },
       });
     },
   },

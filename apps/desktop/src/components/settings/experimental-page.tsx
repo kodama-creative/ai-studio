@@ -1,7 +1,6 @@
 "use client";
 
 import { ConfirmDialog } from "@llm-space/ui/components/confirm-dialog";
-import { Separator } from "@llm-space/ui/ui/separator";
 import { useState } from "react";
 
 import { useCommands } from "@/commands";
@@ -11,8 +10,7 @@ import { SettingsPage } from "./settings-page";
 import { SettingsToggleRow } from "./settings-toggle-row";
 
 export function ExperimentalPage() {
-  const { tracingEnabled, setTracingEnabled, reactScanEnabled, setReactScanEnabled } =
-    useExperimental();
+  const { reactScanEnabled, setReactScanEnabled } = useExperimental();
   const { executeCommand } = useCommands();
   const [reloadPromptOpen, setReloadPromptOpen] = useState(false);
 
@@ -30,22 +28,13 @@ export function ExperimentalPage() {
       className="overflow-y-auto"
     >
       <div className="flex flex-col gap-6 pb-2">
-        <SettingsToggleRow
-          title="Tracing"
-          hint="Enable to connect Langfuse or create a manual project for JSON exports."
-          checked={tracingEnabled}
-          onCheckedChange={setTracingEnabled}
-        />
         {import.meta.env.DEV ? (
-          <>
-            <Separator />
-            <SettingsToggleRow
-              title="React Scan"
-              hint="Highlight component re-renders after a reload. Dev builds only."
-              checked={reactScanEnabled}
-              onCheckedChange={handleReactScanChange}
-            />
-          </>
+          <SettingsToggleRow
+            title="React Scan"
+            hint="Highlight component re-renders after a reload. Dev builds only."
+            checked={reactScanEnabled}
+            onCheckedChange={handleReactScanChange}
+          />
         ) : null}
       </div>
       <ConfirmDialog
@@ -61,7 +50,7 @@ export function ExperimentalPage() {
         confirmVariant="default"
         onConfirm={() => {
           setReloadPromptOpen(false);
-          executeCommand({ type: "reload", args: {} });
+          executeCommand({ type: "window.reload", args: {} });
         }}
       />
     </SettingsPage>

@@ -4,7 +4,7 @@ import type {
   PluginCommandView,
 } from "@llm-space/core";
 
-import type { PluginCommandExecutionEvent } from "../shared/rpc";
+import type { PluginCommandExecutionEvent } from "../shared/plugin-command-execution";
 
 import type { PluginActiveTab } from "./plugins";
 
