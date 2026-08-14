@@ -1,13 +1,16 @@
 import { ContainerModule, type ResolutionContext } from "inversify";
 
 import {
-  COMMAND_HANDLER_CONTRIBUTION,
-  type CommandHandlerContribution,
+  CommandContribution,
+  type CommandContribution as CommandContributionApi,
 } from "../di/command-contribution";
+import type { CommandRegistry } from "../di/command-registry";
+import type { DesktopWindowScope } from "../di/process-container";
 import {
-  RPC_SERVER_CONTRIBUTION,
-  type RpcServerContribution,
+  RpcContribution,
+  type RpcContribution as RpcContributionApi,
 } from "../di/rpc-contribution";
+import type { RpcRegistry } from "../di/rpc-registry";
 import { desktopToken, PROCESS_TOKENS } from "../di/tokens";
 import { AgentProjectsRpcServer } from "../rpc/agent-projects-rpc-server";
 
@@ -33,28 +36,58 @@ export function agentProjectsModule(): ContainerModule {
           )
       )
       .inSingletonScope();
-    bind<RpcServerContribution>(RPC_SERVER_CONTRIBUTION).toConstantValue({
-      id: "agent-projects.rpc",
-      windows: ["main"],
-      create: (scope) =>
-        new AgentProjectsRpcServer(scope.get(AGENT_PROJECTS_APPLICATION)),
+  });
+}
+
+class AgentProjectsCommandContribution implements CommandContributionApi {
+  constructor(private readonly _application: AgentProjectsApplicationApi) {}
+
+  /** Register the native project picker command for every desktop window. */
+  registerCommands(commands: CommandRegistry): void {
+    commands.registerCommand("agentProjects.open", {
+      execute: () => void this._application.pickAndOpen(),
     });
-    bind<CommandHandlerContribution>(
-      COMMAND_HANDLER_CONTRIBUTION
-    ).toConstantValue({
-      id: "agent-projects.commands",
-      windows: ["main", "project"],
-      create: (scope) => {
-        const projects = scope.get<AgentProjectsApplicationApi>(
-          AGENT_PROJECTS_APPLICATION
-        );
-        return {
-          commands: ["agentProjects.open"],
-          execute() {
-            void projects.pickAndOpen();
-          },
-        };
-      },
-    });
+  }
+}
+
+class AgentProjectsRpcContribution implements RpcContributionApi {
+  constructor(private readonly _application: AgentProjectsApplicationApi) {}
+
+  /** Expose project catalog operations only to the Main renderer. */
+  registerRpc(rpc: RpcRegistry): void {
+    rpc.registerServer(new AgentProjectsRpcServer(this._application));
+  }
+}
+
+/** Bind window-owned Agent Project adapters without exposing the DI scope. */
+export function agentProjectsContributionsModule(
+  scope: DesktopWindowScope,
+  includeRpc: boolean
+): ContainerModule {
+  return new ContainerModule(({ bind }) => {
+    bind(AgentProjectsCommandContribution)
+      .toDynamicValue(
+        () =>
+          new AgentProjectsCommandContribution(
+            scope.get(AGENT_PROJECTS_APPLICATION)
+          )
+      )
+      .inSingletonScope();
+    bind<CommandContributionApi>(CommandContribution).toService(
+      AgentProjectsCommandContribution
+    );
+    if (includeRpc) {
+      bind(AgentProjectsRpcContribution)
+        .toDynamicValue(
+          () =>
+            new AgentProjectsRpcContribution(
+              scope.get(AGENT_PROJECTS_APPLICATION)
+            )
+        )
+        .inSingletonScope();
+      bind<RpcContributionApi>(RpcContribution).toService(
+        AgentProjectsRpcContribution
+      );
+    }
   });
 }

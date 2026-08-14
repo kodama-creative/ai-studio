@@ -3,7 +3,9 @@ import { expect, test } from "bun:test";
 import { EventHub } from "../../shared/event-hub";
 import { defineRpcNamespace } from "../../shared/namespaced-rpc";
 
-import { NamespacedRpcServer } from "./namespaced-rpc-server";
+import { SnapshotContributionProvider } from "./contribution-provider";
+import type { RpcContribution } from "./rpc-contribution";
+import { RpcRegistry } from "./rpc-registry";
 
 interface FixtureRpc {
   readonly requests: {
@@ -25,7 +27,7 @@ const FIXTURE_RPC = defineRpcNamespace<FixtureRpc>("fixture", {
   events: ["changed"],
 });
 
-test("namespaced RPC server dispatches class methods and owns streams", async () => {
+test("RPC Registry collects contributions and owns streams and events", async () => {
   const events: unknown[] = [];
   const published: unknown[] = [];
   const eventSource = new EventHub<{ changed: string }>();
@@ -49,21 +51,29 @@ test("namespaced RPC server dispatches class methods and owns streams", async ()
       for (let value = 0; value < input.count; value += 1) yield value;
     }
   }
-  const server = new NamespacedRpcServer({
-    sendStreamEvent: (event) => events.push(event),
-    sendEvent: (event) => published.push(event),
-  });
-  server.register(new FixtureRpcServer());
+  const contribution: RpcContribution = {
+    registerRpc(rpc) {
+      rpc.registerServer(new FixtureRpcServer());
+    },
+  };
+  const registry = new RpcRegistry(
+    new SnapshotContributionProvider(() => [contribution]),
+    {
+      sendStreamEvent: (event) => events.push(event),
+      sendEvent: (event) => published.push(event),
+    }
+  );
+  registry.onStart();
 
   expect(
-    await server.request({
+    await registry.request({
       namespace: "fixture",
       method: "greet",
       args: ["Ada"],
     })
   ).toEqual({ ok: true, value: "hello Ada" });
   eventSource.publish("changed", "next");
-  server.subscribe({
+  registry.subscribe({
     subscriptionId: "subscription-1",
     namespace: "fixture",
     method: "values",
@@ -80,15 +90,11 @@ test("namespaced RPC server dispatches class methods and owns streams", async ()
   expect(published).toEqual([
     { namespace: "fixture", event: "changed", payload: "next" },
   ]);
-  await server.dispose();
+  await registry.dispose();
 });
 
-test("namespaced RPC server rejects duplicate and unknown modules", () => {
-  const server = new NamespacedRpcServer({
-    sendStreamEvent: () => undefined,
-    sendEvent: () => undefined,
-  });
-  const module = {
+test("RPC Registry rejects duplicate and late namespace registration", () => {
+  const server = {
     namespace: FIXTURE_RPC,
     requests: { greet: () => Promise.resolve("hello") },
     streams: {
@@ -98,18 +104,23 @@ test("namespaced RPC server rejects duplicate and unknown modules", () => {
       },
     },
   };
-  server.register(module);
-
-  expect(() => server.register(module)).toThrow(
+  const contribution = (): RpcContribution => ({
+    registerRpc: (rpc) => void rpc.registerServer(server),
+  });
+  const duplicate = new RpcRegistry(
+    new SnapshotContributionProvider(() => [contribution(), contribution()]),
+    { sendStreamEvent: () => undefined, sendEvent: () => undefined }
+  );
+  expect(() => duplicate.onStart()).toThrow(
     'RPC namespace "fixture" is already registered.'
   );
-  expect(
-    server.request({ namespace: "missing", method: "read", args: [] })
-  ).resolves.toEqual({
-    ok: false,
-    error: {
-      code: "INTERNAL",
-      message: "Internal RPC error.",
-    },
+
+  const started = new RpcRegistry(new SnapshotContributionProvider(() => []), {
+    sendStreamEvent: () => undefined,
+    sendEvent: () => undefined,
   });
+  started.onStart();
+  expect(() => started.registerServer(server)).toThrow(
+    "can only be registered while RpcRegistry is starting"
+  );
 });

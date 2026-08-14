@@ -1,10 +1,12 @@
 import type { RuntimeRouter } from "@llm-space/runtime/runtime";
 import { ContainerModule, type ResolutionContext } from "inversify";
 
+import type { DesktopWindowScope } from "../di/process-container";
 import {
-  RPC_SERVER_CONTRIBUTION,
-  type RpcServerContribution,
+  RpcContribution,
+  type RpcContribution as RpcContributionApi,
 } from "../di/rpc-contribution";
+import type { RpcRegistry } from "../di/rpc-registry";
 import { desktopToken, PROCESS_TOKENS } from "../di/tokens";
 import {
   AgentExecutionRpcServer,
@@ -43,9 +45,15 @@ import {
 } from "./runtime-applications";
 
 export const RUNTIME_APPLICATION_TOKENS = {
-  runtimes: desktopToken<RuntimesApplication>("runtime", "runtimes-application"),
+  runtimes: desktopToken<RuntimesApplication>(
+    "runtime",
+    "runtimes-application"
+  ),
   models: desktopToken<ModelsApplication>("runtime", "models-application"),
-  workspace: desktopToken<WorkspaceApplication>("runtime", "workspace-application"),
+  workspace: desktopToken<WorkspaceApplication>(
+    "runtime",
+    "workspace-application"
+  ),
   promptFiles: desktopToken<PromptFilesApplication>(
     "runtime",
     "prompt-files-application"
@@ -113,70 +121,60 @@ export function runtimeApplicationsModule(): ContainerModule {
         (context) => new AgentExecutionApplicationImpl(router(context))
       )
       .inSingletonScope();
+  });
+}
 
-    const contribute = (
-      id: RpcServerContribution["id"],
-      create: RpcServerContribution["create"]
-    ) =>
-      bind<RpcServerContribution>(RPC_SERVER_CONTRIBUTION).toConstantValue({
-        id,
-        windows: ["main", "project"],
-        create,
-      });
-    contribute(
-      "runtime.runtimes.rpc",
-      (scope) =>
-        new RuntimesRpcServer(scope.get(RUNTIME_APPLICATION_TOKENS.runtimes))
-    );
-    contribute(
-      "runtime.models.rpc",
-      (scope) =>
-        new ModelsRpcServer(scope.get(RUNTIME_APPLICATION_TOKENS.models))
-    );
-    contribute(
-      "runtime.workspace.rpc",
-      (scope) =>
-        new WorkspaceRpcServer(scope.get(RUNTIME_APPLICATION_TOKENS.workspace))
-    );
-    contribute(
-      "runtime.prompt-files.rpc",
-      (scope) =>
-        new PromptFilesRpcServer(
-          scope.get(RUNTIME_APPLICATION_TOKENS.promptFiles)
-        )
-    );
-    contribute(
-      "runtime.mcp.rpc",
-      (scope) => new McpRpcServer(scope.get(RUNTIME_APPLICATION_TOKENS.mcp))
-    );
-    contribute(
-      "runtime.builtin-tools.rpc",
-      (scope) =>
-        new BuiltinToolsRpcServer(
-          scope.get(RUNTIME_APPLICATION_TOKENS.builtinTools)
-        )
-    );
-    contribute(
-      "runtime.search.rpc",
-      (scope) =>
-        new SearchRpcServer(scope.get(RUNTIME_APPLICATION_TOKENS.search))
-    );
-    contribute(
-      "runtime.network.rpc",
-      (scope) =>
-        new NetworkRpcServer(scope.get(RUNTIME_APPLICATION_TOKENS.network))
-    );
-    contribute(
-      "runtime.skills.rpc",
-      (scope) =>
-        new SkillsRpcServer(scope.get(RUNTIME_APPLICATION_TOKENS.skills))
-    );
-    contribute(
-      "runtime.agent-execution.rpc",
-      (scope) =>
-        new AgentExecutionRpcServer(
-          scope.get(RUNTIME_APPLICATION_TOKENS.agentExecution)
-        )
-    );
+class RuntimeContribution implements RpcContributionApi {
+  constructor(
+    private readonly _runtimes: RuntimesApplication,
+    private readonly _models: ModelsApplication,
+    private readonly _workspace: WorkspaceApplication,
+    private readonly _promptFiles: PromptFilesApplication,
+    private readonly _mcp: McpApplication,
+    private readonly _builtinTools: BuiltinToolsApplication,
+    private readonly _search: SearchApplication,
+    private readonly _network: NetworkApplication,
+    private readonly _skills: SkillsApplication,
+    private readonly _agentExecution: AgentExecutionApplication
+  ) {}
+
+  /** Register the Runtime-owned request and stream namespaces. */
+  registerRpc(rpc: RpcRegistry): void {
+    rpc.registerServer(new RuntimesRpcServer(this._runtimes));
+    rpc.registerServer(new ModelsRpcServer(this._models));
+    rpc.registerServer(new WorkspaceRpcServer(this._workspace));
+    rpc.registerServer(new PromptFilesRpcServer(this._promptFiles));
+    rpc.registerServer(new McpRpcServer(this._mcp));
+    rpc.registerServer(new BuiltinToolsRpcServer(this._builtinTools));
+    rpc.registerServer(new SearchRpcServer(this._search));
+    rpc.registerServer(new NetworkRpcServer(this._network));
+    rpc.registerServer(new SkillsRpcServer(this._skills));
+    rpc.registerServer(new AgentExecutionRpcServer(this._agentExecution));
+  }
+}
+
+/** Bind Runtime RPC declarations as one window-scoped feature contribution. */
+export function runtimeContributionsModule(
+  scope: DesktopWindowScope
+): ContainerModule {
+  return new ContainerModule(({ bind }) => {
+    bind(RuntimeContribution)
+      .toDynamicValue(
+        () =>
+          new RuntimeContribution(
+            scope.get(RUNTIME_APPLICATION_TOKENS.runtimes),
+            scope.get(RUNTIME_APPLICATION_TOKENS.models),
+            scope.get(RUNTIME_APPLICATION_TOKENS.workspace),
+            scope.get(RUNTIME_APPLICATION_TOKENS.promptFiles),
+            scope.get(RUNTIME_APPLICATION_TOKENS.mcp),
+            scope.get(RUNTIME_APPLICATION_TOKENS.builtinTools),
+            scope.get(RUNTIME_APPLICATION_TOKENS.search),
+            scope.get(RUNTIME_APPLICATION_TOKENS.network),
+            scope.get(RUNTIME_APPLICATION_TOKENS.skills),
+            scope.get(RUNTIME_APPLICATION_TOKENS.agentExecution)
+          )
+      )
+      .inSingletonScope();
+    bind<RpcContributionApi>(RpcContribution).toService(RuntimeContribution);
   });
 }

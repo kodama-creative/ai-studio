@@ -3,18 +3,20 @@ import {
   RuntimeNotFoundError,
 } from "@llm-space/runtime/runtime";
 
+import { isDisposable, type Disposable } from "../../shared/disposable";
 import type {
-  NamespacedRpcRequest,
   NamespacedRpcEvent,
+  NamespacedRpcRequest,
   NamespacedRpcStreamEvent,
   NamespacedRpcStreamSubscribe,
-  RpcNamespaceInterface,
-  RpcServer,
 } from "../../shared/namespaced-rpc";
 import type { RpcError, RpcResult } from "../../shared/rpc-error";
 import { RpcDomainError } from "../../shared/rpc-error";
 
-interface AnyRpcServer {
+import type { ContributionProvider } from "./contribution-provider";
+import type { AnyRpcServer, RpcContribution } from "./rpc-contribution";
+
+interface RegisteredRpcServer {
   readonly namespace: {
     readonly name: string;
     readonly streamNames: ReadonlySet<string>;
@@ -23,57 +25,89 @@ interface AnyRpcServer {
   readonly requests: object;
   readonly streams: object;
   readonly eventSource?: {
-    subscribe(
-      event: string,
-      listener: (payload: unknown) => void
-    ): { dispose(): void | Promise<void> };
+    subscribe(event: string, listener: (payload: unknown) => void): Disposable;
   };
 }
 
-export interface NamespacedRpcServerOptions {
-  readonly sendStreamEvent: (event: NamespacedRpcStreamEvent) => void;
-  readonly sendEvent: (event: NamespacedRpcEvent) => void;
+export interface RpcEventSink {
+  sendStreamEvent(event: NamespacedRpcStreamEvent): void;
+  sendEvent(event: NamespacedRpcEvent): void;
 }
 
-/**
- * Own namespace dispatch and every stream subscription for one native window.
- * Business modules remain ordinary classes and never depend on Electrobun.
- */
-export class NamespacedRpcServer {
-  private readonly _servers = new Map<string, AnyRpcServer>();
+type RegistryState = "idle" | "starting" | "started" | "disposed";
+
+/** Window-scoped namespace registry and transport-independent RPC dispatcher. */
+export class RpcRegistry implements Disposable {
+  private readonly _servers = new Map<string, RegisteredRpcServer>();
   private readonly _subscriptions = new Map<string, AbortController>();
-  private readonly _eventSubscriptions: {
-    dispose(): void | Promise<void>;
-  }[] = [];
+  private readonly _registrations: Disposable[] = [];
+  private _disposePromise: Promise<void> | undefined;
+  private _state: RegistryState = "idle";
 
-  constructor(private readonly _options: NamespacedRpcServerOptions) {}
+  constructor(
+    private readonly _contributions: ContributionProvider<RpcContribution>,
+    private readonly _sink: RpcEventSink
+  ) {}
 
-  /** Register one namespace before the window starts serving RPC traffic. */
-  register<TInterface extends RpcNamespaceInterface>(
-    server: RpcServer<TInterface>
-  ): void {
+  /** Collect every RPC contribution exactly once, then freeze namespaces. */
+  onStart(): void {
+    if (this._state !== "idle") {
+      throw new Error(`RpcRegistry cannot start from state "${this._state}".`);
+    }
+    this._state = "starting";
+    try {
+      for (const contribution of this._contributions.getContributions()) {
+        contribution.registerRpc(this);
+      }
+      this._state = "started";
+    } catch (error) {
+      void this.dispose();
+      throw error;
+    }
+  }
+
+  /** Register one typed namespace while contributions are being collected. */
+  registerServer(server: AnyRpcServer): Disposable {
+    if (this._state !== "starting") {
+      throw new Error(
+        `RPC namespace "${server.namespace.name}" can only be registered while RpcRegistry is starting.`
+      );
+    }
     const namespace = server.namespace.name;
     if (this._servers.has(namespace)) {
       throw new Error(`RPC namespace "${namespace}" is already registered.`);
     }
-    this._servers.set(namespace, server);
-    const eventSource = server.eventSource as
-      | AnyRpcServer["eventSource"]
-      | undefined;
-    if (eventSource !== undefined) {
-      for (const event of server.namespace.eventNames) {
-        this._eventSubscriptions.push(
-          eventSource.subscribe(event, (payload) =>
-            this._options.sendEvent({ namespace, event, payload })
+    const eventSubscriptions: Disposable[] = [];
+    const registered = server as RegisteredRpcServer;
+    this._servers.set(namespace, registered);
+    const registration: Disposable = {
+      dispose: async () => {
+        if (this._servers.get(namespace) === server) {
+          this._servers.delete(namespace);
+        }
+        for (const subscription of eventSubscriptions.reverse()) {
+          await subscription.dispose();
+        }
+        if (isDisposable(server)) await server.dispose();
+      },
+    };
+    this._registrations.push(registration);
+    if (registered.eventSource !== undefined) {
+      for (const event of registered.namespace.eventNames) {
+        eventSubscriptions.push(
+          registered.eventSource.subscribe(event, (payload) =>
+            this._sink.sendEvent({ namespace, event, payload })
           )
         );
       }
     }
+    return registration;
   }
 
-  /** Dispatch one request to its owning server class. */
+  /** Dispatch one request to its owning namespace server. */
   async request(input: NamespacedRpcRequest): Promise<RpcResult<unknown>> {
     try {
+      this._assertStarted();
       const server = this._requireServer(input.namespace);
       const method = _requireMethod(server.requests, input.method, "request");
       return { ok: true, value: await method(...input.args) };
@@ -82,8 +116,9 @@ export class NamespacedRpcServer {
     }
   }
 
-  /** Start one stream; items and terminal state are emitted to the webview. */
+  /** Start one stream; items and terminal state are emitted to the renderer. */
   subscribe(input: NamespacedRpcStreamSubscribe): void {
+    this._assertStarted();
     this.unsubscribe(input.subscriptionId);
     const server = this._requireServer(input.namespace);
     if (!server.namespace.streamNames.has(input.method)) {
@@ -97,22 +132,37 @@ export class NamespacedRpcServer {
     void this._consume(input, method, controller);
   }
 
-  /** Abort one stream without affecting sibling module subscriptions. */
+  /** Abort one stream without affecting sibling namespace subscriptions. */
   unsubscribe(subscriptionId: string): void {
     this._subscriptions.get(subscriptionId)?.abort();
     this._subscriptions.delete(subscriptionId);
   }
 
-  /** Window disposal owns all remaining stream cancellation. */
-  async dispose(): Promise<void> {
-    for (const controller of this._subscriptions.values()) controller.abort();
-    this._subscriptions.clear();
-    for (const subscription of this._eventSubscriptions.reverse()) {
-      await subscription.dispose();
-    }
-    this._eventSubscriptions.length = 0;
+  /** Stop dispatch, cancel streams, then release registrations in reverse. */
+  dispose(): Promise<void> {
+    this._disposePromise ??= this._dispose();
+    return this._disposePromise;
   }
 
+  /** Run the idempotent asynchronous cleanup behind {@link dispose}. */
+  private async _dispose(): Promise<void> {
+    this._state = "disposed";
+    for (const controller of this._subscriptions.values()) controller.abort();
+    this._subscriptions.clear();
+    for (const registration of this._registrations.reverse()) {
+      await registration.dispose();
+    }
+    this._registrations.length = 0;
+  }
+
+  /** Reject transport calls before startup and after window shutdown. */
+  private _assertStarted(): void {
+    if (this._state !== "started") {
+      throw new Error(`RpcRegistry is not running (state: "${this._state}").`);
+    }
+  }
+
+  /** Consume one application stream and publish its terminal state exactly once. */
   private async _consume(
     input: NamespacedRpcStreamSubscribe,
     method: (...args: readonly unknown[]) => unknown,
@@ -128,21 +178,21 @@ export class NamespacedRpcServer {
       }
       for await (const item of iterable) {
         if (controller.signal.aborted) return;
-        this._options.sendStreamEvent({
+        this._sink.sendStreamEvent({
           subscriptionId: input.subscriptionId,
           type: "item",
           item,
         });
       }
       if (!controller.signal.aborted) {
-        this._options.sendStreamEvent({
+        this._sink.sendStreamEvent({
           subscriptionId: input.subscriptionId,
           type: "done",
         });
       }
     } catch (error) {
       if (!controller.signal.aborted) {
-        this._options.sendStreamEvent({
+        this._sink.sendStreamEvent({
           subscriptionId: input.subscriptionId,
           type: "error",
           error: _rpcError(error),
@@ -155,7 +205,8 @@ export class NamespacedRpcServer {
     }
   }
 
-  private _requireServer(namespace: string): AnyRpcServer {
+  /** Resolve one registered namespace or fail at the transport boundary. */
+  private _requireServer(namespace: string): RegisteredRpcServer {
     const server = this._servers.get(namespace);
     if (server === undefined) {
       throw new Error(`RPC namespace "${namespace}" is not registered.`);
@@ -220,8 +271,5 @@ function _rpcError(error: unknown): RpcError {
     };
   }
   console.error("Unhandled namespaced RPC error:", error);
-  return {
-    code: "INTERNAL",
-    message: "Internal RPC error.",
-  };
+  return { code: "INTERNAL", message: "Internal RPC error." };
 }

@@ -82,18 +82,9 @@ Bun-workspace monorepo. Workspaces are `packages/*`, `apps/*`, and the runnable
 
 ### The RPC bridge
 
-The typed contract lives in `src/shared/rpc.ts` (`DesktopRPCType`). The bun side creates handlers in `src/bun/rpc/index.ts` (`createMainWindowRPC()`); the renderer holds the client in `src/lib/electrobun.ts` (`electrobun.rpc`). Two directions:
+`src/shared/rpc.ts` (`DesktopRPCType`) is only the Electrobun transport envelope: one namespaced request, stream subscribe/unsubscribe messages, namespace events, and `executeCommand`. Business methods are never flattened into that contract. Each feature owns a shared `RpcNamespace` interface, a Bun `RpcServer` class, and a renderer `createRpcClientProxy()` client with exact request/response/stream/event types.
 
-- **requests** (webview → bun, request/response): `availableModels`, `addProvider`/`updateProvider`/`removeProvider`/`setModelEnabled`/…, the filesystem ops `fsLs`/`fsRead`/`fsWrite`/`fsMkdir`/`fsCp`/`fsMv`/`fsRm`/`fsReveal` (mirroring what were HTTP routes), the prompt-template helpers `fsReadText` (read an arbitrary text file for the `@include` macro; `~` expands, missing → `""`), `fsPickFile` (native OS file picker for File-content variables), and `ensureRootDir` (resolve/create a dir under the llm-space root — the renderer can't touch the filesystem), plus the one-time feature reminders `featureReminderNext` (next unseen reminder or `null`; pure read) / `featureReminderMarkSeen` (record as seen on dismiss/click — recording is deferred so a reminder that never showed can't be burned).
-- **messages** (fire-and-forget, both ways): agent streaming (`sendStreamThreadRequest` / `receiveStreamThreadResponse` / `abortStreamThread`), fullscreen sync, update status (`updateStatusChanged`), and `executeCommand` (see the command layer).
-
-Electrobun RPC has no native streaming, so agent runs **simulate a stream over fire-and-forget messages**, correlated by a per-run `streamId` (uuid):
-
-1. Renderer `createRpcTransport()` (`src/client/rpc-transport.ts`) sends `sendStreamThreadRequest { streamId, request }`.
-2. Bun `StreamThreadController.run()` (`bun/streaming/stream-thread.ts`) iterates `streamAgent()` and sends back `receiveStreamThreadResponse` messages keyed by `streamId`: one `{ type: "event" }` per event, then a terminal `{ type: "done" }` or `{ type: "error", message }`.
-3. The transport keeps a per-`streamId` listener that buffers events and drives an async iterator via a wake/notify promise — turning the message stream back into `for await`. `done` ends it, `error` throws, and abort (signal or early break) sends `abortStreamThread`, which calls `StreamThreadController.abort()` for the bun-side `AbortController`.
-
-Downstream, `reduceMessages()` folds the events into messages.
+Every native window owns one `RpcRegistry`. Window-scoped feature classes implement the same-name `RpcContribution` symbol + interface and register their server classes during `RpcRegistry.onStart()`. A named `ContributionProvider<RpcContribution>` takes one frozen snapshot after all window modules are bound; duplicate namespaces and late registration fail. The Registry owns request dispatch, stream abort, event subscriptions, and reverse-order registration cleanup. `createMainWindowRPC()` only forwards the Electrobun envelope to that Registry and never constructs business services.
 
 ### Bun composition and bundled modules
 
@@ -102,6 +93,15 @@ The Bun process object graph is assembled in one production composition root,
 there and passed explicitly to RPC, streaming, commands, updates, and tool
 factories; Bun feature modules must not export import-time manager instances or
 reach through a service locator.
+
+Each native window has a child Inversify scope. Feature modules bind window
+contribution classes with `toService(...)`; one class may implement both
+`CommandContribution` and `RpcContribution` without creating two instances.
+The named generic `ContributionProvider<T>` keeps both Registries independent
+from Inversify. Registries start once before the Electrobun bridge and native
+window are created, reject late registration, then dispose registrations before
+the window scope disposes contribution instances. Application classes never
+implement Desktop contribution interfaces and never access the container.
 
 `DesktopHost` (`src/bun/host/desktop-host.ts`) is the lifecycle boundary for
 trusted, bundled modules. Modules register synchronously before RPC/window
@@ -183,7 +183,7 @@ Releases ship for **macOS arm64 + x64** (so four build jobs per tag: 2 arches ×
 
 ### The command layer
 
-Every cross-boundary user action (menus, context menus, toolbar buttons, shortcuts) is a `Command` — a namespaced `type` discriminant (`workspace.newFile`, `window.reload`, `updates.check`) plus typed `args` — defined in `src/shared/commands.ts`. `COMMAND_META` tags each with a target of `"webview"` or `"bun"`; the single `executeCommand` RPC message is only a transport envelope. On the Bun side, `WindowCommandBus` is assembled from `CommandHandlerContribution`s registered by the owning application module (`native`, `agent-projects`, `github-account`, `updates`) rather than one central switch. On the renderer side, the state-owning UI module registers its handlers through `CommandProvider`. The native menu maps shell action ids into commands. DI symbols use `desktopToken(namespace, name)` so every service identity has an explicit namespace.
+Every cross-boundary user action (menus, context menus, toolbar buttons, shortcuts) is a `Command` — a namespaced `type` discriminant (`workspace.newFile`, `window.reload`, `updates.check`) plus typed `args` — defined in `src/shared/commands.ts`. `COMMAND_META` tags each with a target of `"webview"` or `"bun"`; the single `executeCommand` RPC message is only a transport envelope. On the Bun side, every window owns one `CommandRegistry`. Feature classes implement the same-name `CommandContribution` symbol + interface and register one typed handler per command during `onStart()`; duplicate ownership and late registration fail. Unclaimed renderer commands are forwarded through the window's `CommandSink`. On the renderer side, the state-owning UI module registers its handlers through `CommandProvider`. The native menu maps shell action ids into commands. DI symbols use `desktopToken(namespace, name)` so every service identity has an explicit namespace.
 
 ### App layout (`apps/desktop/src`)
 

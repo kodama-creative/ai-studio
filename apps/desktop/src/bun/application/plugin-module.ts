@@ -1,9 +1,11 @@
 import { ContainerModule, type ResolutionContext } from "inversify";
 
+import type { DesktopWindowScope } from "../di/process-container";
 import {
-  RPC_SERVER_CONTRIBUTION,
-  type RpcServerContribution,
+  RpcContribution,
+  type RpcContribution as RpcContributionApi,
 } from "../di/rpc-contribution";
+import type { RpcRegistry } from "../di/rpc-registry";
 import { desktopToken, PROCESS_TOKENS } from "../di/tokens";
 import {
   PluginCommandsRpcServer,
@@ -21,7 +23,10 @@ import {
 
 export const PLUGIN_APPLICATION_TOKENS = {
   plugins: desktopToken<PluginsApplication>("plugins", "application"),
-  commands: desktopToken<PluginCommandsApplication>("plugin-commands", "application"),
+  commands: desktopToken<PluginCommandsApplication>(
+    "plugin-commands",
+    "application"
+  ),
   tools: desktopToken<PluginToolsApplication>("plugin-tools", "application"),
   threadStorages: desktopToken<ThreadStoragesApplication>(
     "thread-storages",
@@ -61,38 +66,46 @@ export function pluginModule(): ContainerModule {
           )
       )
       .inSingletonScope();
-    const contribute = (
-      id: RpcServerContribution["id"],
-      create: RpcServerContribution["create"]
-    ) =>
-      bind<RpcServerContribution>(RPC_SERVER_CONTRIBUTION).toConstantValue({
-        id,
-        windows: ["main", "project"],
-        create,
-      });
-    contribute("plugins.rpc", (scope) => {
-      const app = scope.get<PluginsApplication>(
-        PLUGIN_APPLICATION_TOKENS.plugins
-      );
-      return new PluginsRpcServer(app, app.events);
-    });
-    contribute("plugin-commands.rpc", (scope) => {
-      const app = scope.get<PluginCommandsApplication>(
-        PLUGIN_APPLICATION_TOKENS.commands
-      );
-      return new PluginCommandsRpcServer(app, app.events);
-    });
-    contribute(
-      "plugin-tools.rpc",
-      (scope) =>
-        new PluginToolsRpcServer(scope.get(PLUGIN_APPLICATION_TOKENS.tools))
+  });
+}
+
+class PluginContribution implements RpcContributionApi {
+  constructor(
+    private readonly _plugins: PluginsApplication,
+    private readonly _commands: PluginCommandsApplication,
+    private readonly _tools: PluginToolsApplication,
+    private readonly _threadStorages: ThreadStoragesApplication
+  ) {}
+
+  /** Register Plugin requests, command events, tools, and storage connectors. */
+  registerRpc(rpc: RpcRegistry): void {
+    rpc.registerServer(
+      new PluginsRpcServer(this._plugins, this._plugins.events)
     );
-    contribute(
-      "thread-storages.rpc",
-      (scope) =>
-        new ThreadStoragesRpcServer(
-          scope.get(PLUGIN_APPLICATION_TOKENS.threadStorages)
-        )
+    rpc.registerServer(
+      new PluginCommandsRpcServer(this._commands, this._commands.events)
     );
+    rpc.registerServer(new PluginToolsRpcServer(this._tools));
+    rpc.registerServer(new ThreadStoragesRpcServer(this._threadStorages));
+  }
+}
+
+/** Bind Plugin RPC declarations as one window-scoped contribution. */
+export function pluginContributionsModule(
+  scope: DesktopWindowScope
+): ContainerModule {
+  return new ContainerModule(({ bind }) => {
+    bind(PluginContribution)
+      .toDynamicValue(
+        () =>
+          new PluginContribution(
+            scope.get(PLUGIN_APPLICATION_TOKENS.plugins),
+            scope.get(PLUGIN_APPLICATION_TOKENS.commands),
+            scope.get(PLUGIN_APPLICATION_TOKENS.tools),
+            scope.get(PLUGIN_APPLICATION_TOKENS.threadStorages)
+          )
+      )
+      .inSingletonScope();
+    bind<RpcContributionApi>(RpcContribution).toService(PluginContribution);
   });
 }

@@ -1,9 +1,11 @@
 import { ContainerModule, type ResolutionContext } from "inversify";
 
+import type { DesktopWindowScope } from "../di/process-container";
 import {
-  RPC_SERVER_CONTRIBUTION,
-  type RpcServerContribution,
+  RpcContribution,
+  type RpcContribution as RpcContributionApi,
 } from "../di/rpc-contribution";
+import type { RpcRegistry } from "../di/rpc-registry";
 import { desktopToken } from "../di/tokens";
 import { GeneratorRpcServer } from "../rpc/generator-rpc-server";
 
@@ -16,10 +18,8 @@ import {
 import type { ModelsApplication } from "./runtime-applications";
 import { RUNTIME_APPLICATION_TOKENS } from "./runtime-module";
 
-export const GENERATOR_APPLICATION = desktopToken<ProjectGeneratorApplicationApi>(
-  "generator",
-  "application"
-);
+export const GENERATOR_APPLICATION =
+  desktopToken<ProjectGeneratorApplicationApi>("generator", "application");
 
 /** Register the process-scoped Generator application and its RPC adapter. */
 export function generatorModule(): ContainerModule {
@@ -35,11 +35,28 @@ export function generatorModule(): ContainerModule {
           )
       )
       .inSingletonScope();
-    bind<RpcServerContribution>(RPC_SERVER_CONTRIBUTION).toConstantValue({
-      id: "generator.rpc",
-      windows: ["main", "project"],
-      create: (scope) =>
-        new GeneratorRpcServer(scope.get(GENERATOR_APPLICATION)),
-    });
+  });
+}
+
+class GeneratorContribution implements RpcContributionApi {
+  constructor(private readonly _application: ProjectGeneratorApplicationApi) {}
+
+  /** Register the typed project generator RPC namespace. */
+  registerRpc(rpc: RpcRegistry): void {
+    rpc.registerServer(new GeneratorRpcServer(this._application));
+  }
+}
+
+/** Bind one generator contribution inside the owning window scope. */
+export function generatorContributionsModule(
+  scope: DesktopWindowScope
+): ContainerModule {
+  return new ContainerModule(({ bind }) => {
+    bind(GeneratorContribution)
+      .toDynamicValue(
+        () => new GeneratorContribution(scope.get(GENERATOR_APPLICATION))
+      )
+      .inSingletonScope();
+    bind<RpcContributionApi>(RpcContribution).toService(GeneratorContribution);
   });
 }

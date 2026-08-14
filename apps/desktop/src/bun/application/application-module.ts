@@ -1,13 +1,16 @@
 import { ContainerModule, type ResolutionContext } from "inversify";
 
 import {
-  COMMAND_HANDLER_CONTRIBUTION,
-  type CommandHandlerContribution,
+  CommandContribution,
+  type CommandContribution as CommandContributionApi,
 } from "../di/command-contribution";
+import type { CommandRegistry } from "../di/command-registry";
+import type { DesktopWindowScope } from "../di/process-container";
 import {
-  RPC_SERVER_CONTRIBUTION,
-  type RpcServerContribution,
+  RpcContribution,
+  type RpcContribution as RpcContributionApi,
 } from "../di/rpc-contribution";
+import type { RpcRegistry } from "../di/rpc-registry";
 import { desktopToken, PROCESS_TOKENS } from "../di/tokens";
 import {
   AnalyticsRpcServer,
@@ -27,8 +30,14 @@ import {
 import { RUNTIME_APPLICATION_TOKENS } from "./runtime-module";
 
 export const APPLICATION_TOKENS = {
-  sharing: desktopToken<ThreadSharingApplication>("thread-sharing", "application"),
-  github: desktopToken<GithubAccountApplication>("github-account", "application"),
+  sharing: desktopToken<ThreadSharingApplication>(
+    "thread-sharing",
+    "application"
+  ),
+  github: desktopToken<GithubAccountApplication>(
+    "github-account",
+    "application"
+  ),
   updates: desktopToken<UpdatesApplication>("updates", "application"),
   reminders: desktopToken<RemindersApplication>("reminders", "application"),
   analytics: desktopToken<AnalyticsApplication>("analytics", "application"),
@@ -68,75 +77,129 @@ export function applicationModule(): ContainerModule {
           new AnalyticsApplication(context.get(PROCESS_TOKENS.analytics))
       )
       .inSingletonScope();
-    const contribute = (
-      id: RpcServerContribution["id"],
-      create: RpcServerContribution["create"]
-    ) =>
-      bind<RpcServerContribution>(RPC_SERVER_CONTRIBUTION).toConstantValue({
-        id,
-        windows: ["main", "project"],
-        create,
-      });
-    contribute(
-      "thread-sharing.rpc",
-      (scope) =>
-        new ThreadSharingRpcServer(scope.get(APPLICATION_TOKENS.sharing))
+  });
+}
+
+class ThreadSharingContribution implements RpcContributionApi {
+  constructor(private readonly _application: ThreadSharingApplication) {}
+
+  /** Register thread sharing requests. */
+  registerRpc(rpc: RpcRegistry): void {
+    rpc.registerServer(new ThreadSharingRpcServer(this._application));
+  }
+}
+
+class GithubAccountContribution
+  implements CommandContributionApi, RpcContributionApi
+{
+  constructor(private readonly _application: GithubAccountApplication) {}
+
+  /** Register GitHub account commands owned by the Bun process. */
+  registerCommands(commands: CommandRegistry): void {
+    commands.registerCommand("githubAccount.login", {
+      execute: () => void this._application.login(),
+    });
+    commands.registerCommand("githubAccount.logout", {
+      execute: () => this._application.logout(),
+    });
+  }
+
+  /** Register GitHub account requests and state events. */
+  registerRpc(rpc: RpcRegistry): void {
+    rpc.registerServer(
+      new GithubAccountRpcServer(this._application, this._application.events)
     );
-    contribute("github-account.rpc", (scope) => {
-      const app = scope.get<GithubAccountApplication>(
-        APPLICATION_TOKENS.github
-      );
-      return new GithubAccountRpcServer(app, app.events);
+  }
+}
+
+class UpdatesContribution
+  implements CommandContributionApi, RpcContributionApi
+{
+  constructor(private readonly _application: UpdatesApplication) {}
+
+  /** Register update lifecycle commands. */
+  registerCommands(commands: CommandRegistry): void {
+    commands.registerCommand("updates.check", {
+      execute: () => void this._application.check(),
     });
-    contribute("updates.rpc", (scope) => {
-      const app = scope.get<UpdatesApplication>(APPLICATION_TOKENS.updates);
-      return new UpdatesRpcServer(app, app.events);
+    commands.registerCommand("updates.applyAndRestart", {
+      execute: () => void this._application.applyAndRestart(),
     });
-    contribute(
-      "reminders.rpc",
-      (scope) => new RemindersRpcServer(scope.get(APPLICATION_TOKENS.reminders))
+  }
+
+  /** Register update requests and status events. */
+  registerRpc(rpc: RpcRegistry): void {
+    rpc.registerServer(
+      new UpdatesRpcServer(this._application, this._application.events)
     );
-    contribute(
-      "analytics.rpc",
-      (scope) => new AnalyticsRpcServer(scope.get(APPLICATION_TOKENS.analytics))
+  }
+}
+
+class RemindersContribution implements RpcContributionApi {
+  constructor(private readonly _application: RemindersApplication) {}
+
+  /** Register persisted feature reminder requests. */
+  registerRpc(rpc: RpcRegistry): void {
+    rpc.registerServer(new RemindersRpcServer(this._application));
+  }
+}
+
+class AnalyticsContribution implements RpcContributionApi {
+  constructor(private readonly _application: AnalyticsApplication) {}
+
+  /** Register renderer analytics requests. */
+  registerRpc(rpc: RpcRegistry): void {
+    rpc.registerServer(new AnalyticsRpcServer(this._application));
+  }
+}
+
+/** Bind general application adapters as window-scoped contributions. */
+export function applicationContributionsModule(
+  scope: DesktopWindowScope
+): ContainerModule {
+  return new ContainerModule(({ bind }) => {
+    bind(ThreadSharingContribution)
+      .toDynamicValue(
+        () =>
+          new ThreadSharingContribution(scope.get(APPLICATION_TOKENS.sharing))
+      )
+      .inSingletonScope();
+    bind(GithubAccountContribution)
+      .toDynamicValue(
+        () =>
+          new GithubAccountContribution(scope.get(APPLICATION_TOKENS.github))
+      )
+      .inSingletonScope();
+    bind(UpdatesContribution)
+      .toDynamicValue(
+        () => new UpdatesContribution(scope.get(APPLICATION_TOKENS.updates))
+      )
+      .inSingletonScope();
+    bind(RemindersContribution)
+      .toDynamicValue(
+        () => new RemindersContribution(scope.get(APPLICATION_TOKENS.reminders))
+      )
+      .inSingletonScope();
+    bind(AnalyticsContribution)
+      .toDynamicValue(
+        () => new AnalyticsContribution(scope.get(APPLICATION_TOKENS.analytics))
+      )
+      .inSingletonScope();
+
+    bind<RpcContributionApi>(RpcContribution).toService(
+      ThreadSharingContribution
     );
-    bind<CommandHandlerContribution>(
-      COMMAND_HANDLER_CONTRIBUTION
-    ).toConstantValue({
-      id: "github-account.commands",
-      windows: ["main", "project"],
-      create: (scope) => {
-        const github = scope.get<GithubAccountApplication>(
-          APPLICATION_TOKENS.github
-        );
-        return {
-          commands: ["githubAccount.login", "githubAccount.logout"],
-          execute(command) {
-            if (command.type === "githubAccount.login") void github.login();
-            else if (command.type === "githubAccount.logout") github.logout();
-          },
-        };
-      },
-    });
-    bind<CommandHandlerContribution>(
-      COMMAND_HANDLER_CONTRIBUTION
-    ).toConstantValue({
-      id: "updates.commands",
-      windows: ["main", "project"],
-      create: (scope) => {
-        const updates = scope.get<UpdatesApplication>(
-          APPLICATION_TOKENS.updates
-        );
-        return {
-          commands: ["updates.check", "updates.applyAndRestart"],
-          execute(command) {
-            if (command.type === "updates.check") void updates.check();
-            else if (command.type === "updates.applyAndRestart") {
-              void updates.applyAndRestart();
-            }
-          },
-        };
-      },
-    });
+    bind<CommandContributionApi>(CommandContribution).toService(
+      GithubAccountContribution
+    );
+    bind<RpcContributionApi>(RpcContribution).toService(
+      GithubAccountContribution
+    );
+    bind<CommandContributionApi>(CommandContribution).toService(
+      UpdatesContribution
+    );
+    bind<RpcContributionApi>(RpcContribution).toService(UpdatesContribution);
+    bind<RpcContributionApi>(RpcContribution).toService(RemindersContribution);
+    bind<RpcContributionApi>(RpcContribution).toService(AnalyticsContribution);
   });
 }

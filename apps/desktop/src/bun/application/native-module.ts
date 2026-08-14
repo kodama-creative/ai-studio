@@ -10,18 +10,17 @@ import type { DesktopWindowContext } from "../../shared/agent-project";
 import { isChineseLocale } from "../app/locales";
 import type { WindowStateManager } from "../app/window-state";
 import {
-  COMMAND_HANDLER_CONTRIBUTION,
-  type CommandHandlerContribution,
+  CommandContribution,
+  type CommandContribution as CommandContributionApi,
 } from "../di/command-contribution";
+import type { CommandRegistry, CommandSink } from "../di/command-registry";
+import type { DesktopWindowScope } from "../di/process-container";
 import {
-  RPC_SERVER_CONTRIBUTION,
-  type RpcServerContribution,
+  RpcContribution,
+  type RpcContribution as RpcContributionApi,
 } from "../di/rpc-contribution";
-import {
-  desktopToken,
-  PROCESS_TOKENS,
-  WINDOW_TOKENS,
-} from "../di/tokens";
+import type { RpcRegistry } from "../di/rpc-registry";
+import { desktopToken, PROCESS_TOKENS, WINDOW_TOKENS } from "../di/tokens";
 import {
   importFilesWithNativePicker,
   importTextFromClipboard,
@@ -55,7 +54,10 @@ function _clampZoom(zoom: number): number {
 }
 
 export const NATIVE_APPLICATION_TOKENS = {
-  dialogs: desktopToken<NativeDialogsApplication>("native", "dialogs-application"),
+  dialogs: desktopToken<NativeDialogsApplication>(
+    "native",
+    "dialogs-application"
+  ),
   files: desktopToken<NativeFilesApplication>("native", "files-application"),
   appDirectories: desktopToken<AppDirectoriesApplicationApi>(
     "native",
@@ -84,138 +86,149 @@ export function nativeApplicationsModule(): ContainerModule {
           new AppDirectoriesApplication(context.get(PROCESS_TOKENS.homePath))
       )
       .inSingletonScope();
-    const contribute = (
-      id: RpcServerContribution["id"],
-      create: RpcServerContribution["create"]
-    ) =>
-      bind<RpcServerContribution>(RPC_SERVER_CONTRIBUTION).toConstantValue({
-        id,
-        windows: ["main", "project"],
-        create,
-      });
-    contribute(
-      "native.dialogs.rpc",
-      (scope) =>
-        new NativeDialogsRpcServer(scope.get(NATIVE_APPLICATION_TOKENS.dialogs))
-    );
-    contribute(
-      "native.files.rpc",
-      (scope) =>
-        new NativeFilesRpcServer(scope.get(NATIVE_APPLICATION_TOKENS.files))
-    );
-    contribute(
-      "native.app-directories.rpc",
-      (scope) =>
-        new AppDirectoriesRpcServer(
-          scope.get(NATIVE_APPLICATION_TOKENS.appDirectories)
-        )
-    );
-    contribute("native.window.rpc", (scope) => {
-      const application = new WindowApplication(
-        () => scope.get<BrowserWindow>(WINDOW_TOKENS.browserWindow),
-        scope.get<DesktopWindowContext>(WINDOW_TOKENS.context)
-      );
-      scope.bindConstant(NATIVE_APPLICATION_TOKENS.window, application);
-      return new WindowRpcServer(application, application.events);
-    });
+  });
+}
 
-    const contributeCommand = (value: CommandHandlerContribution) =>
-      bind<CommandHandlerContribution>(
-        COMMAND_HANDLER_CONTRIBUTION
-      ).toConstantValue(value);
-    const windows = ["main", "project"] as const;
-    contributeCommand({
-      id: "workspace.import.commands",
-      windows,
-      create: (_scope, context) => ({
-        commands: ["workspace.importFiles", "workspace.importFromClipboard"],
-        execute(command) {
-          if (command.type === "workspace.importFiles") {
-            void importFilesWithNativePicker(
-              context.sendToWebview,
-              command.args.parent
-            );
-          } else if (command.type === "workspace.importFromClipboard") {
-            importTextFromClipboard(context.sendToWebview, command.args.parent);
-          }
-        },
-      }),
-    });
-    contributeCommand({
-      id: "window.commands",
-      windows,
-      create: (scope, context) => {
-        const windowStates = scope.get<WindowStateManager>(
-          PROCESS_TOKENS.windowStates
+class NativeContribution implements CommandContributionApi, RpcContributionApi {
+  constructor(
+    private readonly _dialogs: NativeDialogsApplication,
+    private readonly _files: NativeFilesApplication,
+    private readonly _appDirectories: AppDirectoriesApplicationApi,
+    private readonly _windowApplication: WindowApplication,
+    private readonly _windowStates: WindowStateManager,
+    private readonly _homePath: string,
+    private readonly _getWindow: () => BrowserWindow,
+    private readonly _commandSink: CommandSink
+  ) {}
+
+  /** Register native dialogs, files, directories, and window RPC namespaces. */
+  registerRpc(rpc: RpcRegistry): void {
+    rpc.registerServer(new NativeDialogsRpcServer(this._dialogs));
+    rpc.registerServer(new NativeFilesRpcServer(this._files));
+    rpc.registerServer(new AppDirectoriesRpcServer(this._appDirectories));
+    rpc.registerServer(
+      new WindowRpcServer(
+        this._windowApplication,
+        this._windowApplication.events
+      )
+    );
+  }
+
+  /** Register native import, window, link, and filesystem commands. */
+  registerCommands(commands: CommandRegistry): void {
+    commands.registerCommand("workspace.importFiles", {
+      execute: (command) => {
+        void importFilesWithNativePicker(
+          (next) => this._commandSink.sendToWebview(next),
+          command.args.parent
         );
-        return {
-          commands: [
-            "window.zoomIn",
-            "window.zoomOut",
-            "window.resetZoom",
-            "window.reload",
-          ],
-          execute(command) {
-            const window = context.window();
-            if (command.type === "window.reload") {
-              window.webview?.executeJavascript("location.reload()");
-              return;
-            }
-            const zoom =
-              command.type === "window.resetZoom"
-                ? 1
-                : _clampZoom(
-                    window.getPageZoom() +
-                      (command.type === "window.zoomIn" ? ZOOM_STEP : -ZOOM_STEP)
-                  );
-            window.setPageZoom(zoom);
-            windowStates.saveZoom(window, zoom);
-          },
-        };
       },
     });
-    contributeCommand({
-      id: "shell.links.commands",
-      windows,
-      create: () => ({
-        commands: ["shell.openLink", "shell.openDocument", "shell.reportBugs"],
-        execute(command) {
-          if (command.type === "shell.openLink") {
-            try {
-              Utils.openExternal(parseExternalUrl(command.args.url).href);
-            } catch {
-              console.error("Blocked unsafe external URL.");
-            }
-          } else if (command.type === "shell.openDocument") {
-            Utils.openExternal(isChineseLocale() ? DOCS_ZH_CN_URL : DOCS_URL);
-          } else if (command.type === "shell.reportBugs") {
-            Utils.openExternal(ISSUES_URL);
-          }
-        },
-      }),
+    commands.registerCommand("workspace.importFromClipboard", {
+      execute: (command) =>
+        importTextFromClipboard(
+          (next) => this._commandSink.sendToWebview(next),
+          command.args.parent
+        ),
     });
-    contributeCommand({
-      id: "workspace.native-files.commands",
-      windows,
-      create: (scope) => {
-        const homePath = scope.get<string>(PROCESS_TOKENS.homePath);
-        return {
-          commands: ["workspace.copyFile", "shell.openWorkspaceFolder"],
-          execute(command) {
-            if (command.type === "workspace.copyFile") {
-              try {
-                writeClipboardFilePaths([command.args.path]);
-              } catch (error) {
-                console.error("Failed to copy to clipboard:", error);
-              }
-              return;
-            }
-            const workspacePath = path.join(homePath, "workspace");
-            mkdirSync(workspacePath, { recursive: true });
-            Utils.openPath(workspacePath);
-          },
-        };
+    commands.registerCommand("window.zoomIn", {
+      execute: () => this._changeZoom(ZOOM_STEP),
+    });
+    commands.registerCommand("window.zoomOut", {
+      execute: () => this._changeZoom(-ZOOM_STEP),
+    });
+    commands.registerCommand("window.resetZoom", {
+      execute: () => this._setZoom(1),
+    });
+    commands.registerCommand("window.reload", {
+      execute: () =>
+        this._getWindow().webview?.executeJavascript("location.reload()"),
+    });
+    commands.registerCommand("shell.openLink", {
+      execute: (command) => {
+        try {
+          Utils.openExternal(parseExternalUrl(command.args.url).href);
+        } catch {
+          console.error("Blocked unsafe external URL.");
+        }
       },
     });
+    commands.registerCommand("shell.openDocument", {
+      execute: () =>
+        Utils.openExternal(isChineseLocale() ? DOCS_ZH_CN_URL : DOCS_URL),
+    });
+    commands.registerCommand("shell.reportBugs", {
+      execute: () => Utils.openExternal(ISSUES_URL),
+    });
+    commands.registerCommand("workspace.copyFile", {
+      execute: (command) => {
+        try {
+          writeClipboardFilePaths([command.args.path]);
+        } catch (error) {
+          console.error("Failed to copy to clipboard:", error);
+        }
+      },
+    });
+    commands.registerCommand("shell.openWorkspaceFolder", {
+      execute: () => {
+        const workspacePath = path.join(this._homePath, "workspace");
+        mkdirSync(workspacePath, { recursive: true });
+        Utils.openPath(workspacePath);
+      },
+    });
+  }
+
+  /** Apply a relative zoom step to the owning native window. */
+  private _changeZoom(delta: number): void {
+    this._setZoom(_clampZoom(this._getWindow().getPageZoom() + delta));
+  }
+
+  /** Persist the same absolute zoom applied to the native renderer. */
+  private _setZoom(zoom: number): void {
+    const window = this._getWindow();
+    window.setPageZoom(zoom);
+    this._windowStates.saveZoom(window, zoom);
+  }
+}
+
+export interface NativeContributionsModuleInput {
+  readonly getWindow: () => BrowserWindow;
+  readonly commandSink: CommandSink;
+}
+
+/** Bind the native feature contribution and its per-window application state. */
+export function nativeContributionsModule(
+  scope: DesktopWindowScope,
+  input: NativeContributionsModuleInput
+): ContainerModule {
+  return new ContainerModule(({ bind }) => {
+    bind<WindowApplication>(NATIVE_APPLICATION_TOKENS.window)
+      .toDynamicValue(
+        () =>
+          new WindowApplication(
+            input.getWindow,
+            scope.get<DesktopWindowContext>(WINDOW_TOKENS.context)
+          )
+      )
+      .inSingletonScope();
+    bind(NativeContribution)
+      .toDynamicValue(
+        () =>
+          new NativeContribution(
+            scope.get(NATIVE_APPLICATION_TOKENS.dialogs),
+            scope.get(NATIVE_APPLICATION_TOKENS.files),
+            scope.get(NATIVE_APPLICATION_TOKENS.appDirectories),
+            scope.get(NATIVE_APPLICATION_TOKENS.window),
+            scope.get(PROCESS_TOKENS.windowStates),
+            scope.get(PROCESS_TOKENS.homePath),
+            input.getWindow,
+            input.commandSink
+          )
+      )
+      .inSingletonScope();
+    bind<CommandContributionApi>(CommandContribution).toService(
+      NativeContribution
+    );
+    bind<RpcContributionApi>(RpcContribution).toService(NativeContribution);
   });
 }

@@ -87,9 +87,14 @@ export class DesktopWindowScope {
   /** Resolve every local + inherited contribution in registration order. */
   getAll<T>(token: ServiceIdentifier<T>): T[] {
     this._assertOpen();
+    const isWindowOwned = this._container.isCurrentBound(token);
     return this._container
       .getAll(token, { chained: true })
-      .map((value) => value);
+      .map((value) =>
+        isWindowOwned
+          ? this._disposables.track(value)
+          : this._trackInherited(value)
+      );
   }
 
   /** Adopt a factory-created window resource for automatic disposal. */
@@ -250,7 +255,10 @@ export class DesktopProcessContainer {
       errors.push(error);
     }
     if (errors.length > 0) {
-      throw new AggregateError(errors, "Failed to dispose desktop process scope.");
+      throw new AggregateError(
+        errors,
+        "Failed to dispose desktop process scope."
+      );
     }
   }
 

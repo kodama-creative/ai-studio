@@ -1,10 +1,12 @@
 import type { PluginManager } from "@llm-space/runtime/plugins";
 import { ContainerModule, type ResolutionContext } from "inversify";
 
+import type { DesktopWindowScope } from "../di/process-container";
 import {
-  RPC_SERVER_CONTRIBUTION,
-  type RpcServerContribution,
+  RpcContribution,
+  type RpcContribution as RpcContributionApi,
 } from "../di/rpc-contribution";
+import type { RpcRegistry } from "../di/rpc-registry";
 import { desktopToken, PROCESS_TOKENS } from "../di/tokens";
 import type { ProjectWindowManager } from "../projects/project-window-manager";
 import { SharedImportRpcServer } from "../rpc/shared-import-rpc-server";
@@ -35,15 +37,32 @@ export function sharedImportModule(): ContainerModule {
         });
       })
       .inSingletonScope();
-    bind<RpcServerContribution>(RPC_SERVER_CONTRIBUTION).toConstantValue({
-      id: "shared-import.rpc",
-      windows: ["main"],
-      create: (scope) => {
-        const application = scope.get<SharedImportApplication>(
-          SHARED_IMPORT_APPLICATION
-        );
-        return new SharedImportRpcServer(application, application.events);
-      },
-    });
+  });
+}
+
+class SharedImportContribution implements RpcContributionApi {
+  constructor(private readonly _application: SharedImportApplication) {}
+
+  /** Register shared-link import requests and progress events. */
+  registerRpc(rpc: RpcRegistry): void {
+    rpc.registerServer(
+      new SharedImportRpcServer(this._application, this._application.events)
+    );
+  }
+}
+
+/** Bind the Main-only shared import contribution. */
+export function sharedImportContributionsModule(
+  scope: DesktopWindowScope
+): ContainerModule {
+  return new ContainerModule(({ bind }) => {
+    bind(SharedImportContribution)
+      .toDynamicValue(
+        () => new SharedImportContribution(scope.get(SHARED_IMPORT_APPLICATION))
+      )
+      .inSingletonScope();
+    bind<RpcContributionApi>(RpcContribution).toService(
+      SharedImportContribution
+    );
   });
 }

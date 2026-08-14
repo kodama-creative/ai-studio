@@ -1,7 +1,7 @@
 import { createPiRunExecutor } from "@llm-space/engine-pi";
 import type { ModelManager } from "@llm-space/runtime/models";
 import type { RuntimeRouter } from "@llm-space/runtime/runtime";
-import { createStudio } from "@llm-space/studio/server";
+import { createStudio, type Studio } from "@llm-space/studio/server";
 import type { BrowserWindow } from "electrobun/bun";
 import {
   ContainerModule,
@@ -18,10 +18,12 @@ import type { MainWindowRPCController } from "../rpc";
 import { PlaygroundRpcServer } from "../rpc/playground-rpc-server";
 import { ProjectRpcServer } from "../rpc/project-rpc-server";
 
+import type { DesktopWindowScope } from "./process-container";
 import {
-  RPC_SERVER_CONTRIBUTION,
-  type RpcServerContribution,
+  RpcContribution,
+  type RpcContribution as RpcContributionApi,
 } from "./rpc-contribution";
+import type { RpcRegistry } from "./rpc-registry";
 import {
   PROCESS_TOKENS,
   PROJECT_WINDOW_TOKENS,
@@ -31,12 +33,12 @@ import {
 
 type TokenValue<T> = T extends DesktopToken<infer TValue> ? TValue : never;
 type ProcessServices = {
-  readonly [TKey in Exclude<
-    keyof typeof PROCESS_TOKENS,
-    "playgroundApplication" | "playgroundHost"
-  >]: TokenValue<
-    (typeof PROCESS_TOKENS)[TKey]
-  >;
+  readonly [
+    TKey in Exclude<
+      keyof typeof PROCESS_TOKENS,
+      "playgroundApplication" | "playgroundHost"
+    >
+  ]: TokenValue<(typeof PROCESS_TOKENS)[TKey]>;
 };
 
 /** Bind already-constructed process singletons without decorators. */
@@ -73,20 +75,6 @@ export function processModule(services: ProcessServices): ContainerModule {
           )
       )
       .inSingletonScope();
-    bind<RpcServerContribution>(RPC_SERVER_CONTRIBUTION).toConstantValue({
-      id: "playground.rpc",
-      windows: ["main"],
-      create: (scope) =>
-        new PlaygroundRpcServer(
-          scope.get(PROCESS_TOKENS.playgroundApplication)
-        ),
-    });
-    bind<RpcServerContribution>(RPC_SERVER_CONTRIBUTION).toConstantValue({
-      id: "project-studio.rpc",
-      windows: ["project"],
-      create: (scope) =>
-        new ProjectRpcServer(scope.get(PROJECT_WINDOW_TOKENS.studio)),
-    });
   });
 }
 
@@ -116,9 +104,7 @@ export function projectWindowModule(input: {
     bind(PROJECT_WINDOW_TOKENS.source).toConstantValue(input.source);
     bind(PROJECT_WINDOW_TOKENS.studio)
       .toDynamicValue(async (context: ResolutionContext) => {
-        const source = context.get<AgentProject>(
-          PROJECT_WINDOW_TOKENS.source
-        );
+        const source = context.get<AgentProject>(PROJECT_WINDOW_TOKENS.source);
         const modelManager = context.get<ModelManager>(
           PROCESS_TOKENS.modelManager
         );
@@ -147,5 +133,56 @@ export function projectWindowIdentityModule(
       project,
     });
     bind(PROJECT_WINDOW_TOKENS.project).toConstantValue(project);
+  });
+}
+
+class PlaygroundContribution implements RpcContributionApi {
+  constructor(
+    private readonly _application: DesktopPlaygroundApplicationImpl
+  ) {}
+
+  /** Register durable Playground operations for the Main window. */
+  registerRpc(rpc: RpcRegistry): void {
+    rpc.registerServer(new PlaygroundRpcServer(this._application));
+  }
+}
+
+class ProjectContribution implements RpcContributionApi {
+  constructor(private readonly _studio: Studio) {}
+
+  /** Register Studio operations for one Agent Project window. */
+  registerRpc(rpc: RpcRegistry): void {
+    rpc.registerServer(new ProjectRpcServer(this._studio));
+  }
+}
+
+/** Bind the Main-only Playground RPC contribution. */
+export function playgroundContributionsModule(
+  scope: DesktopWindowScope
+): ContainerModule {
+  return new ContainerModule(({ bind }) => {
+    bind(PlaygroundContribution)
+      .toDynamicValue(
+        () =>
+          new PlaygroundContribution(
+            scope.get(PROCESS_TOKENS.playgroundApplication)
+          )
+      )
+      .inSingletonScope();
+    bind<RpcContributionApi>(RpcContribution).toService(PlaygroundContribution);
+  });
+}
+
+/** Bind the Project-only Studio RPC contribution. */
+export function projectContributionsModule(
+  scope: DesktopWindowScope
+): ContainerModule {
+  return new ContainerModule(({ bind }) => {
+    bind(ProjectContribution)
+      .toDynamicValue(
+        () => new ProjectContribution(scope.get(PROJECT_WINDOW_TOKENS.studio))
+      )
+      .inSingletonScope();
+    bind<RpcContributionApi>(RpcContribution).toService(ProjectContribution);
   });
 }
