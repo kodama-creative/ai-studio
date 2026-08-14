@@ -32,6 +32,29 @@ export function buildTunnelArgs(input: {
   ];
 }
 
+/** Builds one no-TTY SSH process that transports ACP NDJSON over stdio. */
+export function buildRemoteAcpArgs(input: {
+  config: SshRemoteRuntimeConfig;
+  projectRoot?: string;
+}): string[] {
+  return [
+    ...buildSshBaseArgs(input.config).slice(0, -1),
+    "-T",
+    buildSshTarget(input.config),
+    buildRemoteAcpCommand(input.projectRoot),
+  ];
+}
+
+/** Starts the remote CLI endpoint without introducing HTTP or port forwarding. */
+export function buildRemoteAcpCommand(projectRoot?: string): string {
+  return [
+    "exec llm-space acp",
+    ...(projectRoot === undefined
+      ? []
+      : ["--project", shellPath(projectRoot)]),
+  ].join(" ");
+}
+
 export function buildRemoteServerArgs(input: {
   config: SshRemoteRuntimeConfig;
   entrypoint: string;

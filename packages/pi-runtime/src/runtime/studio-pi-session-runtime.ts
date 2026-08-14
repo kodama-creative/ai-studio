@@ -322,6 +322,50 @@ export class StudioPiSessionRuntime {
     return this._snapshot(session, input.lane ?? DEFAULT_LANE);
   }
 
+  /** Reads Pi-owned Session display metadata without projecting another copy. */
+  async getSessionName(sessionId: string): Promise<string | undefined> {
+    this._requireOpen();
+    return (await this._session(sessionId)).getName();
+  }
+
+  /** Writes the product title directly to Pi's Session name fact. */
+  async setSessionName(sessionId: string, name: string): Promise<void> {
+    this._requireOpen();
+    const normalized = name.trim();
+    if (normalized.length === 0) {
+      throw new Error("Pi Session name must not be empty.");
+    }
+    await (await this._session(sessionId)).setName(normalized);
+  }
+
+  /** Returns the current Pi branch entries in durable conversation order. */
+  async listBranchEntries(input: {
+    readonly sessionId: string;
+    readonly lane?: string;
+  }): Promise<readonly Entry[]> {
+    this._requireOpen();
+    const session = await this._session(input.sessionId);
+    return (
+      await session
+        .view(input.lane ?? DEFAULT_LANE)
+        .findEntriesOnBranch({ order: "oldestFirst" })
+    ).map((entry) => structuredClone(entry));
+  }
+
+  /** Appends a product timeline item as a Pi CustomEntry on the selected lane. */
+  async appendCustomEntry(input: {
+    readonly sessionId: string;
+    readonly lane?: string;
+    readonly customType: string;
+    readonly data?: unknown;
+  }): Promise<string> {
+    this._requireOpen();
+    const session = await this._session(input.sessionId);
+    return session
+      .view(input.lane ?? DEFAULT_LANE)
+      .appendCustomEntry(input.customType, input.data);
+  }
+
   /**
    * Freezes the runtime binding, admits the Pi operation, then materializes its
    * initial messages. No provider or tool is invoked.

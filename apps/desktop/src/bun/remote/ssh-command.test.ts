@@ -14,6 +14,8 @@ import path from "node:path";
 
 import type { SshRemoteRuntimeConfig } from "./ssh-bootstrap-config";
 import {
+  buildRemoteAcpArgs,
+  buildRemoteAcpCommand,
   buildRemoteServerCommand,
   buildRemoteServerArgs,
   buildSourceRemoteServerArgs,
@@ -109,6 +111,24 @@ describe("ssh command builders", () => {
     });
     expect(forcedTtyArgs).toContain("-tt");
     expect(forcedTtyArgs).not.toContain("-T");
+  });
+
+  test("builds direct ACP stdio SSH without a tunnel or TTY", () => {
+    expect(buildRemoteAcpCommand()).toBe("exec llm-space acp");
+    expect(buildRemoteAcpCommand("~/Agent Project")).toBe(
+      'exec llm-space acp --project "$HOME"/'.concat("'Agent Project'")
+    );
+    const args = buildRemoteAcpArgs({
+      config: SERVER_TTY_CONFIG,
+      projectRoot: "/srv/Agent Project",
+    });
+    expect(args.at(-2)).toBe("tty-probe");
+    expect(args.at(-1)).toBe(
+      "exec llm-space acp --project '/srv/Agent Project'"
+    );
+    expect(args.indexOf("-T")).toBeGreaterThan(args.indexOf("-tt"));
+    expect(args).not.toContain("-L");
+    expect(args.join(" ")).not.toContain("llm-space-server");
   });
 
   test("keeps the packaged runtime token out of local and remote argv", () => {

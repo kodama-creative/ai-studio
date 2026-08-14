@@ -1,63 +1,31 @@
-import type { TokenResult } from "@llm-space/agent/connections";
-import type { SandboxSession } from "@llm-space/agent/sandbox";
-import type { SkillHandle } from "@llm-space/agent/skills";
+import type { TokenResult } from "../connections";
+import type { SandboxSession } from "../sandbox";
+import type { SkillHandle } from "../skills";
 import type {
   ToolAuthOptions,
   ToolAuthProvider,
   ToolContext,
-} from "@llm-space/agent/tools";
+} from "../tools";
 
 export interface SandboxService {
-  /** Return the durable workspace associated with one Pi-compatible Session. */
+  /** Returns the durable workspace associated with one Pi Session. */
   getOrCreate(input: {
     readonly agentId: string;
     readonly sessionId: string;
     readonly signal: AbortSignal;
   }): Promise<SandboxSession>;
-  /** Release resources after a Session is explicitly removed or reset. */
   disposeSession?(sessionId: string): Promise<void>;
-  /** Release process-scoped backend resources. */
   close?(): Promise<void>;
 }
 
 export interface SkillService {
-  /** Resolve a Skill explicitly mounted by the loaded Agent. */
+  /** Resolves one Skill explicitly mounted by the loaded Agent. */
   resolve(input: {
     readonly agentId: string;
     readonly sessionId: string;
     readonly identifier: string;
   }): SkillHandle;
-  /** Release process-scoped Skill resources. */
   close?(): Promise<void>;
-}
-
-export interface AuthorizationService {
-  /** Return a usable token, or reject with a host-specific auth challenge. */
-  getToken(
-    provider: ToolAuthProvider,
-    options: ToolAuthOptions | undefined,
-    context: ToolRuntimeContext
-  ): Promise<TokenResult>;
-  /** Persist or surface an authorization challenge, then interrupt execution. */
-  requireAuth(
-    provider: ToolAuthProvider,
-    options: ToolAuthOptions | undefined,
-    context: ToolRuntimeContext
-  ): never;
-  /** Release process-scoped authorization resources. */
-  close?(): Promise<void>;
-}
-
-export interface ConnectionService {
-  /** Release process-scoped MCP/OpenAPI connections. */
-  close(): Promise<void>;
-}
-
-export interface RuntimeServices {
-  readonly authorization?: AuthorizationService;
-  readonly connections?: ConnectionService;
-  readonly sandbox?: SandboxService;
-  readonly skills?: SkillService;
 }
 
 export interface ToolRuntimeContext {
@@ -66,7 +34,33 @@ export interface ToolRuntimeContext {
   readonly signal: AbortSignal;
 }
 
-/** Build the stable Agent ToolContext from explicitly injected host services. */
+export interface AuthorizationService {
+  getToken(
+    provider: ToolAuthProvider,
+    options: ToolAuthOptions | undefined,
+    context: ToolRuntimeContext
+  ): Promise<TokenResult>;
+  requireAuth(
+    provider: ToolAuthProvider,
+    options: ToolAuthOptions | undefined,
+    context: ToolRuntimeContext
+  ): never;
+  close?(): Promise<void>;
+}
+
+export interface ConnectionService {
+  close(): Promise<void>;
+}
+
+/** Host-owned capabilities available to authored Agent tools. */
+export interface RuntimeServices {
+  readonly authorization?: AuthorizationService;
+  readonly connections?: ConnectionService;
+  readonly sandbox?: SandboxService;
+  readonly skills?: SkillService;
+}
+
+/** Builds the authored ToolContext from explicitly injected host services. */
 export function createRuntimeToolContext(
   services: RuntimeServices,
   context: ToolRuntimeContext
@@ -123,7 +117,7 @@ export function createRuntimeToolContext(
   };
 }
 
-/** Close each distinct process-scoped runtime service once. */
+/** Closes each distinct process-scoped host service once. */
 export async function closeRuntimeServices(
   services: RuntimeServices
 ): Promise<void> {

@@ -738,7 +738,10 @@ writes and recover entirely from Pi Session.
 
 #### Phase 5: App/CLI cutover and retirement
 
-Status: pending.
+Status: implemented. App Session is now a Pi-backed facade; CLI `exec` and
+`acp` share one App/Pi runtime and database; SSH transports the standard ACP
+NDJSON stdio endpoint directly; the old Engine/Engine-Pi packages, composition,
+and stores have been removed.
 
 - Replace App model Session projection with Pi-backed facade.
 - Route CLI through the shared runtime, expose ACP v2 over standard NDJSON

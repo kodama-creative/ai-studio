@@ -143,7 +143,7 @@ export interface ThreadState {
   activeRunId: string | null;
   /** Auto-executing tool calls for in-flight UI feedback; never persisted. */
   executingToolCallIds: string[];
-  /** Engine-backed tool outputs are checkpoint-owned and cannot be edited locally. */
+  /** Runtime-owned tool outputs are durable and cannot be edited locally. */
   toolCallOutputsReadonly: boolean;
   /** The host can execute function-tool calls that are only stubs in the UI model. */
   externalToolExecutionAvailable: boolean;

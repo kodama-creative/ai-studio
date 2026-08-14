@@ -1,29 +1,34 @@
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
-import type { Models } from "@earendil-works/pi-ai";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { Models, Tool as PiTool } from "@earendil-works/pi-ai";
+import type { PiAcpSessionBackend } from "@llm-space/acp";
 import { loadAgent } from "@llm-space/agent/loader";
-import type { Message } from "@llm-space/core";
 import {
   closeRuntimeServices,
-  createAgentEngine,
   createRuntimeToolContext,
-  executableAgent,
   resolveAgentGeneration,
-  type ExecutableAgent,
-  type Run,
-  type RunEventCursor,
-  type RunFrame,
   type RuntimeServices,
-  type ThreadState,
-} from "@llm-space/engine";
-import { createSqliteEngineStore } from "@llm-space/engine/storage/sqlite";
+} from "@llm-space/agent/runtime";
 import {
-  createPiRunExecutor,
+  BunSqliteRuntimeBindingStore,
+  BunSqliteSessionRepository,
+  PiAssistantExecutor,
+  StudioPiSessionRuntime,
+  runtimeTool,
   type PiProviderConnection,
   type PiProviderConnectionInput,
-} from "@llm-space/engine-pi";
+  type RuntimeBinding,
+  type RuntimeTool,
+} from "@llm-space/pi-runtime";
 
-import type { Session, SessionMessage, Task } from "./domain";
+import {
+  APP_PI_RUNTIME_FORMAT_VERSION,
+  type AgentExecutionResult,
+  type Session,
+  type SessionEntry,
+  type Task,
+} from "./domain";
 import {
   createSessionApplication,
   type SessionApplication,
@@ -31,13 +36,9 @@ import {
 import { createSqliteApplicationStore } from "./storage/sqlite";
 
 export interface CreateAgentOptions {
-  /** Source project or built Bundle root understood by the Agent Loader. */
   readonly projectRoot: string;
-  /** Host-owned directory; Agent runtime data is never written into source. */
   readonly dataRoot: string;
-  /** Pi model registry prepared by the host from its config and credentials. */
   readonly models: Models | (() => Models | Promise<Models>);
-  /** Resolve host-owned provider settings without storing secrets in Runs. */
   readonly resolveConnection?: (
     input: PiProviderConnectionInput
   ) => PiProviderConnection | Promise<PiProviderConnection>;
@@ -46,142 +47,136 @@ export interface CreateAgentOptions {
   readonly generateId?: (prefix: string) => string;
 }
 
-export interface StartAgentRunInput {
-  readonly message: Extract<Message, { role: "user" }>;
+export interface ExecAgentInput {
+  readonly messages: readonly AgentMessage[];
   readonly operationId?: string;
   readonly taskId?: string;
+  readonly mode?: "step" | "continue";
+  readonly signal?: AbortSignal;
 }
 
-/** Project-scoped end-application facade over SessionApplication and Engine. */
+/** Project-scoped Pi Session application used by CLI and ACP hosts. */
 export interface Agent {
   readonly agentId: string;
+  readonly acpBackend: PiAcpSessionBackend;
   createSession(input?: {
-    readonly title?: string;
+    readonly sessionId?: string;
+    readonly name?: string;
     readonly projectId?: string;
-    readonly initialThreadState?: ThreadState;
   }): Promise<Session>;
   getSession(sessionId: string): Promise<Session | undefined>;
   listSessions(): Promise<readonly Session[]>;
-  listMessages(sessionId: string): Promise<readonly SessionMessage[]>;
+  listEntries(sessionId: string): Promise<readonly SessionEntry[]>;
+  listOperations(
+    sessionId: string
+  ): ReturnType<SessionApplication["listOperations"]>;
   createTask(input: {
     readonly sessionId: string;
     readonly title: string;
   }): Promise<Task>;
   listTasks(sessionId: string): Promise<readonly Task[]>;
-  listRuns(sessionId: string): Promise<readonly Run[]>;
-  startRun(sessionId: string, input: StartAgentRunInput): Promise<Run>;
-  retryTaskRun(input: {
-    readonly sessionId: string;
-    readonly taskId: string;
-    readonly runId: string;
-    readonly operationId?: string;
-  }): Promise<Run>;
-  cancelRun(sessionId: string, runId: string): Promise<void>;
-  events(
-    sessionId: string,
-    runId: string,
-    cursor?: RunEventCursor
-  ): AsyncIterable<RunFrame>;
+  exec(sessionId: string, input: ExecAgentInput): Promise<AgentExecutionResult>;
+  abort(sessionId: string): Promise<void>;
   close(): Promise<void>;
 }
 
-/**
- * Create one project-scoped Agent application.
- *
- * Each new Run reloads current project code. Engine still receives one exact
- * executable snapshot, so code already selected for a running Run is stable.
- */
+/** Composes App metadata, Pi Session, and bindings over one SQLite file. */
 export async function createAgent(options: CreateAgentOptions): Promise<Agent> {
   const first = await _loadExecutable(options.projectRoot);
-  const executableRef = { current: first };
   const databasePath = join(options.dataRoot, "agent.sqlite");
-  const engineStore = createSqliteEngineStore({ path: databasePath });
-  let engine: ReturnType<typeof createAgentEngine>;
+  const repository = new BunSqliteSessionRepository({ path: databasePath });
+  let bindings: BunSqliteRuntimeBindingStore;
   try {
-    engine = createAgentEngine({
-      store: engineStore,
-      runExecutor: createPiRunExecutor({
-        models: options.models,
-        ...(options.resolveConnection === undefined
-          ? {}
-          : { resolveConnection: options.resolveConnection }),
-      }),
-      agentResolver: {
-        async resolve(snapshot) {
-          if (_sameSnapshot(executableRef.current, snapshot)) {
-            return executableRef.current;
-          }
-          const loaded = await _loadExecutable(options.projectRoot);
-          executableRef.current = loaded;
-          return loaded;
-        },
-      },
-      createToolContext: ({ agent, execution, signal }) =>
-        createRuntimeToolContext(options.runtimeServices, {
-          agentId: agent.agentId,
-          execution,
-          signal,
-        }),
-      ...(options.clock === undefined ? {} : { clock: options.clock }),
-      ...(options.generateId === undefined
-        ? {}
-        : { generateId: options.generateId }),
-    });
+    bindings = new BunSqliteRuntimeBindingStore({ path: databasePath });
   } catch (error) {
-    engineStore.close();
+    await repository.close();
     throw error;
   }
+  const resolveCurrentAgent = async () => {
+    const current = await _loadExecutable(options.projectRoot);
+    if (current.agentId !== first.agentId) {
+      throw new Error(
+        `Agent identity changed from "${first.agentId}" to "${current.agentId}" while the App was open.`
+      );
+    }
+    return current;
+  };
+  const resolveTools = async (): Promise<ReadonlyMap<string, RuntimeTool>> =>
+    (await resolveCurrentAgent()).tools;
+  const runtime = new StudioPiSessionRuntime({
+    repository,
+    bindings,
+    assistantExecutor: new PiAssistantExecutor({
+      models: options.models,
+      ...(options.resolveConnection === undefined
+        ? {}
+        : { resolveConnection: options.resolveConnection }),
+      resolveTools: _modelTools,
+    }),
+    resolveTools,
+    createToolContext: ({ execution, signal }) =>
+      createRuntimeToolContext(options.runtimeServices, {
+        agentId: first.agentId,
+        execution,
+        signal,
+      }),
+  });
   let store: ReturnType<typeof createSqliteApplicationStore>;
   try {
     store = createSqliteApplicationStore({ path: databasePath });
   } catch (error) {
-    await engine.close();
+    try {
+      await runtime.close();
+    } finally {
+      try {
+        bindings.close();
+      } finally {
+        await repository.close();
+      }
+    }
     throw error;
   }
-  let application: SessionApplication;
-  try {
-    application = createSessionApplication({
-      engine,
-      store,
-      ...(options.clock === undefined ? {} : { clock: options.clock }),
-      ...(options.generateId === undefined
-        ? {}
-        : { generateId: options.generateId }),
-    });
-  } catch (error) {
-    store.close();
-    await engine.close();
-    throw error;
-  }
-  return new AgentImpl(options, application, first, executableRef);
+  const application = createSessionApplication({
+    runtime,
+    store,
+    agentId: first.agentId,
+    resolveBinding: async () => (await resolveCurrentAgent()).binding,
+    ...(options.clock === undefined ? {} : { clock: options.clock }),
+    ...(options.generateId === undefined
+      ? {}
+      : { generateId: options.generateId }),
+  });
+  const backend = _acpBackend(application, runtime, options.projectRoot);
+  return new AgentImpl(
+    options,
+    first.agentId,
+    backend,
+    application,
+    bindings,
+    repository
+  );
 }
 
 class AgentImpl implements Agent {
-  readonly agentId: string;
-  private _closed = false;
   private _closePromise: Promise<void> | undefined;
 
   constructor(
     private readonly _options: CreateAgentOptions,
+    readonly agentId: string,
+    readonly acpBackend: PiAcpSessionBackend,
     private readonly _application: SessionApplication,
-    first: ExecutableAgent,
-    private readonly _executableRef: { current: ExecutableAgent }
-  ) {
-    this.agentId = first.snapshot.agentId;
-  }
+    private readonly _bindings: BunSqliteRuntimeBindingStore,
+    private readonly _repository: BunSqliteSessionRepository
+  ) {}
 
-  /** Create a Session whose default continuation Thread is owned by App. */
   createSession(
     input: {
-      readonly title?: string;
+      readonly sessionId?: string;
+      readonly name?: string;
       readonly projectId?: string;
-      readonly initialThreadState?: ThreadState;
     } = {}
   ): Promise<Session> {
-    return this._application.createSession({
-      ...input,
-      agentId: this.agentId,
-    });
+    return this._application.createSession(input);
   }
 
   getSession(sessionId: string): Promise<Session | undefined> {
@@ -192,8 +187,14 @@ class AgentImpl implements Agent {
     return this._application.listSessions();
   }
 
-  listMessages(sessionId: string): Promise<readonly SessionMessage[]> {
-    return this._application.listMessages(sessionId);
+  listEntries(sessionId: string): Promise<readonly SessionEntry[]> {
+    return this._application.listEntries(sessionId);
+  }
+
+  listOperations(
+    sessionId: string
+  ): ReturnType<SessionApplication["listOperations"]> {
+    return this._application.listOperations(sessionId);
   }
 
   createTask(input: {
@@ -207,49 +208,12 @@ class AgentImpl implements Agent {
     return this._application.listTasks(sessionId);
   }
 
-  listRuns(sessionId: string): Promise<readonly Run[]> {
-    return this._application.listRuns(sessionId);
+  exec(sessionId: string, input: ExecAgentInput): Promise<AgentExecutionResult> {
+    return this._application.execute({ sessionId, ...input });
   }
 
-  /** Reload current Agent code before every user-triggered Run. */
-  async startRun(sessionId: string, input: StartAgentRunInput): Promise<Run> {
-    const executable = await _loadExecutable(this._options.projectRoot);
-    if (executable.snapshot.agentId !== this.agentId) {
-      throw new Error(
-        `Agent Project changed identity from "${this.agentId}" to "${executable.snapshot.agentId}".`
-      );
-    }
-    this._executableRef.current = executable;
-    return this._application.startRun({
-      sessionId,
-      message: input.message,
-      agentSnapshot: executable.snapshot,
-      ...(input.taskId === undefined ? {} : { taskId: input.taskId }),
-      ...(input.operationId === undefined
-        ? {}
-        : { operationId: input.operationId }),
-    });
-  }
-
-  retryTaskRun(input: {
-    readonly sessionId: string;
-    readonly taskId: string;
-    readonly runId: string;
-    readonly operationId?: string;
-  }): Promise<Run> {
-    return this._application.retryTaskRun(input);
-  }
-
-  cancelRun(sessionId: string, runId: string): Promise<void> {
-    return this._application.cancelRun(sessionId, runId);
-  }
-
-  events(
-    sessionId: string,
-    runId: string,
-    cursor?: RunEventCursor
-  ): AsyncIterable<RunFrame> {
-    return this._application.streamRun(sessionId, runId, cursor);
+  abort(sessionId: string): Promise<void> {
+    return this._application.abort(sessionId);
   }
 
   close(): Promise<void> {
@@ -257,34 +221,168 @@ class AgentImpl implements Agent {
     return this._closePromise;
   }
 
-  /** Stop durable execution before releasing host runtime services. */
   private async _close(): Promise<void> {
-    if (this._closed) return;
-    this._closed = true;
     try {
       await this._application.close();
     } finally {
-      await closeRuntimeServices(this._options.runtimeServices);
+      try {
+        this._bindings.close();
+      } finally {
+        try {
+          await this._repository.close();
+        } finally {
+          await closeRuntimeServices(this._options.runtimeServices);
+        }
+      }
     }
   }
 }
 
-/** Resolve one source or Bundle directory into Engine's executable contract. */
-async function _loadExecutable(projectRoot: string): Promise<ExecutableAgent> {
-  const executable = executableAgent(
-    await resolveAgentGeneration(await loadAgent({ startPath: projectRoot }))
+interface LoadedExecutable {
+  readonly agentId: string;
+  readonly binding: RuntimeBinding;
+  readonly tools: ReadonlyMap<string, RuntimeTool>;
+}
+
+/** Loads current project source into one immutable Pi operation binding. */
+async function _loadExecutable(projectRoot: string): Promise<LoadedExecutable> {
+  const definition = await resolveAgentGeneration(
+    await loadAgent({ startPath: projectRoot })
   );
+  if (typeof definition.model !== "string") {
+    throw new Error(
+      `Agent "${definition.agentId}" requires a static provider/model string.`
+    );
+  }
+  const separator = definition.model.indexOf("/");
+  if (separator <= 0 || separator === definition.model.length - 1) {
+    throw new Error(
+      `Pi model "${definition.model}" must use provider/model format.`
+    );
+  }
+  const tools = new Map<string, RuntimeTool>();
+  const frozenTools = [...definition.tools.entries()].map(([name, tool]) => {
+    const implementationId = `source:${definition.generationId}:${name}`;
+    tools.set(
+      name,
+      runtimeTool(tool.definition, {
+        implementationId,
+      })
+    );
+    return {
+      name,
+      description: tool.model.description,
+      inputSchema: tool.model.inputSchema,
+      ...(tool.model.outputSchema === undefined
+        ? {}
+        : { outputSchema: tool.model.outputSchema }),
+      implementationId,
+      replay: tool.definition.replay ?? "never",
+      hostBinding: {
+        type: "app.project-tool",
+        agentSpecId: definition.agentId,
+        sourceRevision: definition.generationId,
+        toolName: name,
+      },
+    };
+  });
   return {
-    ...executable,
-    // Development has one current source generation. Exact full-snapshot
-    // comparison still rejects a paused Run after authored code changes.
-    snapshot: { ...executable.snapshot, generationId: "development" },
+    agentId: definition.agentId,
+    binding: {
+      formatVersion: APP_PI_RUNTIME_FORMAT_VERSION,
+      agent: {
+        agentSpecId: definition.agentId,
+        sourceRevision: definition.generationId,
+      },
+      model: {
+        provider: definition.model.slice(0, separator),
+        modelId: definition.model.slice(separator + 1),
+      },
+      systemPrompt: definition.instructions.join("\n\n"),
+      tools: frozenTools,
+    },
+    tools,
   };
 }
 
-function _sameSnapshot(
-  executable: ExecutableAgent,
-  snapshot: ExecutableAgent["snapshot"]
-): boolean {
-  return JSON.stringify(executable.snapshot) === JSON.stringify(snapshot);
+/** Projects frozen tool schemas to Pi's model-visible contract. */
+function _modelTools(binding: RuntimeBinding): PiTool[] {
+  return binding.tools.map((tool) => {
+    if (tool.description === undefined || tool.inputSchema === undefined) {
+      throw new Error(
+        `Frozen tool "${tool.name}" is missing its model-visible schema.`
+      );
+    }
+    return {
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.inputSchema as never,
+    };
+  });
+}
+
+/** Adapts the App facade to the transport-neutral official ACP edge. */
+function _acpBackend(
+  application: SessionApplication,
+  runtime: StudioPiSessionRuntime,
+  projectRoot: string
+): PiAcpSessionBackend {
+  const cwd = resolve(projectRoot);
+  return {
+    async create(request) {
+      if (resolve(request.cwd) !== cwd) {
+        throw new Error(`ACP Session cwd must be the Agent Project root: ${cwd}`);
+      }
+      const session = await application.createSession();
+      return runtime.open({ sessionId: session.sessionId, lane: session.lane });
+    },
+    async list(request) {
+      if (request.cursor !== undefined && request.cursor !== null) {
+        throw new Error("ACP Session list cursor is invalid for this endpoint.");
+      }
+      if (
+        request.cwd !== undefined &&
+        request.cwd !== null &&
+        resolve(request.cwd) !== cwd
+      ) {
+        return { sessions: [] };
+      }
+      const sessions = await application.listSessions();
+      return {
+        sessions: sessions.map((session) => ({
+          sessionId: session.sessionId,
+          cwd,
+          title: session.name,
+          updatedAt: new Date(session.updatedAt).toISOString(),
+        })),
+      };
+    },
+    inspect: (request) => application.readCommitted(request),
+    async prompt(input) {
+      const controls = input.meta?.["llm-space.dev"];
+      const mode =
+        typeof controls === "object" &&
+        controls !== null &&
+        !Array.isArray(controls) &&
+        (controls as Record<string, unknown>).mode === "step"
+          ? "step"
+          : "continue";
+      const result = await application.execute({
+        sessionId: input.sessionId,
+        messages: input.messages,
+        mode,
+        signal: input.signal,
+      });
+      return result.snapshot;
+    },
+    step: (input) => application.step(input),
+    continue: (input) => application.continue(input),
+    async abort(input) {
+      await application.abort(input.sessionId);
+      return runtime.open(input);
+    },
+    async closeSession(input) {
+      await application.abort(input.sessionId);
+    },
+  };
 }

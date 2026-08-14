@@ -1,77 +1,76 @@
-import type { Message } from "@llm-space/core";
+import { SessionError, type AgentMessage } from "@earendil-works/pi-agent-core";
 import type {
-  AgentEngine,
-  AgentSnapshot,
-  Run,
-  RunEventCursor,
-  RunFrame,
-  ThreadState,
-} from "@llm-space/engine";
+  PiAcpContinueRequest,
+  PiAcpSnapshotRequest,
+  PiAcpStepRequest,
+} from "@llm-space/acp";
+import type {
+  PiOperationSnapshot,
+  PiSessionSnapshot,
+  RuntimeBinding,
+  StudioPiSessionRuntime,
+} from "@llm-space/pi-runtime";
 
-import type {
-  ApplicationRunIntent,
-  ModelSessionMessage,
-  Session,
-  SessionMessage,
-  SessionRunLink,
-  SystemSessionMessage,
-  Task,
-  UserActionSessionMessage,
+import {
+  APP_PI_LANE,
+  APP_PI_RUNTIME_FORMAT_VERSION,
+  type AgentExecutionResult,
+  type AppCommandReceipt,
+  type AppSessionRecord,
+  type Session,
+  type SessionEntry,
+  type Task,
 } from "./domain";
-import type { ApplicationStore, ApplicationStoreTransaction } from "./storage";
+import type { ApplicationStore } from "./storage";
 
 export interface CreateSessionApplicationOptions {
-  readonly engine: AgentEngine;
+  readonly runtime: StudioPiSessionRuntime;
   readonly store: ApplicationStore;
+  readonly agentId: string;
+  readonly resolveBinding: () => RuntimeBinding | Promise<RuntimeBinding>;
   readonly clock?: () => number;
   readonly generateId?: (prefix: string) => string;
 }
 
 export interface SessionApplication {
-  createSession(input: {
-    readonly title?: string;
+  createSession(input?: {
+    readonly sessionId?: string;
+    readonly name?: string;
     readonly projectId?: string;
-    readonly agentId: string;
-    readonly initialThreadState?: ThreadState;
   }): Promise<Session>;
   getSession(sessionId: string): Promise<Session | undefined>;
   listSessions(): Promise<readonly Session[]>;
-  listMessages(sessionId: string): Promise<readonly SessionMessage[]>;
+  listEntries(sessionId: string): Promise<readonly SessionEntry[]>;
+  listOperations(sessionId: string): Promise<readonly PiOperationSnapshot[]>;
+  readCommitted(
+    input: PiAcpSnapshotRequest
+  ): ReturnType<StudioPiSessionRuntime["readCommitted"]>;
+  step(input: PiAcpStepRequest): Promise<PiSessionSnapshot>;
+  continue(input: PiAcpContinueRequest): Promise<PiSessionSnapshot>;
   recordSystemMessage(input: {
     readonly sessionId: string;
     readonly code: string;
     readonly text: string;
-  }): Promise<SystemSessionMessage>;
+  }): Promise<string>;
   recordUserAction(input: {
     readonly sessionId: string;
     readonly action: string;
     readonly detail?: string;
-  }): Promise<UserActionSessionMessage>;
+  }): Promise<string>;
   createTask(input: {
     readonly sessionId: string;
     readonly title: string;
   }): Promise<Task>;
   listTasks(sessionId: string): Promise<readonly Task[]>;
-  listRuns(sessionId: string): Promise<readonly Run[]>;
-  startRun(input: {
+  execute(input: {
     readonly sessionId: string;
-    readonly message: Extract<Message, { role: "user" }>;
-    readonly agentSnapshot: AgentSnapshot;
+    readonly messages: readonly AgentMessage[];
+    readonly operationId?: string;
     readonly taskId?: string;
-    readonly operationId?: string;
-  }): Promise<Run>;
-  retryTaskRun(input: {
-    readonly sessionId: string;
-    readonly taskId: string;
-    readonly runId: string;
-    readonly operationId?: string;
-  }): Promise<Run>;
-  cancelRun(sessionId: string, runId: string): Promise<void>;
-  streamRun(
-    sessionId: string,
-    runId: string,
-    cursor?: RunEventCursor
-  ): AsyncIterable<RunFrame>;
+    readonly mode?: "step" | "continue";
+    readonly signal?: AbortSignal;
+  }): Promise<AgentExecutionResult>;
+  abort(sessionId: string): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -84,8 +83,6 @@ export function createSessionApplication(
 class SessionApplicationImpl implements SessionApplication {
   private readonly _clock: () => number;
   private readonly _generateId: (prefix: string) => string;
-  private readonly _recovery: Promise<void>;
-  private readonly _projections = new Map<string, Promise<void>>();
   private _closed = false;
   private _closePromise: Promise<void> | undefined;
 
@@ -94,630 +91,571 @@ class SessionApplicationImpl implements SessionApplication {
     this._generateId =
       _options.generateId ??
       ((prefix) => `${prefix}_${crypto.randomUUID().replaceAll("-", "")}`);
-    this._recovery = Promise.resolve().then(() => this._recover());
-    void this._recovery.catch(() => undefined);
   }
 
-  async createSession(input: {
-    readonly title?: string;
-    readonly projectId?: string;
-    readonly agentId: string;
-    readonly initialThreadState?: ThreadState;
-  }): Promise<Session> {
-    await this._recovery;
-    const thread = await this._options.engine.createThread({
-      ...(input.initialThreadState === undefined
-        ? {}
-        : { initialState: input.initialThreadState }),
-    });
+  /** Creates Pi first, then reconciles the App reference using its stable id. */
+  async createSession(
+    input: {
+      readonly sessionId?: string;
+      readonly name?: string;
+      readonly projectId?: string;
+    } = {}
+  ): Promise<Session> {
+    this._requireOpen();
+    const sessionId = input.sessionId ?? this._generateId("session");
+    const existing = this._options.store.transaction((tx) =>
+      tx.getSession(sessionId)
+    );
+    if (existing !== undefined) {
+      this._assertRecordOwner(existing);
+      if (existing.projectId !== input.projectId) {
+        throw new Error(
+          `Session "${sessionId}" was already created for another Project.`
+        );
+      }
+      return this._compose(existing);
+    }
+
+    let snapshot;
+    let created = false;
+    try {
+      snapshot = await this._options.runtime.createSession({ id: sessionId });
+      created = true;
+    } catch (error) {
+      if (!(error instanceof SessionError) || error.code !== "already_exists") {
+        throw error;
+      }
+      snapshot = await this._options.runtime.open({
+        sessionId,
+        lane: APP_PI_LANE,
+      });
+    }
+    const name = input.name?.trim() || "New Session";
+    const currentName = await this._options.runtime.getSessionName(sessionId);
+    if (!created && currentName !== undefined && currentName !== name) {
+      throw new Error(
+        `Pi Session "${sessionId}" was already created with another name.`
+      );
+    }
+    if (currentName !== name) {
+      await this._options.runtime.setSessionName(sessionId, name);
+    }
     const now = this._clock();
-    const session: Session = {
-      schemaVersion: 1,
-      id: this._generateId("session"),
+    const record: AppSessionRecord = {
+      schemaVersion: 2,
+      sessionId,
       ...(input.projectId === undefined ? {} : { projectId: input.projectId }),
-      threadId: thread.id,
-      agentId: input.agentId,
-      title: input.title?.trim() || "New Session",
+      agentId: this._options.agentId,
       status: "active",
       createdAt: now,
       updatedAt: now,
     };
-    this._options.store.transaction((tx) => tx.insertSession(session));
-    return structuredClone(session);
+    this._options.store.transaction((tx) => tx.insertSession(record));
+    return this._compose(record, snapshot, name);
   }
 
   async getSession(sessionId: string): Promise<Session | undefined> {
-    await this._recovery;
-    return this._options.store.transaction((tx) => tx.getSession(sessionId));
+    this._requireOpen();
+    const record = this._options.store.transaction((tx) =>
+      tx.getSession(sessionId)
+    );
+    if (record === undefined) return undefined;
+    this._assertRecordOwner(record);
+    return this._compose(record);
   }
 
   async listSessions(): Promise<readonly Session[]> {
-    await this._recovery;
-    return this._options.store.transaction((tx) => tx.listSessions());
+    this._requireOpen();
+    const records = this._options.store.transaction((tx) => tx.listSessions());
+    for (const record of records) this._assertRecordOwner(record);
+    return Promise.all(records.map((record) => this._compose(record)));
   }
 
-  async listMessages(sessionId: string): Promise<readonly SessionMessage[]> {
-    await this._recovery;
-    return this._options.store.transaction((tx) =>
-      tx.listSessionMessages(sessionId)
+  /** Returns only Pi message/custom entries on the active branch. */
+  async listEntries(sessionId: string): Promise<readonly SessionEntry[]> {
+    this._requireRecord(sessionId);
+    return (
+      await this._options.runtime.listBranchEntries({
+        sessionId,
+        lane: APP_PI_LANE,
+      })
+    ).flatMap((entry) =>
+      entry.type === "message" || entry.type === "custom" ? [entry] : []
     );
   }
 
+  listOperations(sessionId: string): Promise<readonly PiOperationSnapshot[]> {
+    this._requireRecord(sessionId);
+    return this._options.runtime.listOperations({
+      sessionId,
+      lane: APP_PI_LANE,
+    });
+  }
+
+  readCommitted(
+    input: PiAcpSnapshotRequest
+  ): ReturnType<StudioPiSessionRuntime["readCommitted"]> {
+    this._requireRecord(input.sessionId);
+    return this._options.runtime.readCommitted(input);
+  }
+
+  step(input: PiAcpStepRequest): Promise<PiSessionSnapshot> {
+    this._requireRecord(input.sessionId);
+    return this._debugCommand("step", input, () =>
+      this._options.runtime.step({
+        sessionId: input.sessionId,
+        ...(input.lane === undefined ? {} : { lane: input.lane }),
+        expectedActionId: input.expectedActionId,
+        kind: input.kind,
+      })
+    );
+  }
+
+  continue(input: PiAcpContinueRequest): Promise<PiSessionSnapshot> {
+    this._requireRecord(input.sessionId);
+    return this._debugCommand("continue", input, () =>
+      this._options.runtime.continue({
+        sessionId: input.sessionId,
+        ...(input.lane === undefined ? {} : { lane: input.lane }),
+      })
+    );
+  }
+
+  /** Persists the system timeline directly as a Pi CustomEntry. */
   async recordSystemMessage(input: {
     readonly sessionId: string;
     readonly code: string;
     readonly text: string;
-  }): Promise<SystemSessionMessage> {
-    await this._recovery;
-    const message: SystemSessionMessage = {
-      schemaVersion: 1,
-      id: this._generateId("message"),
+  }): Promise<string> {
+    this._requireRecord(input.sessionId);
+    const id = await this._options.runtime.appendCustomEntry({
       sessionId: input.sessionId,
-      type: "system",
-      code: input.code,
-      text: input.text,
-      createdAt: this._clock(),
-    };
-    this._options.store.transaction((tx) => {
-      _requireSession(tx.getSession(input.sessionId), input.sessionId);
-      tx.upsertSessionMessage(message);
+      lane: APP_PI_LANE,
+      customType: "llm-space.system",
+      data: {
+        schemaVersion: 1,
+        code: input.code,
+        text: input.text,
+        createdAt: this._clock(),
+      },
     });
-    return structuredClone(message);
+    this._touchSession(input.sessionId);
+    return id;
   }
 
+  /** Persists auditable user activity directly as a Pi CustomEntry. */
   async recordUserAction(input: {
     readonly sessionId: string;
     readonly action: string;
     readonly detail?: string;
-  }): Promise<UserActionSessionMessage> {
-    await this._recovery;
-    const message: UserActionSessionMessage = {
-      schemaVersion: 1,
-      id: this._generateId("message"),
+  }): Promise<string> {
+    this._requireRecord(input.sessionId);
+    const id = await this._options.runtime.appendCustomEntry({
       sessionId: input.sessionId,
-      type: "user-action",
-      action: input.action,
-      ...(input.detail === undefined ? {} : { detail: input.detail }),
-      createdAt: this._clock(),
-    };
-    this._options.store.transaction((tx) => {
-      _requireSession(tx.getSession(input.sessionId), input.sessionId);
-      tx.upsertSessionMessage(message);
+      lane: APP_PI_LANE,
+      customType: "llm-space.user-action",
+      data: {
+        schemaVersion: 1,
+        action: input.action,
+        ...(input.detail === undefined ? {} : { detail: input.detail }),
+        createdAt: this._clock(),
+      },
     });
-    return structuredClone(message);
+    this._touchSession(input.sessionId);
+    return id;
   }
 
-  async createTask(input: {
+  createTask(input: {
     readonly sessionId: string;
     readonly title: string;
   }): Promise<Task> {
-    await this._recovery;
+    this._requireRecord(input.sessionId);
     const now = this._clock();
-    const task = this._options.store.transaction((tx) => {
-      _requireSession(tx.getSession(input.sessionId), input.sessionId);
-      const value: Task = {
-        schemaVersion: 1,
-        id: this._generateId("task"),
-        sessionId: input.sessionId,
-        title: input.title.trim() || "New Task",
-        status: "pending",
-        createdAt: now,
-        updatedAt: now,
-      };
-      tx.insertTask(value);
-      return value;
-    });
-    return structuredClone(task);
+    const task: Task = {
+      schemaVersion: 2,
+      id: this._generateId("task"),
+      sessionId: input.sessionId,
+      title: input.title.trim() || "New Task",
+      status: "pending",
+      createdAt: now,
+      updatedAt: now,
+    };
+    this._options.store.transaction((tx) => tx.insertTask(task));
+    return Promise.resolve(structuredClone(task));
   }
 
-  async listTasks(sessionId: string): Promise<readonly Task[]> {
-    await this._recovery;
-    return this._options.store.transaction((tx) => tx.listTasks(sessionId));
-  }
-
-  async listRuns(sessionId: string): Promise<readonly Run[]> {
-    await this._recovery;
-    const links = this._options.store.transaction((tx) => {
-      _requireSession(tx.getSession(sessionId), sessionId);
-      return tx.listRunLinks(sessionId);
-    });
-    const runs = await Promise.all(
-      links.map((link) => this._options.engine.getRun(link.runId))
+  listTasks(sessionId: string): Promise<readonly Task[]> {
+    this._requireRecord(sessionId);
+    return Promise.resolve(
+      this._options.store.transaction((tx) => tx.listTasks(sessionId))
     );
-    return runs.filter((run): run is Run => run !== undefined);
   }
 
-  async startRun(input: {
+  /** Admits and drives one Pi operation; the final result is reconstructed from Pi. */
+  async execute(input: {
     readonly sessionId: string;
-    readonly message: Extract<Message, { role: "user" }>;
-    readonly agentSnapshot: AgentSnapshot;
+    readonly messages: readonly AgentMessage[];
+    readonly operationId?: string;
     readonly taskId?: string;
-    readonly operationId?: string;
-  }): Promise<Run> {
-    await this._recovery;
-    const session = this._options.store.transaction((tx) =>
-      _requireSession(tx.getSession(input.sessionId), input.sessionId)
+    readonly mode?: "step" | "continue";
+    readonly signal?: AbortSignal;
+  }): Promise<AgentExecutionResult> {
+    this._requireRecord(input.sessionId);
+    if (input.messages.length === 0) {
+      throw new Error("Agent execution requires at least one Pi message.");
+    }
+    if (input.taskId !== undefined) {
+      this._requireTask(input.taskId, input.sessionId);
+    }
+    input.signal?.throwIfAborted();
+    const operationId = input.operationId ?? this._generateId("operation");
+    const binding = await this._options.resolveBinding();
+    input.signal?.throwIfAborted();
+    let snapshot = await this._options.runtime.start({
+      operationId,
+      sessionId: input.sessionId,
+      lane: APP_PI_LANE,
+      messages: input.messages.map((message) => structuredClone(message)),
+      binding,
+    });
+    if (input.taskId !== undefined) {
+      this._setTaskOperation(input.taskId, input.sessionId, operationId);
+    }
+
+    const abort = () => {
+      void this._options.runtime.abort({
+        sessionId: input.sessionId,
+        lane: APP_PI_LANE,
+      });
+    };
+    input.signal?.addEventListener("abort", abort, { once: true });
+    try {
+      if (input.signal?.aborted) {
+        snapshot = await this._options.runtime.abort({
+          sessionId: input.sessionId,
+          lane: APP_PI_LANE,
+        });
+      } else if (input.mode === "step") {
+        if (snapshot.nextAction !== undefined) {
+          snapshot = await this._options.runtime.step({
+            sessionId: input.sessionId,
+            lane: APP_PI_LANE,
+            expectedActionId: snapshot.nextAction.id,
+            kind: snapshot.nextAction.kind,
+          });
+        }
+      } else {
+        snapshot = await this._options.runtime.continue({
+          sessionId: input.sessionId,
+          lane: APP_PI_LANE,
+        });
+      }
+    } catch (error) {
+      if (!input.signal?.aborted) {
+        this._projectTask(input.taskId, "failed");
+        throw error;
+      }
+      snapshot = await this._options.runtime.abort({
+        sessionId: input.sessionId,
+        lane: APP_PI_LANE,
+      });
+    } finally {
+      input.signal?.removeEventListener("abort", abort);
+    }
+
+    const operation = (
+      await this._options.runtime.listOperations({
+        sessionId: input.sessionId,
+        lane: APP_PI_LANE,
+      })
+    ).find((candidate) => candidate.operationId === operationId);
+    if (operation === undefined) {
+      throw new Error(`Pi operation "${operationId}" was not found.`);
+    }
+    this._projectTask(
+      input.taskId,
+      _taskStatusForOperation(operation.status)
     );
-    const operationId = input.operationId ?? this._generateId("operation");
-    const candidate: ApplicationRunIntent = {
-      schemaVersion: 1,
-      operationId,
-      sessionId: session.id,
-      ...(input.taskId === undefined ? {} : { taskId: input.taskId }),
-      type: "start",
-      message: structuredClone(input.message),
-      createdAt: this._clock(),
+    this._touchSession(input.sessionId);
+    return {
+      schemaVersion: 2,
+      sessionId: input.sessionId,
+      operation,
+      snapshot,
+      messages: structuredClone(snapshot.messages),
     };
-    const existingRun =
-      await this._options.engine.getRunByOperationId(operationId);
-    if (existingRun !== undefined) {
-      _assertStartRunMatches(existingRun, candidate, input.agentSnapshot);
-      const existingLink = this._options.store.transaction((tx) =>
-        tx.getRunLink(existingRun.id)
-      );
-      if (existingLink !== undefined) {
-        _assertRunLinkMatches(existingLink, candidate);
-        this._scheduleRunProjection(existingLink);
-        return existingRun;
-      }
-    }
-    const thread =
-      existingRun === undefined
-        ? await this._options.engine.getThread(session.threadId)
-        : undefined;
-    if (existingRun === undefined && thread === undefined) {
-      throw new Error(`Thread "${session.threadId}" was not found.`);
-    }
-    const intent = this._options.store.transaction((tx) => {
-      const current = _requireSession(
-        tx.getSession(input.sessionId),
-        input.sessionId
-      );
-      if (existingRun === undefined && current.threadId !== thread?.id) {
-        throw new Error(`Session "${current.id}" continuation Thread changed.`);
-      }
-      if (input.taskId !== undefined) {
-        _requireTask(tx.getTask(input.taskId), input.taskId, current.id);
-      }
-      return _insertRunIntent(tx, candidate);
+  }
+
+  /** Aborts the currently open Pi operation, if any. */
+  async abort(sessionId: string): Promise<void> {
+    this._requireRecord(sessionId);
+    const snapshot = await this._options.runtime.open({
+      sessionId,
+      lane: APP_PI_LANE,
     });
-    let run = existingRun;
-    if (run === undefined) {
-      try {
-        run = await this._options.engine.startRun({
-          threadId: thread!.id,
-          expectedHeadCheckpointId: thread!.headCheckpointId,
-          inputMessages: [input.message],
-          agentSnapshot: input.agentSnapshot,
-          operationId,
-        });
-      } catch (error) {
-        this._deleteRunIntent(operationId);
-        throw error;
+    if (snapshot.status !== "paused" && snapshot.status !== "suspended") {
+      return;
+    }
+    await this._options.runtime.abort({ sessionId, lane: APP_PI_LANE });
+    for (const task of this._options.store.transaction((tx) =>
+      tx.listTasks(sessionId)
+    )) {
+      if (task.operationId === snapshot.operationId) {
+        this._projectTask(task.id, "cancelled");
       }
     }
-    const link = this._finalizeRunIntent(intent, run);
-    this._scheduleRunProjection(link);
-    return run;
+    this._touchSession(sessionId);
   }
 
-  async retryTaskRun(input: {
-    readonly sessionId: string;
-    readonly taskId: string;
-    readonly runId: string;
-    readonly operationId?: string;
-  }): Promise<Run> {
-    await this._recovery;
-    const current = this._options.store.transaction((tx) => {
-      const session = _requireSession(
-        tx.getSession(input.sessionId),
-        input.sessionId
-      );
-      _requireTask(tx.getTask(input.taskId), input.taskId, session.id);
-      const link = tx.getRunLink(input.runId);
-      if (link?.sessionId !== session.id || link.taskId !== input.taskId) {
-        throw new Error(
-          `Run "${input.runId}" does not belong to Task "${input.taskId}".`
-        );
-      }
-      return session;
-    });
-    const operationId = input.operationId ?? this._generateId("operation");
-    const candidate: ApplicationRunIntent = {
-      schemaVersion: 1,
-      operationId,
-      sessionId: current.id,
-      taskId: input.taskId,
-      type: "retry",
-      retryOfRunId: input.runId,
-      createdAt: this._clock(),
-    };
-    const existingRun =
-      await this._options.engine.getRunByOperationId(operationId);
-    if (existingRun !== undefined) {
-      _assertRetryRunMatches(existingRun, candidate);
-      const existingLink = this._options.store.transaction((tx) =>
-        tx.getRunLink(existingRun.id)
-      );
-      if (existingLink !== undefined) {
-        _assertRunLinkMatches(existingLink, candidate);
-        this._scheduleRunProjection(existingLink);
-        return existingRun;
-      }
-    }
-    const intent = this._options.store.transaction((tx) => {
-      _requireSession(tx.getSession(current.id), current.id);
-      _requireTask(tx.getTask(input.taskId), input.taskId, current.id);
-      return _insertRunIntent(tx, candidate);
-    });
-    let retry = existingRun;
-    if (retry === undefined) {
-      try {
-        retry = await this._options.engine.retryRun({
-          runId: input.runId,
-          operationId,
-        });
-      } catch (error) {
-        this._deleteRunIntent(operationId);
-        throw error;
-      }
-    }
-    const link = this._finalizeRunIntent(intent, retry);
-    this._scheduleRunProjection(link);
-    return retry;
-  }
-
-  async cancelRun(sessionId: string, runId: string): Promise<void> {
-    await this._recovery;
-    const link = this._options.store.transaction((tx) => tx.getRunLink(runId));
-    if (link?.sessionId !== sessionId) {
-      throw new Error(
-        `Run "${runId}" does not belong to Session "${sessionId}".`
-      );
-    }
-    await this._options.engine.cancelRun(runId);
-  }
-
-  async *streamRun(
-    sessionId: string,
-    runId: string,
-    cursor: RunEventCursor = {}
-  ): AsyncIterable<RunFrame> {
-    await this._recovery;
-    const link = this._options.store.transaction((tx) => tx.getRunLink(runId));
-    if (link?.sessionId !== sessionId) {
-      throw new Error(
-        `Run "${runId}" does not belong to Session "${sessionId}".`
-      );
-    }
-    for await (const frame of this._options.engine.streamRun(runId, cursor)) {
-      this._projectFrame(link, frame);
-      yield frame;
-    }
-  }
-
-  /** Stop Engine work before releasing Application-owned persistence. */
   close(): Promise<void> {
     this._closePromise ??= this._close();
     return this._closePromise;
   }
 
   private async _close(): Promise<void> {
+    if (this._closed) return;
     this._closed = true;
     try {
-      // Recovery can still be reading Engine state when close begins. Let that
-      // bounded reconciliation stop at `_closed` before releasing Engine data.
-      await Promise.allSettled([this._recovery]);
-      await this._options.engine.close();
-      await Promise.allSettled(this._projections.values());
+      await this._options.runtime.close();
     } finally {
       this._options.store.close();
     }
   }
 
-  private async _recover(): Promise<void> {
-    for (const intent of this._options.store.transaction((tx) =>
-      tx.listRunIntents()
-    )) {
-      if (this._closed) return;
-      try {
-        const run = await this._options.engine.getRunByOperationId(
-          intent.operationId
-        );
-        if (run === undefined) {
-          this._deleteRunIntent(intent.operationId);
-          continue;
-        }
-        this._finalizeRunIntent(intent, run);
-      } catch {
-        // One inconsistent association must not prevent unrelated Sessions
-        // from recovering. Keep the intent durable for diagnosis or a later
-        // retry instead of discarding a Run that already exists in Engine.
-      }
-    }
-    await this._recoverRunProjections();
+  private async _compose(
+    record: AppSessionRecord,
+    known?: Awaited<ReturnType<StudioPiSessionRuntime["open"]>>,
+    knownName?: string
+  ): Promise<Session> {
+    const snapshot =
+      known ??
+      (await this._options.runtime.open({
+        sessionId: record.sessionId,
+        lane: APP_PI_LANE,
+      }));
+    const name =
+      knownName ??
+      (await this._options.runtime.getSessionName(record.sessionId)) ??
+      "New Session";
+    return {
+      ...structuredClone(record),
+      lane: APP_PI_LANE,
+      name,
+      leafId: snapshot.leafId,
+      ...(_activeOperationId(snapshot) === undefined
+        ? {}
+        : { operationId: _activeOperationId(snapshot) }),
+      runtimeFormatVersion: APP_PI_RUNTIME_FORMAT_VERSION,
+    };
   }
 
-  private _finalizeRunIntent(
-    intent: ApplicationRunIntent,
-    run: Run
-  ): SessionRunLink {
-    const now = this._clock();
-    return this._options.store.transaction((tx) => {
-      const session = _requireSession(
-        tx.getSession(intent.sessionId),
-        intent.sessionId
-      );
-      if (intent.type === "start" && session.threadId !== run.threadId) {
-        throw new Error(`Session "${session.id}" continuation Thread changed.`);
-      }
-      const link = _runLink(session.id, run, intent.taskId, now);
-      const existingLink = tx.getRunLink(run.id);
-      if (existingLink !== undefined) {
-        _assertRunLinkMatches(existingLink, intent);
-      }
-      tx.insertRunLink(link);
-      if (intent.type === "start") {
-        tx.upsertSessionMessage({
-          schemaVersion: 1,
-          id: intent.message.id,
-          sessionId: session.id,
-          type: "model",
-          threadId: run.threadId,
-          runId: run.id,
-          message: structuredClone(intent.message),
-          createdAt: intent.createdAt,
-        });
-      }
-      if (intent.taskId !== undefined) {
-        const task = _requireTask(
-          tx.getTask(intent.taskId),
-          intent.taskId,
-          session.id
-        );
-        tx.saveTask({ ...task, status: "running", updatedAt: now });
-        if (_isTerminal(run.status)) {
-          _projectTaskStatus(tx, link, run.status, now);
-        }
-      }
-      tx.saveSession({
-        ...session,
-        ...(intent.type === "retry" ? { threadId: run.threadId } : {}),
-        updatedAt: now,
-      });
-      tx.deleteRunIntent(intent.operationId);
-      return existingLink ?? link;
-    });
-  }
-
-  private _deleteRunIntent(operationId: string): void {
-    this._options.store.transaction((tx) => tx.deleteRunIntent(operationId));
-  }
-
-  private async _recoverRunProjections(): Promise<void> {
-    if (this._closed) return;
-    const links = this._options.store.transaction((tx) =>
-      tx.listSessions().flatMap((session) => tx.listRunLinks(session.id))
+  private _requireRecord(sessionId: string): AppSessionRecord {
+    this._requireOpen();
+    const record = this._options.store.transaction((tx) =>
+      tx.getSession(sessionId)
     );
-    for (const link of links) {
-      let terminal = false;
-      for await (const frame of this._options.engine.streamRun(link.runId)) {
-        this._projectFrame(link, frame);
-        terminal = frame.type === "snapshot" && _isTerminal(frame.run.status);
+    if (record === undefined) {
+      throw new Error(`Session "${sessionId}" was not found.`);
+    }
+    this._assertRecordOwner(record);
+    return record;
+  }
+
+  /** Prevents a changed project Agent from adopting durable Sessions. */
+  private _assertRecordOwner(record: AppSessionRecord): void {
+    if (record.agentId !== this._options.agentId) {
+      throw new Error(
+        `Session "${record.sessionId}" belongs to Agent "${record.agentId}", not "${this._options.agentId}".`
+      );
+    }
+  }
+
+  private _touchSession(sessionId: string): void {
+    const record = this._requireRecord(sessionId);
+    this._options.store.transaction((tx) =>
+      tx.saveSession({ ...record, updatedAt: this._clock() })
+    );
+  }
+
+  private _setTaskOperation(
+    taskId: string,
+    sessionId: string,
+    operationId: string
+  ): void {
+    this._options.store.transaction((tx) => {
+      const task = tx.getTask(taskId);
+      if (task?.sessionId !== sessionId) {
+        throw new Error(
+          `Task "${taskId}" does not belong to Session "${sessionId}".`
+        );
       }
-      if (!terminal) this._scheduleRunProjection(link);
-    }
-  }
-
-  private _scheduleRunProjection(link: SessionRunLink): void {
-    if (this._closed || this._projections.has(link.runId)) return;
-    const projection = this._projectRun(link).finally(() => {
-      this._projections.delete(link.runId);
+      tx.saveTask({
+        ...task,
+        operationId,
+        status: "running",
+        updatedAt: this._clock(),
+      });
     });
-    this._projections.set(link.runId, projection);
-    // Projection is retried from the durable Run snapshot on the next App
-    // startup. UI stream consumption remains an immediate idempotent fallback.
-    void projection.catch(() => undefined);
   }
 
-  private async _projectRun(link: SessionRunLink): Promise<void> {
-    for await (const frame of this._options.engine.streamRun(link.runId, {
-      follow: true,
-    })) {
-      this._projectFrame(link, frame);
+  private _requireTask(taskId: string, sessionId: string): Task {
+    const task = this._options.store.transaction((tx) => tx.getTask(taskId));
+    if (task?.sessionId !== sessionId) {
+      throw new Error(
+        `Task "${taskId}" does not belong to Session "${sessionId}".`
+      );
     }
+    return task;
   }
 
-  private _projectFrame(link: SessionRunLink, frame: RunFrame): void {
+  private _projectTask(
+    taskId: string | undefined,
+    status: Task["status"]
+  ): void {
+    if (taskId === undefined) return;
+    this._options.store.transaction((tx) => {
+      const task = tx.getTask(taskId);
+      if (task === undefined) return;
+      tx.saveTask({ ...task, status, updatedAt: this._clock() });
+    });
+  }
+
+  /** Durably accepts debugger identity before effects and reconciles retries from Pi. */
+  private async _debugCommand(
+    method: "step" | "continue",
+    input: PiAcpStepRequest | PiAcpContinueRequest,
+    execute: () => Promise<PiSessionSnapshot>
+  ): Promise<PiSessionSnapshot> {
+    const fingerprint = JSON.stringify({ method, input });
+    let receipt = this._options.store.transaction((tx) =>
+      tx.getCommandReceipt(input.sessionId, input.commandId)
+    );
+    if (receipt !== undefined) {
+      if (receipt.method !== method || receipt.fingerprint !== fingerprint) {
+        throw new Error(
+          `Command "${input.commandId}" was already used with other input.`
+        );
+      }
+      const current = await this._options.runtime.open({
+        sessionId: input.sessionId,
+        ...(input.lane === undefined ? {} : { lane: input.lane }),
+      });
+      if (receipt.status === "applied") {
+        await this._reconcileOperationMetadata(input.sessionId, current);
+        return current;
+      }
+      if (!_debugCommandNeedsExecution(method, input, current)) {
+        await this._finalizeDebugCommand(receipt, current);
+        return current;
+      }
+    } else {
+      const acceptedReceipt = {
+        sessionId: input.sessionId,
+        commandId: input.commandId,
+        method,
+        status: "accepted" as const,
+        fingerprint,
+        createdAt: this._clock(),
+      };
+      this._options.store.transaction((tx) =>
+        tx.insertCommandReceipt(acceptedReceipt)
+      );
+      receipt = acceptedReceipt;
+    }
+
+    if (receipt === undefined) {
+      throw new Error(`Command "${input.commandId}" was not accepted.`);
+    }
+    const snapshot = await execute();
+    await this._finalizeDebugCommand(receipt, snapshot);
+    return snapshot;
+  }
+
+  /** Marks the command applied before replaying its idempotent product projection. */
+  private async _finalizeDebugCommand(
+    receipt: AppCommandReceipt,
+    snapshot: PiSessionSnapshot
+  ): Promise<void> {
+    this._options.store.transaction((tx) => {
+      tx.saveCommandReceipt({
+        ...receipt,
+        status: "applied",
+        ...(snapshot.operationId === undefined
+          ? {}
+          : { operationId: snapshot.operationId }),
+        ...(snapshot.leafId === null ? {} : { leafId: snapshot.leafId }),
+      });
+    });
+    await this._reconcileOperationMetadata(receipt.sessionId, snapshot);
+  }
+
+  /** Replays product projections after either debugger crash window. */
+  private async _reconcileOperationMetadata(
+    sessionId: string,
+    snapshot: PiSessionSnapshot
+  ): Promise<void> {
+    let operation: PiOperationSnapshot | undefined;
+    if (snapshot.operationId !== undefined) {
+      operation = (
+        await this._options.runtime.listOperations({
+          sessionId,
+          lane: snapshot.lane,
+        })
+      ).find((candidate) => candidate.operationId === snapshot.operationId);
+    }
     const now = this._clock();
     this._options.store.transaction((tx) => {
-      if (frame.type === "snapshot") {
-        for (const output of frame.outputs) {
-          if (output.status === "completed") {
-            _insertProjectedMessage(tx, link, output.message, output.updatedAt);
+      const session = tx.getSession(sessionId);
+      if (session === undefined) {
+        throw new Error(`Session "${sessionId}" was not found.`);
+      }
+      this._assertRecordOwner(session);
+      tx.saveSession({ ...session, updatedAt: now });
+      if (operation !== undefined) {
+        for (const task of tx.listTasks(sessionId)) {
+          if (task.operationId === operation.operationId) {
+            tx.saveTask({
+              ...task,
+              status: _taskStatusForOperation(operation.status),
+              updatedAt: now,
+            });
           }
         }
-        if (_isTerminal(frame.run.status)) {
-          _projectTaskStatus(tx, link, frame.run.status, now);
-        }
-        return;
-      }
-      if (
-        frame.event.type === "message.completed" ||
-        frame.event.type === "tool.completed"
-      ) {
-        _insertProjectedMessage(tx, link, frame.event.message, now);
-      } else if (
-        frame.event.type === "run.updated" &&
-        _isTerminal(frame.event.run.status)
-      ) {
-        _projectTaskStatus(tx, link, frame.event.run.status, now);
       }
     });
   }
-}
 
-function _insertProjectedMessage(
-  tx: ApplicationStoreTransaction,
-  link: SessionRunLink,
-  message: Message,
-  createdAt: number
-): void {
-  const projected: ModelSessionMessage = {
-    schemaVersion: 1,
-    id: message.id,
-    sessionId: link.sessionId,
-    type: "model",
-    threadId: link.threadId,
-    runId: link.runId,
-    message: structuredClone(message),
-    createdAt,
-  };
-  tx.upsertSessionMessage(projected);
-}
-
-function _insertRunIntent(
-  tx: ApplicationStoreTransaction,
-  intent: ApplicationRunIntent
-): ApplicationRunIntent {
-  const existing = tx.getRunIntent(intent.operationId);
-  if (existing === undefined) {
-    tx.insertRunIntent(intent);
-    return intent;
+  private _requireOpen(): void {
+    if (this._closed) throw new Error("Session application is closed.");
   }
-  if (!_sameRunIntentInput(existing, intent)) {
-    throw new Error(
-      `Run intent "${intent.operationId}" was reused with different input.`
-    );
-  }
-  return existing;
 }
 
-function _sameRunIntentInput(
-  left: ApplicationRunIntent,
-  right: ApplicationRunIntent
+function _activeOperationId(snapshot: PiSessionSnapshot): string | undefined {
+  return snapshot.status === "paused" || snapshot.status === "suspended"
+    ? snapshot.operationId
+    : undefined;
+}
+
+function _debugCommandNeedsExecution(
+  method: "step" | "continue",
+  input: PiAcpStepRequest | PiAcpContinueRequest,
+  snapshot: PiSessionSnapshot
 ): boolean {
-  return (
-    left.schemaVersion === right.schemaVersion &&
-    left.operationId === right.operationId &&
-    left.sessionId === right.sessionId &&
-    left.taskId === right.taskId &&
-    left.type === right.type &&
-    (left.type === "start" && right.type === "start"
-      ? _sameJson(left.message, right.message)
-      : left.type === "retry" &&
-        right.type === "retry" &&
-        left.retryOfRunId === right.retryOfRunId)
-  );
-}
-
-function _assertStartRunMatches(
-  run: Run,
-  intent: Extract<ApplicationRunIntent, { type: "start" }>,
-  agentSnapshot: AgentSnapshot
-): void {
-  if (
-    run.retryOfRunId !== undefined ||
-    !_sameJson(run.inputMessages, [intent.message]) ||
-    !_sameJson(run.agentSnapshot, agentSnapshot)
-  ) {
-    throw new Error(
-      `Run operation "${intent.operationId}" was reused with different Application input.`
+  if (method === "step") {
+    return (
+      "expectedActionId" in input &&
+      snapshot.nextAction?.id === input.expectedActionId
     );
   }
+  return snapshot.status === "paused";
 }
 
-function _assertRetryRunMatches(
-  run: Run,
-  intent: Extract<ApplicationRunIntent, { type: "retry" }>
-): void {
-  if (run.retryOfRunId !== intent.retryOfRunId) {
-    throw new Error(
-      `Run operation "${intent.operationId}" was reused with different Application input.`
-    );
-  }
-}
-
-function _assertRunLinkMatches(
-  link: SessionRunLink,
-  intent: ApplicationRunIntent
-): void {
-  if (link.sessionId !== intent.sessionId || link.taskId !== intent.taskId) {
-    throw new Error(
-      `Run operation "${intent.operationId}" was reused with different Application input.`
-    );
-  }
-}
-
-function _sameJson(left: unknown, right: unknown): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
-}
-
-function _projectTaskStatus(
-  tx: ApplicationStoreTransaction,
-  link: SessionRunLink,
-  status: Run["status"],
-  now: number
-): void {
-  if (link.taskId === undefined) return;
-  const task = tx.getTask(link.taskId);
-  if (task === undefined) return;
-  const latest = tx
-    .listRunLinks(link.sessionId)
-    .findLast((candidate) => candidate.taskId === link.taskId);
-  if (latest?.runId !== link.runId) return;
-  const taskStatus: Task["status"] =
-    status === "completed"
-      ? "completed"
-      : status === "cancelled"
-        ? "cancelled"
-        : "failed";
-  tx.saveTask({ ...task, status: taskStatus, updatedAt: now });
-}
-
-function _runLink(
-  sessionId: string,
-  run: Run,
-  taskId: string | undefined,
-  createdAt: number
-): SessionRunLink {
-  return {
-    schemaVersion: 1,
-    sessionId,
-    threadId: run.threadId,
-    runId: run.id,
-    ...(taskId === undefined ? {} : { taskId }),
-    createdAt,
-  };
-}
-
-function _requireSession(
-  session: Session | undefined,
-  sessionId: string
-): Session {
-  if (session === undefined)
-    throw new Error(`Session "${sessionId}" was not found.`);
-  return session;
-}
-
-function _requireTask(
-  task: Task | undefined,
-  taskId: string,
-  sessionId: string
-): Task {
-  if (task?.sessionId !== sessionId) {
-    throw new Error(
-      `Task "${taskId}" was not found in Session "${sessionId}".`
-    );
-  }
-  return task;
-}
-
-function _isTerminal(status: Run["status"]): boolean {
-  return (
-    status === "completed" ||
-    status === "failed" ||
-    status === "cancelled" ||
-    status === "interrupted"
-  );
+/** Projects Pi operation lifecycle without treating a debugger pause as failure. */
+function _taskStatusForOperation(
+  status: PiOperationSnapshot["status"]
+): Task["status"] {
+  if (status === "completed") return "completed";
+  if (status === "aborted") return "cancelled";
+  if (status === "failed" || status === "declined") return "failed";
+  return "running";
 }

@@ -1,5 +1,6 @@
 import path from "node:path";
 
+import type { UpdateSessionNotification } from "@llm-space/acp";
 import { uuid } from "@llm-space/core";
 import {
   atomicWriteJsonFileSync,
@@ -25,6 +26,10 @@ import type {
 } from "../../shared/remote-servers";
 
 import { DEFAULT_REMOTE_INSTALL_DIR } from "./server-package";
+import {
+  openSshAcpConnection,
+  type SshAcpConnectionHandle,
+} from "./ssh-acp-connection";
 import type { SshRemoteRuntimeConfig } from "./ssh-bootstrap-config";
 import { OpenSshHostKeyService, type SshHostKeyService } from "./ssh-host-key";
 import { startSshRemoteRuntime } from "./ssh-remote-runtime";
@@ -40,6 +45,8 @@ type StartSshRemoteRuntime = (
     onProgress?: (progress: { stage: string; message: string }) => void;
   }
 ) => Promise<RemoteRuntimeHandle>;
+
+type OpenSshAcpConnection = typeof openSshAcpConnection;
 
 interface RemoteServersConfigFile {
   version?: number;
@@ -97,13 +104,18 @@ type RemoteServerStatusListener = (
 export class RemoteServerManager {
   private _servers: RemoteServerConfig[];
   private readonly _connections = new Map<string, ConnectedServer>();
+  private readonly _agentConnections = new Map<
+    string,
+    Set<SshAcpConnectionHandle>
+  >();
   private _operationQueue: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly _runtimeRouter: RuntimeRouter,
     private readonly _startSshRemoteRuntime: StartSshRemoteRuntime = startSshRemoteRuntime,
     private _onStatusChanged?: RemoteServerStatusListener,
-    private readonly _hostKeyService: SshHostKeyService = new OpenSshHostKeyService()
+    private readonly _hostKeyService: SshHostKeyService = new OpenSshHostKeyService(),
+    private readonly _openSshAcpConnection: OpenSshAcpConnection = openSshAcpConnection
   ) {
     this._servers = this._load();
   }
@@ -246,6 +258,52 @@ export class RemoteServerManager {
     });
   }
 
+  /** Opens one Pi-backed Agent path over direct SSH ACP on a connected host. */
+  async openAgentConnection(input: {
+    readonly runtimeId: RuntimeId;
+    readonly projectRoot: string;
+    readonly signal?: AbortSignal;
+    readonly onSessionUpdate?: (update: UpdateSessionNotification) => void;
+  }): Promise<SshAcpConnectionHandle> {
+    const server = this._servers.find(
+      (candidate) => this._runtimeId(candidate.id) === input.runtimeId
+    );
+    if (
+      server === undefined ||
+      this._connections.get(server.id)?.status !== "connected"
+    ) {
+      throw new Error(
+        `Remote Agent runtime is not connected: ${input.runtimeId}`
+      );
+    }
+    const handle = await this._openSshAcpConnection(this._sshConfig(server), {
+      projectRoot: input.projectRoot,
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+      ...(input.onSessionUpdate === undefined
+        ? {}
+        : { onSessionUpdate: input.onSessionUpdate }),
+    });
+    let handles = this._agentConnections.get(server.id);
+    if (handles === undefined) {
+      handles = new Set();
+      this._agentConnections.set(server.id, handles);
+    }
+    let stopPromise: Promise<void> | undefined;
+    const managed: SshAcpConnectionHandle = {
+      connection: handle.connection,
+      initialization: handle.initialization,
+      stop: () => {
+        stopPromise ??= handle.stop().finally(() => {
+          handles?.delete(managed);
+          if (handles?.size === 0) this._agentConnections.delete(server.id);
+        });
+        return stopPromise;
+      },
+    };
+    handles.add(managed);
+    return managed;
+  }
+
   async trustServerHostKey(
     id: string,
     requestId: string
@@ -289,12 +347,20 @@ export class RemoteServerManager {
     let stopError: unknown;
     const connection = this._connections.get(id);
     try {
-      if (connection?.handle) {
-        await connection.handle.stop();
+      for (const handle of this._agentConnections.get(id) ?? []) {
+        try {
+          await handle.stop();
+        } catch (error) {
+          stopError ??= error;
+        }
       }
-    } catch (error) {
-      stopError = error;
+      try {
+        if (connection?.handle) await connection.handle.stop();
+      } catch (error) {
+        stopError ??= error;
+      }
     } finally {
+      this._agentConnections.delete(id);
       const runtimeId = this._runtimeId(id);
       if (this._runtimeRouter.getDefaultRuntimeId() === runtimeId) {
         this._runtimeRouter.setDefaultRuntime("local");

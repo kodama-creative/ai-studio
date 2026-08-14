@@ -15,6 +15,7 @@
     "./instructions": "./src/instructions/index.ts",
     "./instrumentation": "./src/instrumentation/index.ts",
     "./loader": "./src/loader/index.ts",
+    "./runtime": "./src/runtime/index.ts",
     "./sandbox": "./src/sandbox/index.ts",
     "./schedules": "./src/schedules/index.ts",
     "./skills": "./src/skills/index.ts",

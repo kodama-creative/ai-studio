@@ -4,8 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "llm-space dev .",
-    "start": "llm-space run --project ."
+    "dev": "llm-space dev ."
   },
   "dependencies": {
     "@llm-space/agent": "workspace:*",

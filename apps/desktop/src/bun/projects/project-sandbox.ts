@@ -1,12 +1,12 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 
+import type { SandboxService } from "@llm-space/agent/runtime";
 import type {
   SandboxCommandResult,
   SandboxRunOptions,
   SandboxSession,
 } from "@llm-space/agent/sandbox";
-import type { SandboxService } from "@llm-space/engine";
 
 /** Local sandbox adapter whose filesystem and default cwd are one project. */
 export class ProjectSandbox implements SandboxSession, SandboxService {

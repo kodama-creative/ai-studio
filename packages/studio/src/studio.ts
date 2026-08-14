@@ -12,7 +12,7 @@ import {
   createRuntimeToolContext,
   resolveAgentGeneration,
   type RuntimeServices,
-} from "@llm-space/engine";
+} from "@llm-space/agent/runtime";
 import {
   BunSqliteRuntimeBindingStore,
   BunSqliteSessionRepository,
@@ -433,9 +433,6 @@ async function _loadExecutable(
       name,
       runtimeTool(tool.definition, {
         implementationId,
-        ...(tool.isErrorResult === undefined
-          ? {}
-          : { isErrorResult: tool.isErrorResult }),
       })
     );
     return {

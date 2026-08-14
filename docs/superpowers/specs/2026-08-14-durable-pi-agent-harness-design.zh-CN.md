@@ -538,7 +538,9 @@ Draft、Pi reference、evaluation 与 command receipt。
 
 #### Phase 5：App/CLI cutover 与退休旧实现
 
-状态：待实现。
+状态：已实现。App Session 已改为 Pi-backed facade；CLI 的 `exec` 与 `acp`
+复用同一个 App/Pi runtime 和数据库；SSH 直接搬运标准 ACP NDJSON stdio；旧
+Engine/Engine-Pi package、composition 与 store 已删除。
 
 - 将 App model Session projection 替换为 Pi-backed facade。
 - 将 CLI 路由到共享 runtime，提供标准 NDJSON stdio ACP v2 endpoint，并让 SSH

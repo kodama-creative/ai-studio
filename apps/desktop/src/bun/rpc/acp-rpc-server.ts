@@ -1,6 +1,19 @@
-import type { AgentApp, AnyWireMessage, AgentConnection } from "@llm-space/acp";
+import {
+  createForwardingAcpAgent,
+  methods,
+  type AgentApp,
+  type AgentConnection,
+  type AnyWireMessage,
+  type ClientConnection,
+  type InitializeResponse,
+  type UpdateSessionNotification,
+} from "@llm-space/acp";
 
-import { ACP_RPC, type AcpRpc } from "../../shared/acp-rpc";
+import {
+  ACP_RPC,
+  type AcpConnectionTarget,
+  type AcpRpc,
+} from "../../shared/acp-rpc";
 import type { Disposable } from "../../shared/disposable";
 import type { RpcServer } from "../../shared/namespaced-rpc";
 
@@ -8,13 +21,26 @@ interface AcpConnectionState {
   readonly incoming: WritableStreamDefaultWriter<AnyWireMessage>;
   readonly outgoing: ReadableStreamDefaultReader<AnyWireMessage>;
   readonly connection: AgentConnection;
+  readonly stopRemote?: () => Promise<void>;
 }
+
+interface RemoteAcpHandle {
+  readonly connection: ClientConnection;
+  readonly initialization: InitializeResponse;
+  stop(): Promise<void>;
+}
+
+export type OpenRemoteAcpConnection = (
+  target: Extract<AcpConnectionTarget, { kind: "remote" }>,
+  onSessionUpdate: (update: UpdateSessionNotification) => void
+) => Promise<RemoteAcpHandle>;
 
 /** Bridges official ACP wire messages over the generic Electrobun envelope. */
 export class AcpRpcServer implements RpcServer<AcpRpc>, Disposable {
   readonly namespace = ACP_RPC;
   readonly requests = {
-    open: (connectionId: string) => this._open(connectionId),
+    open: (connectionId: string, target?: AcpConnectionTarget) =>
+      this._open(connectionId, target),
     send: (connectionId: string, message: AnyWireMessage) =>
       this._send(connectionId, message),
     close: (connectionId: string) => this._close(connectionId),
@@ -27,31 +53,62 @@ export class AcpRpcServer implements RpcServer<AcpRpc>, Disposable {
   };
   private readonly _connections = new Map<string, AcpConnectionState>();
 
-  constructor(private readonly _app: AgentApp) {}
+  constructor(
+    private readonly _app: AgentApp,
+    private readonly _openRemote?: OpenRemoteAcpConnection
+  ) {}
 
   /** Creates one official ACP connection before either direction starts I/O. */
-  private _open(connectionId: string): Promise<void> {
+  private async _open(
+    connectionId: string,
+    target: AcpConnectionTarget = { kind: "local" }
+  ): Promise<void> {
     if (this._connections.has(connectionId)) {
       throw new Error(`ACP connection "${connectionId}" is already open.`);
     }
     const incoming = new TransformStream<AnyWireMessage, AnyWireMessage>();
     const outgoing = new TransformStream<AnyWireMessage, AnyWireMessage>();
-    const connection = this._app.connect({
-      writable: outgoing.writable,
-      readable: incoming.readable,
-    });
+    let downstream: AgentConnection | undefined;
+    let remote: RemoteAcpHandle | undefined;
+    try {
+      if (target.kind === "remote") {
+        if (this._openRemote === undefined) {
+          throw new Error("Remote ACP is unavailable in this window.");
+        }
+        remote = await this._openRemote(target, (update) => {
+          void downstream?.client
+            .notify(methods.client.session.update, update)
+            .catch(() => undefined);
+        });
+      }
+      const app =
+        remote === undefined
+          ? this._app
+          : createForwardingAcpAgent({
+              remote: remote.connection,
+              initialization: remote.initialization,
+            });
+      downstream = app.connect({
+        writable: outgoing.writable,
+        readable: incoming.readable,
+      });
+    } catch (error) {
+      await remote?.stop();
+      throw error;
+    }
     const state: AcpConnectionState = {
       incoming: incoming.writable.getWriter(),
       outgoing: outgoing.readable.getReader(),
-      connection,
+      connection: downstream,
+      ...(remote === undefined ? {} : { stopRemote: () => remote.stop() }),
     };
     this._connections.set(connectionId, state);
-    void connection.closed.finally(() => {
+    void downstream.closed.finally(() => {
       if (this._connections.get(connectionId) === state) {
         this._connections.delete(connectionId);
+        void state.stopRemote?.().catch(() => undefined);
       }
     });
-    return Promise.resolve();
   }
 
   /** Writes one JSON-RPC message without interpreting or flattening ACP methods. */
@@ -92,6 +149,7 @@ export class AcpRpcServer implements RpcServer<AcpRpc>, Disposable {
       state.incoming.close(),
       state.outgoing.cancel(),
       state.connection.closed,
+      state.stopRemote?.(),
     ]);
   }
 

@@ -1,4 +1,5 @@
 export * from "./extensions";
+export * from "./forwarding-agent";
 export * from "./pi-agent-app";
 export * from "./pi-projector";
 
@@ -14,6 +15,7 @@ export {
   type ClientApp,
   type ClientConnection,
   type ContentBlock,
+  type InitializeResponse,
   type SessionUpdate,
   type Stream,
   type UpdateSessionNotification,

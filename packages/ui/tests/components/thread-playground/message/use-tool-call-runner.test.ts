@@ -7,7 +7,7 @@ import {
   findTool,
 } from "../../../../src/components/thread-playground/message/use-tool-call-runner";
 
-test("an Agent function tool is runnable through the external Engine runtime", () => {
+test("an Agent function tool is runnable through the external execution runtime", () => {
   const tool: Tool = {
     type: "function",
     name: "word-count",
@@ -20,7 +20,7 @@ test("an Agent function tool is runnable through the external Engine runtime", (
   expect(canRunToolCall(undefined, true)).toBeFalse();
 });
 
-test("an external Engine runtime does not claim provider-hosted tools", () => {
+test("an external execution runtime does not claim provider-hosted tools", () => {
   const tool: Tool = {
     type: "provider-hosted",
     config: { type: "web_search" },

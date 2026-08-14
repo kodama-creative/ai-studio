@@ -15,6 +15,7 @@ import { DesktopPlaygroundApplicationImpl } from "../application/playground-appl
 import { createPlaygroundHost } from "../playgrounds/playground-host";
 import type { AgentProject } from "../projects/agent-project";
 import { ProjectSandbox } from "../projects/project-sandbox";
+import type { RemoteServerManager } from "../remote";
 import type { MainWindowRPCController } from "../rpc";
 import { AcpRpcServer } from "../rpc/acp-rpc-server";
 import { PlaygroundRpcServer } from "../rpc/playground-rpc-server";
@@ -139,7 +140,8 @@ export function projectWindowIdentityModule(
 class PlaygroundContribution implements RpcContributionApi {
   constructor(
     private readonly _application: DesktopPlaygroundApplicationImpl,
-    private readonly _host: ReturnType<typeof createPlaygroundHost>
+    private readonly _host: ReturnType<typeof createPlaygroundHost>,
+    private readonly _remoteServers: RemoteServerManager
   ) {}
 
   /** Register durable Playground operations for the Main window. */
@@ -150,7 +152,13 @@ class PlaygroundContribution implements RpcContributionApi {
         createPiAcpAgent({
           backend: this._host.acpBackend,
           version: desktopPackage.version,
-        })
+        }),
+        (target, onSessionUpdate) =>
+          this._remoteServers.openAgentConnection({
+            runtimeId: target.runtimeId,
+            projectRoot: target.projectRoot,
+            onSessionUpdate,
+          })
       )
     );
   }
@@ -183,7 +191,8 @@ export function playgroundContributionsModule(
         () =>
           new PlaygroundContribution(
             scope.get(PROCESS_TOKENS.playgroundApplication),
-            scope.get(PROCESS_TOKENS.playgroundHost)
+            scope.get(PROCESS_TOKENS.playgroundHost),
+            scope.get(PROCESS_TOKENS.remoteServerManager)
           )
       )
       .inSingletonScope();

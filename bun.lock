@@ -52,8 +52,6 @@
         "@llm-space/acp": "workspace:*",
         "@llm-space/agent": "workspace:*",
         "@llm-space/core": "workspace:*",
-        "@llm-space/engine": "workspace:*",
-        "@llm-space/engine-pi": "workspace:*",
         "@llm-space/pi-runtime": "workspace:*",
         "@llm-space/runtime": "workspace:*",
         "@llm-space/studio": "workspace:*",
@@ -178,11 +176,11 @@
       "name": "@llm-space/app",
       "version": "4.0.1",
       "dependencies": {
+        "@earendil-works/pi-agent-core": "catalog:",
         "@earendil-works/pi-ai": "catalog:",
+        "@llm-space/acp": "workspace:*",
         "@llm-space/agent": "workspace:*",
-        "@llm-space/core": "workspace:*",
-        "@llm-space/engine": "workspace:*",
-        "@llm-space/engine-pi": "workspace:*",
+        "@llm-space/pi-runtime": "workspace:*",
       },
     },
     "packages/cli": {
@@ -192,9 +190,9 @@
         "llm-space": "./src/cli.ts",
       },
       "dependencies": {
+        "@llm-space/acp": "workspace:*",
         "@llm-space/app": "workspace:*",
         "@llm-space/core": "workspace:*",
-        "@llm-space/engine": "workspace:*",
         "@llm-space/runtime": "workspace:*",
       },
     },
@@ -212,25 +210,6 @@
       },
       "devDependencies": {
         "@types/nunjucks": "^3.2.6",
-      },
-    },
-    "packages/engine": {
-      "name": "@llm-space/engine",
-      "version": "4.0.1",
-      "dependencies": {
-        "@llm-space/agent": "workspace:*",
-        "@llm-space/core": "workspace:*",
-      },
-    },
-    "packages/engine-pi": {
-      "name": "@llm-space/engine-pi",
-      "version": "4.0.1",
-      "dependencies": {
-        "@earendil-works/pi-agent-core": "catalog:",
-        "@earendil-works/pi-ai": "catalog:",
-        "@llm-space/agent": "workspace:*",
-        "@llm-space/core": "workspace:*",
-        "@llm-space/engine": "workspace:*",
       },
     },
     "packages/pi-runtime": {
@@ -263,8 +242,6 @@
         "@llm-space/acp": "workspace:*",
         "@llm-space/agent": "workspace:*",
         "@llm-space/core": "workspace:*",
-        "@llm-space/engine": "workspace:*",
-        "@llm-space/engine-pi": "workspace:*",
         "@llm-space/pi-runtime": "workspace:*",
       },
     },
@@ -788,10 +765,6 @@
     "@llm-space/core": ["@llm-space/core@workspace:packages/core"],
 
     "@llm-space/desktop": ["@llm-space/desktop@workspace:apps/desktop"],
-
-    "@llm-space/engine": ["@llm-space/engine@workspace:packages/engine"],
-
-    "@llm-space/engine-pi": ["@llm-space/engine-pi@workspace:packages/engine-pi"],
 
     "@llm-space/example-basic-agent": ["@llm-space/example-basic-agent@workspace:examples/basic-agent"],
 

@@ -3,8 +3,8 @@ import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import type { RuntimeClient } from "@llm-space/runtime/runtime";
-import { RuntimeRouter } from "@llm-space/runtime/runtime";
+import { PROTOCOL_VERSION, type ClientConnection } from "@llm-space/acp";
+import { RuntimeRouter, type RuntimeClient } from "@llm-space/runtime/runtime";
 
 import type { RemoteServerView } from "../../shared/remote-servers";
 
@@ -15,6 +15,9 @@ import type { SshHostKeyService } from "./ssh-host-key";
 type StartSshRemoteRuntime = ConstructorParameters<
   typeof RemoteServerManager
 >[1];
+type OpenSshAcpConnection = ConstructorParameters<
+  typeof RemoteServerManager
+>[4];
 
 function _localRuntime(): RuntimeClient {
   return {
@@ -44,14 +47,16 @@ function _manager(
   start: StartSshRemoteRuntime,
   home = mkdtempSync(path.join(tmpdir(), "llm-space-remote-manager-test-")),
   onStatusChanged?: ConstructorParameters<typeof RemoteServerManager>[2],
-  hostKeyService: SshHostKeyService = _trustedHostKeyService()
+  hostKeyService: SshHostKeyService = _trustedHostKeyService(),
+  openSshAcpConnection?: OpenSshAcpConnection
 ): RemoteServerManager {
   process.env.LLM_SPACE_HOME = home;
   return new RemoteServerManager(
     new RuntimeRouter(_localRuntime()),
     start,
     onStatusChanged,
-    hostKeyService
+    hostKeyService,
+    openSshAcpConnection
   );
 }
 
@@ -63,6 +68,57 @@ function _trustedHostKeyService(): SshHostKeyService {
 }
 
 describe("RemoteServerManager", () => {
+  test("opens a selected remote Agent through direct SSH ACP", async () => {
+    const opened: {
+      config: SshRemoteRuntimeConfig;
+      projectRoot?: string;
+    }[] = [];
+    const stopped: string[] = [];
+    const manager = _manager(
+      (config) =>
+        Promise.resolve({
+          client: _remoteRuntime(config.id),
+          stop: () => Promise.resolve(),
+        }),
+      undefined,
+      undefined,
+      undefined,
+      (config, options) => {
+        opened.push({ config, projectRoot: options?.projectRoot });
+        return Promise.resolve({
+          connection: {} as ClientConnection,
+          initialization: {
+            protocolVersion: PROTOCOL_VERSION,
+            info: { name: "remote-agent", version: "1" },
+            capabilities: {},
+          },
+          stop: () => {
+            stopped.push(config.id);
+            return Promise.resolve();
+          },
+        });
+      }
+    );
+    const [server] = manager.addServer({ name: "Agent host", host: "agent" });
+    await manager.connectServer(server.id);
+
+    const handle = await manager.openAgentConnection({
+      runtimeId: server.runtimeId,
+      projectRoot: "/srv/project",
+    });
+
+    expect(opened).toMatchObject([
+      {
+        config: { id: server.runtimeId, host: "agent" },
+        projectRoot: "/srv/project",
+      },
+    ]);
+    await manager.disconnectServer(server.id);
+    expect(stopped).toEqual([server.runtimeId]);
+    await handle.stop();
+    expect(stopped).toEqual([server.runtimeId]);
+  });
+
   test("connecting a second SSH server disconnects the first after the second connects", async () => {
     const stopped: string[] = [];
     const starts: string[] = [];

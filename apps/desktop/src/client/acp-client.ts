@@ -7,13 +7,18 @@ import {
   type UpdateSessionNotification,
 } from "@llm-space/acp";
 
-import { ACP_RPC, type AcpRpc } from "../shared/acp-rpc";
+import {
+  ACP_RPC,
+  type AcpConnectionTarget,
+  type AcpRpc,
+} from "../shared/acp-rpc";
 import { createRpcClientProxy, type RpcClient } from "../shared/namespaced-rpc";
 
 import { createElectrobunRpcClientTransport } from "./namespaced-rpc-client";
 
 export interface OpenDesktopAcpConnectionOptions {
   readonly onSessionUpdate?: (update: UpdateSessionNotification) => void;
+  readonly target?: AcpConnectionTarget;
 }
 
 /** Opens one official ACP v2 client over the Electrobun custom wire stream. */
@@ -25,7 +30,7 @@ export async function openDesktopAcpConnection(
     createElectrobunRpcClientTransport()
   );
   const connectionId = crypto.randomUUID();
-  await rpc.open(connectionId);
+  await rpc.open(connectionId, options.target);
   const controller = new AbortController();
   const wire = {
     writable: new WritableStream<AnyWireMessage>({

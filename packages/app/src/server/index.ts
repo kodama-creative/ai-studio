@@ -2,5 +2,5 @@ export {
   createAgent,
   type Agent,
   type CreateAgentOptions,
-  type StartAgentRunInput,
+  type ExecAgentInput,
 } from "../agent";

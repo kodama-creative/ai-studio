@@ -101,19 +101,20 @@ interface CachedDebugCommand {
   readonly response: Promise<PiAcpDebugResponse>;
 }
 
-const SNAPSHOT_REQUEST = z.object({
+export const PI_ACP_SNAPSHOT_REQUEST_SCHEMA = z.object({
   sessionId: z.string().min(1),
   lane: z.string().min(1).optional(),
   afterSeq: z.number().int().nonnegative().optional(),
 });
-const STEP_REQUEST = SNAPSHOT_REQUEST.extend({
+export const PI_ACP_STEP_REQUEST_SCHEMA = PI_ACP_SNAPSHOT_REQUEST_SCHEMA.extend({
   commandId: z.string().min(1),
   expectedActionId: z.string().min(1),
   kind: z.enum(["model", "tool"]),
 });
-const CONTINUE_REQUEST = SNAPSHOT_REQUEST.extend({
-  commandId: z.string().min(1),
-});
+export const PI_ACP_CONTINUE_REQUEST_SCHEMA =
+  PI_ACP_SNAPSHOT_REQUEST_SCHEMA.extend({
+    commandId: z.string().min(1),
+  });
 
 /** Builds the official ACP v2 AgentApp over a host-owned Pi Session backend. */
 export function createPiAcpAgent(options: CreatePiAcpAgentOptions): AgentApp {
@@ -212,27 +213,34 @@ export function createPiAcpAgent(options: CreatePiAcpAgentOptions): AgentApp {
     )
     .onRequest(
       LLM_SPACE_ACP_METHODS.snapshot,
-      SNAPSHOT_REQUEST,
+      PI_ACP_SNAPSHOT_REQUEST_SCHEMA,
       async ({ params }) =>
         _debugResponse(await options.backend.inspect(params))
     )
-    .onRequest(LLM_SPACE_ACP_METHODS.step, STEP_REQUEST, ({ params, client }) =>
-      _runDebugCommand(
-        debugCommands,
-        LLM_SPACE_ACP_METHODS.step,
-        params,
-        async () => {
-          await _notifyRunning(client, params.sessionId, params.afterSeq ?? 0);
-          await options.backend.step(params);
-          const frame = await options.backend.inspect(params);
-          await _notifyFrame(client, frame);
-          return _debugResponse(frame);
-        }
-      )
+    .onRequest(
+      LLM_SPACE_ACP_METHODS.step,
+      PI_ACP_STEP_REQUEST_SCHEMA,
+      ({ params, client }) =>
+        _runDebugCommand(
+          debugCommands,
+          LLM_SPACE_ACP_METHODS.step,
+          params,
+          async () => {
+            await _notifyRunning(
+              client,
+              params.sessionId,
+              params.afterSeq ?? 0
+            );
+            await options.backend.step(params);
+            const frame = await options.backend.inspect(params);
+            await _notifyFrame(client, frame);
+            return _debugResponse(frame);
+          }
+        )
     )
     .onRequest(
       LLM_SPACE_ACP_METHODS.continue,
-      CONTINUE_REQUEST,
+      PI_ACP_CONTINUE_REQUEST_SCHEMA,
       ({ params, client }) =>
         _runDebugCommand(
           debugCommands,

@@ -1,31 +1,31 @@
-import type { AgentDefinition, AgentModelDefinition } from "@llm-space/agent";
+import type { AgentDefinition, AgentModelDefinition } from "../agent";
 import type {
   AgentManifestSource,
   LoadAgentResult,
-} from "@llm-space/agent/loader";
-import type { ToolDefinition } from "@llm-space/agent/tools";
-
-import type {
-  AgentSnapshot,
-  ExecutableAgent,
-  ModelToolDefinition,
-  PreparedTool,
-} from "../domain";
+} from "../loader";
+import type { ToolDefinition } from "../tools";
 
 export type AgentGeneration = Pick<
   LoadAgentResult,
   "diagnostics" | "manifest" | "moduleMap" | "sourceFingerprint"
 >;
 
+export interface PreparedTool {
+  readonly definition: ToolDefinition;
+  readonly model: {
+    readonly name: string;
+    readonly description: string;
+    readonly inputSchema: Readonly<Record<string, unknown>>;
+    readonly outputSchema?: Readonly<Record<string, unknown>>;
+  };
+}
+
 export interface PreparedAgentDefinition {
   readonly agentId: string;
   readonly generationId: string;
   readonly instructions: readonly string[];
   readonly model: AgentModelDefinition;
-  readonly tools: ReadonlyMap<
-    string,
-    PreparedTool & { readonly model: ModelToolDefinition }
-  >;
+  readonly tools: ReadonlyMap<string, PreparedTool>;
 }
 
 export class AgentGenerationResolutionError extends Error {
@@ -35,19 +35,16 @@ export class AgentGenerationResolutionError extends Error {
   }
 }
 
-/**
- * Materializes one exact loader generation into a serializable snapshot plus
- * executable tool functions. Unsupported runtime features fail explicitly.
- */
+/** Materializes one exact loader generation into data plus executable tools. */
 export async function resolveAgentGeneration(
   generation: AgentGeneration
 ): Promise<PreparedAgentDefinition> {
-  const errorDiagnostics = generation.diagnostics.filter(
+  const diagnostics = generation.diagnostics.filter(
     (diagnostic) => diagnostic.severity === "error"
   );
-  if (errorDiagnostics.length > 0) {
+  if (diagnostics.length > 0) {
     throw new AgentGenerationResolutionError(
-      errorDiagnostics.map((diagnostic) => diagnostic.message).join("\n")
+      diagnostics.map((diagnostic) => diagnostic.message).join("\n")
     );
   }
 
@@ -66,7 +63,7 @@ export async function resolveAgentGeneration(
   }
   if (_asRecordOrEmpty(agent.model).kind === "llm-space:dynamic") {
     throw new AgentGenerationResolutionError(
-      "Dynamic model selection is not supported by this Engine version."
+      "Dynamic model selection is not supported by the Pi runtime."
     );
   }
 
@@ -89,10 +86,7 @@ export async function resolveAgentGeneration(
     })
   );
 
-  const tools = new Map<
-    string,
-    PreparedTool & { readonly model: ModelToolDefinition }
-  >();
+  const tools = new Map<string, PreparedTool>();
   for (const source of generation.manifest.tools) {
     const value = await _loadDefinition(generation, source);
     if (!_isToolDefinition(value)) {
@@ -102,7 +96,7 @@ export async function resolveAgentGeneration(
     }
     if (value.approval !== undefined) {
       throw new AgentGenerationResolutionError(
-        `Tool approval for "${source.name}" is not supported by Engine v1.`
+        `Tool approval for "${source.name}" is not supported by the Pi runtime.`
       );
     }
     if (tools.has(source.name)) {
@@ -132,21 +126,6 @@ export async function resolveAgentGeneration(
   };
 }
 
-/** Converts a prepared generation into the exact resolver result Engine needs. */
-export function executableAgent(
-  prepared: PreparedAgentDefinition
-): ExecutableAgent {
-  const snapshot: AgentSnapshot = {
-    schemaVersion: 1,
-    agentId: prepared.agentId,
-    generationId: prepared.generationId,
-    model: prepared.model,
-    instructions: prepared.instructions,
-    tools: [...prepared.tools.values()].map((tool) => tool.model),
-  };
-  return { snapshot, tools: prepared.tools };
-}
-
 function _assertSupportedManifestFeatures(generation: AgentGeneration): void {
   const { manifest } = generation;
   const unsupported = [
@@ -163,7 +142,7 @@ function _assertSupportedManifestFeatures(generation: AgentGeneration): void {
     .map(([feature]) => feature);
   if (active.length > 0) {
     throw new AgentGenerationResolutionError(
-      `Engine v1 does not yet support: ${active.join(", ")}.`
+      `Pi runtime does not yet support: ${active.join(", ")}.`
     );
   }
 }

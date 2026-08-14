@@ -6,6 +6,16 @@ English | [中文](./remote-runtime.zh-CN.md)
 
 Remote Runtime lets the desktop UI connect to a Linux machine over SSH and run the LLM Space runtime there. The desktop keeps the window and interaction; the remote machine owns the workspace, model settings, MCP servers, tools, skills, and network access for that runtime.
 
+## Agent ACP over SSH
+
+Pi-backed Agent execution uses the standard ACP v2 NDJSON stdio endpoint directly:
+
+```sh
+ssh llm-devbox llm-space acp --project /absolute/remote/project
+```
+
+The Desktop SSH ACP client starts that same no-TTY command and carries ACP bytes on stdin/stdout. It does not open an HTTP server, WebSocket, or port-forwarding tunnel. The packaged Remote Runtime described below remains a separate, general-purpose channel for remote model settings, MCP, skills, tools, filesystem, and other runtime services.
+
 ## Recommended SSH setup
 
 Use your system OpenSSH configuration. LLM Space calls the `ssh` command and intentionally reuses the same files and behavior as your terminal.

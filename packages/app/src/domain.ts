@@ -1,85 +1,64 @@
-import type { Message } from "@llm-space/core";
+import type { AgentMessage, Entry } from "@earendil-works/pi-agent-core";
+import type {
+  PiOperationSnapshot,
+  PiSessionSnapshot,
+} from "@llm-space/pi-runtime";
 
-/** Stable product entry point. `threadId` is the default continuation Thread. */
-export interface Session {
-  readonly schemaVersion: 1;
-  readonly id: string;
+export const APP_PI_LANE = "main" as const;
+export const APP_PI_RUNTIME_FORMAT_VERSION = 1 as const;
+
+/** App-owned metadata that references, but never duplicates, one Pi Session. */
+export interface AppSessionRecord {
+  readonly schemaVersion: 2;
+  readonly sessionId: string;
   readonly projectId?: string;
-  readonly threadId: string;
   readonly agentId: string;
-  readonly title: string;
   readonly status: "active" | "archived";
   readonly createdAt: number;
   readonly updatedAt: number;
 }
 
-export interface SessionMessageBase {
-  readonly schemaVersion: 1;
-  readonly id: string;
-  readonly sessionId: string;
-  readonly createdAt: number;
+/** Product Session facade composed from App metadata and current Pi facts. */
+export interface Session extends AppSessionRecord {
+  readonly lane: typeof APP_PI_LANE;
+  readonly name: string;
+  readonly leafId: string | null;
+  readonly operationId?: string;
+  readonly runtimeFormatVersion: typeof APP_PI_RUNTIME_FORMAT_VERSION;
 }
 
-/** Durable transcript entry projected from a model-facing core Message. */
-export interface ModelSessionMessage extends SessionMessageBase {
-  readonly type: "model";
-  readonly threadId: string;
-  readonly runId?: string;
-  readonly message: Message;
-}
+/** App exposes Pi entries directly; it does not persist a model transcript. */
+export type SessionEntry = Extract<Entry, { type: "message" | "custom" }>;
 
-/** Product/system timeline entry that is never sent to the model implicitly. */
-export interface SystemSessionMessage extends SessionMessageBase {
-  readonly type: "system";
-  readonly code: string;
-  readonly text: string;
-}
-
-/** Auditable user behavior outside the model conversation. */
-export interface UserActionSessionMessage extends SessionMessageBase {
-  readonly type: "user-action";
-  readonly action: string;
-  readonly detail?: string;
-}
-
-export type SessionMessage =
-  ModelSessionMessage | SystemSessionMessage | UserActionSessionMessage;
-
+/** Product workflow metadata referencing its current Pi operation. */
 export interface Task {
-  readonly schemaVersion: 1;
+  readonly schemaVersion: 2;
   readonly id: string;
   readonly sessionId: string;
   readonly title: string;
   readonly status: "pending" | "running" | "completed" | "failed" | "cancelled";
+  readonly operationId?: string;
   readonly createdAt: number;
   readonly updatedAt: number;
 }
 
-/** Application-owned association; Run itself remains owned only by Engine Thread. */
-export interface SessionRunLink {
-  readonly schemaVersion: 1;
+/** Durable ACP mutation identity without protocol payload or transcript data. */
+export interface AppCommandReceipt {
   readonly sessionId: string;
-  readonly threadId: string;
-  readonly runId: string;
-  readonly taskId?: string;
+  readonly commandId: string;
+  readonly method: "step" | "continue";
+  readonly status: "accepted" | "applied";
+  readonly fingerprint: string;
+  readonly operationId?: string;
+  readonly leafId?: string;
   readonly createdAt: number;
 }
 
-interface ApplicationRunIntentBase {
-  readonly schemaVersion: 1;
-  readonly operationId: string;
+/** Final machine-readable result returned by App and `llm-space exec`. */
+export interface AgentExecutionResult {
+  readonly schemaVersion: 2;
   readonly sessionId: string;
-  readonly taskId?: string;
-  readonly createdAt: number;
+  readonly operation: PiOperationSnapshot;
+  readonly snapshot: PiSessionSnapshot;
+  readonly messages: readonly AgentMessage[];
 }
-
-/** Durable command marker used to reconcile an Engine Run after a host crash. */
-export type ApplicationRunIntent =
-  | (ApplicationRunIntentBase & {
-      readonly type: "start";
-      readonly message: Extract<Message, { role: "user" }>;
-    })
-  | (ApplicationRunIntentBase & {
-      readonly type: "retry";
-      readonly retryOfRunId: string;
-    });

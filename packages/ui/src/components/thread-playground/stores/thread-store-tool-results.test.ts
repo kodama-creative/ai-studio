@@ -22,7 +22,7 @@ function _event(value: unknown): AgentEvent {
 }
 
 describe("auto-run tool results", () => {
-  test("does not accept UI-only tool results for an Engine-backed Thread", () => {
+  test("does not accept UI-only tool results for a runtime-owned Thread", () => {
     const store = createThreadStore(
       {
         context: {
