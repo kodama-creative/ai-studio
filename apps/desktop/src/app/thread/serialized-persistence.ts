@@ -92,10 +92,7 @@ export class SerializedPersistence<T> {
         if (attempt === 1) this._onWriteError?.(error);
         // Preserve a newer edit when one arrived during the failed write. If
         // none did, restore the failed revision itself for the retry.
-        if (
-          !this._pending &&
-          candidate.revision > this._persistedRevision
-        ) {
+        if (!this._pending && candidate.revision > this._persistedRevision) {
           this._pending = candidate;
         }
         await this._waitBeforeRetry(attempt);

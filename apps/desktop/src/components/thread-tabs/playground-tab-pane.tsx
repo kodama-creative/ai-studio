@@ -20,10 +20,10 @@ import {
   createPlaygroundThreadExecutionRuntime,
   playgroundToEditorThread,
 } from "@/app/playground-thread-adapter";
+import { SerializedPersistence } from "@/app/thread/serialized-persistence";
 import { createPlaygroundClient } from "@/client/playground-client";
 
 import type { PaneLifecycleHost } from "./pane-lifecycle-host";
-import { SerializedPersistence } from "./serialized-persistence";
 import { settleStreamingPane } from "./settle-streaming-pane";
 import { usePaneRefreshAcknowledgement } from "./use-pane-refresh-ack";
 

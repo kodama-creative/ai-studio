@@ -8,7 +8,7 @@ import {
 import { useCallback, useMemo, useRef } from "react";
 import { toast } from "sonner";
 
-import { SerializedPersistence } from "@/components/thread-tabs/serialized-persistence";
+import { SerializedPersistence } from "@/app/thread/serialized-persistence";
 import type { StudioTransport } from "@/shared/studio-rpc";
 
 import {

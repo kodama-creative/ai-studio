@@ -72,5 +72,4 @@ describe("SerializedPersistence", () => {
 
     expect(writes).toEqual(["A", "B"]);
   });
-
 });
