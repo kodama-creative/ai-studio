@@ -15,10 +15,8 @@ import Electrobun, { app, type ElectrobunEvent, Utils } from "electrobun/bun";
 
 import { resolveDeepLinkScheme } from "../../shared/deep-link-scheme";
 import { Analytics } from "../analytics";
-import { auxiliaryGenerationModule } from "../application/auxiliary-generation-module";
-import { modelsModule } from "../application/models-module";
-import { threadSharingApplicationModule } from "../application/thread-sharing-application";
 import { GitHubAuthManager } from "../auth/github-auth-manager";
+import { auxiliaryGenerationModule } from "../auxiliary-generation/auxiliary-generation-module";
 import { isStudioOpenDeepLink } from "../deep-link";
 import { activateWindowForDeepLink } from "../deep-link/activate-window";
 import { getPendingDeepLinks, setDeepLinkHandler } from "../deep-link/launch";
@@ -31,6 +29,7 @@ import { PROCESS_TOKENS } from "../di/tokens";
 import { openPath, revealInFileManager } from "../fs";
 import { generatorModule } from "../generator/generator-module";
 import { DesktopHost } from "../host/desktop-host";
+import { modelsModule } from "../models/models-module";
 import { appDirectoriesApplicationModule } from "../native/app-directories-module";
 import { nativeDialogsApplicationModule } from "../native/native-dialogs-module";
 import { nativeFilesApplicationModule } from "../native/native-files-module";
@@ -43,6 +42,7 @@ import {
 } from "../projects/project-window-state";
 import { remindersModule } from "../reminders/reminders-module";
 import { getManagedSkillsDir } from "../skills/seed";
+import { threadSharingApplicationModule } from "../thread-sharing/thread-sharing-application";
 import { UpdaterService } from "../updates";
 import { UpdatesState } from "../updates/state";
 

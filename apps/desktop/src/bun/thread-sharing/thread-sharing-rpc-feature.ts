@@ -6,14 +6,15 @@ import {
   type ThreadSharingRpc,
 } from "../../shared/thread-sharing-rpc";
 import {
-  THREAD_SHARING_APPLICATION,
-  type ThreadSharingApplication,
-} from "../application/thread-sharing-application";
-import {
   RpcContribution,
   type RpcContribution as RpcContributionApi,
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
+
+import {
+  THREAD_SHARING_APPLICATION,
+  type ThreadSharingApplication,
+} from "./thread-sharing-application";
 
 class ThreadSharingRpcServer implements RpcServer<ThreadSharingRpc> {
   readonly namespace = THREAD_SHARING_RPC;

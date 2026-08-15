@@ -13,10 +13,10 @@ import { ContainerModule, type ResolutionContext } from "inversify";
 import { buildWebShareUrl } from "../../shared/share";
 import type { ThreadSharingRequests } from "../../shared/thread-sharing-rpc";
 import { desktopToken, PROCESS_TOKENS } from "../di/tokens";
+import type { ModelsApplication } from "../models/models-application";
+import { MODELS_APPLICATION } from "../models/models-module";
 import type { DesktopPlaygroundApplication } from "../playgrounds/playground-application";
 
-import type { ModelsApplication } from "./models-application";
-import { MODELS_APPLICATION } from "./models-module";
 import { buildSharedThread } from "./thread-sharing";
 
 export const THREAD_SHARING_APPLICATION =

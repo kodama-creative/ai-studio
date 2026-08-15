@@ -5,13 +5,14 @@ import {
   type AuxiliaryGenerationRpc,
 } from "../../shared/auxiliary-generation-rpc";
 import type { RpcServer } from "../../shared/namespaced-rpc";
-import type { AuxiliaryGenerationApplication } from "../application/auxiliary-generation-application";
-import { AUXILIARY_GENERATION_APPLICATION } from "../application/auxiliary-generation-module";
 import {
   RpcContribution,
   type RpcContribution as RpcContributionApi,
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
+
+import type { AuxiliaryGenerationApplication } from "./auxiliary-generation-application";
+import { AUXILIARY_GENERATION_APPLICATION } from "./auxiliary-generation-module";
 
 /** Typed Desktop RPC adapter for stateless UI helper generation. */
 class AuxiliaryGenerationRpcServer

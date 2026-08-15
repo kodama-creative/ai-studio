@@ -1,12 +1,14 @@
 import type { BrowserWindow } from "electrobun/bun";
 
 import type { Command } from "../../shared/commands";
+import { auxiliaryGenerationRpcModule } from "../auxiliary-generation/auxiliary-generation-rpc-feature";
 import { CommandRegistry, type CommandSink } from "../di/command-registry";
 import type { DesktopWindowScope } from "../di/process-container";
 import { RpcRegistry, type RpcEventSink } from "../di/rpc-registry";
 import { windowModule } from "../di/window-module";
 import { windowRegistryModule } from "../di/window-registry-module";
 import { generatorContributionsModule } from "../generator/generator-module";
+import { modelsRpcModule } from "../models/models-rpc-feature";
 import { appDirectoriesRpcModule } from "../native/app-directories-module";
 import { nativeDialogsContributionsModule } from "../native/native-dialogs-module";
 import { nativeFilesRpcModule } from "../native/native-files-module";
@@ -21,18 +23,16 @@ import {
   type MainWindowRPCController,
 } from "../rpc";
 import { analyticsRpcModule } from "../rpc/analytics-rpc-feature";
-import { auxiliaryGenerationRpcModule } from "../rpc/auxiliary-generation-rpc-feature";
 import { builtinToolsRpcModule } from "../rpc/builtin-tools-rpc-feature";
 import { githubAccountRpcModule } from "../rpc/github-account-rpc-feature";
 import { mcpRpcModule } from "../rpc/mcp-rpc-feature";
-import { modelsRpcModule } from "../rpc/models-rpc-feature";
 import { networkRpcModule } from "../rpc/network-rpc-feature";
 import { promptFilesRpcModule } from "../rpc/prompt-files-rpc-feature";
 import { remindersRpcModule } from "../rpc/reminders-rpc-feature";
 import { searchRpcModule } from "../rpc/search-rpc-feature";
 import { skillsRpcModule } from "../rpc/skills-rpc-feature";
-import { threadSharingRpcModule } from "../rpc/thread-sharing-rpc-feature";
 import { updatesRpcModule } from "../rpc/updates-rpc-feature";
+import { threadSharingRpcModule } from "../thread-sharing/thread-sharing-rpc-feature";
 
 export type DesktopWindowKind = "main" | "project";
 

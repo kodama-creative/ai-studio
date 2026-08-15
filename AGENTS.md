@@ -95,11 +95,13 @@ The Bun process object graph is assembled in one production composition root,
 `src/bun/app/start-desktop-app.ts`. Process-scoped managers are constructed
 there, bound once through `di/process-module.ts`, and consumed by constructor
 factories in feature-owned modules. Vertical feature slices live under
-`bun/playgrounds/`, `bun/projects/`, `bun/native/`, and `bun/generator/`; each
-owns its application logic, DI module, RPC server/contribution, and local
-implementation details. Transport-only cross-cutting adapters live in
-`bun/rpc/*-rpc-feature.ts`. Do not recreate central `runtime-module` or catch-all
-`di/modules` files.
+`bun/playgrounds/`, `bun/projects/`, `bun/native/`, `bun/generator/`,
+`bun/models/`, `bun/auxiliary-generation/`, and `bun/thread-sharing/`; each owns
+its application logic, DI module, RPC server/contribution, and local
+implementation details. `bun/rpc/` keeps RPC infrastructure, shared thread
+transport, and transport-only adapters for process-owned managers/state; an RPC
+contribution that adapts real application logic stays with its feature slice.
+Do not recreate central `runtime-module` or catch-all `di/modules` files.
 
 The Generator slice owns guarded project filesystem/uv operations and the
 explicit model/environment-secret resolution needed by generated projects.

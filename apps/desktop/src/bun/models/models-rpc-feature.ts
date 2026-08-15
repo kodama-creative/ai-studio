@@ -3,13 +3,14 @@ import { ContainerModule } from "inversify";
 import type { ModelsRequests, ModelsRpc } from "../../shared/models-rpc";
 import { MODELS_RPC } from "../../shared/models-rpc";
 import type { RpcServer } from "../../shared/namespaced-rpc";
-import type { ModelsApplication } from "../application/models-application";
-import { MODELS_APPLICATION } from "../application/models-module";
 import {
   RpcContribution,
   type RpcContribution as RpcContributionApi,
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
+
+import type { ModelsApplication } from "./models-application";
+import { MODELS_APPLICATION } from "./models-module";
 
 class ModelsRpcServer implements RpcServer<ModelsRpc> {
   readonly namespace = MODELS_RPC;
