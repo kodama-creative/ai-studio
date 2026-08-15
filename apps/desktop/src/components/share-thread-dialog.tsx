@@ -32,9 +32,9 @@ import {
   useState,
 } from "react";
 
+import { useGithubAuth } from "@/app/account/github-auth-provider";
 import { createThreadSharingClient } from "@/client/share";
 import { useCommands } from "@/commands";
-import { useGithubAuth } from "@/components/github-auth-provider";
 
 import {
   prepareShareThreadDialogCommit,

@@ -10,8 +10,8 @@ import {
 } from "@llm-space/ui/ui/popover";
 import { ArrowDownToLineIcon } from "lucide-react";
 
+import { useUpdateStatus } from "@/app/updates/update-status-provider";
 import { useCommands } from "@/commands";
-import { useUpdateStatus } from "@/components/update-status-provider";
 
 /**
  * The persistent "update ready" affordance: a badged icon button at the right

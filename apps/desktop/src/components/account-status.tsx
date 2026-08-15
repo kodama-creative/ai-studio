@@ -10,8 +10,8 @@ import {
 } from "@llm-space/ui/ui/dropdown-menu";
 import { ChevronsUpDown, Loader2Icon, LogOut, XIcon } from "lucide-react";
 
+import { useGithubAuth } from "@/app/account/github-auth-provider";
 import { useCommands } from "@/commands";
-import { useGithubAuth } from "@/components/github-auth-provider";
 import { GithubAvatar } from "@/components/github-avatar";
 import { GitHubIcon } from "@/components/github-icon";
 import type { GithubUser } from "@/shared/auth";

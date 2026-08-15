@@ -22,6 +22,9 @@ import { lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePanelRef } from "react-resizable-panels";
 import { toast } from "sonner";
 
+import { GithubAuthProvider } from "@/app/account/github-auth-provider";
+import { UpdateStatusProvider } from "@/app/updates/update-status-provider";
+import { useFullScreen } from "@/app/window/use-full-screen";
 import { createAgentProjectClient } from "@/client/agent-project-client";
 import { createAnalyticsClient } from "@/client/analytics";
 import { createPlaygroundClient } from "@/client/playground-client";
@@ -29,7 +32,6 @@ import { createThreadSharingClient } from "@/client/share";
 import { useCommands, useRegisterCommands } from "@/commands";
 import { AccountStatus } from "@/components/account-status";
 import { FeatureReminderDialog } from "@/components/feature-reminder-dialog";
-import { GithubAuthProvider } from "@/components/github-auth-provider";
 import { GithubDeviceDialog } from "@/components/github-device-dialog";
 import { GithubStarReminder } from "@/components/github-star-reminder";
 import { LazyMount } from "@/components/lazy-mount";
@@ -41,10 +43,8 @@ import {
 } from "@/components/thread-tabs";
 import type { PaneLifecycleHost } from "@/components/thread-tabs/pane-lifecycle-host";
 import { UpdateIndicator } from "@/components/update-indicator";
-import { UpdateStatusProvider } from "@/components/update-status-provider";
 import { Welcome } from "@/components/welcome";
 import { trackAnalytics } from "@/lib/analytics";
-import { useFullScreen } from "@/lib/use-full-screen";
 import type { SettingsTab } from "@/shared/commands";
 
 import { PaneActivityTracker } from "./playground/pane-activity-tracker";

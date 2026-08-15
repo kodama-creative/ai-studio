@@ -20,7 +20,7 @@ import {
   Undo2Icon,
 } from "lucide-react";
 
-import { useGithubAuth } from "@/components/github-auth-provider";
+import { useGithubAuth } from "@/app/account/github-auth-provider";
 import { GithubAvatar } from "@/components/github-avatar";
 import { GitHubIcon } from "@/components/github-icon";
 import type { GithubUser } from "@/shared/auth";

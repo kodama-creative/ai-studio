@@ -12,8 +12,8 @@ import {
 import { CheckIcon, CopyIcon, Loader2Icon } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { useGithubAuth } from "@/app/account/github-auth-provider";
 import { useCommands } from "@/commands";
-import { useGithubAuth } from "@/components/github-auth-provider";
 import { GitHubIcon } from "@/components/github-icon";
 
 /**
