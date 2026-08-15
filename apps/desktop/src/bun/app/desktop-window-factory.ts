@@ -63,9 +63,7 @@ export class DesktopWindowFactory implements ProjectWindowAdapter {
     const scope = this._process.createWindowScope(`project:${project.id}`);
     try {
       scope.load(projectWindowModule({ source: project }));
-      const studio = scope.own(
-        await scope.getAsync<Studio>(PROJECT_WINDOW_TOKENS.studio)
-      );
+      const studio = await scope.getAsync<Studio>(PROJECT_WINDOW_TOKENS.studio);
       const projectView: AgentProjectView = {
         id: project.id,
         name: project.name,

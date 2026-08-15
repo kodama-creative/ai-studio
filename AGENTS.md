@@ -100,8 +100,8 @@ Every native window owns one `RpcRegistry`. Window-scoped feature classes implem
 
 The Bun process object graph is assembled in one production composition root,
 `src/bun/app/start-desktop-app.ts`. Process-scoped managers are constructed
-there, bound once through `di/process-module.ts`, and consumed by constructor
-factories in feature-owned modules. Vertical feature slices live under
+there, bound and eagerly adopted once through `di/process-services.ts`, and
+consumed by constructor factories in feature-owned modules. Vertical feature slices live under
 `bun/playgrounds/`, `bun/projects/`, `bun/native/`, `bun/generator/`,
 `bun/models/`, `bun/auxiliary-generation/`, and `bun/thread-sharing/`; each owns
 its application logic, DI module, RPC server/contribution, and local

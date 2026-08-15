@@ -24,7 +24,7 @@ import {
   createDesktopProcessContainer,
   type DesktopProcessContainer,
 } from "../di/process-container";
-import { processServicesModule } from "../di/process-module";
+import { bindProcessServices } from "../di/process-services";
 import { PROCESS_TOKENS } from "../di/tokens";
 import { openPath, revealInFileManager } from "../fs";
 import { generatorModule } from "../generator/generator-module";
@@ -99,7 +99,6 @@ async function _startDesktopApp(
   });
   let mainWindows: MainWindowManager<DesktopMainWindowHandle> | undefined;
   const githubAuth = new GitHubAuthManager();
-  processLifecycle.defer("GitHub auth", () => githubAuth.dispose());
   // Write-side gist connector for the "Share thread" flow. Reuses the signed-in
   // GitHub token (the `gist` scope); creates secret gists readable by URL.
   const gistWriter = new GistThreadWriter({
@@ -141,24 +140,22 @@ async function _startDesktopApp(
   });
   // DI resolution remains confined to this composition root; feature classes
   // still receive ordinary constructor arguments instead of the Container.
-  processContainer.load(
-    processServicesModule({
-      analytics,
-      desktopHost: host,
-      githubAuth,
-      gistWriter,
-      gistReader,
-      homePath,
-      mcpManager,
-      modelManager,
-      networkSettings,
-      projectWindows,
-      searchSettings,
-      skillsManager,
-      updater,
-      windowStates,
-    })
-  );
+  bindProcessServices(processContainer, {
+    analytics,
+    desktopHost: host,
+    githubAuth,
+    gistWriter,
+    gistReader,
+    homePath,
+    mcpManager,
+    modelManager,
+    networkSettings,
+    projectWindows,
+    searchSettings,
+    skillsManager,
+    updater,
+    windowStates,
+  });
   processContainer.load(playgroundModule());
   processContainer.load(auxiliaryGenerationModule());
   processContainer.load(modelsModule());

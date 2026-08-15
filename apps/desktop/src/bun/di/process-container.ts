@@ -97,12 +97,6 @@ export class DesktopWindowScope {
       );
   }
 
-  /** Adopt a factory-created window resource for automatic disposal. */
-  own<T>(value: T): T {
-    this._assertOpen();
-    return this._disposables.track(value);
-  }
-
   /** Register explicit async cleanup; callbacks run in reverse ownership order. */
   onDispose(disposer: Disposer): void {
     this._assertOpen();
