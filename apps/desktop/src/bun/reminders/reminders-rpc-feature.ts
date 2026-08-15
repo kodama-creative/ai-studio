@@ -10,8 +10,7 @@ import {
   type RpcContribution as RpcContributionApi,
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
-import { REMINDERS_STATE } from "../reminders/reminders-module";
-import type { RemindersState } from "../reminders/state";
+import { RemindersState } from "../reminders/state";
 
 class RemindersRpcServer implements RpcServer<RemindersRpc> {
   readonly namespace = REMINDERS_RPC;
@@ -28,12 +27,12 @@ class RemindersContribution implements RpcContributionApi {
   }
 }
 
-/** Bind reminder RPC as one window contribution. */
+/** Bind the reminder feature's RPC adapter as one window contribution. */
 export function remindersRpcModule(): ContainerModule {
   return new ContainerModule(({ bind }) => {
     bind(RemindersContribution)
       .toDynamicValue(
-        (context) => new RemindersContribution(context.get(REMINDERS_STATE))
+        (context) => new RemindersContribution(context.get(RemindersState))
       )
       .inSingletonScope();
     bind<RpcContributionApi>(RpcContribution).toService(RemindersContribution);

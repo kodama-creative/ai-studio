@@ -12,7 +12,13 @@ import {
   type RpcContribution as RpcContributionApi,
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
-import { PROCESS_TOKENS } from "../di/tokens";
+import { desktopToken } from "../di/tokens";
+import { bindWindowFeature, windowFeature } from "../di/window-feature";
+
+export const SEARCH_SETTINGS = desktopToken<SearchSettingsManager>(
+  "search",
+  "settings"
+);
 
 class SearchRpcServer implements RpcServer<SearchRpc> {
   readonly namespace = SEARCH_RPC;
@@ -43,10 +49,20 @@ export function searchRpcModule(): ContainerModule {
       .toDynamicValue(
         (context) =>
           new SearchRpcContribution(
-            context.get<SearchSettingsManager>(PROCESS_TOKENS.searchSettings)
+            context.get<SearchSettingsManager>(SEARCH_SETTINGS)
           )
       )
       .inSingletonScope();
     bind<RpcContributionApi>(RpcContribution).toService(SearchRpcContribution);
+  });
+}
+
+/** Register search settings RPC as one bundled window feature. */
+export function searchModule(): ContainerModule {
+  return new ContainerModule(({ bind }) => {
+    bindWindowFeature(
+      bind,
+      windowFeature("search", (scope) => scope.load(searchRpcModule()))
+    );
   });
 }

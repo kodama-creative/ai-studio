@@ -25,7 +25,8 @@ import {
   type RpcContribution as RpcContributionApi,
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
-import { desktopToken, PROCESS_TOKENS, WINDOW_TOKENS } from "../di/tokens";
+import { desktopToken } from "../di/tokens";
+import { bindWindowFeature, windowFeature } from "../di/window-feature";
 
 const ZOOM_STEP = 0.1;
 
@@ -35,6 +36,12 @@ function _clampZoom(zoom: number): number {
 
 export const WINDOW_APPLICATION =
   desktopToken<WindowApplication>("window", "application");
+export const WINDOW_CONTEXT =
+  desktopToken<DesktopWindowContext>("window", "context");
+export const WINDOW_STATE_MANAGER = desktopToken<WindowStateManager>(
+  "window",
+  "state-manager"
+);
 
 export interface NativeWindowStateBinding {
   readonly store: WindowStatePersistenceStore;
@@ -162,14 +169,14 @@ class WindowContribution implements CommandContributionApi, RpcContributionApi {
 }
 
 /** Bind the Window application, RPC, and commands for one native window. */
-export function nativeWindowModule(): ContainerModule {
+export function nativeWindowContributionsModule(): ContainerModule {
   return new ContainerModule(({ bind }) => {
     bind<WindowApplication>(WINDOW_APPLICATION)
       .toDynamicValue(
         (context) =>
           new WindowApplication(
-            context.get(WINDOW_TOKENS.context),
-            context.get(PROCESS_TOKENS.windowStates)
+            context.get(WINDOW_CONTEXT),
+            context.get(WINDOW_STATE_MANAGER)
           )
       )
       .inSingletonScope();
@@ -185,5 +192,17 @@ export function nativeWindowModule(): ContainerModule {
       WindowContribution
     );
     bind<RpcContributionApi>(RpcContribution).toService(WindowContribution);
+  });
+}
+
+/** Register native window commands/state as one bundled window feature. */
+export function nativeWindowModule(): ContainerModule {
+  return new ContainerModule(({ bind }) => {
+    bindWindowFeature(
+      bind,
+      windowFeature("native-window", (scope) =>
+        scope.load(nativeWindowContributionsModule())
+      )
+    );
   });
 }

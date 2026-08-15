@@ -16,8 +16,12 @@ import {
   type RpcContribution as RpcContributionApi,
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
-import { PROCESS_TOKENS } from "../di/tokens";
-import type { UpdaterService } from "../updates";
+import { desktopToken } from "../di/tokens";
+import { bindWindowFeature, windowFeature } from "../di/window-feature";
+
+import type { UpdaterService } from "./index";
+
+export const UPDATER = desktopToken<UpdaterService>("updates", "updater");
 
 class UpdatesRpcServer implements RpcServer<UpdatesRpc> {
   readonly namespace = UPDATES_RPC;
@@ -62,7 +66,7 @@ export function updatesRpcModule(): ContainerModule {
       .toDynamicValue(
         (context) =>
           new UpdatesContribution(
-            context.get<UpdaterService>(PROCESS_TOKENS.updater)
+            context.get<UpdaterService>(UPDATER)
           )
       )
       .inSingletonScope();
@@ -70,5 +74,15 @@ export function updatesRpcModule(): ContainerModule {
       UpdatesContribution
     );
     bind<RpcContributionApi>(RpcContribution).toService(UpdatesContribution);
+  });
+}
+
+/** Register update commands and RPC as one bundled window feature. */
+export function updatesModule(): ContainerModule {
+  return new ContainerModule(({ bind }) => {
+    bindWindowFeature(
+      bind,
+      windowFeature("updates", (scope) => scope.load(updatesRpcModule()))
+    );
   });
 }

@@ -11,8 +11,11 @@ import {
   type RpcContribution as RpcContributionApi,
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
-import { PROCESS_TOKENS } from "../di/tokens";
+import { desktopToken } from "../di/tokens";
+import { bindWindowFeature, windowFeature } from "../di/window-feature";
 import { ensureRootDir } from "../fs/ensure-root-dir";
+
+export const APP_HOME_PATH = desktopToken<string>("app-directories", "home");
 
 /** Typed Electrobun adapter for the app-directories namespace. */
 class AppDirectoriesRpcServer implements RpcServer<AppDirectoriesRpc> {
@@ -47,11 +50,23 @@ export function appDirectoriesRpcModule(): ContainerModule {
     bind(AppDirectoriesContribution)
       .toDynamicValue(
         (context: ResolutionContext) =>
-          new AppDirectoriesContribution(context.get(PROCESS_TOKENS.homePath))
+          new AppDirectoriesContribution(context.get(APP_HOME_PATH))
       )
       .inSingletonScope();
     bind<RpcContributionApi>(RpcContribution).toService(
       AppDirectoriesContribution
+    );
+  });
+}
+
+/** Register app-owned directory operations as one bundled window feature. */
+export function appDirectoriesModule(): ContainerModule {
+  return new ContainerModule(({ bind }) => {
+    bindWindowFeature(
+      bind,
+      windowFeature("app-directories", (scope) =>
+        scope.load(appDirectoriesRpcModule())
+      )
     );
   });
 }

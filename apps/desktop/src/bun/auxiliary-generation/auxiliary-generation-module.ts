@@ -1,23 +1,19 @@
 import type { ModelManager } from "@llm-space/runtime/models";
 import { ContainerModule } from "inversify";
 
-import { desktopToken, PROCESS_TOKENS } from "../di/tokens";
+import { bindWindowFeature, windowFeature } from "../di/window-feature";
+import { MODEL_MANAGER } from "../models/models-module";
 
 import { AuxiliaryGenerationApplication } from "./auxiliary-generation-application";
-
-export const AUXILIARY_GENERATION_APPLICATION =
-  desktopToken<AuxiliaryGenerationApplication>(
-    "auxiliary-generation",
-    "application"
-  );
+import { auxiliaryGenerationRpcModule } from "./auxiliary-generation-rpc-feature";
 
 /** Bind process-scoped auxiliary model generation. */
 export function auxiliaryGenerationModule(): ContainerModule {
   return new ContainerModule(({ bind }) => {
-    bind<AuxiliaryGenerationApplication>(AUXILIARY_GENERATION_APPLICATION)
+    bind(AuxiliaryGenerationApplication)
       .toDynamicValue((context) => {
         const modelManager = context.get<ModelManager>(
-          PROCESS_TOKENS.modelManager
+          MODEL_MANAGER
         );
         return new AuxiliaryGenerationApplication({
           models: () => modelManager.getAvailableModels(),
@@ -26,5 +22,11 @@ export function auxiliaryGenerationModule(): ContainerModule {
         });
       })
       .inSingletonScope();
+    bindWindowFeature(
+      bind,
+      windowFeature("auxiliary-generation", (scope) =>
+        scope.load(auxiliaryGenerationRpcModule())
+      )
+    );
   });
 }

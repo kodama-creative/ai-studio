@@ -96,6 +96,13 @@ callbacks, or bind raw BrowserWindow/RPC values without an actual consumer.
 
 Every native window owns one `RpcRegistry`. Window-scoped feature classes implement the same-name `RpcContribution` symbol + interface and register their server classes during `RpcRegistry.onStart()`. A named `ContributionProvider<RpcContribution>` takes one frozen snapshot after all window modules are bound; duplicate namespaces and late registration fail. The Registry owns request dispatch, stream abort, event subscriptions, and reverse-order registration cleanup. `createMainWindowRPC()` only forwards the Electrobun envelope to that Registry and never constructs business services.
 
+Bundled feature installation is DI-owned. Every process feature module
+multi-binds one stable-id `DesktopWindowFeature`; `DesktopWindowRuntime`
+resolves that ordered snapshot, installs it once for the Main or Project kind,
+then freezes the Command/RPC registries. The runtime must not import business
+feature modules directly. Duplicate feature ids and feature-attributed startup
+failures are rejected before the native window is exposed.
+
 Project windows keep three interfaces distinct: `projectSource.*` owns source
 read/watch, `studio.*` owns Studio Thread metadata, Drafts, history,
 evaluations, and events, while `thread.*` exclusively owns Run/Step/Continue,
@@ -106,14 +113,13 @@ methods into a catch-all Project Studio client/server.
 
 The Bun process object graph is assembled in one production composition root,
 `src/bun/app/start-desktop-app.ts`. Process-scoped managers are constructed
-there, bound and eagerly adopted once through `di/process-services.ts`, and
-consumed by constructor factories in feature-owned modules. Vertical feature slices live under
-`bun/playgrounds/`, `bun/projects/`, `bun/native/`, `bun/generator/`,
-`bun/models/`, `bun/auxiliary-generation/`, and `bun/thread-sharing/`; each owns
-its application logic, DI module, RPC server/contribution, and local
-implementation details. `bun/rpc/` keeps RPC infrastructure, shared thread
-transport, and transport-only adapters for process-owned managers/state; an RPC
-contribution that adapts real application logic stays with its feature slice.
+there, bound and eagerly adopted once with feature-owned DI identities, and
+consumed by constructor factories in feature-owned modules. Vertical feature
+slices live under their named `bun/*/` directories; each owns its application
+logic, DI identities/module, RPC server/contribution, and local implementation
+details. `bun/rpc/` contains only the Electrobun transport bridge, while shared
+Thread execution transport lives under `bun/thread/`. Do not recreate a central
+business-token registry or put feature adapters back into `bun/rpc/`.
 Do not recreate central `runtime-module` or catch-all `di/modules` files.
 
 The Generator slice owns guarded project filesystem/uv operations and the
@@ -151,9 +157,12 @@ Each native window has a child Inversify scope. Feature modules bind window
 contribution classes with `toService(...)`; one class may implement both
 `CommandContribution` and `RpcContribution` without creating two instances.
 `DesktopWindowRuntime` is the deep lifecycle module around that scope: it
-loads the installed feature modules, freezes and starts both Registries, owns
-the Electrobun bridge, attaches the eventual native window, and disposes
-transports before closing the window. Callers must not reproduce that sequence.
+installs the DI-provided `DesktopWindowFeature` snapshot, freezes and starts
+both Registries, owns the Electrobun bridge, attaches the eventual native
+window, and disposes transports before closing the window. Callers must not
+reproduce that sequence. Concrete internal application classes use their
+constructors as DI identities; typed symbols are reserved for external values
+and actual interface seams and remain owned by the relevant feature.
 `DesktopWindowFactory` owns Main/Project native creation around that runtime,
 including Studio resolution, immutable Project identity, window-state binding,
 command routing, and failed-scope cleanup; window managers consume the factory

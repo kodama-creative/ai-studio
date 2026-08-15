@@ -6,7 +6,6 @@ import {
   type GithubAccountRpc,
 } from "../../shared/github-account-rpc";
 import type { RpcServer } from "../../shared/namespaced-rpc";
-import type { GitHubAuthManager } from "../auth/github-auth-manager";
 import {
   CommandContribution,
   type CommandContribution as CommandContributionApi,
@@ -17,7 +16,15 @@ import {
   type RpcContribution as RpcContributionApi,
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
-import { PROCESS_TOKENS } from "../di/tokens";
+import { desktopToken } from "../di/tokens";
+import { bindWindowFeature, windowFeature } from "../di/window-feature";
+
+import type { GitHubAuthManager } from "./github-auth-manager";
+
+export const GITHUB_AUTH = desktopToken<GitHubAuthManager>(
+  "github-account",
+  "auth"
+);
 
 class GithubAccountRpcServer implements RpcServer<GithubAccountRpc> {
   readonly namespace = GITHUB_ACCOUNT_RPC;
@@ -59,7 +66,7 @@ export function githubAccountRpcModule(): ContainerModule {
       .toDynamicValue(
         (context) =>
           new GithubAccountContribution(
-            context.get<GitHubAuthManager>(PROCESS_TOKENS.githubAuth)
+            context.get<GitHubAuthManager>(GITHUB_AUTH)
           )
       )
       .inSingletonScope();
@@ -68,6 +75,18 @@ export function githubAccountRpcModule(): ContainerModule {
     );
     bind<RpcContributionApi>(RpcContribution).toService(
       GithubAccountContribution
+    );
+  });
+}
+
+/** Register GitHub Account commands and RPC as one bundled window feature. */
+export function githubAccountModule(): ContainerModule {
+  return new ContainerModule(({ bind }) => {
+    bindWindowFeature(
+      bind,
+      windowFeature("github-account", (scope) =>
+        scope.load(githubAccountRpcModule())
+      )
     );
   });
 }

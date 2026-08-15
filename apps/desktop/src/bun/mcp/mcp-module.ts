@@ -12,7 +12,10 @@ import {
   type RpcContribution as RpcContributionApi,
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
-import { PROCESS_TOKENS } from "../di/tokens";
+import { desktopToken } from "../di/tokens";
+import { bindWindowFeature, windowFeature } from "../di/window-feature";
+
+export const MCP_MANAGER = desktopToken<McpManager>("mcp", "manager");
 
 class McpRpcServer implements RpcServer<McpRpc> {
   readonly namespace = MCP_RPC;
@@ -49,10 +52,20 @@ export function mcpRpcModule(): ContainerModule {
       .toDynamicValue(
         (context) =>
           new McpRpcContribution(
-            context.get<McpManager>(PROCESS_TOKENS.mcpManager)
+            context.get<McpManager>(MCP_MANAGER)
           )
       )
       .inSingletonScope();
     bind<RpcContributionApi>(RpcContribution).toService(McpRpcContribution);
+  });
+}
+
+/** Register MCP settings and tool RPC as one bundled window feature. */
+export function mcpModule(): ContainerModule {
+  return new ContainerModule(({ bind }) => {
+    bindWindowFeature(
+      bind,
+      windowFeature("mcp", (scope) => scope.load(mcpRpcModule()))
+    );
   });
 }

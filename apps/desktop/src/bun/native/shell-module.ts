@@ -7,6 +7,7 @@ import {
   type CommandContribution as CommandContributionApi,
 } from "../di/command-contribution";
 import type { CommandRegistry } from "../di/command-registry";
+import { bindWindowFeature, windowFeature } from "../di/window-feature";
 
 import { parseExternalUrl } from "./parse-external-url";
 
@@ -42,6 +43,16 @@ export function shellCommandsModule(): ContainerModule {
     bind(ShellContribution).toSelf().inSingletonScope();
     bind<CommandContributionApi>(CommandContribution).toService(
       ShellContribution
+    );
+  });
+}
+
+/** Register native shell commands as one bundled window feature. */
+export function shellModule(): ContainerModule {
+  return new ContainerModule(({ bind }) => {
+    bindWindowFeature(
+      bind,
+      windowFeature("shell", (scope) => scope.load(shellCommandsModule()))
     );
   });
 }

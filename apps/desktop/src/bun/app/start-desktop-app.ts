@@ -15,6 +15,14 @@ import Electrobun, { app, type ElectrobunEvent, Utils } from "electrobun/bun";
 
 import { resolveDeepLinkScheme } from "../../shared/deep-link-scheme";
 import { Analytics } from "../analytics";
+import {
+  ANALYTICS,
+  analyticsModule,
+} from "../analytics/analytics-module";
+import {
+  GITHUB_AUTH,
+  githubAccountModule,
+} from "../auth/github-account-module";
 import { GitHubAuthManager } from "../auth/github-auth-manager";
 import { auxiliaryGenerationModule } from "../auxiliary-generation/auxiliary-generation-module";
 import { isStudioOpenDeepLink } from "../deep-link";
@@ -24,25 +32,56 @@ import {
   createDesktopProcessContainer,
   type DesktopProcessContainer,
 } from "../di/process-container";
-import { bindProcessServices } from "../di/process-services";
-import { PROCESS_TOKENS } from "../di/tokens";
 import { openPath, revealInFileManager } from "../fs";
 import { generatorModule } from "../generator/generator-module";
 import { DesktopHost } from "../host/desktop-host";
-import { modelsModule } from "../models/models-module";
+import {
+  DESKTOP_HOST,
+  desktopHostModule,
+} from "../host/desktop-host-module";
+import { MCP_MANAGER, mcpModule } from "../mcp/mcp-module";
+import { MODEL_MANAGER, modelsModule } from "../models/models-module";
+import {
+  APP_HOME_PATH,
+  appDirectoriesModule,
+} from "../native/app-directories-module";
 import { nativeDialogsApplicationModule } from "../native/native-dialogs-module";
-import { playgroundModule } from "../playgrounds/playground-module";
-import { agentProjectsModule } from "../projects/agent-projects-module";
+import { nativeFilesModule } from "../native/native-files-module";
+import {
+  nativeWindowModule,
+  WINDOW_STATE_MANAGER,
+} from "../native/native-window-module";
+import { promptFilesModule } from "../native/prompt-files-module";
+import { shellModule } from "../native/shell-module";
+import {
+  NETWORK_SETTINGS,
+  networkModule,
+} from "../network/network-module";
+import {
+  PLAYGROUND_APPLICATION,
+  playgroundModule,
+} from "../playgrounds/playground-module";
+import {
+  agentProjectsModule,
+  PROJECT_WINDOW_MANAGER,
+} from "../projects/agent-projects-module";
 import { ProjectWindowManager } from "../projects/project-window-manager";
 import {
   FileAgentProjectCatalogStore,
   FileProjectWindowStateStore,
 } from "../projects/project-window-state";
 import { remindersModule } from "../reminders/reminders-module";
+import { SEARCH_SETTINGS, searchModule } from "../search/search-module";
 import { getManagedSkillsDir } from "../skills/seed";
-import { threadSharingApplicationModule } from "../thread-sharing/thread-sharing-application";
+import { SKILLS_MANAGER, skillsModule } from "../skills/skills-module";
+import {
+  GIST_THREAD_READER,
+  GIST_THREAD_WRITER,
+  threadSharingModule,
+} from "../thread-sharing/thread-sharing-module";
 import { UpdaterService } from "../updates";
 import { UpdatesState } from "../updates/state";
+import { UPDATER, updatesModule } from "../updates/updates-module";
 
 import { DesktopProcessLifecycle } from "./desktop-process-lifecycle";
 import {
@@ -141,33 +180,44 @@ async function _startDesktopApp(
   });
   // DI resolution remains confined to this composition root; feature classes
   // still receive ordinary constructor arguments instead of the Container.
-  bindProcessServices(processContainer, {
-    analytics,
-    desktopHost: host,
-    githubAuth,
-    gistWriter,
-    gistReader,
-    homePath,
-    mcpManager,
-    modelManager,
-    networkSettings,
-    projectWindows,
-    searchSettings,
-    skillsManager,
-    updater,
-    windowStates,
-  });
-  processContainer.load(playgroundModule());
+  processContainer.bindConstant(ANALYTICS, analytics);
+  processContainer.bindConstant(APP_HOME_PATH, homePath);
+  processContainer.bindConstant(DESKTOP_HOST, host);
+  processContainer.bindConstant(GITHUB_AUTH, githubAuth);
+  processContainer.bindConstant(GIST_THREAD_READER, gistReader);
+  processContainer.bindConstant(GIST_THREAD_WRITER, gistWriter);
+  processContainer.bindConstant(MCP_MANAGER, mcpManager);
+  processContainer.bindConstant(MODEL_MANAGER, modelManager);
+  processContainer.bindConstant(NETWORK_SETTINGS, networkSettings);
+  processContainer.bindConstant(PROJECT_WINDOW_MANAGER, projectWindows);
+  processContainer.bindConstant(SEARCH_SETTINGS, searchSettings);
+  processContainer.bindConstant(SKILLS_MANAGER, skillsManager);
+  processContainer.bindConstant(UPDATER, updater);
+  processContainer.bindConstant(WINDOW_STATE_MANAGER, windowStates);
+  processContainer.load(threadSharingModule());
+  processContainer.load(githubAccountModule());
+  processContainer.load(updatesModule());
+  processContainer.load(remindersModule());
+  processContainer.load(analyticsModule());
+  processContainer.load(agentProjectsModule());
+  processContainer.load(generatorModule());
+  processContainer.load(nativeDialogsApplicationModule());
+  processContainer.load(nativeFilesModule());
+  processContainer.load(appDirectoriesModule());
+  processContainer.load(nativeWindowModule());
+  processContainer.load(shellModule());
   processContainer.load(auxiliaryGenerationModule());
   processContainer.load(modelsModule());
-  processContainer.load(nativeDialogsApplicationModule());
-  processContainer.load(generatorModule());
-  processContainer.load(agentProjectsModule());
-  processContainer.load(remindersModule());
-  processContainer.load(threadSharingApplicationModule());
+  processContainer.load(promptFilesModule());
+  processContainer.load(mcpModule());
+  processContainer.load(desktopHostModule());
+  processContainer.load(searchModule());
+  processContainer.load(networkModule());
+  processContainer.load(skillsModule());
+  processContainer.load(playgroundModule());
   // Resolve the lazy application root through DI so its Disposable lifecycle
   // is adopted by the process scope before any window can request it.
-  processContainer.get(PROCESS_TOKENS.playgroundApplication);
+  processContainer.get(PLAYGROUND_APPLICATION);
   let stopPromise: Promise<void> | null = null;
   const runtime: DesktopAppRuntime = {
     stop() {

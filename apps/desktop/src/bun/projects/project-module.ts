@@ -10,11 +10,12 @@ import {
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
 import {
-  PROCESS_TOKENS,
-  PROJECT_WINDOW_TOKENS,
-  WINDOW_TOKENS,
+  desktopToken,
 } from "../di/tokens";
-import { StudioThreadRpcServer } from "../rpc/thread-rpc-server";
+import { MODEL_MANAGER } from "../models/models-module";
+import { WINDOW_CONTEXT } from "../native/native-window-module";
+import { SKILLS_MANAGER } from "../skills/skills-module";
+import { StudioThreadRpcServer } from "../thread/thread-rpc-server";
 
 import type { AgentProject } from "./agent-project";
 import {
@@ -23,20 +24,33 @@ import {
 } from "./project-rpc-server";
 import { ProjectSandbox } from "./project-sandbox";
 
+export const PROJECT_SOURCE = desktopToken<AgentProject>(
+  "project-window",
+  "source"
+);
+export const PROJECT_VIEW = desktopToken<AgentProjectView>(
+  "project-window",
+  "project"
+);
+export const PROJECT_STUDIO = desktopToken<Studio>(
+  "project-window",
+  "studio"
+);
+
 /** Bind one Project Studio from its source and process-owned runtime managers. */
 export function projectWindowModule(input: {
   readonly source: AgentProject;
 }): ContainerModule {
   return new ContainerModule(({ bind }) => {
-    bind(PROJECT_WINDOW_TOKENS.source).toConstantValue(input.source);
-    bind(PROJECT_WINDOW_TOKENS.studio)
+    bind(PROJECT_SOURCE).toConstantValue(input.source);
+    bind(PROJECT_STUDIO)
       .toDynamicValue(async (context: ResolutionContext) => {
-        const source = context.get<AgentProject>(PROJECT_WINDOW_TOKENS.source);
+        const source = context.get<AgentProject>(PROJECT_SOURCE);
         const modelManager = context.get<ModelManager>(
-          PROCESS_TOKENS.modelManager
+          MODEL_MANAGER
         );
         const skillsManager = context.get<SkillsManager>(
-          PROCESS_TOKENS.skillsManager
+          SKILLS_MANAGER
         );
         return createStudio({
           projectRoot: source.rootPath,
@@ -79,11 +93,11 @@ export function projectWindowIdentityModule(
   project: AgentProjectView
 ): ContainerModule {
   return new ContainerModule(({ bind }) => {
-    bind(WINDOW_TOKENS.context).toConstantValue({
+    bind(WINDOW_CONTEXT).toConstantValue({
       kind: "agentProject",
       project,
     });
-    bind(PROJECT_WINDOW_TOKENS.project).toConstantValue(project);
+    bind(PROJECT_VIEW).toConstantValue(project);
   });
 }
 
@@ -109,8 +123,8 @@ export function projectContributionsModule(): ContainerModule {
       .toDynamicValue(
         (context) =>
           new ProjectContribution(
-            context.get(PROJECT_WINDOW_TOKENS.studio),
-            context.get<AgentProjectView>(PROJECT_WINDOW_TOKENS.project).id
+            context.get(PROJECT_STUDIO),
+            context.get<AgentProjectView>(PROJECT_VIEW).id
           )
       )
       .inSingletonScope();

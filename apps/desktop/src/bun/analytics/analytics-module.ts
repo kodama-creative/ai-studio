@@ -7,13 +7,17 @@ import {
   type AnalyticsRpc,
 } from "../../shared/analytics-rpc";
 import type { RpcServer } from "../../shared/namespaced-rpc";
-import type { Analytics } from "../analytics";
 import {
   RpcContribution,
   type RpcContribution as RpcContributionApi,
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
-import { PROCESS_TOKENS } from "../di/tokens";
+import { desktopToken } from "../di/tokens";
+import { bindWindowFeature, windowFeature } from "../di/window-feature";
+
+import type { Analytics } from "./index";
+
+export const ANALYTICS = desktopToken<Analytics>("analytics", "analytics");
 
 class AnalyticsRpcServer implements RpcServer<AnalyticsRpc> {
   readonly namespace = ANALYTICS_RPC;
@@ -46,9 +50,19 @@ export function analyticsRpcModule(): ContainerModule {
     bind(AnalyticsContribution)
       .toDynamicValue(
         (context) =>
-          new AnalyticsContribution(context.get(PROCESS_TOKENS.analytics))
+          new AnalyticsContribution(context.get(ANALYTICS))
       )
       .inSingletonScope();
     bind<RpcContributionApi>(RpcContribution).toService(AnalyticsContribution);
+  });
+}
+
+/** Register Analytics as one bundled window feature. */
+export function analyticsModule(): ContainerModule {
+  return new ContainerModule(({ bind }) => {
+    bindWindowFeature(
+      bind,
+      windowFeature("analytics", (scope) => scope.load(analyticsRpcModule()))
+    );
   });
 }

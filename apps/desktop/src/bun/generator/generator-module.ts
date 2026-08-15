@@ -8,7 +8,9 @@ import {
   type RpcContribution as RpcContributionApi,
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
-import { desktopToken, PROCESS_TOKENS } from "../di/tokens";
+import { desktopToken } from "../di/tokens";
+import { bindWindowFeature, windowFeature } from "../di/window-feature";
+import { MODEL_MANAGER } from "../models/models-module";
 import {
   NATIVE_DIALOGS_APPLICATION,
   type NativeDialogsApplication,
@@ -34,10 +36,16 @@ export function generatorModule(): ContainerModule {
         (context: ResolutionContext) =>
           new ProjectGeneratorApplication(
             context.get<NativeDialogsApplication>(NATIVE_DIALOGS_APPLICATION),
-            context.get<ModelManager>(PROCESS_TOKENS.modelManager)
+            context.get<ModelManager>(MODEL_MANAGER)
           )
       )
       .inSingletonScope();
+    bindWindowFeature(
+      bind,
+      windowFeature("generator", (scope) =>
+        scope.load(generatorContributionsModule())
+      )
+    );
   });
 }
 

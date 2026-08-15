@@ -11,10 +11,7 @@ import {
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
 
-import {
-  THREAD_SHARING_APPLICATION,
-  type ThreadSharingApplication,
-} from "./thread-sharing-application";
+import { ThreadSharingApplication } from "./thread-sharing-application";
 
 class ThreadSharingRpcServer implements RpcServer<ThreadSharingRpc> {
   readonly namespace = THREAD_SHARING_RPC;
@@ -38,7 +35,7 @@ export function threadSharingRpcModule(): ContainerModule {
       .toDynamicValue(
         (context) =>
           new ThreadSharingContribution(
-            context.get(THREAD_SHARING_APPLICATION)
+            context.get(ThreadSharingApplication)
           )
       )
       .inSingletonScope();

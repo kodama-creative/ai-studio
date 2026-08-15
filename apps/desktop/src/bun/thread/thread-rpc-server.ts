@@ -91,7 +91,7 @@ interface ThreadOperations {
   cancel(id: string): Promise<void>;
 }
 
-/** Applies target resolution and request-local cancellation once for both products. */
+/** Applies target resolution and request-local cancellation for both Thread products. */
 function _threadRequests(
   resolveTarget: (target: ThreadTarget) => string,
   operations: ThreadOperations

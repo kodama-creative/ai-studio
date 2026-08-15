@@ -11,8 +11,7 @@ import {
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
 
-import type { AuxiliaryGenerationApplication } from "./auxiliary-generation-application";
-import { AUXILIARY_GENERATION_APPLICATION } from "./auxiliary-generation-module";
+import { AuxiliaryGenerationApplication } from "./auxiliary-generation-application";
 
 /** Typed Desktop RPC adapter for stateless UI helper generation. */
 class AuxiliaryGenerationRpcServer
@@ -42,7 +41,7 @@ export function auxiliaryGenerationRpcModule(): ContainerModule {
       .toDynamicValue(
         (context) =>
           new AuxiliaryGenerationRpcContribution(
-            context.get(AUXILIARY_GENERATION_APPLICATION)
+            context.get(AuxiliaryGenerationApplication)
           )
       )
       .inSingletonScope();

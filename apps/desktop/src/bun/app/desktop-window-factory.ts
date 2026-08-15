@@ -7,13 +7,13 @@ import type {
   DesktopProcessContainer,
   DesktopWindowScope,
 } from "../di/process-container";
-import { PROJECT_WINDOW_TOKENS } from "../di/tokens";
 import type { NativeWindowStateBinding } from "../native/native-window-module";
 import { playgroundWindowModule } from "../playgrounds/playground-module";
 import type { AgentProject } from "../projects/agent-project";
 import {
   projectWindowIdentityModule,
   projectWindowModule,
+  PROJECT_STUDIO,
 } from "../projects/project-module";
 import type {
   ProjectWindowAdapter,
@@ -63,7 +63,7 @@ export class DesktopWindowFactory implements ProjectWindowAdapter {
     const scope = this._process.createWindowScope(`project:${project.id}`);
     try {
       scope.load(projectWindowModule({ source: project }));
-      const studio = await scope.getAsync<Studio>(PROJECT_WINDOW_TOKENS.studio);
+      const studio = await scope.getAsync<Studio>(PROJECT_STUDIO);
       const projectView: AgentProjectView = {
         id: project.id,
         name: project.name,

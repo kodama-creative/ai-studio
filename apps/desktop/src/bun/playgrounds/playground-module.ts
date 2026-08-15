@@ -7,9 +7,15 @@ import {
   type RpcContribution as RpcContributionApi,
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
-import { PROCESS_TOKENS, WINDOW_TOKENS } from "../di/tokens";
+import { desktopToken } from "../di/tokens";
+import { bindWindowFeature, windowFeature } from "../di/window-feature";
 import type { DesktopHost } from "../host/desktop-host";
-import { PlaygroundThreadRpcServer } from "../rpc/thread-rpc-server";
+import { DESKTOP_HOST } from "../host/desktop-host-module";
+import { MCP_MANAGER } from "../mcp/mcp-module";
+import { MODEL_MANAGER } from "../models/models-module";
+import { APP_HOME_PATH } from "../native/app-directories-module";
+import { WINDOW_CONTEXT } from "../native/native-window-module";
+import { PlaygroundThreadRpcServer } from "../thread/thread-rpc-server";
 
 import {
   createDesktopPlaygroundApplication,
@@ -17,20 +23,23 @@ import {
 } from "./playground-application";
 import { PlaygroundRpcServer } from "./playground-rpc-server";
 
+export const PLAYGROUND_APPLICATION =
+  desktopToken<DesktopPlaygroundApplication>("playground", "application");
+
 /** Bind the process-owned Playground application host. */
 export function playgroundModule(): ContainerModule {
   return new ContainerModule(({ bind }) => {
-    bind(PROCESS_TOKENS.playgroundApplication)
+    bind(PLAYGROUND_APPLICATION)
       .toDynamicValue((context: ResolutionContext) => {
         const modelManager = context.get<ModelManager>(
-          PROCESS_TOKENS.modelManager
+          MODEL_MANAGER
         );
         const desktopHost = context.get<DesktopHost>(
-          PROCESS_TOKENS.desktopHost
+          DESKTOP_HOST
         );
-        const mcpManager = context.get<McpManager>(PROCESS_TOKENS.mcpManager);
+        const mcpManager = context.get<McpManager>(MCP_MANAGER);
         return createDesktopPlaygroundApplication({
-          homePath: context.get(PROCESS_TOKENS.homePath),
+          homePath: context.get(APP_HOME_PATH),
           models: () => modelManager.getAvailableModels(),
           resolveConnection: ({ providerId }) =>
             modelManager.resolveConnection({ providerId }),
@@ -43,13 +52,19 @@ export function playgroundModule(): ContainerModule {
         });
       })
       .inSingletonScope();
+    bindWindowFeature(
+      bind,
+      windowFeature("playground", (scope, { kind }) => {
+        if (kind === "main") scope.load(playgroundContributionsModule());
+      })
+    );
   });
 }
 
 /** Identify the Main window as the durable Playground catalog. */
 export function playgroundWindowModule(): ContainerModule {
   return new ContainerModule(({ bind }) => {
-    bind(WINDOW_TOKENS.context).toConstantValue({ kind: "playground" });
+    bind(WINDOW_CONTEXT).toConstantValue({ kind: "playground" });
   });
 }
 
@@ -69,7 +84,7 @@ export function playgroundContributionsModule(): ContainerModule {
       .toDynamicValue(
         (context) =>
           new PlaygroundContribution(
-            context.get(PROCESS_TOKENS.playgroundApplication)
+            context.get(PLAYGROUND_APPLICATION)
           )
       )
       .inSingletonScope();

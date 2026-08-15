@@ -15,16 +15,23 @@ import {
   type RpcContribution as RpcContributionApi,
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
-import { desktopToken, PROCESS_TOKENS } from "../di/tokens";
+import { desktopToken } from "../di/tokens";
+import { bindWindowFeature, windowFeature } from "../di/window-feature";
 import { NATIVE_DIALOGS_APPLICATION } from "../native/native-dialogs-module";
 
 import {
   AgentProjectsApplication,
   type DirectoryPicker,
 } from "./agent-projects-application";
+import { projectContributionsModule } from "./project-module";
+import type { ProjectWindowManager } from "./project-window-manager";
 
 export const AGENT_PROJECTS_APPLICATION =
   desktopToken<AgentProjectsApplication>("agent-projects", "application");
+export const PROJECT_WINDOW_MANAGER = desktopToken<ProjectWindowManager>(
+  "agent-projects",
+  "window-manager"
+);
 
 class AgentProjectsRpcServer implements RpcServer<AgentProjectsRpc> {
   readonly namespace = AGENT_PROJECTS_RPC;
@@ -43,11 +50,18 @@ export function agentProjectsModule(): ContainerModule {
       .toDynamicValue(
         (context: ResolutionContext) =>
           new AgentProjectsApplication(
-            context.get(PROCESS_TOKENS.projectWindows),
+            context.get(PROJECT_WINDOW_MANAGER),
             context.get<DirectoryPicker>(NATIVE_DIALOGS_APPLICATION)
           )
       )
       .inSingletonScope();
+    bindWindowFeature(
+      bind,
+      windowFeature("agent-projects", (scope, { kind }) => {
+        scope.load(agentProjectsContributionsModule(kind === "main"));
+        if (kind === "project") scope.load(projectContributionsModule());
+      })
+    );
   });
 }
 

@@ -12,7 +12,15 @@ import {
   type RpcContribution as RpcContributionApi,
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
-import { PROCESS_TOKENS } from "../di/tokens";
+import { desktopToken } from "../di/tokens";
+import { bindWindowFeature, windowFeature } from "../di/window-feature";
+
+import type { DesktopHost } from "./desktop-host";
+
+export const DESKTOP_HOST = desktopToken<DesktopHost>(
+  "desktop-host",
+  "host"
+);
 
 class BuiltinToolsRpcServer implements RpcServer<BuiltinToolsRpc> {
   readonly namespace = BUILTIN_TOOLS_RPC;
@@ -43,13 +51,24 @@ export function builtinToolsRpcModule(): ContainerModule {
       .toDynamicValue(
         (context) =>
           new BuiltinToolsRpcContribution(
-            context.get<{ tools: ToolRegistry }>(PROCESS_TOKENS.desktopHost)
-              .tools
+            context.get<DesktopHost>(DESKTOP_HOST).tools
           )
       )
       .inSingletonScope();
     bind<RpcContributionApi>(RpcContribution).toService(
       BuiltinToolsRpcContribution
+    );
+  });
+}
+
+/** Register bundled Tool discovery/execution as one window feature. */
+export function desktopHostModule(): ContainerModule {
+  return new ContainerModule(({ bind }) => {
+    bindWindowFeature(
+      bind,
+      windowFeature("builtin-tools", (scope) =>
+        scope.load(builtinToolsRpcModule())
+      )
     );
   });
 }

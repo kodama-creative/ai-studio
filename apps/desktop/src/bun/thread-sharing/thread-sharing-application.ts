@@ -8,19 +8,13 @@ import {
   playgroundToThread,
   threadToPlaygroundDocument,
 } from "@llm-space/studio";
-import { ContainerModule, type ResolutionContext } from "inversify";
 
 import { buildWebShareUrl } from "../../shared/share";
 import type { ThreadSharingRequests } from "../../shared/thread-sharing-rpc";
-import { desktopToken, PROCESS_TOKENS } from "../di/tokens";
 import type { ModelsApplication } from "../models/models-application";
-import { MODELS_APPLICATION } from "../models/models-module";
 import type { DesktopPlaygroundApplication } from "../playgrounds/playground-application";
 
 import { buildSharedThread } from "./thread-sharing";
-
-export const THREAD_SHARING_APPLICATION =
-  desktopToken<ThreadSharingApplication>("thread-sharing", "application");
 
 /** Publishes immutable Playground copies through the Gist connector. */
 export class ThreadSharingApplication implements ThreadSharingRequests {
@@ -90,21 +84,4 @@ export class ThreadSharingApplication implements ThreadSharingRequests {
   async importGist(gistId: string) {
     return this.importSnapshot(await this._reader.readSnapshot(gistId));
   }
-}
-
-/** Bind process-scoped thread sharing use cases. */
-export function threadSharingApplicationModule(): ContainerModule {
-  return new ContainerModule(({ bind }) => {
-    bind<ThreadSharingApplication>(THREAD_SHARING_APPLICATION)
-      .toDynamicValue(
-        (context: ResolutionContext) =>
-          new ThreadSharingApplication(
-            context.get(PROCESS_TOKENS.playgroundApplication),
-            context.get(MODELS_APPLICATION),
-            context.get(PROCESS_TOKENS.gistWriter),
-            context.get(PROCESS_TOKENS.gistReader)
-          )
-      )
-      .inSingletonScope();
-  });
 }

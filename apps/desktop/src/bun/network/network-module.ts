@@ -12,7 +12,13 @@ import {
   type RpcContribution as RpcContributionApi,
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
-import { PROCESS_TOKENS } from "../di/tokens";
+import { desktopToken } from "../di/tokens";
+import { bindWindowFeature, windowFeature } from "../di/window-feature";
+
+export const NETWORK_SETTINGS = desktopToken<NetworkSettingsManager>(
+  "network",
+  "settings"
+);
 
 class NetworkRpcServer implements RpcServer<NetworkRpc> {
   readonly namespace = NETWORK_RPC;
@@ -44,10 +50,20 @@ export function networkRpcModule(): ContainerModule {
       .toDynamicValue(
         (context) =>
           new NetworkRpcContribution(
-            context.get<NetworkSettingsManager>(PROCESS_TOKENS.networkSettings)
+            context.get<NetworkSettingsManager>(NETWORK_SETTINGS)
           )
       )
       .inSingletonScope();
     bind<RpcContributionApi>(RpcContribution).toService(NetworkRpcContribution);
+  });
+}
+
+/** Register network settings RPC as one bundled window feature. */
+export function networkModule(): ContainerModule {
+  return new ContainerModule(({ bind }) => {
+    bindWindowFeature(
+      bind,
+      windowFeature("network", (scope) => scope.load(networkRpcModule()))
+    );
   });
 }
