@@ -17,6 +17,7 @@ import { resolveDeepLinkScheme } from "../../shared/deep-link-scheme";
 import { Analytics } from "../analytics";
 import { agentProjectsModule } from "../application/agent-projects-module";
 import { analyticsApplicationModule } from "../application/analytics-application";
+import { appDirectoriesApplicationModule } from "../application/app-directories-module";
 import { auxiliaryGenerationModule } from "../application/auxiliary-generation-module";
 import { generatorModule } from "../application/generator-module";
 import {
@@ -25,7 +26,8 @@ import {
   githubAccountApplicationModule,
 } from "../application/github-account-application";
 import { modelsModule } from "../application/models-module";
-import { nativeApplicationsModule } from "../application/native-module";
+import { nativeDialogsApplicationModule } from "../application/native-dialogs-module";
+import { nativeFilesApplicationModule } from "../application/native-files-module";
 import { remindersApplicationModule } from "../application/reminders-application";
 import { threadSharingApplicationModule } from "../application/thread-sharing-application";
 import {
@@ -177,7 +179,9 @@ async function _startDesktopApp(
   processContainer.load(playgroundModule());
   processContainer.load(auxiliaryGenerationModule());
   processContainer.load(modelsModule());
-  processContainer.load(nativeApplicationsModule());
+  processContainer.load(nativeDialogsApplicationModule());
+  processContainer.load(nativeFilesApplicationModule());
+  processContainer.load(appDirectoriesApplicationModule());
   processContainer.load(generatorModule());
   processContainer.load(agentProjectsModule());
   processContainer.load(threadSharingApplicationModule());

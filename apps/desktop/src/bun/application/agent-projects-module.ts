@@ -18,7 +18,7 @@ import {
   type AgentProjectsApplicationApi,
   type DirectoryPicker,
 } from "./agent-projects-application";
-import { NATIVE_APPLICATION_TOKENS } from "./native-module";
+import { NATIVE_DIALOGS_APPLICATION } from "./native-dialogs-module";
 
 export const AGENT_PROJECTS_APPLICATION =
   desktopToken<AgentProjectsApplicationApi>("agent-projects", "application");
@@ -31,7 +31,7 @@ export function agentProjectsModule(): ContainerModule {
         (context: ResolutionContext) =>
           new AgentProjectsApplication(
             context.get(PROCESS_TOKENS.projectWindows),
-            context.get<DirectoryPicker>(NATIVE_APPLICATION_TOKENS.dialogs)
+            context.get<DirectoryPicker>(NATIVE_DIALOGS_APPLICATION)
           )
       )
       .inSingletonScope();

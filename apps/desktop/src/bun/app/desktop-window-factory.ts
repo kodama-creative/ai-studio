@@ -3,8 +3,10 @@ import type { BrowserWindow } from "electrobun/bun";
 
 import type { AgentProjectView } from "../../shared/agent-project";
 import type { Command } from "../../shared/commands";
-import type { WindowApplication } from "../application/native-applications";
-import { NATIVE_APPLICATION_TOKENS } from "../application/native-module";
+import {
+  WINDOW_APPLICATION,
+  type WindowApplication,
+} from "../application/native-window-module";
 import type {
   DesktopProcessContainer,
   DesktopWindowScope,
@@ -54,7 +56,7 @@ export class DesktopWindowFactory implements ProjectWindowAdapter {
       windowStates: this._windowStates,
       onFullScreenChange: (fullScreen) =>
         scope
-          .get<WindowApplication>(NATIVE_APPLICATION_TOKENS.window)
+          .get<WindowApplication>(WINDOW_APPLICATION)
           .notifyFullScreenChanged(fullScreen),
     });
     this._attach(scope, window, runtime);
@@ -96,7 +98,7 @@ export class DesktopWindowFactory implements ProjectWindowAdapter {
         windowStates: this._windowStates,
         onFullScreenChange: (fullScreen) =>
           scope
-            .get<WindowApplication>(NATIVE_APPLICATION_TOKENS.window)
+            .get<WindowApplication>(WINDOW_APPLICATION)
             .notifyFullScreenChanged(fullScreen),
       });
       this._attach(scope, window, runtime);

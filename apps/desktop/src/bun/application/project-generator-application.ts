@@ -1,10 +1,10 @@
 import { checkUv, GeneratorProjectWorkspace } from "../fs";
 
 import type { ModelsApplication } from "./models-application";
-import type { NativeDialogApplication } from "./native-applications";
+import type { NativeDialogsApplication } from "./native-dialogs-module";
 
 export interface ProjectGeneratorApplicationApi {
-  pickDirectory(): ReturnType<NativeDialogApplication["pickDirectory"]>;
+  pickDirectory(): ReturnType<NativeDialogsApplication["pickDirectory"]>;
   prepareDirectory(parentDir: string, projectName: string): ReturnType<GeneratorProjectWorkspace["prepare"]>;
   checkUv(): ReturnType<typeof checkUv>;
   runUv(rootDir: string, args: string[], options?: { timeoutMs?: number }): ReturnType<GeneratorProjectWorkspace["runUv"]>;
@@ -17,7 +17,7 @@ export interface ProjectGeneratorApplicationApi {
 /** Coordinates native selection, guarded project writes, and model secrets. */
 export class ProjectGeneratorApplication implements ProjectGeneratorApplicationApi {
   constructor(
-    private readonly _dialogs: Pick<NativeDialogApplication, "pickDirectory">,
+    private readonly _dialogs: Pick<NativeDialogsApplication, "pickDirectory">,
     private readonly _models: Pick<ModelsApplication, "resolveGeneratorEnv">,
     private readonly _workspace = new GeneratorProjectWorkspace()
   ) {}

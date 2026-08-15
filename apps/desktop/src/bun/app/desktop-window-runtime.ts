@@ -2,8 +2,12 @@ import type { BrowserWindow } from "electrobun/bun";
 
 import type { Command } from "../../shared/commands";
 import { agentProjectsContributionsModule } from "../application/agent-projects-module";
+import { appDirectoriesRpcModule } from "../application/app-directories-module";
 import { generatorContributionsModule } from "../application/generator-module";
-import { nativeContributionsModule } from "../application/native-module";
+import { nativeDialogsContributionsModule } from "../application/native-dialogs-module";
+import { nativeFilesRpcModule } from "../application/native-files-module";
+import { nativeWindowContributionsModule } from "../application/native-window-module";
+import { shellCommandsModule } from "../application/shell-module";
 import { CommandRegistry, type CommandSink } from "../di/command-registry";
 import type { DesktopWindowScope } from "../di/process-container";
 import { RpcRegistry, type RpcEventSink } from "../di/rpc-registry";
@@ -126,12 +130,15 @@ export class DesktopWindowRuntime {
       agentProjectsContributionsModule(this._kind === "main")
     );
     this._scope.load(generatorContributionsModule());
+    this._scope.load(nativeDialogsContributionsModule(commandSink));
+    this._scope.load(nativeFilesRpcModule());
+    this._scope.load(appDirectoriesRpcModule());
     this._scope.load(
-      nativeContributionsModule(this._scope, {
-        getWindow: () => this._requireWindow(),
-        commandSink,
-      })
+      nativeWindowContributionsModule(this._scope, () =>
+        this._requireWindow()
+      )
     );
+    this._scope.load(shellCommandsModule());
     this._scope.load(auxiliaryGenerationRpcModule());
     this._scope.load(modelsRpcModule());
     this._scope.load(promptFilesRpcModule());

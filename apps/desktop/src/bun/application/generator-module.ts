@@ -10,8 +10,10 @@ import { GeneratorRpcServer } from "../rpc/generator-rpc-server";
 
 import type { ModelsApplication } from "./models-application";
 import { MODELS_APPLICATION } from "./models-module";
-import type { NativeDialogApplication } from "./native-applications";
-import { NATIVE_APPLICATION_TOKENS } from "./native-module";
+import {
+  NATIVE_DIALOGS_APPLICATION,
+  type NativeDialogsApplication,
+} from "./native-dialogs-module";
 import {
   ProjectGeneratorApplication,
   type ProjectGeneratorApplicationApi,
@@ -27,9 +29,7 @@ export function generatorModule(): ContainerModule {
       .toDynamicValue(
         (context: ResolutionContext) =>
           new ProjectGeneratorApplication(
-            context.get<NativeDialogApplication>(
-              NATIVE_APPLICATION_TOKENS.dialogs
-            ),
+            context.get<NativeDialogsApplication>(NATIVE_DIALOGS_APPLICATION),
             context.get<ModelsApplication>(MODELS_APPLICATION)
           )
       )
