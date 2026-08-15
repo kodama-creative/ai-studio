@@ -65,11 +65,6 @@ export interface ModelsRequests {
     model: CustomModel,
     originalId?: string
   ): Promise<ModelProviderGroup[]>;
-  resolveGeneratorEnv(input: {
-    providerId: string;
-    profileId?: string;
-    envNames: string[];
-  }): Promise<{ modelApiKey: string; envValues: Record<string, string> }>;
 }
 
 export type ModelsRpc = RequestRpcShape<ModelsRequests>;
@@ -92,7 +87,6 @@ export const MODELS_RPC = defineRpcNamespace<ModelsRpc>("models", {
     testConnection: true,
     removeCustom: true,
     upsertCustom: true,
-    resolveGeneratorEnv: true,
   },
   streams: {},
   events: {},

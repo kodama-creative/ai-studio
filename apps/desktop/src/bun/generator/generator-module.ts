@@ -1,44 +1,40 @@
+import type { ModelManager } from "@llm-space/runtime/models";
 import { ContainerModule, type ResolutionContext } from "inversify";
 
 import { GENERATOR_RPC, type GeneratorRpc } from "../../shared/generator-rpc";
 import type { RpcServer } from "../../shared/namespaced-rpc";
-import type { ModelsApplication } from "../application/models-application";
-import { MODELS_APPLICATION } from "../application/models-module";
 import {
   RpcContribution,
   type RpcContribution as RpcContributionApi,
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
-import { desktopToken } from "../di/tokens";
+import { desktopToken, PROCESS_TOKENS } from "../di/tokens";
 import {
   NATIVE_DIALOGS_APPLICATION,
   type NativeDialogsApplication,
 } from "../native/native-dialogs-module";
 
-import {
-  ProjectGeneratorApplication,
-  type ProjectGeneratorApplicationApi,
-} from "./project-generator-application";
+import { ProjectGeneratorApplication } from "./project-generator-application";
 
 export const GENERATOR_APPLICATION =
-  desktopToken<ProjectGeneratorApplicationApi>("generator", "application");
+  desktopToken<ProjectGeneratorApplication>("generator", "application");
 
 class GeneratorRpcServer implements RpcServer<GeneratorRpc> {
   readonly namespace = GENERATOR_RPC;
   readonly streams = {};
 
-  constructor(readonly requests: ProjectGeneratorApplicationApi) {}
+  constructor(readonly requests: ProjectGeneratorApplication) {}
 }
 
 /** Register the process-scoped Generator application and its RPC adapter. */
 export function generatorModule(): ContainerModule {
   return new ContainerModule(({ bind }) => {
-    bind<ProjectGeneratorApplicationApi>(GENERATOR_APPLICATION)
+    bind<ProjectGeneratorApplication>(GENERATOR_APPLICATION)
       .toDynamicValue(
         (context: ResolutionContext) =>
           new ProjectGeneratorApplication(
             context.get<NativeDialogsApplication>(NATIVE_DIALOGS_APPLICATION),
-            context.get<ModelsApplication>(MODELS_APPLICATION)
+            context.get<ModelManager>(PROCESS_TOKENS.modelManager)
           )
       )
       .inSingletonScope();
@@ -46,7 +42,7 @@ export function generatorModule(): ContainerModule {
 }
 
 class GeneratorContribution implements RpcContributionApi {
-  constructor(private readonly _application: ProjectGeneratorApplicationApi) {}
+  constructor(private readonly _application: ProjectGeneratorApplication) {}
 
   /** Register the typed project generator RPC namespace. */
   registerRpc(rpc: RpcRegistry): void {

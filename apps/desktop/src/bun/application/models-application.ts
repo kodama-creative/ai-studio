@@ -150,21 +150,4 @@ export class ModelsApplication implements ModelsRequests {
     this._models.upsertCustomModel(providerId, model, originalId);
     return this.list();
   }
-
-  async resolveGeneratorEnv(
-    input: Parameters<ModelsRequests["resolveGeneratorEnv"]>[0]
-  ) {
-    const modelApiKey =
-      (
-        await this._models.resolveConnection({
-          providerId: input.providerId,
-          profileId: input.profileId,
-        })
-      ).apiKey ?? "";
-    const envValues: Record<string, string> = {};
-    for (const name of input.envNames) {
-      envValues[name] = process.env[name] ?? "";
-    }
-    return { modelApiKey, envValues };
-  }
 }

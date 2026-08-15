@@ -101,6 +101,11 @@ implementation details. Transport-only cross-cutting adapters live in
 `bun/rpc/*-rpc-feature.ts`. Do not recreate central `runtime-module` or catch-all
 `di/modules` files.
 
+The Generator slice owns guarded project filesystem/uv operations and the
+explicit model/environment-secret resolution needed by generated projects.
+Do not expose that generator-only capability through the Models RPC interface;
+the Models application owns provider configuration and connection testing.
+
 The Playground slice binds one process-owned `DesktopPlaygroundApplication`,
 which directly owns Studio/Pi/SQLite/tool composition and disposal. RPC performs
 the transport naming projection; do not add a second pass-through Playground

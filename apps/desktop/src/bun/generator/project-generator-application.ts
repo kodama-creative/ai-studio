@@ -1,48 +1,18 @@
-import type { ModelsApplication } from "../application/models-application";
-import type { NativeDialogsApplication } from "../native/native-dialogs-module";
+import type { ModelManager } from "@llm-space/runtime/models";
 
+import type { GeneratorRequests } from "../../shared/generator-rpc";
+import type { NativeDialogsApplication } from "../native/native-dialogs-module";
 
 import {
   checkUv,
   GeneratorProjectWorkspace,
 } from "./generator-project-workspace";
 
-export interface ProjectGeneratorApplicationApi {
-  pickDirectory(): ReturnType<NativeDialogsApplication["pickDirectory"]>;
-  prepareDirectory(
-    parentDir: string,
-    projectName: string
-  ): ReturnType<GeneratorProjectWorkspace["prepare"]>;
-  checkUv(): ReturnType<typeof checkUv>;
-  runUv(
-    rootDir: string,
-    args: string[],
-    options?: { timeoutMs?: number }
-  ): ReturnType<GeneratorProjectWorkspace["runUv"]>;
-  writeFile(
-    rootDir: string,
-    relativePath: string,
-    contents: string
-  ): ReturnType<GeneratorProjectWorkspace["writeFile"]>;
-  removeFile(
-    rootDir: string,
-    relativePath: string
-  ): ReturnType<GeneratorProjectWorkspace["removeFile"]>;
-  openDevTerminal(
-    rootDir: string
-  ): ReturnType<GeneratorProjectWorkspace["openDevTerminal"]>;
-  resolveEnv(
-    input: Parameters<ModelsApplication["resolveGeneratorEnv"]>[0]
-  ): ReturnType<ModelsApplication["resolveGeneratorEnv"]>;
-}
-
 /** Coordinates native selection, guarded project writes, and model secrets. */
-export class ProjectGeneratorApplication
-  implements ProjectGeneratorApplicationApi
-{
+export class ProjectGeneratorApplication implements GeneratorRequests {
   constructor(
     private readonly _dialogs: Pick<NativeDialogsApplication, "pickDirectory">,
-    private readonly _models: Pick<ModelsApplication, "resolveGeneratorEnv">,
+    private readonly _models: Pick<ModelManager, "resolveConnection">,
     private readonly _workspace = new GeneratorProjectWorkspace()
   ) {}
 
@@ -81,8 +51,19 @@ export class ProjectGeneratorApplication
     return this._workspace.openDevTerminal(rootDir);
   }
 
-  /** Resolve explicitly requested secrets through the local model service. */
-  resolveEnv(input: Parameters<ModelsApplication["resolveGeneratorEnv"]>[0]) {
-    return this._models.resolveGeneratorEnv(input);
+  /** Resolve explicitly requested secrets inside the Generator slice. */
+  async resolveEnv(input: Parameters<GeneratorRequests["resolveEnv"]>[0]) {
+    const modelApiKey =
+      (
+        await this._models.resolveConnection({
+          providerId: input.providerId,
+          profileId: input.profileId,
+        })
+      ).apiKey ?? "";
+    const envValues: Record<string, string> = {};
+    for (const name of input.envNames) {
+      envValues[name] = process.env[name] ?? "";
+    }
+    return { modelApiKey, envValues };
   }
 }
