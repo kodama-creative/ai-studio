@@ -29,9 +29,14 @@ import {
 import { useCommands } from "@/commands";
 
 import { PaneHost } from "./pane-host";
-import { tabLabel, type AppTab } from "./use-thread-tabs";
 
-function _getPaneKey(tab: AppTab): string {
+interface ThreadTabView {
+  readonly id: string;
+  readonly title: string;
+  readonly paneId: string;
+}
+
+function _getPaneKey(tab: ThreadTabView): string {
   return tab.paneId;
 }
 
@@ -48,11 +53,11 @@ function _tabIdFromEventTarget(target: EventTarget | null): string | null {
   );
 }
 
-interface ThreadTabsProps {
+interface ThreadTabsProps<TTab extends ThreadTabView> {
   className?: string;
   emptyState?: ReactNode;
-  tabs: AppTab[];
-  paneTabs: AppTab[];
+  tabs: readonly TTab[];
+  paneTabs: readonly TTab[];
   activeId: string | null;
   sidebarOpen?: boolean;
   fullScreen?: boolean;
@@ -65,12 +70,12 @@ interface ThreadTabsProps {
   /** Create and open a new durable Playground. */
   onNewPlayground?: () => void;
   onToggleSidebar?: () => void;
-  renderPane: (tab: AppTab, active: boolean) => ReactNode;
+  renderPane: (tab: TTab, active: boolean) => ReactNode;
   /** Extra content pinned at the right end of the tab strip, before "+". */
   toolbarSlot?: ReactNode;
 }
 
-export function ThreadTabs({
+export function ThreadTabs<TTab extends ThreadTabView>({
   className,
   emptyState,
   tabs,
@@ -88,7 +93,7 @@ export function ThreadTabs({
   onToggleSidebar,
   renderPane,
   toolbarSlot,
-}: ThreadTabsProps) {
+}: ThreadTabsProps<TTab>) {
   const { resolvedTheme } = useTheme();
   const { executeCommand } = useCommands();
   // The chrome-tabs lib renders tab DOM imperatively and exposes no tooltip prop,
@@ -108,7 +113,7 @@ export function ThreadTabs({
         if (!id) return;
         const tab = tabs.find((tab) => tab.id === id);
         if (!tab) return;
-        const label = tabLabel(tab);
+        const label = tab.title;
         el.title = id;
         el.tabIndex = 0;
         el.setAttribute("role", "tab");
@@ -256,7 +261,7 @@ export function ThreadTabs({
               darkMode={resolvedTheme === "dark"}
               tabs={tabs.map((tab) => ({
                 id: tab.id,
-                title: tabLabel(tab),
+                title: tab.title,
                 favicon: false,
                 active: tab.id === activeId,
               }))}

@@ -21,6 +21,7 @@ export class PaneActivityTracker {
       this._runningPanes.set(paneId, runs);
     }
     runs.add(runId);
+    this._notifyChange();
     return true;
   }
 
@@ -28,6 +29,7 @@ export class PaneActivityTracker {
     const runs = this._runningPanes.get(paneId);
     if (!runs?.delete(runId)) return false;
     if (runs.size === 0) this._runningPanes.delete(paneId);
+    this._notifyChange();
     return true;
   }
 
@@ -39,11 +41,13 @@ export class PaneActivityTracker {
         this._persistingPanes.set(paneId, owners);
       }
       owners.add(owner);
+      this._notifyChange();
       return;
     }
     const owners = this._persistingPanes.get(paneId);
     owners?.delete(owner);
     if (owners?.size === 0) this._persistingPanes.delete(paneId);
+    this._notifyChange();
   }
 
   isPaneBusy(paneId: string): boolean {
@@ -68,17 +72,17 @@ export class PaneActivityTracker {
       return null;
     }
     ids.forEach((paneId) => this._mutatingPanes.add(paneId));
-    this._notifyMutationChange();
+    this._notifyChange();
     let active = true;
     return () => {
       if (!active) return;
       active = false;
       ids.forEach((paneId) => this._mutatingPanes.delete(paneId));
-      this._notifyMutationChange();
+      this._notifyChange();
     };
   }
 
-  private _notifyMutationChange(): void {
+  private _notifyChange(): void {
     this._version += 1;
     this._listeners.forEach((listener) => listener());
   }

@@ -30,6 +30,12 @@ import { usePanelRef } from "react-resizable-panels";
 import { toast } from "sonner";
 
 import { GithubAuthProvider } from "@/app/account/github-auth-provider";
+import {
+  MainTabsController,
+  type AppTab,
+} from "@/app/tabs/main-tabs-controller";
+import { MainTabsLocalStorage } from "@/app/tabs/main-tabs-local-storage";
+import { useMainTabs } from "@/app/tabs/use-main-tabs";
 import { UpdateStatusProvider } from "@/app/updates/update-status-provider";
 import { useFullScreen } from "@/app/window/use-full-screen";
 import { createAgentProjectClient } from "@/client/agent-project-client";
@@ -43,11 +49,7 @@ import { GithubDeviceDialog } from "@/components/github-device-dialog";
 import { GithubStarReminder } from "@/components/github-star-reminder";
 import { LazyMount } from "@/components/lazy-mount";
 import { PlaygroundSidebar } from "@/components/playground-sidebar";
-import {
-  ThreadTabs,
-  useThreadTabs,
-  type AppTab,
-} from "@/components/thread-tabs";
+import { ThreadTabs } from "@/components/thread-tabs";
 import { UpdateIndicator } from "@/components/update-indicator";
 import { Welcome } from "@/components/welcome";
 import { trackAnalytics } from "@/lib/analytics";
@@ -161,8 +163,43 @@ function PageWorkspace() {
       !paneActivityTrackerRef.current.isMutationReserved(paneId)
     );
   }, []);
-  const tabs = useThreadTabs({ canPruneRestoredTab });
   const playgroundClient = useMemo(() => createPlaygroundClient(), []);
+  const tabsController = useMemo(
+    () =>
+      new MainTabsController({
+        persistence: new MainTabsLocalStorage(),
+        playgroundExists: (playgroundId) =>
+          playgroundClient
+            .load(playgroundId)
+            .then((value) => value !== undefined),
+        canPruneRestoredTab,
+        subscribeToPruneChanges: paneActivityTrackerRef.current.subscribe,
+      }),
+    [canPruneRestoredTab, playgroundClient]
+  );
+  const tabState = useMainTabs(tabsController);
+  const openPlayground = useCallback(
+    (playgroundId: string, title: string) =>
+      tabsController.dispatch({
+        type: "open",
+        playgroundId,
+        title,
+      }),
+    [tabsController]
+  );
+  const close = useCallback(
+    (id: string) => tabsController.dispatch({ type: "close", id }),
+    [tabsController]
+  );
+  const closeOthers = useCallback(
+    (keepId: string) =>
+      tabsController.dispatch({ type: "closeOthers", keepId }),
+    [tabsController]
+  );
+  const closeAll = useCallback(
+    () => tabsController.dispatch({ type: "closeAll" }),
+    [tabsController]
+  );
   const agentProjectClient = useMemo(() => createAgentProjectClient(), []);
   const agentProjectCatalogController = useMemo(
     () =>
@@ -192,44 +229,18 @@ function PageWorkspace() {
   const models = useModels();
   const refreshModels = useRefreshModels();
 
-  const { close, closeAll, closeOthers, reopenClosed, openPlayground } = tabs;
-  const visibleTabs = tabs.tabs;
-  const visibleActiveId = tabs.activeId;
-  // The visible active tab is read through a ref so command handlers never go
-  // stale or accidentally target a previously active tab.
-  const activeTabIdRef = useRef(visibleActiveId);
-  const allTabsRef = useRef(tabs.tabs);
-  useEffect(() => {
-    activeTabIdRef.current = visibleActiveId;
-  }, [visibleActiveId]);
-  useEffect(() => {
-    allTabsRef.current = tabs.tabs;
-  }, [tabs.tabs]);
+  const visibleTabs = tabState.tabs;
+  const visibleActiveId = tabState.activeId;
   const activateVisibleTab = useCallback(
     (id: string) => {
-      if (visibleTabs.some((tab) => tab.id === id)) tabs.activate(id);
+      tabsController.dispatch({ type: "activate", id });
     },
-    [tabs, visibleTabs]
+    [tabsController]
   );
   const reorderVisibleTabs = useCallback(
-    (from: number, to: number) => tabs.reorder(from, to),
-    [tabs]
-  );
-  const activateVisibleSibling = useCallback(
-    (offset: 1 | -1) => {
-      if (visibleTabs.length === 0) return;
-      const index = visibleTabs.findIndex((tab) => tab.id === visibleActiveId);
-      const next =
-        index === -1
-          ? offset === 1
-            ? visibleTabs[0]
-            : visibleTabs[visibleTabs.length - 1]
-          : visibleTabs[
-              (index + offset + visibleTabs.length) % visibleTabs.length
-            ];
-      if (next) tabs.activate(next.id);
-    },
-    [tabs, visibleActiveId, visibleTabs]
+    (from: number, to: number) =>
+      tabsController.dispatch({ type: "reorder", from, to }),
+    [tabsController]
   );
   const showPaneBusy = useCallback((action: string) => {
     toast.info("Wait for active runs to finish", {
@@ -347,38 +358,44 @@ function PageWorkspace() {
       void playgroundWorkspace.createFromExample(example);
     },
     "tabs.close": ({ id }) => {
-      const target = id ?? activeTabIdRef.current;
+      const current = tabsController.getSnapshot();
+      const target = id ?? current.activeId;
       if (!target) return;
       closeTabIfAllowed({
         tracker: paneActivityTrackerRef.current,
-        tabs: tabs.tabs,
+        tabs: current.tabs,
         targetId: target,
         onBlocked: () => showPaneBusy("closing this tab"),
         close,
       });
     },
     "tabs.closeOthers": ({ id }) => {
-      const target = id ?? activeTabIdRef.current;
+      const current = tabsController.getSnapshot();
+      const target = id ?? current.activeId;
       if (!target) return;
       closeOtherTabsIfAllowed({
         tracker: paneActivityTrackerRef.current,
-        tabs: tabs.tabs,
+        tabs: current.tabs,
         keepId: target,
         onBlocked: () => showPaneBusy("closing other tabs"),
         closeOthers,
       });
     },
     "tabs.closeAll": () => {
+      const current = tabsController.getSnapshot();
       closeAllTabsIfAllowed({
         tracker: paneActivityTrackerRef.current,
-        tabs: tabs.tabs,
+        tabs: current.tabs,
         onBlocked: () => showPaneBusy("closing all tabs"),
         closeAll,
       });
     },
-    "tabs.reopenClosed": () => void reopenClosed(),
-    "tabs.selectNext": () => activateVisibleSibling(1),
-    "tabs.selectPrevious": () => activateVisibleSibling(-1),
+    "tabs.reopenClosed": () =>
+      tabsController.dispatch({ type: "reopenClosed" }),
+    "tabs.selectNext": () =>
+      tabsController.dispatch({ type: "activateSibling", offset: 1 }),
+    "tabs.selectPrevious": () =>
+      tabsController.dispatch({ type: "activateSibling", offset: -1 }),
     "layout.toggleSidebar": () => toggleSidebar(),
     "app.openSettings": ({ tab }) => {
       if (tab) setSettingsTab(tab);
@@ -403,9 +420,8 @@ function PageWorkspace() {
         setSharePath(path);
         return;
       }
-      const active = allTabsRef.current.find(
-        (tab) => tab.id === activeTabIdRef.current
-      );
+      const current = tabsController.getSnapshot();
+      const active = current.tabs.find((tab) => tab.id === current.activeId);
       if (active !== undefined) {
         setSharePath(`playgrounds/${active.playgroundId}`);
       }
@@ -436,14 +452,16 @@ function PageWorkspace() {
   const refreshReservationsRef = useRef(new Map<string, () => void>());
   const handleRefreshTab = useCallback(
     (id: string) => {
-      const tab = tabs.tabs.find((candidate) => candidate.id === id);
+      const current = tabsController.getSnapshot();
+      const tab = current.tabs.find((candidate) => candidate.id === id);
       if (!tab) return;
       const reservation = refreshTabIfAllowed({
         tracker: paneActivityTrackerRef.current,
-        tabs: tabs.tabs,
+        tabs: current.tabs,
         targetId: tab.id,
         onBlocked: () => showPaneBusy("refreshing this tab"),
-        refresh: tabs.refresh,
+        refresh: (targetId) =>
+          tabsController.dispatch({ type: "refresh", id: targetId }),
       });
       if (reservation) {
         refreshReservationsRef.current.set(
@@ -452,7 +470,7 @@ function PageWorkspace() {
         );
       }
     },
-    [showPaneBusy, tabs]
+    [showPaneBusy, tabsController]
   );
   const handlePaneRefreshSettled = useCallback((paneId: string) => {
     const release = refreshReservationsRef.current.get(paneId);
@@ -460,10 +478,19 @@ function PageWorkspace() {
     refreshReservationsRef.current.delete(paneId);
     release();
   }, []);
+  const handlePlaygroundTitleChange = useCallback(
+    (playgroundId: string, title: string) =>
+      tabsController.dispatch({
+        type: "renamePlayground",
+        playgroundId,
+        title,
+      }),
+    [tabsController]
+  );
   const paneLifecycleHost = useMemo<PaneLifecycleHost>(
     () => ({
       isMutationReserved: isPaneMutationReserved,
-      subscribeToMutationChanges: paneActivityTrackerRef.current.subscribe,
+      subscribeToActivityChanges: paneActivityTrackerRef.current.subscribe,
       onPersistenceChange: handlePanePersistenceChange,
       onRefreshSettled: handlePaneRefreshSettled,
       onRunSettled: handlePaneRunSettled,
@@ -487,15 +514,15 @@ function PageWorkspace() {
         lifecycleHost={paneLifecycleHost}
         refreshNonce={tab.refreshNonce ?? 0}
         onClose={close}
-        onTitleChange={tabs.handlePlaygroundTitleChange}
+        onTitleChange={handlePlaygroundTitleChange}
         onPlaygroundChange={playgroundWorkspace.acceptProjection}
       />
     ),
     [
       close,
+      handlePlaygroundTitleChange,
       paneLifecycleHost,
       playgroundWorkspace.acceptProjection,
-      tabs.handlePlaygroundTitleChange,
     ]
   );
   useEffect(
@@ -589,7 +616,7 @@ function PageWorkspace() {
           <ResizablePanel minSize={640}>
             <ThreadTabs
               tabs={visibleTabs}
-              paneTabs={tabs.tabs}
+              paneTabs={tabState.tabs}
               emptyState={
                 <Welcome
                   onNewStarter={() => setExamplesOpen(true)}

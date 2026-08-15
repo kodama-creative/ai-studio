@@ -308,7 +308,7 @@ function _PlaygroundTabPane({
     [lifecycleHost, paneId]
   );
   const mutationReserved = useSyncExternalStore(
-    lifecycleHost.subscribeToMutationChanges,
+    lifecycleHost.subscribeToActivityChanges,
     getMutationReserved,
     getMutationReserved
   );

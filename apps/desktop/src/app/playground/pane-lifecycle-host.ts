@@ -1,6 +1,6 @@
 export interface PaneLifecycleHost {
   isMutationReserved: (paneId: string) => boolean;
-  subscribeToMutationChanges: (listener: () => void) => () => void;
+  subscribeToActivityChanges: (listener: () => void) => () => void;
   onPersistenceChange: (
     paneId: string,
     owner: object,
