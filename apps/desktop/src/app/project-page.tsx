@@ -23,7 +23,6 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
   useSyncExternalStore,
 } from "react";
@@ -35,6 +34,7 @@ import { TreeView, type TreeDataItem } from "@/components/tree-view";
 import type { AgentProjectView } from "@/shared/agent-project";
 import type { ProjectSourceNode } from "@/shared/project-studio";
 
+import { ProjectSourceController } from "./project/project-source-controller";
 import { ProjectThreadPane } from "./project/project-thread-pane";
 import { ProjectThreadsController } from "./project/project-threads-controller";
 
@@ -50,7 +50,6 @@ type ProjectTab =
       readonly type: "code";
       readonly path: string;
       readonly title: string;
-      readonly content: string;
     };
 
 export function ProjectPage({ project }: { project: AgentProjectView }) {
@@ -68,28 +67,34 @@ export function ProjectPage({ project }: { project: AgentProjectView }) {
     threadController.getSnapshot,
     threadController.getSnapshot
   );
-  const { executeCommand } = useCommands();
-  const [sourceFiles, setSourceFiles] = useState<readonly ProjectSourceNode[]>(
-    []
+  const sourceController = useMemo(
+    () =>
+      new ProjectSourceController({
+        client,
+        reportError: _reportError,
+      }),
+    [client]
   );
+  const sourceState = useSyncExternalStore(
+    sourceController.subscribe,
+    sourceController.getSnapshot,
+    sourceController.getSnapshot
+  );
+  const { executeCommand } = useCommands();
   const [expandedSourceIds, setExpandedSourceIds] = useState<readonly string[]>(
     []
   );
   const [tabs, setTabs] = useState<readonly ProjectTab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string>();
-  const tabsRef = useRef(tabs);
-  tabsRef.current = tabs;
   const activeTab = tabs.find((tab) => tab.id === activeTabId);
   const activeThreadId = threadState.activeThread?.id;
   const openingThreadId = threadState.openingThreadId;
   const visibleThread =
-    activeTab?.type === "thread" &&
-    activeThreadId === activeTab.threadId
+    activeTab?.type === "thread" && activeThreadId === activeTab.threadId
       ? threadState.activeThread
       : undefined;
   const openingThread =
-    activeTab?.type === "thread" &&
-    openingThreadId === activeTab.threadId;
+    activeTab?.type === "thread" && openingThreadId === activeTab.threadId;
 
   const openThreadTab = useCallback((thread: StudioThread) => {
     const id = `thread:${thread.id}`;
@@ -114,35 +119,29 @@ export function ProjectPage({ project }: { project: AgentProjectView }) {
   const openCodeFile = useCallback(
     async (path: string) => {
       const id = `code:${path}`;
-      const existing = tabs.find((tab) => tab.id === id);
-      if (existing !== undefined) {
-        setActiveTabId(id);
-        return;
-      }
-      try {
-        const content = await client.readSourceFile(path);
-        setTabs((current) => [
-          ...current,
-          {
-            id,
-            type: "code",
-            path,
-            title: path.split("/").at(-1) ?? path,
-            content,
-          },
-        ]);
-        setActiveTabId(id);
-      } catch (error) {
-        toast.error("Unable to open source file", {
-          description: _errorMessage(error),
-        });
-      }
+      if (!(await sourceController.open(path))) return;
+      setTabs((current) =>
+        current.some((tab) => tab.id === id)
+          ? current
+          : [
+              ...current,
+              {
+                id,
+                type: "code",
+                path,
+                title: path.split("/").at(-1) ?? path,
+              },
+            ]
+      );
+      setActiveTabId(id);
     },
-    [client, tabs]
+    [sourceController]
   );
 
   const closeTab = useCallback(
     (tabId: string) => {
+      const closing = tabs.find((tab) => tab.id === tabId);
+      if (closing?.type === "code") sourceController.close(closing.path);
       setTabs((current) => {
         const index = current.findIndex((tab) => tab.id === tabId);
         const next = current.filter((tab) => tab.id !== tabId);
@@ -152,7 +151,7 @@ export function ProjectPage({ project }: { project: AgentProjectView }) {
         return next;
       });
     },
-    [activeTabId]
+    [activeTabId, sourceController, tabs]
   );
 
   const openThread = useCallback(
@@ -216,75 +215,16 @@ export function ProjectPage({ project }: { project: AgentProjectView }) {
   }, [openThreadTab, threadController]);
 
   useEffect(() => {
-    let cancelled = false;
-    const sourceController = new AbortController();
-    void (async () => {
-      try {
-        for await (const snapshot of client.watchSourceFiles({
-          signal: sourceController.signal,
-        })) {
-          if (cancelled) return;
-          setSourceFiles(snapshot.files);
-          const codeTabs = tabsRef.current.filter(
-            (tab): tab is Extract<ProjectTab, { readonly type: "code" }> =>
-              tab.type === "code"
-          );
-          const refreshed = await Promise.all(
-            codeTabs.map(async (tab) => {
-              try {
-                return {
-                  id: tab.id,
-                  content: await client.readSourceFile(tab.path),
-                };
-              } catch {
-                return undefined;
-              }
-            })
-          );
-          const contentById = new Map(
-            refreshed.flatMap((item) =>
-              item === undefined ? [] : [[item.id, item.content] as const]
-            )
-          );
-          if (contentById.size > 0) {
-            setTabs((current) =>
-              current.map((tab) => {
-                const content = contentById.get(tab.id);
-                return tab.type === "code" && content !== undefined
-                  ? { ...tab, content }
-                  : tab;
-              })
-            );
-          }
-        }
-      } catch (error) {
-        if (!sourceController.signal.aborted) {
-          toast.error("Project source watch failed", {
-            description: _errorMessage(error),
-          });
-        }
-      }
-    })();
-    void client
-      .listSourceFiles()
-      .then((files) => {
-        if (!cancelled) setSourceFiles(files);
-      })
-      .catch((error: unknown) => {
-        toast.error("Unable to load Project source", {
-          description: _errorMessage(error),
-        });
-      });
+    sourceController.start();
     return () => {
-      cancelled = true;
-      sourceController.abort();
+      sourceController.stop();
     };
-  }, [client]);
+  }, [sourceController]);
 
   const sourceTree = useMemo<TreeDataItem[]>(
     () =>
       _sourceTreeItems(
-        sourceFiles,
+        sourceState.files,
         (path) => void openCodeFile(path),
         (path) =>
           setExpandedSourceIds((current) => {
@@ -294,7 +234,7 @@ export function ProjectPage({ project }: { project: AgentProjectView }) {
               : [...current, id];
           })
       ),
-    [openCodeFile, sourceFiles]
+    [openCodeFile, sourceState.files]
   );
 
   return (
@@ -427,7 +367,7 @@ export function ProjectPage({ project }: { project: AgentProjectView }) {
               className="min-h-0 flex-1 rounded-none border-0"
               hideBorder
               readonly
-              value={activeTab.content}
+              value={sourceState.contentByPath.get(activeTab.path) ?? ""}
             />
           </div>
         ) : visibleThread === undefined ? (
