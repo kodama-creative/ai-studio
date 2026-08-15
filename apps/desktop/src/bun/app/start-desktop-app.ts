@@ -30,9 +30,7 @@ import { openPath, revealInFileManager } from "../fs";
 import { generatorModule } from "../generator/generator-module";
 import { DesktopHost } from "../host/desktop-host";
 import { modelsModule } from "../models/models-module";
-import { appDirectoriesApplicationModule } from "../native/app-directories-module";
 import { nativeDialogsApplicationModule } from "../native/native-dialogs-module";
-import { nativeFilesApplicationModule } from "../native/native-files-module";
 import { playgroundModule } from "../playgrounds/playground-module";
 import { agentProjectsModule } from "../projects/agent-projects-module";
 import { ProjectWindowManager } from "../projects/project-window-manager";
@@ -163,8 +161,6 @@ async function _startDesktopApp(
   processContainer.load(auxiliaryGenerationModule());
   processContainer.load(modelsModule());
   processContainer.load(nativeDialogsApplicationModule());
-  processContainer.load(nativeFilesApplicationModule());
-  processContainer.load(appDirectoriesApplicationModule());
   processContainer.load(generatorModule());
   processContainer.load(agentProjectsModule());
   processContainer.load(remindersModule());

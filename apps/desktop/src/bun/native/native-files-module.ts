@@ -5,6 +5,7 @@ import { ContainerModule, type ResolutionContext } from "inversify";
 import type { RpcServer } from "../../shared/namespaced-rpc";
 import {
   NATIVE_FILES_RPC,
+  type NativeFilesRequests,
   type NativeFilesRpc,
 } from "../../shared/native-files-rpc";
 import {
@@ -12,51 +13,35 @@ import {
   type RpcContribution as RpcContributionApi,
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
-import { desktopToken, PROCESS_TOKENS } from "../di/tokens";
+import { PROCESS_TOKENS } from "../di/tokens";
 import { revealResource } from "../fs/reveal-resource";
 
-export const NATIVE_FILES_APPLICATION =
-  desktopToken<NativeFilesApplication>("native-files", "application");
-
-export class NativeFilesApplication {
-  constructor(private readonly _skills: Pick<SkillsManager, "findSkill">) {}
-
-  directoryExists(path: string) {
-    return userDirectoryExists(path);
-  }
-
-  reveal(pathOrLocator: string) {
-    return revealResource(pathOrLocator, { skillsManager: this._skills });
-  }
-}
-
+/** Typed Electrobun adapter for the native-files namespace. */
 class NativeFilesRpcServer implements RpcServer<NativeFilesRpc> {
   readonly namespace = NATIVE_FILES_RPC;
   readonly streams = {};
+  readonly requests: NativeFilesRequests;
 
-  constructor(readonly requests: NativeFilesApplication) {}
-}
-
-class NativeFilesContribution implements RpcContributionApi {
-  constructor(private readonly _application: NativeFilesApplication) {}
-
-  registerRpc(rpc: RpcRegistry): void {
-    rpc.registerServer(new NativeFilesRpcServer(this._application));
+  constructor(skills: Pick<SkillsManager, "findSkill">) {
+    this.requests = {
+      directoryExists: (path) => userDirectoryExists(path),
+      reveal: (pathOrLocator) =>
+        revealResource(pathOrLocator, { skillsManager: skills }),
+    };
   }
 }
 
-/** Bind the process-owned native filesystem application. */
-export function nativeFilesApplicationModule(): ContainerModule {
-  return new ContainerModule(({ bind }) => {
-    bind<NativeFilesApplication>(NATIVE_FILES_APPLICATION)
-      .toDynamicValue(
-        (context: ResolutionContext) =>
-          new NativeFilesApplication(
-            context.get<SkillsManager>(PROCESS_TOKENS.skillsManager)
-          )
-      )
-      .inSingletonScope();
-  });
+/** Owns native-files RPC registration for one native window. */
+class NativeFilesContribution implements RpcContributionApi {
+  private readonly _server: NativeFilesRpcServer;
+
+  constructor(skills: Pick<SkillsManager, "findSkill">) {
+    this._server = new NativeFilesRpcServer(skills);
+  }
+
+  registerRpc(rpc: RpcRegistry): void {
+    rpc.registerServer(this._server);
+  }
 }
 
 /** Bind native file RPC for one window. */
@@ -64,8 +49,10 @@ export function nativeFilesRpcModule(): ContainerModule {
   return new ContainerModule(({ bind }) => {
     bind(NativeFilesContribution)
       .toDynamicValue(
-        (context) =>
-          new NativeFilesContribution(context.get(NATIVE_FILES_APPLICATION))
+        (context: ResolutionContext) =>
+          new NativeFilesContribution(
+            context.get<SkillsManager>(PROCESS_TOKENS.skillsManager)
+          )
       )
       .inSingletonScope();
     bind<RpcContributionApi>(RpcContribution).toService(
