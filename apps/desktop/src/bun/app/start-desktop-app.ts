@@ -98,15 +98,6 @@ async function _startDesktopApp(
     managedSkillsDir: getManagedSkillsDir(),
   });
   let mainWindows: MainWindowManager<DesktopMainWindowHandle> | undefined;
-  const githubAuth = new GitHubAuthManager();
-  // Write-side gist connector for the "Share thread" flow. Reuses the signed-in
-  // GitHub token (the `gist` scope); creates secret gists readable by URL.
-  const gistWriter = new GistThreadWriter({
-    getToken: () => githubAuth.getAccessToken(),
-  });
-  const gistReader = new GistThreadReader({
-    getToken: () => githubAuth.getAccessToken(),
-  });
   const host = new DesktopHost({
     modules: [
       createBuiltInToolsModule({
@@ -123,6 +114,18 @@ async function _startDesktopApp(
   processLifecycle.defer("desktop host", () => host.stop());
   await host.start();
 
+  // Construct the disposable auth manager only after the fallible host startup
+  // and immediately before the process services are adopted below. This keeps
+  // every live auth EventHub inside the process container's cleanup window.
+  const githubAuth = new GitHubAuthManager();
+  // Write-side gist connector for the "Share thread" flow. Reuses the signed-in
+  // GitHub token (the `gist` scope); creates secret gists readable by URL.
+  const gistWriter = new GistThreadWriter({
+    getToken: () => githubAuth.getAccessToken(),
+  });
+  const gistReader = new GistThreadReader({
+    getToken: () => githubAuth.getAccessToken(),
+  });
   const updater = new UpdaterService(
     new UpdatesState(path.join(homePath, "settings", "updates.json"))
   );
