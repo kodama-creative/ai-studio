@@ -3,7 +3,6 @@
 import type { CustomModel } from "@llm-space/core";
 import {
   useTestModelConnection,
-  useUpdateProvider,
   useUpsertCustomModel,
 } from "@llm-space/ui/components/model-provider";
 import { ModelAvatar } from "@llm-space/ui/components/thread-playground/model-avatar";
@@ -26,8 +25,17 @@ import {
 } from "@llm-space/ui/ui/select";
 import { Switch } from "@llm-space/ui/ui/switch";
 import { CableIcon, Loader2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { toast } from "sonner";
+
+import { CustomModelEditorController } from "@/app/settings/custom-model-editor-controller";
 
 import {
   CUSTOM_PROVIDER_API_TYPES,
@@ -104,21 +112,46 @@ export function ModelEditorDialog({
   providerApi?: CustomProviderApi;
   model?: CustomModel | null;
 }) {
-  const updateProvider = useUpdateProvider();
   const upsertCustomModel = useUpsertCustomModel();
   const testModelConnection = useTestModelConnection();
   const [form, setForm] = useState<FormState>(() =>
     initialState(model, providerApi)
   );
-  const [testing, setTesting] = useState(false);
+  const controller = useMemo(
+    () =>
+      new CustomModelEditorController({
+        save: upsertCustomModel,
+        test: (targetProviderId, targetProfileId, candidate) =>
+          testModelConnection(
+            targetProviderId,
+            candidate.id,
+            candidate,
+            targetProfileId
+          ),
+      }),
+    [testModelConnection, upsertCustomModel]
+  );
+  const operation = useSyncExternalStore(
+    controller.subscribe,
+    controller.getSnapshot,
+    controller.getSnapshot
+  ).operation;
 
   // Reset the form whenever the dialog opens (for a fresh create or a different
   // model to edit).
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (open) {
       setForm(initialState(model, providerApi));
+      controller.open({
+        providerId,
+        profileId,
+        ...(model?.id === undefined ? {} : { originalModelId: model.id }),
+      });
+    } else {
+      controller.close();
     }
-  }, [open, model, providerApi]);
+  }, [controller, model, open, profileId, providerApi, providerId]);
+  useEffect(() => () => controller.close(), [controller]);
 
   const isEdit = Boolean(model);
 
@@ -158,40 +191,52 @@ export function ModelEditorDialog({
     };
   };
 
-  const handleSave = () => {
+  const handleOpenChange = useCallback(
+    (next: boolean) => {
+      if (!next) controller.close();
+      onOpenChange(next);
+    },
+    [controller, onOpenChange]
+  );
+
+  const handleSave = async () => {
     if (!canSave) return;
     const built = buildModel();
-    void (async () => {
-      if (providerApi && form.api !== providerApi) {
-        await updateProvider(providerId, { api: form.api });
-      }
-      await upsertCustomModel(providerId, built, model?.id);
-    })();
-    onOpenChange(false);
+    const result = await controller.save(built);
+    if (result.type === "saved") {
+      handleOpenChange(false);
+    } else if (result.type === "failed") {
+      toast.error("Failed to save custom model", {
+        description:
+          result.error instanceof Error
+            ? result.error.message
+            : "Please try again.",
+      });
+    }
   };
 
   // Test the current form values without persisting them, reusing the same
   // provider-connection check as the model list's per-model test button.
   const handleTest = async () => {
     if (!canSave) return;
-    setTesting(true);
-    try {
-      await testModelConnection(providerId, trimmedId, buildModel(), profileId);
+    const built = buildModel();
+    const result = await controller.test(built);
+    if (result.type === "tested") {
       toast.success("Model connected successfully", {
-        description: form.name.trim() || trimmedId,
+        description: built.name,
       });
-    } catch (error) {
+    } else if (result.type === "failed") {
       toast.error("Failed to connect to model", {
         description:
-          error instanceof Error ? error.message : "Please try again.",
+          result.error instanceof Error
+            ? result.error.message
+            : "Please try again.",
       });
-    } finally {
-      setTesting(false);
     }
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
         className="max-h-[85vh] overflow-y-auto sm:max-w-md"
         onInteractOutside={(e) => e.preventDefault()}
@@ -340,9 +385,9 @@ export function ModelEditorDialog({
           <Button
             variant="outline"
             onClick={() => void handleTest()}
-            disabled={!canSave || testing}
+            disabled={!canSave || operation !== "idle"}
           >
-            {testing ? (
+            {operation === "testing" ? (
               <Loader2 className="size-4 animate-spin" />
             ) : (
               <CableIcon className="size-4" />
@@ -350,10 +395,16 @@ export function ModelEditorDialog({
             Test
           </Button>
           <div className="flex gap-2">
-            <Button variant="ghost" onClick={() => onOpenChange(false)}>
+            <Button variant="ghost" onClick={() => handleOpenChange(false)}>
               Cancel
             </Button>
-            <Button onClick={handleSave} disabled={!canSave}>
+            <Button
+              onClick={() => void handleSave()}
+              disabled={!canSave || operation !== "idle"}
+            >
+              {operation === "saving" ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : null}
               {isEdit ? "Save" : "Add"}
             </Button>
           </div>

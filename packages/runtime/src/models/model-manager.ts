@@ -580,11 +580,11 @@ export class ModelManager {
   }
 
   /**
-   * Add or update a user-added custom model on a provider. When `originalId` is
-   * given (an edit) the model it names is replaced — supporting a rename — and
-   * any `disabledModels` reference is carried over to the new id. Stored without
-   * `provider`/`baseUrl`; those are filled in at build time. Throws when the
-   * provider is not configured.
+   * Atomically add or update a user-added custom model and its custom provider
+   * API mode. When `originalId` is given (an edit) the model it names is
+   * replaced — supporting a rename — and any `disabledModels` reference is
+   * carried over to the new id. Stored without `provider`/`baseUrl`; those are
+   * filled in at build time. Throws when the provider is not configured.
    */
   upsertCustomModel(
     providerId: string,
@@ -596,6 +596,9 @@ export class ModelManager {
     );
     if (!entry) {
       throw new Error(`Provider not configured: ${providerId}`);
+    }
+    if (entry.builtin !== true) {
+      entry.api = model.api as CustomProviderApi;
     }
     const removeId = originalId ?? model.id;
     const models = (entry.models ?? []).filter(

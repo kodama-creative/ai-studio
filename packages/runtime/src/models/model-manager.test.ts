@@ -196,6 +196,70 @@ function _emptySettingsDir() {
   return directory;
 }
 
+describe("ModelManager custom models", () => {
+  test("persists a custom provider API change with the model upsert", async () => {
+    const settingsDir = _emptySettingsDir();
+    const manager = new ModelManager({ settingsDir });
+    manager.addCustomProvider({
+      id: "custom",
+      name: "Custom",
+      baseUrl: "https://example.test/v1",
+      api: "openai-completions",
+    });
+
+    manager.upsertCustomModel("custom", {
+      id: "model",
+      name: "Model",
+      api: "openai-responses",
+      reasoning: false,
+      input: ["text"],
+      contextWindow: 1024,
+      maxTokens: 512,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    });
+
+    const persisted = JSON.parse(
+      await readFile(path.join(settingsDir, "models.json"), "utf8")
+    ) as { providers: { id: string; api?: string; models?: unknown[] }[] };
+    expect(persisted.providers.find(({ id }) => id === "custom")).toMatchObject(
+      {
+        api: "openai-responses",
+        models: [{ id: "model", api: "openai-responses" }],
+      }
+    );
+  });
+
+  test("does not derive a builtin provider API from a custom model", async () => {
+    const settingsDir = _emptySettingsDir();
+    const manager = new ModelManager({ settingsDir });
+    manager.addBuiltInProvider({ id: "openai" });
+
+    manager.upsertCustomModel("openai", {
+      id: "model",
+      name: "Model",
+      api: "openai-responses",
+      reasoning: false,
+      input: ["text"],
+      contextWindow: 1024,
+      maxTokens: 512,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    });
+
+    const persisted = JSON.parse(
+      await readFile(path.join(settingsDir, "models.json"), "utf8")
+    ) as { providers: { id: string; api?: string; models?: unknown[] }[] };
+    expect(persisted.providers.find(({ id }) => id === "openai")).toMatchObject(
+      {
+        builtin: true,
+        models: [{ id: "model", api: "openai-responses" }],
+      }
+    );
+    expect(
+      persisted.providers.find(({ id }) => id === "openai")?.api
+    ).toBeUndefined();
+  });
+});
+
 describe("ModelManager provider profiles", () => {
   test("migrates legacy connection fields into a fixed default profile", () => {
     const settingsDir = _emptySettingsDir();
