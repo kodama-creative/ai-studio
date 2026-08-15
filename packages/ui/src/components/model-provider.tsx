@@ -8,21 +8,20 @@ import type {
   ModelProviderGroup,
   ProviderProfilePatch,
 } from "@llm-space/core";
-import { uuid } from "@llm-space/core";
 import { resolveModelConfig } from "@llm-space/core/thread";
 import {
   createContext,
-  useCallback,
   useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
-  useState,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
 
 import type { ModelClient } from "../host";
+import { ModelCatalogController } from "../host/model-catalog-controller";
 
 interface ModelContextValue {
   providers: ModelProviderGroup[];
@@ -77,19 +76,6 @@ interface ModelContextValue {
 const ModelContext = createContext<ModelContextValue | null>(null);
 const EMPTY_MODEL_PROVIDERS: ModelProviderGroup[] = [];
 
-interface ModelSnapshot {
-  client: ModelClient;
-  defaultModel: ModelConfig | null;
-  epoch: number;
-  providers: ModelProviderGroup[] | null;
-}
-
-interface ModelRequestLease {
-  client: ModelClient;
-  epoch: number;
-  generation: number;
-}
-
 function buildModelIndex(providers: ModelProviderGroup[]) {
   const map = new Map<string, pi.Model<pi.Api>>();
   for (const group of providers) {
@@ -115,330 +101,28 @@ export function ModelProvider({
   children: ReactNode;
   fallback?: ReactNode;
 }) {
-  const [snapshot, setSnapshot] = useState<ModelSnapshot>(() => ({
-    client,
-    defaultModel: null,
-    epoch: 1,
-    providers: null,
-  }));
-  const committedScopeRef = useRef({ client, epoch: 1 });
-  const nextEpochRef = useRef(1);
-  const latestRequestGenerationRef = useRef(0);
-  const mutationTailsRef = useRef(new WeakMap<ModelClient, Promise<void>>());
+  const controllerRef = useRef<ModelCatalogController | null>(null);
+  if (controllerRef.current === null) {
+    controllerRef.current = new ModelCatalogController(client);
+  }
+  const controller = controllerRef.current;
+  const snapshot = useSyncExternalStore(
+    controller.subscribe,
+    controller.getSnapshot,
+    controller.getSnapshot
+  );
   useLayoutEffect(() => {
-    if (committedScopeRef.current.client === client) return;
-    const nextScope = {
-      client,
-      epoch: ++nextEpochRef.current,
-    };
-    committedScopeRef.current = nextScope;
-    // Invalidate every request issued by the previous committed scope before
-    // passive effects can start the new scope's initial refresh.
-    latestRequestGenerationRef.current += 1;
-    setSnapshot({
-      client,
-      defaultModel: null,
-      epoch: nextScope.epoch,
-      providers: EMPTY_MODEL_PROVIDERS,
-    });
-  }, [client]);
-
-  const beginRequest = useCallback((source: ModelClient) => {
-    const scope = committedScopeRef.current;
-    if (scope.client !== source) return null;
-    return {
-      ...scope,
-      generation: ++latestRequestGenerationRef.current,
-    };
-  }, []);
-
-  const isCurrentScope = useCallback((lease: ModelRequestLease) => {
-    const scope = committedScopeRef.current;
-    return scope.client === lease.client && scope.epoch === lease.epoch;
-  }, []);
-  const isCurrentRequest = useCallback(
-    (lease: ModelRequestLease) =>
-      isCurrentScope(lease) &&
-      latestRequestGenerationRef.current === lease.generation,
-    [isCurrentScope]
-  );
-
-  const enqueueMutation = useCallback(
-    async <T,>(
-      source: ModelClient,
-      mutate: () => Promise<T>
-    ): Promise<{ lease: ModelRequestLease; value: T } | null> => {
-      const lease = beginRequest(source);
-      if (!lease) return null;
-      const previous =
-        mutationTailsRef.current.get(source) ?? Promise.resolve();
-      const result = previous.then(async () => ({
-        lease,
-        value: await mutate(),
-      }));
-      // Keep the side-effect queue alive after a failed mutation, while still
-      // returning the original rejection to its caller. The queue is keyed by
-      // client (not render epoch) so A -> B -> A refreshes wait for an A request
-      // that was already in flight before the round trip.
-      mutationTailsRef.current.set(
-        source,
-        result.then(
-          () => undefined,
-          () => undefined
-        )
-      );
-      return result;
-    },
-    [beginRequest]
-  );
-
-  const commitProviders = useCallback(
-    (lease: ModelRequestLease | null, providers: ModelProviderGroup[]) => {
-      if (!lease) return;
-      setSnapshot((current) =>
-        isCurrentScope(lease)
-          ? {
-              client: lease.client,
-              defaultModel:
-                current.client === lease.client && current.epoch === lease.epoch
-                  ? current.defaultModel
-                  : null,
-              epoch: lease.epoch,
-              providers,
-            }
-          : current
-      );
-    },
-    [isCurrentScope]
-  );
-
-  const setDefaultModel = useCallback(
-    async (model: ModelConfig | null) => {
-      const result = await enqueueMutation(client, () =>
-        client.setDefaultModel(model)
-      );
-      if (!result) return;
-      const { lease, value: defaultModel } = result;
-      setSnapshot((current) =>
-        isCurrentScope(lease)
-          ? {
-              client,
-              defaultModel,
-              epoch: lease.epoch,
-              providers:
-                current.client === client && current.epoch === lease.epoch
-                  ? current.providers
-                  : EMPTY_MODEL_PROVIDERS,
-            }
-          : current
-      );
-    },
-    [client, enqueueMutation, isCurrentScope]
-  );
-
-  const removeProvider = useCallback(
-    async (providerId: string) => {
-      const result = await enqueueMutation(client, () =>
-        client.removeProvider(providerId)
-      );
-      if (result) commitProviders(result.lease, result.value);
-    },
-    [client, commitProviders, enqueueMutation]
-  );
-
-  const addProvider = useCallback(
-    async (providerId: string) => {
-      const result = await enqueueMutation(client, () =>
-        client.addProvider(providerId)
-      );
-      if (result) commitProviders(result.lease, result.value);
-    },
-    [client, commitProviders, enqueueMutation]
-  );
-
-  const addCustomProvider = useCallback(
-    async (name: string, baseUrl: string) => {
-      const id = uuid();
-      const result = await enqueueMutation(client, () =>
-        client.addCustomProvider({ id, name, baseUrl })
-      );
-      if (result) commitProviders(result.lease, result.value);
-      return id;
-    },
-    [client, commitProviders, enqueueMutation]
-  );
-
-  const addProviderProfile = useCallback(
-    async (providerId: string) => {
-      const result = await enqueueMutation(client, () =>
-        client.addProviderProfile(providerId)
-      );
-      if (!result) {
-        throw new Error("Model provider scope changed while adding a profile.");
-      }
-      commitProviders(result.lease, result.value);
-      const profile = result.value
-        .find((provider) => provider.id === providerId)
-        ?.profiles.at(-1);
-      if (!profile) {
-        throw new Error(`Failed to add profile for provider: ${providerId}`);
-      }
-      return profile.id;
-    },
-    [client, commitProviders, enqueueMutation]
-  );
-
-  const updateProviderProfile = useCallback(
-    async (
-      providerId: string,
-      profileId: string,
-      fields: ProviderProfilePatch
-    ) => {
-      const result = await enqueueMutation(client, () =>
-        client.updateProviderProfile(providerId, profileId, fields)
-      );
-      if (result) commitProviders(result.lease, result.value);
-    },
-    [client, commitProviders, enqueueMutation]
-  );
-
-  const removeProviderProfile = useCallback(
-    async (providerId: string, profileId: string) => {
-      const result = await enqueueMutation(client, () =>
-        client.removeProviderProfile(providerId, profileId)
-      );
-      if (result) commitProviders(result.lease, result.value);
-    },
-    [client, commitProviders, enqueueMutation]
-  );
-
-  const updateProvider = useCallback(
-    async (
-      providerId: string,
-      fields: {
-        name?: string | null;
-        api?:
-          | "anthropic-messages"
-          | "openai-completions"
-          | "openai-responses"
-          | null;
-        icon?: string | null;
-        imageGeneration?: ArkImageGenerationConfig;
-      }
-    ) => {
-      const result = await enqueueMutation(client, () =>
-        client.updateProvider(providerId, fields)
-      );
-      if (result) commitProviders(result.lease, result.value);
-    },
-    [client, commitProviders, enqueueMutation]
-  );
-
-  const setModelEnabled = useCallback(
-    async (providerId: string, modelId: string, enabled: boolean) => {
-      const result = await enqueueMutation(client, () =>
-        client.setModelEnabled(providerId, modelId, enabled)
-      );
-      if (result) commitProviders(result.lease, result.value);
-    },
-    [client, commitProviders, enqueueMutation]
-  );
-
-  const setAllModelsEnabled = useCallback(
-    async (providerId: string, enabled: boolean) => {
-      const result = await enqueueMutation(client, () =>
-        client.setAllModelsEnabled(providerId, enabled)
-      );
-      if (result) commitProviders(result.lease, result.value);
-    },
-    [client, commitProviders, enqueueMutation]
-  );
-
-  const testModelConnection = useCallback(
-    async (
-      providerId: string,
-      modelId: string,
-      candidate?: CustomModel,
-      profileId?: string
-    ) => {
-      await client.testModelConnection(
-        providerId,
-        modelId,
-        candidate,
-        profileId
-      );
-    },
-    [client]
-  );
-
-  const removeCustomModel = useCallback(
-    async (providerId: string, modelId: string) => {
-      const result = await enqueueMutation(client, () =>
-        client.removeCustomModel(providerId, modelId)
-      );
-      if (result) commitProviders(result.lease, result.value);
-    },
-    [client, commitProviders, enqueueMutation]
-  );
-
-  const upsertCustomModel = useCallback(
-    async (providerId: string, model: CustomModel, originalId?: string) => {
-      const result = await enqueueMutation(client, () =>
-        client.upsertCustomModel(providerId, model, originalId)
-      );
-      if (result) commitProviders(result.lease, result.value);
-    },
-    [client, commitProviders, enqueueMutation]
-  );
-
-  const builtinProviders = useCallback(
-    () => client.builtinProviders(),
-    [client]
-  );
-
-  // Re-fetch the providers from the host. Callers invoke this to force a fresh
-  // read (e.g. every time the model dropdown opens) — the result is never cached
-  // beyond the current render.
-  const refresh = useCallback(async () => {
-    const lease = beginRequest(client);
-    if (!lease) return;
-    try {
-      const pendingMutation = mutationTailsRef.current.get(client);
-      if (pendingMutation) await pendingMutation;
-      if (!isCurrentRequest(lease)) return;
-      const [nextProviders, nextDefault] = await Promise.all([
-        client.availableModels(),
-        client.getDefaultModel(),
-      ]);
-      setSnapshot((current) =>
-        isCurrentRequest(lease)
-          ? {
-              client,
-              defaultModel: nextDefault ?? null,
-              epoch: lease.epoch,
-              providers: nextProviders,
-            }
-          : current
-      );
-    } catch (error) {
-      if (isCurrentRequest(lease)) {
-        console.error("Failed to fetch models", error);
-      }
-    }
-  }, [beginRequest, client, isCurrentRequest]);
-
+    controller.setClient(client);
+  }, [client, controller]);
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    controller.start();
+    return () => controller.stop();
+  }, [controller]);
 
   // A client change represents a runtime switch. Keep the already-mounted
   // workspace alive, but expose an empty model view until that runtime's fetch
   // completes so consumers can never observe the previous runtime's models.
-  const committedScope = committedScopeRef.current;
-  const snapshotMatchesCommittedScope =
-    committedScope.client === client &&
-    snapshot.client === client &&
-    snapshot.epoch === committedScope.epoch;
+  const snapshotMatchesCommittedScope = snapshot.client === client;
   const providers = snapshotMatchesCommittedScope
     ? snapshot.providers
     : snapshot.providers === null
@@ -455,42 +139,28 @@ export function ModelProvider({
     const index = buildModelIndex(providers);
     return {
       providers,
-      removeProvider,
-      addProvider,
-      addCustomProvider,
-      addProviderProfile,
-      updateProviderProfile,
-      removeProviderProfile,
-      updateProvider,
-      setModelEnabled,
-      setAllModelsEnabled,
-      testModelConnection,
-      removeCustomModel,
-      upsertCustomModel,
-      refresh,
-      builtinProviders,
+      removeProvider: controller.removeProvider,
+      addProvider: controller.addProvider,
+      addCustomProvider: controller.addCustomProvider,
+      addProviderProfile: controller.addProviderProfile,
+      updateProviderProfile: controller.updateProviderProfile,
+      removeProviderProfile: controller.removeProviderProfile,
+      updateProvider: controller.updateProvider,
+      setModelEnabled: controller.setModelEnabled,
+      setAllModelsEnabled: controller.setAllModelsEnabled,
+      testModelConnection: controller.testModelConnection,
+      removeCustomModel: controller.removeCustomModel,
+      upsertCustomModel: controller.upsertCustomModel,
+      refresh: controller.refresh,
+      builtinProviders: controller.builtinProviders,
       getModel: (ref) => index.get(`${ref.provider}:${ref.id}`) ?? null,
       defaultModel,
-      setDefaultModel,
+      setDefaultModel: controller.setDefaultModel,
     };
   }, [
     providers,
-    removeProvider,
-    addProvider,
-    addCustomProvider,
-    addProviderProfile,
-    updateProviderProfile,
-    removeProviderProfile,
-    updateProvider,
-    setModelEnabled,
-    setAllModelsEnabled,
-    testModelConnection,
-    removeCustomModel,
-    upsertCustomModel,
-    refresh,
-    builtinProviders,
+    controller,
     defaultModel,
-    setDefaultModel,
   ]);
 
   if (!contextValue) {
