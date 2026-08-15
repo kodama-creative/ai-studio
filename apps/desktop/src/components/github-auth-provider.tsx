@@ -2,16 +2,16 @@
 
 import {
   createContext,
-  useCallback,
   useContext,
   useEffect,
   useMemo,
-  useState,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
 import { toast } from "sonner";
 
-import { getGithubAuthStatus, githubAccountClient } from "@/client/github-auth";
+import { GithubAuthController } from "@/app/account/github-auth-controller";
+import { createGithubAccountClient } from "@/client/github-auth";
 import { useCommands } from "@/commands";
 import type { GithubAuthState } from "@/shared/auth";
 
@@ -31,47 +31,33 @@ const GithubAuthContext = createContext<GithubAuthValue | null>(null);
  */
 export function GithubAuthProvider({ children }: { children: ReactNode }) {
   const { executeCommand } = useCommands();
-  const [state, setState] = useState<GithubAuthState>({ status: "signedOut" });
-
+  const client = useMemo(() => createGithubAccountClient(), []);
+  const controller = useMemo(
+    () =>
+      new GithubAuthController({
+        getState: () => client.getState(),
+        subscribeChanged: (listener) => client.on("changed", listener),
+        login: () =>
+          executeCommand({ type: "githubAccount.login", args: {} }),
+        logout: () =>
+          executeCommand({ type: "githubAccount.logout", args: {} }),
+        notifyError: (message) => toast.error(message),
+      }),
+    [client, executeCommand]
+  );
+  const state = useSyncExternalStore(
+    controller.subscribe,
+    controller.getSnapshot,
+    controller.getSnapshot
+  );
   useEffect(() => {
-    const handle = (next: GithubAuthState) => {
-      setState(next);
-      // A failed / cancelled Device Flow comes back as signed-out with a reason.
-      if (next.status === "signedOut" && next.error) {
-        toast.error(next.error);
-      }
-    };
-    const subscription = githubAccountClient.on("changed", handle);
-
-    let cancelled = false;
-    void getGithubAuthStatus()
-      .then((initial) => {
-        // Don't clobber a live transition that arrived before the initial fetch.
-        if (!cancelled)
-          setState((prev) => (prev.status === "signedOut" ? initial : prev));
-      })
-      .catch(() => {
-        // Non-fatal: leave the signed-out default in place.
-      });
-
-    return () => {
-      cancelled = true;
-      void subscription.dispose();
-    };
-  }, []);
-
-  const signIn = useCallback(
-    () => executeCommand({ type: "githubAccount.login", args: {} }),
-    [executeCommand]
-  );
-  const signOut = useCallback(
-    () => executeCommand({ type: "githubAccount.logout", args: {} }),
-    [executeCommand]
-  );
+    controller.start();
+    return () => controller.stop();
+  }, [controller]);
 
   const value = useMemo(
-    () => ({ state, signIn, signOut }),
-    [state, signIn, signOut]
+    () => ({ state, signIn: controller.signIn, signOut: controller.signOut }),
+    [controller, state]
   );
 
   return (
