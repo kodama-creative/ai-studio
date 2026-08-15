@@ -1,11 +1,11 @@
 import { ContainerModule } from "inversify";
 
 import type { RpcServer } from "../../shared/namespaced-rpc";
-import { UPDATES_RPC, type UpdatesRpc } from "../../shared/updates-rpc";
 import {
-  UPDATES_APPLICATION,
-  type UpdatesApplication,
-} from "../application/updates-application";
+  UPDATES_RPC,
+  type UpdatesRequests,
+  type UpdatesRpc,
+} from "../../shared/updates-rpc";
 import {
   CommandContribution,
   type CommandContribution as CommandContributionApi,
@@ -16,33 +16,42 @@ import {
   type RpcContribution as RpcContributionApi,
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
+import { PROCESS_TOKENS } from "../di/tokens";
+import type { UpdaterService } from "../updates";
 
 class UpdatesRpcServer implements RpcServer<UpdatesRpc> {
   readonly namespace = UPDATES_RPC;
   readonly streams = {};
   readonly eventSource;
+  readonly requests: UpdatesRequests;
 
-  constructor(readonly requests: UpdatesApplication) {
-    this.eventSource = requests.events;
+  constructor(updater: UpdaterService) {
+    this.requests = {
+      getMode: () => updater.getUpdateModeSetting(),
+      setMode: (mode) => updater.setUpdateModeSetting(mode),
+      takeInstalledVersion: () =>
+        Promise.resolve(updater.getInstalledVersion()),
+    };
+    this.eventSource = updater.events;
   }
 }
 
 class UpdatesContribution
   implements CommandContributionApi, RpcContributionApi
 {
-  constructor(private readonly _application: UpdatesApplication) {}
+  constructor(private readonly _updater: UpdaterService) {}
 
   registerCommands(commands: CommandRegistry): void {
     commands.registerCommand("updates.check", {
-      execute: () => void this._application.check(),
+      execute: () => void this._updater.checkForUpdates(true),
     });
     commands.registerCommand("updates.applyAndRestart", {
-      execute: () => void this._application.applyAndRestart(),
+      execute: () => void this._updater.applyUpdateAndRestart(),
     });
   }
 
   registerRpc(rpc: RpcRegistry): void {
-    rpc.registerServer(new UpdatesRpcServer(this._application));
+    rpc.registerServer(new UpdatesRpcServer(this._updater));
   }
 }
 
@@ -52,7 +61,9 @@ export function updatesRpcModule(): ContainerModule {
     bind(UpdatesContribution)
       .toDynamicValue(
         (context) =>
-          new UpdatesContribution(context.get(UPDATES_APPLICATION))
+          new UpdatesContribution(
+            context.get<UpdaterService>(PROCESS_TOKENS.updater)
+          )
       )
       .inSingletonScope();
     bind<CommandContributionApi>(CommandContribution).toService(

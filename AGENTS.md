@@ -112,14 +112,15 @@ the transport naming projection; do not add a second pass-through Playground
 facade or duplicate host/application token. Likewise, a DI token backed by one
 concrete application class does not need an empty `*Application` interface plus
 an `*ApplicationImpl` class; implement the shared request contract directly.
-Orchestrating cross-cutting capabilities such as Updates, Models, Auxiliary
-Generation, and Thread Sharing keep separate application and
-`*-rpc-feature.ts` modules. Transport-only features such as Analytics, GitHub
-Account, and Reminders adapt their existing manager/state owner directly in the
-RPC feature. `GitHubAuthManager` owns auth-state events; Reminders state is one
-process-owned `RemindersState` with serialized file access, never module-level
-mutable state. Do not add a second process singleton merely to mirror RPC
-methods. Every feature still owns one shared RPC contract and renderer client;
+Orchestrating cross-cutting capabilities such as Models, Auxiliary Generation,
+and Thread Sharing keep separate application and `*-rpc-feature.ts` modules.
+Transport-only features such as Analytics, GitHub Account, Updates, and
+Reminders adapt their existing manager/state owner directly in the RPC feature.
+`GitHubAuthManager` and `UpdaterService` own their process events; Reminders
+state is one process-owned `RemindersState` with serialized file access, never
+module-level mutable state. Do not add a second process singleton merely to
+mirror RPC methods. Every feature still owns one shared RPC contract and
+renderer client;
 do not merge them into generic `application-services`, `application-rpc-servers`,
 `application-rpc`, or `application-rpc-clients` aggregations. Bun feature
 modules must not export import-time manager instances or let application classes

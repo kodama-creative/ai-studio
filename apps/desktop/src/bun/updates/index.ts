@@ -1,6 +1,12 @@
 import { Updater } from "electrobun/bun";
 
-import type { UpdateMode, UpdateStatus } from "../../shared/updates";
+import { EventHub } from "../../shared/event-hub";
+import type {
+  UpdateMode,
+  UpdateStatus,
+  UpdateStatusChangedPayload,
+} from "../../shared/updates";
+import type { UpdatesEvents } from "../../shared/updates-rpc";
 import { setUpdateReadyInMenu } from "../app/menu";
 
 import { UpdatesState } from "./state";
@@ -9,24 +15,18 @@ const INITIAL_CHECK_DELAY_MS = 30_000;
 const CHECK_INTERVAL_MS = 4 * 60 * 60_000;
 const APPLY_GRACE_MS = 5_000;
 
-export interface UpdateStatusMessage {
-  status: UpdateStatus;
-  manual: boolean;
-}
-
 /** Process-scoped updater state and scheduling. */
 export class UpdaterService {
+  readonly events = new EventHub<UpdatesEvents>();
   private _isCheckInFlight = false;
   private _isPassManual = false;
   private _lastStatus: UpdateStatus | null = null;
   private _installedVersion: string | null = null;
   private _backgroundTimer: ReturnType<typeof setTimeout> | null = null;
   private _backgroundInterval: ReturnType<typeof setInterval> | null = null;
+  private _applyTimer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(
-    private readonly _sendUpdateStatus: (message: UpdateStatusMessage) => void,
-    private readonly _state: UpdatesState
-  ) {}
+  constructor(private readonly _state: UpdatesState) {}
 
   async checkForUpdates(manual: boolean): Promise<void> {
     if (this._isCheckInFlight) {
@@ -78,7 +78,11 @@ export class UpdaterService {
       this._sendStatus({ state: "error", message });
       return;
     }
-    setTimeout(() => void this.checkForUpdates(true), APPLY_GRACE_MS);
+    if (this._applyTimer) clearTimeout(this._applyTimer);
+    this._applyTimer = setTimeout(() => {
+      this._applyTimer = null;
+      void this.checkForUpdates(true);
+    }, APPLY_GRACE_MS);
   }
 
   getInstalledVersion(): string | null {
@@ -110,18 +114,25 @@ export class UpdaterService {
   async stop(): Promise<void> {
     this._clearSchedule();
     await this._state.dispose();
+    this.events.dispose();
   }
 
   private _sendStatus(status: UpdateStatus): void {
     this._lastStatus = status;
-    this._sendUpdateStatus({ status, manual: this._isPassManual });
+    const payload: UpdateStatusChangedPayload = {
+      status,
+      manual: this._isPassManual,
+    };
+    this.events.publish("statusChanged", payload);
   }
 
   private _clearSchedule(): void {
     if (this._backgroundTimer) clearTimeout(this._backgroundTimer);
     if (this._backgroundInterval) clearInterval(this._backgroundInterval);
+    if (this._applyTimer) clearTimeout(this._applyTimer);
     this._backgroundTimer = null;
     this._backgroundInterval = null;
+    this._applyTimer = null;
   }
 
   private _applySchedule(mode: UpdateMode): void {

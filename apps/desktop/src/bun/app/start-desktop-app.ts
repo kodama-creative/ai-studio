@@ -18,11 +18,6 @@ import { Analytics } from "../analytics";
 import { auxiliaryGenerationModule } from "../application/auxiliary-generation-module";
 import { modelsModule } from "../application/models-module";
 import { threadSharingApplicationModule } from "../application/thread-sharing-application";
-import {
-  UPDATES_APPLICATION,
-  UpdatesApplication,
-  updatesApplicationModule,
-} from "../application/updates-application";
 import { GitHubAuthManager } from "../auth/github-auth-manager";
 import { isStudioOpenDeepLink } from "../deep-link";
 import { activateWindowForDeepLink } from "../deep-link/activate-window";
@@ -129,11 +124,7 @@ async function _startDesktopApp(
   processLifecycle.defer("desktop host", () => host.stop());
   await host.start();
 
-  let notifyUpdateChanged: (
-    message: import("../../shared/updates").UpdateStatusChangedPayload
-  ) => void = () => undefined;
   const updater = new UpdaterService(
-    (message) => notifyUpdateChanged(message),
     new UpdatesState(path.join(homePath, "settings", "updates.json"))
   );
   processLifecycle.defer("updater", () => updater.stop());
@@ -179,19 +170,9 @@ async function _startDesktopApp(
   processContainer.load(agentProjectsModule());
   processContainer.load(remindersModule());
   processContainer.load(threadSharingApplicationModule());
-  processContainer.load(updatesApplicationModule());
-  notifyUpdateChanged = (message) =>
-    processContainer
-      .get<UpdatesApplication>(UPDATES_APPLICATION)
-      .notifyStatus(message);
   // Resolve the lazy application root through DI so its Disposable lifecycle
   // is adopted by the process scope before any window can request it.
   processContainer.get(PROCESS_TOKENS.playgroundApplication);
-  processContainer.onDispose(() => {
-    // External managers may emit one final callback while shutting down. Stop
-    // them from resolving Applications after the DI root entered disposal.
-    notifyUpdateChanged = () => undefined;
-  });
   let stopPromise: Promise<void> | null = null;
   const runtime: DesktopAppRuntime = {
     stop() {
