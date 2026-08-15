@@ -79,4 +79,8 @@ export const webModelClient: ModelClient = {
   testModelConnection: () => Promise.resolve(),
   removeCustomModel: () => Promise.resolve([]),
   upsertCustomModel: () => Promise.resolve([]),
+  setImageModelEnabled: () => Promise.resolve([]),
+  setAllImageModelsEnabled: () => Promise.resolve([]),
+  removeCustomImageModel: () => Promise.resolve([]),
+  upsertCustomImageModel: () => Promise.resolve([]),
 };

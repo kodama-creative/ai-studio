@@ -63,6 +63,14 @@ export function createElectrobunModelClient(
       modelsClient.removeCustom(providerId, modelId),
     upsertCustomModel: (providerId, model, originalId) =>
       modelsClient.upsertCustom(providerId, model, originalId),
+    setImageModelEnabled: (modelId, enabled) =>
+      modelsClient.setImageEnabled(modelId, enabled),
+    setAllImageModelsEnabled: (enabled) =>
+      modelsClient.setAllImagesEnabled(enabled),
+    removeCustomImageModel: (modelId) =>
+      modelsClient.removeCustomImage(modelId),
+    upsertCustomImageModel: (model, originalId) =>
+      modelsClient.upsertCustomImage(model, originalId),
   };
 }
 

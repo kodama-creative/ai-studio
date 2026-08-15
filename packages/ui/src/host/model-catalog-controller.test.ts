@@ -144,6 +144,10 @@ function _client(overrides: Partial<ModelClient> = {}): ModelClient {
     testModelConnection: () => Promise.resolve(),
     removeCustomModel: providers,
     upsertCustomModel: providers,
+    setImageModelEnabled: providers,
+    setAllImageModelsEnabled: providers,
+    removeCustomImageModel: providers,
+    upsertCustomImageModel: providers,
     ...overrides,
   };
 }

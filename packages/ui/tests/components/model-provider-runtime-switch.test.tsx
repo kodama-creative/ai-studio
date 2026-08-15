@@ -161,6 +161,10 @@ function _client(
     testModelConnection: () => Promise.resolve(),
     removeCustomModel: unchanged,
     upsertCustomModel: unchanged,
+    setImageModelEnabled: unchanged,
+    setAllImageModelsEnabled: unchanged,
+    removeCustomImageModel: unchanged,
+    upsertCustomImageModel: unchanged,
   };
 }
 

@@ -2,11 +2,11 @@
 
 import type * as pi from "@earendil-works/pi-ai";
 import type {
-  ArkImageGenerationConfig,
   CustomModel,
   ModelConfig,
   ModelProviderGroup,
   ProviderProfilePatch,
+  SeedreamImageModelDefinition,
 } from "@llm-space/core";
 import { resolveModelConfig } from "@llm-space/core/thread";
 import {
@@ -45,7 +45,6 @@ interface ModelContextValue {
       api?:
         "anthropic-messages" | "openai-completions" | "openai-responses" | null;
       icon?: string | null;
-      imageGeneration?: ArkImageGenerationConfig;
     }
   ) => Promise<void>;
   setModelEnabled: (
@@ -64,6 +63,13 @@ interface ModelContextValue {
   upsertCustomModel: (
     providerId: string,
     model: CustomModel,
+    originalId?: string
+  ) => Promise<void>;
+  setImageModelEnabled: (modelId: string, enabled: boolean) => Promise<void>;
+  setAllImageModelsEnabled: (enabled: boolean) => Promise<void>;
+  removeCustomImageModel: (modelId: string) => Promise<void>;
+  upsertCustomImageModel: (
+    model: SeedreamImageModelDefinition,
     originalId?: string
   ) => Promise<void>;
   refresh: () => Promise<void>;
@@ -151,6 +157,10 @@ export function ModelProvider({
       testModelConnection: controller.testModelConnection,
       removeCustomModel: controller.removeCustomModel,
       upsertCustomModel: controller.upsertCustomModel,
+      setImageModelEnabled: controller.setImageModelEnabled,
+      setAllImageModelsEnabled: controller.setAllImageModelsEnabled,
+      removeCustomImageModel: controller.removeCustomImageModel,
+      upsertCustomImageModel: controller.upsertCustomImageModel,
       refresh: controller.refresh,
       builtinProviders: controller.builtinProviders,
       getModel: (ref) => index.get(`${ref.provider}:${ref.id}`) ?? null,
@@ -278,7 +288,6 @@ export function useUpdateProvider(): (
     api?:
       "anthropic-messages" | "openai-completions" | "openai-responses" | null;
     icon?: string | null;
-    imageGeneration?: ArkImageGenerationConfig;
   }
 ) => Promise<void> {
   return useModelProvider().updateProvider;
@@ -321,6 +330,32 @@ export function useUpsertCustomModel(): (
   originalId?: string
 ) => Promise<void> {
   return useModelProvider().upsertCustomModel;
+}
+
+export function useSetImageModelEnabled(): (
+  modelId: string,
+  enabled: boolean
+) => Promise<void> {
+  return useModelProvider().setImageModelEnabled;
+}
+
+export function useSetAllImageModelsEnabled(): (
+  enabled: boolean
+) => Promise<void> {
+  return useModelProvider().setAllImageModelsEnabled;
+}
+
+export function useRemoveCustomImageModel(): (
+  modelId: string
+) => Promise<void> {
+  return useModelProvider().removeCustomImageModel;
+}
+
+export function useUpsertCustomImageModel(): (
+  model: SeedreamImageModelDefinition,
+  originalId?: string
+) => Promise<void> {
+  return useModelProvider().upsertCustomImageModel;
 }
 
 export function useRefreshModels(): () => Promise<void> {

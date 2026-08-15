@@ -3,7 +3,6 @@
 import {
   formatProviderProfileLabel,
   getArkImageModelDefinitions,
-  type ArkImageGenerationConfig,
   type CustomModel,
   type ModelProviderGroup,
   type ProviderProfile,
@@ -17,12 +16,16 @@ import {
   useAddProviderProfile,
   useFetchBuiltinProviders,
   useModels,
+  useRemoveCustomImageModel,
   useRemoveCustomModel,
   useRemoveProvider,
   useRemoveProviderProfile,
+  useSetAllImageModelsEnabled,
   useSetAllModelsEnabled,
+  useSetImageModelEnabled,
   useSetModelEnabled,
   useTestModelConnection,
+  useUpsertCustomImageModel,
   useUpdateProvider,
   useUpdateProviderProfile,
 } from "@llm-space/ui/components/model-provider";
@@ -1121,7 +1124,10 @@ function _ArkImageGenerationEditor({
 }: {
   provider: ModelProviderGroup;
 }) {
-  const updateProvider = useUpdateProvider();
+  const setImageModelEnabled = useSetImageModelEnabled();
+  const setAllImageModelsEnabled = useSetAllImageModelsEnabled();
+  const removeCustomImageModel = useRemoveCustomImageModel();
+  const upsertCustomImageModel = useUpsertCustomImageModel();
   const config = provider.imageGeneration ?? {};
   const models = getArkImageModelDefinitions(config);
   const disabledModels = new Set(config.disabledModels ?? []);
@@ -1141,31 +1147,20 @@ function _ArkImageGenerationEditor({
     return true;
   });
 
-  const update = (imageGeneration: ArkImageGenerationConfig) => {
-    runModelMutation("Failed to update image generation", () =>
-      updateProvider(provider.id, { imageGeneration })
-    );
-  };
-
   /** Enable or disable one image model without changing Thread tool bindings. */
   const handleModelEnabled = (modelId: string, enabled: boolean) => {
-    const disabled = new Set(config.disabledModels ?? []);
-    if (enabled) disabled.delete(modelId);
-    else disabled.add(modelId);
-    update({
-      ...config,
-      ...(disabled.size > 0
-        ? { disabledModels: [...disabled] }
-        : { disabledModels: undefined }),
-    });
+    runModelMutation(
+      `Failed to ${enabled ? "enable" : "disable"} image model`,
+      () => setImageModelEnabled(modelId, enabled)
+    );
   };
 
   /** Apply the existing list-wide enable policy to every image model. */
   const handleAllModelsEnabled = (enabled: boolean) => {
-    update({
-      ...config,
-      disabledModels: enabled ? undefined : models.map((model) => model.id),
-    });
+    runModelMutation(
+      `Failed to ${enabled ? "enable" : "disable"} image models`,
+      () => setAllImageModelsEnabled(enabled)
+    );
   };
 
   /** Add or replace a custom image model and preserve its disabled state. */
@@ -1173,34 +1168,18 @@ function _ArkImageGenerationEditor({
     model: SeedreamImageModelDefinition,
     originalId?: string
   ) => {
-    const custom = (config.models ?? []).filter(
-      (candidate) => candidate.id !== (originalId ?? model.id)
+    runModelMutation(
+      "Failed to save custom image model",
+      () => upsertCustomImageModel(model, originalId)
     );
-    const disabled = (config.disabledModels ?? []).map((modelId) =>
-      originalId && modelId === originalId ? model.id : modelId
-    );
-    update({
-      ...config,
-      models: [...custom, model],
-      ...(disabled.length > 0
-        ? { disabledModels: disabled }
-        : { disabledModels: undefined }),
-    });
   };
 
   /** Remove one custom image model without repairing Thread tool bindings. */
   const handleDeleteCustomModel = (modelId: string) => {
-    const custom = (config.models ?? []).filter(
-      (candidate) => candidate.id !== modelId
+    runModelMutation(
+      "Failed to delete custom image model",
+      () => removeCustomImageModel(modelId)
     );
-    const disabled = (config.disabledModels ?? []).filter(
-      (candidate) => candidate !== modelId
-    );
-    update({
-      ...config,
-      models: custom.length > 0 ? custom : undefined,
-      disabledModels: disabled.length > 0 ? disabled : undefined,
-    });
   };
 
   return (

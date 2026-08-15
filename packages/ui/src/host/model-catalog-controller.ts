@@ -3,6 +3,7 @@ import type {
   ModelConfig,
   ModelProviderGroup,
   ProviderProfilePatch,
+  SeedreamImageModelDefinition,
 } from "@llm-space/core";
 import { uuid } from "@llm-space/core";
 
@@ -218,6 +219,40 @@ export class ModelCatalogController {
   ): Promise<void> => {
     await this._mutateProviders((client) =>
       client.upsertCustomModel(providerId, model, originalId)
+    );
+  };
+
+  readonly setImageModelEnabled = async (
+    modelId: string,
+    enabled: boolean
+  ): Promise<void> => {
+    await this._mutateProviders((client) =>
+      client.setImageModelEnabled(modelId, enabled)
+    );
+  };
+
+  readonly setAllImageModelsEnabled = async (
+    enabled: boolean
+  ): Promise<void> => {
+    await this._mutateProviders((client) =>
+      client.setAllImageModelsEnabled(enabled)
+    );
+  };
+
+  readonly removeCustomImageModel = async (
+    modelId: string
+  ): Promise<void> => {
+    await this._mutateProviders((client) =>
+      client.removeCustomImageModel(modelId)
+    );
+  };
+
+  readonly upsertCustomImageModel = async (
+    model: SeedreamImageModelDefinition,
+    originalId?: string
+  ): Promise<void> => {
+    await this._mutateProviders((client) =>
+      client.upsertCustomImageModel(model, originalId)
     );
   };
 

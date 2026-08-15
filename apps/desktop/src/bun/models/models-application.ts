@@ -150,4 +150,27 @@ export class ModelsApplication implements ModelsRequests {
     this._models.upsertCustomModel(providerId, model, originalId);
     return this.list();
   }
+
+  async setImageEnabled(modelId: string, enabled: boolean) {
+    this._models.setImageModelEnabled(modelId, enabled);
+    return this.list();
+  }
+
+  async setAllImagesEnabled(enabled: boolean) {
+    this._models.setAllImageModelsEnabled(enabled);
+    return this.list();
+  }
+
+  async removeCustomImage(modelId: string) {
+    this._models.removeCustomImageModel(modelId);
+    return this.list();
+  }
+
+  async upsertCustomImage(
+    model: Parameters<ModelsRequests["upsertCustomImage"]>[0],
+    originalId?: string
+  ) {
+    this._models.upsertCustomImageModel(model, originalId);
+    return this.list();
+  }
 }

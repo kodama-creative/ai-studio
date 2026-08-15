@@ -6,7 +6,6 @@
  */
 
 import type {
-  ArkImageGenerationConfig,
   BuiltinTool,
   BuiltinToolCallResponse,
   CustomModel,
@@ -20,6 +19,7 @@ import type {
   ProviderConnectionRef,
   ProviderProfilePatch,
   SearchSettings,
+  SeedreamImageModelDefinition,
   SkillInfo,
   SkillsSettings,
   Thread,
@@ -253,7 +253,6 @@ export interface ModelClient {
       api?:
         "anthropic-messages" | "openai-completions" | "openai-responses" | null;
       icon?: string | null;
-      imageGeneration?: ArkImageGenerationConfig;
     }
   ): Promise<ModelProviderGroup[]>;
   setModelEnabled(
@@ -278,6 +277,16 @@ export interface ModelClient {
   upsertCustomModel(
     providerId: string,
     model: CustomModel,
+    originalId?: string
+  ): Promise<ModelProviderGroup[]>;
+  setImageModelEnabled(
+    modelId: string,
+    enabled: boolean
+  ): Promise<ModelProviderGroup[]>;
+  setAllImageModelsEnabled(enabled: boolean): Promise<ModelProviderGroup[]>;
+  removeCustomImageModel(modelId: string): Promise<ModelProviderGroup[]>;
+  upsertCustomImageModel(
+    model: SeedreamImageModelDefinition,
     originalId?: string
   ): Promise<ModelProviderGroup[]>;
 }

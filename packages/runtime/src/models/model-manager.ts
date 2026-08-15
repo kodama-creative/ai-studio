@@ -297,12 +297,10 @@ export class ModelManager {
       name,
       api,
       icon,
-      imageGeneration,
     }: {
       name?: string | null;
       api?: CustomProviderApi | null;
       icon?: string | null;
-      imageGeneration?: ArkImageGenerationConfig;
     }
   ): void {
     const entry = this._config.providers.find(
@@ -322,15 +320,6 @@ export class ModelManager {
     if (icon !== undefined) {
       if (icon === null) delete entry.icon;
       else entry.icon = icon;
-    }
-    if (imageGeneration !== undefined) {
-      if (providerId !== "ark" || entry.builtin !== true) {
-        throw new Error(
-          "Image generation can only be configured on the builtin Ark provider."
-        );
-      }
-      _assertArkImageGenerationConfig(imageGeneration);
-      entry.imageGeneration = { ...imageGeneration };
     }
     // Rebuild the registry so a cleared baseUrl restores the model's default
     // (the cached model instance would otherwise keep the mutated value).
@@ -474,7 +463,7 @@ export class ModelManager {
 
   /** The model ids the user has disabled for a provider (empty by default). */
   getDisabledModels(providerId: string): string[] {
-    return this._findProvider(providerId)?.disabledModels ?? [];
+    return [...(this._findProvider(providerId)?.disabledModels ?? [])];
   }
 
   /**
@@ -491,12 +480,12 @@ export class ModelManager {
     const config = this._config.providers.find(
       (entry) => entry.id === "ark" && entry.builtin === true
     )?.imageGeneration;
-    return config ? { ...config } : undefined;
+    return config ? structuredClone(config) : undefined;
   }
 
   /** The ids of the user-added models for a provider (empty by default). */
   getCustomModels(providerId: string): string[] {
-    return this._findProvider(providerId)?.customModels ?? [];
+    return [...(this._findProvider(providerId)?.customModels ?? [])];
   }
 
   /** Whether a configured provider is one of the shipped builtin providers. */
@@ -653,6 +642,81 @@ export class ModelManager {
     }
     this._models = null;
     this._saveConfig();
+  }
+
+  /** Atomically enable or disable one model in Ark's image inventory. */
+  setImageModelEnabled(modelId: string, enabled: boolean): void {
+    const config = this._arkImageGenerationConfig();
+    if (
+      !getArkImageModelDefinitions(config).some((model) => model.id === modelId)
+    ) {
+      throw new Error(`Ark image model not configured: ${modelId}`);
+    }
+    const disabled = new Set(config.disabledModels ?? []);
+    if (enabled) disabled.delete(modelId);
+    else disabled.add(modelId);
+    this._saveArkImageGeneration({
+      ...config,
+      disabledModels: disabled.size > 0 ? [...disabled] : undefined,
+    });
+  }
+
+  /** Atomically apply one enablement policy to the full Ark image inventory. */
+  setAllImageModelsEnabled(enabled: boolean): void {
+    const config = this._arkImageGenerationConfig();
+    this._saveArkImageGeneration({
+      ...config,
+      disabledModels: enabled
+        ? undefined
+        : getArkImageModelDefinitions(config).map((model) => model.id),
+    });
+  }
+
+  /**
+   * Add or replace one user-authored Ark image model while preserving a renamed
+   * model's disabled state. The current persisted inventory is read inside this
+   * owner so queued renderer intents cannot overwrite one another.
+   */
+  upsertCustomImageModel(
+    model: SeedreamImageModelDefinition,
+    originalId?: string
+  ): void {
+    const config = this._arkImageGenerationConfig();
+    const removeId = originalId ?? model.id;
+    const custom = (config.models ?? []).filter(
+      (candidate) => candidate.id !== removeId
+    );
+    if (
+      originalId !== undefined &&
+      !(config.models ?? []).some((candidate) => candidate.id === originalId)
+    ) {
+      throw new Error(`Custom Ark image model not configured: ${originalId}`);
+    }
+    const disabled = (config.disabledModels ?? []).map((modelId) =>
+      originalId !== undefined && modelId === originalId ? model.id : modelId
+    );
+    this._saveArkImageGeneration({
+      ...config,
+      models: [...custom, model],
+      disabledModels: disabled.length > 0 ? disabled : undefined,
+    });
+  }
+
+  /** Remove one user-authored Ark image model and its disabled reference. */
+  removeCustomImageModel(modelId: string): void {
+    const config = this._arkImageGenerationConfig();
+    const custom = (config.models ?? []).filter(
+      (candidate) => candidate.id !== modelId
+    );
+    if (custom.length === (config.models ?? []).length) return;
+    const disabled = (config.disabledModels ?? []).filter(
+      (candidate) => candidate !== modelId
+    );
+    this._saveArkImageGeneration({
+      ...config,
+      models: custom.length > 0 ? custom : undefined,
+      disabledModels: disabled.length > 0 ? disabled : undefined,
+    });
   }
 
   /** Remove a provider from `settings/models.json`. No-op when not configured. */
@@ -894,6 +958,27 @@ export class ModelManager {
       throw new Error(`Provider not configured: ${providerId}`);
     }
     return entry;
+  }
+
+  /** Resolve the one provider which owns the native image inventory. */
+  private _arkImageEntry(): ProviderConfig {
+    const entry = this._providerEntry("ark");
+    if (entry.builtin !== true) {
+      throw new Error(
+        "Image generation can only be configured on the builtin Ark provider."
+      );
+    }
+    return entry;
+  }
+
+  private _arkImageGenerationConfig(): ArkImageGenerationConfig {
+    return structuredClone(this._arkImageEntry().imageGeneration ?? {});
+  }
+
+  private _saveArkImageGeneration(config: ArkImageGenerationConfig): void {
+    _assertArkImageGenerationConfig(config);
+    this._arkImageEntry().imageGeneration = structuredClone(config);
+    this._saveConfig();
   }
 
   private _profilesFor(entry: ProviderConfig): ProviderProfileConfig[] {

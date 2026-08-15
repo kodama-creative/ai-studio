@@ -59,20 +59,14 @@ describe("ModelManager Ark image generation", () => {
     const manager = new ModelManager({ settingsDir });
     manager.addBuiltInProvider({ id: "ark" });
 
-    manager.updateProvider("ark", {
-      imageGeneration: {
-        models: [
-          {
-            id: "ep-seedream-custom",
-            name: "Custom Seedream endpoint",
-            supportedSizes: ["2K", "4K"],
-            defaultSize: "2K",
-            icon: "seedream",
-          },
-        ],
-        disabledModels: ["doubao-seedream-4-0-250828"],
-      },
+    manager.upsertCustomImageModel({
+      id: "ep-seedream-custom",
+      name: "Custom Seedream endpoint",
+      supportedSizes: ["2K", "4K"],
+      defaultSize: "2K",
+      icon: "seedream",
     });
+    manager.setImageModelEnabled("doubao-seedream-4-0-250828", false);
 
     const reloaded = new ModelManager({ settingsDir });
     expect(reloaded.getArkImageGenerationConfig()).toEqual({
@@ -95,33 +89,89 @@ describe("ModelManager Ark image generation", () => {
     ).toBe(false);
   });
 
-  test("rejects duplicate image models and invalid disabled ids", async () => {
+  test("owns sequential image intents without stale snapshot overwrites", async () => {
+    const settingsDir = await _settingsDir({ providers: [] });
+    const manager = new ModelManager({ settingsDir });
+    manager.addBuiltInProvider({ id: "ark" });
+
+    manager.setImageModelEnabled("doubao-seedream-5-0-pro-260628", false);
+    manager.setImageModelEnabled("doubao-seedream-5-0-260128", false);
+    manager.upsertCustomImageModel({
+      id: "custom-image",
+      name: "Custom image",
+      supportedSizes: ["2K"],
+      defaultSize: "2K",
+    });
+    manager.setImageModelEnabled("custom-image", false);
+    manager.upsertCustomImageModel(
+      {
+        id: "renamed-image",
+        name: "Renamed image",
+        supportedSizes: ["2K", "4K"],
+        defaultSize: "4K",
+      },
+      "custom-image"
+    );
+
+    expect(manager.getArkImageGenerationConfig()).toEqual({
+      models: [
+        {
+          id: "renamed-image",
+          name: "Renamed image",
+          supportedSizes: ["2K", "4K"],
+          defaultSize: "4K",
+        },
+      ],
+      disabledModels: [
+        "doubao-seedream-5-0-pro-260628",
+        "doubao-seedream-5-0-260128",
+        "renamed-image",
+      ],
+    });
+
+    const detached = manager.getArkImageGenerationConfig();
+    detached?.disabledModels?.splice(0);
+    detached?.models?.splice(0);
+    expect(manager.getArkImageGenerationConfig()?.disabledModels).toHaveLength(
+      3
+    );
+    expect(manager.getArkImageGenerationConfig()?.models).toHaveLength(1);
+
+    manager.removeCustomImageModel("renamed-image");
+    manager.setAllImageModelsEnabled(true);
+
+    expect(new ModelManager({ settingsDir }).getArkImageGenerationConfig()).toEqual(
+      {}
+    );
+  });
+
+  test("rejects invalid image-model intents", async () => {
     const settingsDir = await _settingsDir({ providers: [] });
     const manager = new ModelManager({ settingsDir });
     manager.addBuiltInProvider({ id: "ark" });
 
     expect(() =>
-      manager.updateProvider("ark", {
-        imageGeneration: {
-          models: [
-            {
-              id: "doubao-seedream-5-0-pro-260628",
-              name: "Duplicate",
-              supportedSizes: ["2K"],
-              defaultSize: "2K",
-            },
-          ],
-        },
+      manager.upsertCustomImageModel({
+        id: "doubao-seedream-5-0-pro-260628",
+        name: "Duplicate",
+        supportedSizes: ["2K"],
+        defaultSize: "2K",
       })
     ).toThrow("Duplicate Ark image model id");
-
+    expect(() => manager.setImageModelEnabled("missing", false)).toThrow(
+      "Ark image model not configured"
+    );
     expect(() =>
-      manager.updateProvider("ark", {
-        imageGeneration: {
-          disabledModels: ["missing-image-model"],
+      manager.upsertCustomImageModel(
+        {
+          id: "renamed",
+          name: "Renamed",
+          supportedSizes: ["2K"],
+          defaultSize: "2K",
         },
-      })
-    ).toThrow("Disabled Ark image models must reference unique model ids");
+        "missing"
+      )
+    ).toThrow("Custom Ark image model not configured");
   });
 });
 

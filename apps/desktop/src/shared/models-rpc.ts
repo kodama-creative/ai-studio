@@ -1,9 +1,9 @@
 import type {
-  ArkImageGenerationConfig,
   CustomModel,
   ModelConfig,
   ModelProviderGroup,
   ProviderProfilePatch,
+  SeedreamImageModelDefinition,
 } from "@llm-space/core";
 
 import { defineRpcNamespace } from "./namespaced-rpc";
@@ -37,7 +37,6 @@ export interface ModelsRequests {
       | "openai-responses"
       | null;
     icon?: string | null;
-    imageGeneration?: ArkImageGenerationConfig;
   }): Promise<ModelProviderGroup[]>;
   setEnabled(
     providerId: string,
@@ -65,6 +64,16 @@ export interface ModelsRequests {
     model: CustomModel,
     originalId?: string
   ): Promise<ModelProviderGroup[]>;
+  setImageEnabled(
+    modelId: string,
+    enabled: boolean
+  ): Promise<ModelProviderGroup[]>;
+  setAllImagesEnabled(enabled: boolean): Promise<ModelProviderGroup[]>;
+  removeCustomImage(modelId: string): Promise<ModelProviderGroup[]>;
+  upsertCustomImage(
+    model: SeedreamImageModelDefinition,
+    originalId?: string
+  ): Promise<ModelProviderGroup[]>;
 }
 
 export type ModelsRpc = RequestRpcShape<ModelsRequests>;
@@ -87,6 +96,10 @@ export const MODELS_RPC = defineRpcNamespace<ModelsRpc>("models", {
     testConnection: true,
     removeCustom: true,
     upsertCustom: true,
+    setImageEnabled: true,
+    setAllImagesEnabled: true,
+    removeCustomImage: true,
+    upsertCustomImage: true,
   },
   streams: {},
   events: {},
