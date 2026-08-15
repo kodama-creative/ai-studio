@@ -57,7 +57,7 @@ class AgentProjectsCommandContribution implements CommandContributionApi {
   /** Register the native project picker command for every desktop window. */
   registerCommands(commands: CommandRegistry): void {
     commands.registerCommand("agentProjects.open", {
-      execute: (command) => void this._application.open(command.args.rootPath),
+      execute: (command) => this._application.open(command.args.rootPath),
     });
   }
 }

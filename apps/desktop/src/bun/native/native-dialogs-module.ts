@@ -67,11 +67,10 @@ class NativeDialogsContribution
 
   registerCommands(commands: CommandRegistry): void {
     commands.registerCommand("playground.importFiles", {
-      execute: () => {
-        void importFilesWithNativePicker((next) =>
+      execute: () =>
+        importFilesWithNativePicker((next) =>
           this._commandSink.sendToWebview(next)
-        );
-      },
+        ),
     });
     commands.registerCommand("playground.importFromClipboard", {
       execute: () =>

@@ -40,7 +40,7 @@ class GithubAccountContribution
 
   registerCommands(commands: CommandRegistry): void {
     commands.registerCommand("githubAccount.login", {
-      execute: () => void this._auth.signIn(),
+      execute: () => this._auth.signIn(),
     });
     commands.registerCommand("githubAccount.logout", {
       execute: () => this._auth.signOut(),

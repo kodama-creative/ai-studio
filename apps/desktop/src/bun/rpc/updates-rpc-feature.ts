@@ -43,10 +43,10 @@ class UpdatesContribution
 
   registerCommands(commands: CommandRegistry): void {
     commands.registerCommand("updates.check", {
-      execute: () => void this._updater.checkForUpdates(true),
+      execute: () => this._updater.checkForUpdates(true),
     });
     commands.registerCommand("updates.applyAndRestart", {
-      execute: () => void this._updater.applyUpdateAndRestart(),
+      execute: () => this._updater.applyUpdateAndRestart(),
     });
   }
 
