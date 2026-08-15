@@ -1,5 +1,7 @@
 import type { GithubAuthState } from "@/shared/auth";
 
+import { disposeBestEffort } from "../lifecycle/dispose-best-effort";
+
 interface Subscription {
   dispose(): void | Promise<void>;
 }
@@ -75,13 +77,7 @@ export class GithubAuthController {
     this._lifecycle += 1;
     const subscription = this._subscription;
     this._subscription = null;
-    if (subscription !== null) {
-      try {
-        void Promise.resolve(subscription.dispose()).catch(() => undefined);
-      } catch {
-        // Subscription cleanup is best-effort during renderer teardown.
-      }
-    }
+    disposeBestEffort(subscription);
   }
 
   private _publish(state: GithubAuthState): void {

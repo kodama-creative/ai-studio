@@ -15,6 +15,7 @@ import { FolderGit2Icon, MessagesSquareIcon, PlusIcon } from "lucide-react";
 import { memo, useEffect } from "react";
 import { toast } from "sonner";
 
+import { disposeBestEffort } from "@/app/lifecycle/dispose-best-effort";
 import type { AgentProjectClient } from "@/client/agent-project-client";
 import type { PlaygroundClient } from "@/client/playground-client";
 import { useCommands } from "@/commands";
@@ -51,8 +52,8 @@ function _PlaygroundSidebar({
       });
     });
     return () => {
-      void failed.dispose();
-      void changed.dispose();
+      disposeBestEffort(failed);
+      disposeBestEffort(changed);
     };
   }, [projectClient, queryClient]);
 

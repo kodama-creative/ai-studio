@@ -59,6 +59,7 @@ import {
   PlaygroundWorkspaceController,
   type SnapshotDocument,
 } from "./playground/playground-workspace-controller";
+import { RemindersProvider } from "./reminders/reminders-provider";
 
 // Overlay surfaces that aren't part of the first paint — settings, the command
 // palette, onboarding, and examples. Loaded lazily so their code (and heavy
@@ -94,7 +95,9 @@ export function MainWindowPage() {
   return (
     <UpdateStatusProvider>
       <GithubAuthProvider>
-        <PageWorkspace />
+        <RemindersProvider>
+          <PageWorkspace />
+        </RemindersProvider>
       </GithubAuthProvider>
     </UpdateStatusProvider>
   );

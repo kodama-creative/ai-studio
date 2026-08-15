@@ -2,11 +2,10 @@ import { useModels } from "@llm-space/ui/components/model-provider";
 import { Button } from "@llm-space/ui/ui/button";
 import { Dialog, DialogClose, DialogContent } from "@llm-space/ui/ui/dialog";
 import { ArrowUpRightIcon, XIcon } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import { createRemindersClient } from "@/client/reminders";
+import { useReminders } from "@/app/reminders/reminders-provider";
 import { useCommands } from "@/commands";
-import type { FeatureReminder } from "@/shared/feature-reminders";
 
 /** Wait this long after mount before opening, so it doesn't fight first paint. */
 const SHOW_DELAY_MS = 800;
@@ -26,11 +25,10 @@ const SHOW_DELAY_MS = 800;
  * reminders simply wait for a later launch.
  */
 export function FeatureReminderDialog() {
-  const remindersClient = useMemo(() => createRemindersClient(), []);
+  const { feature: reminder, markFeatureSeen, requestFeature } = useReminders();
   const models = useModels();
   const hasModels = models.length > 0;
   const { executeCommand } = useCommands();
-  const [reminder, setReminder] = useState<FeatureReminder | null>(null);
   const [open, setOpen] = useState(false);
   // Providers load asynchronously, so `hasModels` flips from false→true after
   // mount. Request once on that first transition; the read is idempotent, so
@@ -40,10 +38,8 @@ export function FeatureReminderDialog() {
   useEffect(() => {
     if (!hasModels || requestedRef.current) return;
     requestedRef.current = true;
-    void remindersClient.nextFeature().then((next) => {
-      if (next) setReminder(next);
-    });
-  }, [hasModels, remindersClient]);
+    void requestFeature();
+  }, [hasModels, requestFeature]);
 
   // Open shortly after we have a reminder so it doesn't fight first paint. Kept
   // in its own effect (keyed on the reminder) so a re-render of the fetch effect
@@ -55,10 +51,8 @@ export function FeatureReminderDialog() {
   }, [reminder]);
 
   const markSeen = useCallback(() => {
-    if (reminder) {
-      void remindersClient.markFeatureSeen(reminder.id);
-    }
-  }, [reminder, remindersClient]);
+    if (reminder) void markFeatureSeen();
+  }, [markFeatureSeen, reminder]);
 
   const handleOpenChange = useCallback(
     (next: boolean) => {

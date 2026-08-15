@@ -1,0 +1,98 @@
+import type { FeatureReminder } from "@/shared/feature-reminders";
+import type { RemindersRequests } from "@/shared/reminders-rpc";
+
+type Listener = () => void;
+
+export interface RemindersSnapshot {
+  readonly feature: FeatureReminder | null;
+  readonly showGithubStar: boolean;
+}
+
+/**
+ * Owns passive reminder reads and mutations. Reminder RPC is deliberately
+ * best-effort: a transport failure must never become an unhandled renderer
+ * rejection or interfere with the primary Playground/Studio workflows.
+ */
+export class RemindersController {
+  private readonly _listeners = new Set<Listener>();
+  private _active = true;
+  private _dismissGithubStarRequest: Promise<void> | null = null;
+  private _featureRequest: Promise<void> | null = null;
+  private _githubStarRequest: Promise<void> | null = null;
+  private _markFeatureSeenRequest: Promise<void> | null = null;
+  private _snapshot: RemindersSnapshot = {
+    feature: null,
+    showGithubStar: false,
+  };
+
+  constructor(private readonly _requests: RemindersRequests) {}
+
+  readonly getSnapshot = (): RemindersSnapshot => this._snapshot;
+
+  readonly subscribe = (listener: Listener): (() => void) => {
+    this._listeners.add(listener);
+    return () => this._listeners.delete(listener);
+  };
+
+  requestFeature(): Promise<void> {
+    if (this._featureRequest !== null) return this._featureRequest;
+    this._featureRequest = this._settle(async () => {
+      const feature = await this._requests.nextFeature();
+      if (this._active && feature !== null) {
+        this._publish({ ...this._snapshot, feature });
+      }
+    });
+    return this._featureRequest;
+  }
+
+  requestGithubStar(): Promise<void> {
+    if (this._githubStarRequest !== null) return this._githubStarRequest;
+    this._githubStarRequest = this._settle(async () => {
+      const result = await this._requests.shouldShowGithubStar();
+      if (this._active && result.show) {
+        this._publish({ ...this._snapshot, showGithubStar: true });
+      }
+    });
+    return this._githubStarRequest;
+  }
+
+  markFeatureSeen(): Promise<void> {
+    if (this._snapshot.feature === null) return Promise.resolve();
+    if (this._markFeatureSeenRequest !== null) {
+      return this._markFeatureSeenRequest;
+    }
+    const id = this._snapshot.feature.id;
+    this._markFeatureSeenRequest = this._settle(() =>
+      this._requests.markFeatureSeen(id)
+    );
+    return this._markFeatureSeenRequest;
+  }
+
+  dismissGithubStarForever(): Promise<void> {
+    if (this._dismissGithubStarRequest !== null) {
+      return this._dismissGithubStarRequest;
+    }
+    this._dismissGithubStarRequest = this._settle(() =>
+      this._requests.dismissGithubStarForever()
+    );
+    return this._dismissGithubStarRequest;
+  }
+
+  dispose(): void {
+    this._active = false;
+    this._listeners.clear();
+  }
+
+  private async _settle(run: () => Promise<void>): Promise<void> {
+    try {
+      await run();
+    } catch {
+      // Passive reminders are optional and have no actionable error UI.
+    }
+  }
+
+  private _publish(snapshot: RemindersSnapshot): void {
+    this._snapshot = snapshot;
+    for (const listener of this._listeners) listener();
+  }
+}

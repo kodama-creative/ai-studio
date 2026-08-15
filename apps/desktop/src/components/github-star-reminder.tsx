@@ -1,8 +1,8 @@
 import { cn } from "@llm-space/ui/lib/utils";
 import { XIcon } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
-import { createRemindersClient } from "@/client/reminders";
+import { useReminders } from "@/app/reminders/reminders-provider";
 import { useCommands } from "@/commands";
 
 /** The repository we nudge users to star. */
@@ -21,7 +21,11 @@ const SHOW_DELAY_MS = 5000;
  * reminder for good; the top-right ✕ only dismisses this one showing.
  */
 export function GithubStarReminder() {
-  const remindersClient = useMemo(() => createRemindersClient(), []);
+  const {
+    dismissGithubStarForever,
+    requestGithubStar,
+    showGithubStar,
+  } = useReminders();
   const { executeCommand } = useCommands();
   // `open` keeps the card mounted; `leaving` plays the fade-out before unmount.
   const [open, setOpen] = useState(false);
@@ -32,25 +36,22 @@ export function GithubStarReminder() {
   // fire-once. When it says show, wait 5s so the card slides in after the UI
   // has settled rather than fighting first paint.
   useEffect(() => {
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    void remindersClient.shouldShowGithubStar().then((result) => {
-      if (cancelled || !result.show) return;
-      timer = setTimeout(() => setOpen(true), SHOW_DELAY_MS);
-    });
-    return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
-    };
-  }, [remindersClient]);
+    void requestGithubStar();
+  }, [requestGithubStar]);
+
+  useEffect(() => {
+    if (!showGithubStar) return;
+    const timer = setTimeout(() => setOpen(true), SHOW_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [showGithubStar]);
 
   const close = useCallback(() => setLeaving(true), []);
 
   const handleStar = useCallback(() => {
     executeCommand({ type: "shell.openLink", args: { url: STAR_URL } });
-    void remindersClient.dismissGithubStarForever();
+    void dismissGithubStarForever();
     close();
-  }, [close, executeCommand, remindersClient]);
+  }, [close, dismissGithubStarForever, executeCommand]);
 
   if (!open) return null;
 

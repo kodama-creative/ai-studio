@@ -14,6 +14,7 @@ import {
 } from "react";
 import { toast } from "sonner";
 
+import { UpdateStatusConnection } from "@/app/updates/update-status-connection";
 import { createUpdatesClient } from "@/client/updates";
 import { useCommands } from "@/commands";
 import { UpdateDialog } from "@/components/update-dialog";
@@ -163,8 +164,8 @@ export function UpdateStatusProvider({ children }: { children: ReactNode }) {
     if (!open) dismissedRef.current = true;
   }, []);
 
-  useEffect(() => {
-    const handle = ({ status, manual }: UpdateStatusChangedPayload) => {
+  const handleStatus = useCallback(
+    ({ status, manual }: UpdateStatusChangedPayload) => {
       // Keep the persistent badge in sync no matter how the check started.
       if (status.state === "ready") {
         setReadyVersion(status.version);
@@ -237,20 +238,11 @@ export function UpdateStatusProvider({ children }: { children: ReactNode }) {
           return;
         }
       }
-    };
-
-    const subscription = updatesClient.on("statusChanged", handle);
-    return () => {
-      void subscription.dispose();
-    };
-  }, [restart, updatesClient]);
-
-  // "We just updated" — pulled once on mount, race-free vs. the fire-and-forget
-  // status messages (the bun signal is computed at startup, before we listen).
-  useEffect(() => {
-    let cancelled = false;
-    void updatesClient.takeInstalledVersion().then((version) => {
-      if (cancelled || !version) return;
+    },
+    [restart]
+  );
+  const handleInstalledVersion = useCallback(
+    (version: string) => {
       toast.success(`Updated to v${version}`, {
         action: {
           label: "Release notes",
@@ -261,11 +253,24 @@ export function UpdateStatusProvider({ children }: { children: ReactNode }) {
             }),
         },
       });
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [executeCommand, updatesClient]);
+    },
+    [executeCommand]
+  );
+  const connection = useMemo(
+    () =>
+      new UpdateStatusConnection({
+        subscribeStatus: (listener) =>
+          updatesClient.on("statusChanged", listener),
+        takeInstalledVersion: () => updatesClient.takeInstalledVersion(),
+        onStatus: handleStatus,
+        onInstalledVersion: handleInstalledVersion,
+      }),
+    [handleInstalledVersion, handleStatus, updatesClient]
+  );
+  useEffect(() => {
+    connection.start();
+    return () => connection.stop();
+  }, [connection]);
 
   return (
     <UpdateStatusContext.Provider value={{ readyVersion }}>

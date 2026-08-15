@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 
+import { disposeBestEffort } from "@/app/lifecycle/dispose-best-effort";
 import { createWindowClient } from "@/client/window";
 
 /**
@@ -28,7 +29,7 @@ export function useFullScreen(): boolean {
     const subscription = windowClient.on("fullScreenChanged", onChange);
     return () => {
       cancelled = true;
-      void subscription.dispose();
+      disposeBestEffort(subscription);
     };
   }, [windowClient]);
 
