@@ -172,6 +172,14 @@ External process resources which are not DI disposables register with
 in reverse order and continues after individual failures; the startup wrapper
 always disposes the process scope if composition fails. Do not defer cleanup
 registration until the end of startup.
+Cold-start URL capture is the deliberate import-time exception:
+`deep-link/launch.ts` adapts Electrobun into a `DeepLinkInbox` before async
+bootstrap begins. `DesktopLaunchController` atomically connects to that inbox,
+routes buffered/live Main and Studio links, owns reopen behavior, and
+disconnects before window teardown. `DesktopAppRuntime` owns the idempotent
+top-level stop order (launch routing → Project windows → process scope). Keep
+these state machines out of `start-desktop-app.ts`; the composition root only
+injects their platform adapters.
 The named generic `ContributionProvider<T>` keeps both Registries independent
 from Inversify. Registries start once before the Electrobun bridge and native
 window are created, reject late registration, then dispose registrations before

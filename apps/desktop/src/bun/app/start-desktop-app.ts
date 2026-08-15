@@ -25,9 +25,8 @@ import {
 } from "../auth/github-account-module";
 import { GitHubAuthManager } from "../auth/github-auth-manager";
 import { auxiliaryGenerationModule } from "../auxiliary-generation/auxiliary-generation-module";
-import { isStudioOpenDeepLink } from "../deep-link";
 import { activateWindowForDeepLink } from "../deep-link/activate-window";
-import { getPendingDeepLinks, setDeepLinkHandler } from "../deep-link/launch";
+import { desktopDeepLinks } from "../deep-link/launch";
 import {
   createDesktopProcessContainer,
   type DesktopProcessContainer,
@@ -83,19 +82,14 @@ import { UpdaterService } from "../updates";
 import { UpdatesState } from "../updates/state";
 import { UPDATER, updatesModule } from "../updates/updates-module";
 
+import { DesktopAppRuntime } from "./desktop-app-runtime";
+import { DesktopLaunchController } from "./desktop-launch-controller";
 import { DesktopProcessLifecycle } from "./desktop-process-lifecycle";
-import {
-  DesktopWindowFactory,
-  type DesktopMainWindowHandle,
-} from "./desktop-window-factory";
+import { DesktopWindowFactory } from "./desktop-window-factory";
 import { MainWindowManager } from "./main-window-manager";
 import { registerMenuActions } from "./menu";
 import { createShutdownCoordinator } from "./shutdown-coordinator";
 import { WindowStateManager } from "./window-state";
-
-export interface DesktopAppRuntime {
-  stop(): Promise<void>;
-}
 
 /** Build and start the production Bun object graph. */
 export async function startDesktopApp(): Promise<DesktopAppRuntime> {
@@ -103,10 +97,12 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
   try {
     return await _startDesktopApp(processContainer);
   } catch (error) {
-    await _stopDesktopApp([
-      ["desktop process scope after startup failure", () =>
-        processContainer.dispose()],
-    ]);
+    await new DesktopAppRuntime([
+      {
+        name: "desktop process scope after startup failure",
+        stop: () => processContainer.dispose(),
+      },
+    ]).stop();
     throw error;
   }
 }
@@ -134,7 +130,6 @@ async function _startDesktopApp(
   const skillsManager = new SkillsManager({
     managedSkillsDir: getManagedSkillsDir(),
   });
-  let mainWindows: MainWindowManager<DesktopMainWindowHandle> | undefined;
   const host = new DesktopHost({
     modules: [
       createBuiltInToolsModule({
@@ -218,57 +213,44 @@ async function _startDesktopApp(
   // Resolve the lazy application root through DI so its Disposable lifecycle
   // is adopted by the process scope before any window can request it.
   processContainer.get(PLAYGROUND_APPLICATION);
-  let stopPromise: Promise<void> | null = null;
-  const runtime: DesktopAppRuntime = {
-    stop() {
-      stopPromise ??= _stopDesktopApp([
-        ["agent project windows", () => projectWindows.closeAll()],
-        ["desktop process scope", () => processContainer.dispose()],
-      ]);
-      return stopPromise;
-    },
-  };
-
-  try {
-    mainWindows = new MainWindowManager(processContainer, (scope) =>
-      windowFactory.createMain(scope)
-    );
-    registerMenuActions(
-      () => mainWindows?.current()?.window,
-      (command, window) => windowFactory.executeCommand(command, window)
-    );
-
-    const deepLinkScheme = resolveDeepLinkScheme(
-      process.env.LLM_SPACE_DEEP_LINK_SCHEME
-    );
-    const pendingDeepLinks = getPendingDeepLinks();
-    setDeepLinkHandler((url) => {
-      void (async () => {
-        if (isStudioOpenDeepLink(url, deepLinkScheme)) {
-          const project = new URL(url).searchParams.get("project")?.trim();
-          if (!project) {
-            throw new Error("Can't open Studio: the project path is missing.");
-          }
-          await projectWindows.openProject(project);
-        } else {
-          const main = await _requireMainWindows(mainWindows).open();
+  const mainWindows = new MainWindowManager(processContainer, (scope) =>
+    windowFactory.createMain(scope)
+  );
+  const deepLinkScheme = resolveDeepLinkScheme(
+    process.env.LLM_SPACE_DEEP_LINK_SCHEME
+  );
+  const launch = new DesktopLaunchController({
+    deepLinks: desktopDeepLinks,
+    scheme: deepLinkScheme,
+    targets: {
+      async openMain(url) {
+        const main = await mainWindows.open();
+        if (url !== undefined) {
           activateWindowForDeepLink(main.window, url, deepLinkScheme);
         }
-      })().catch((error) => {
-        console.error("Failed to handle deep link:", error);
-        Utils.showNotification({
-          title: "Unable to Open Agent Project",
-          body: _errorMessage(error),
-        });
+      },
+      openProject: (rootPath) => projectWindows.openProject(rootPath),
+    },
+    onOpenError(error) {
+      console.error("Failed to handle deep link:", error);
+      Utils.showNotification({
+        title: "Unable to Open Agent Project",
+        body: error.message,
       });
-    });
+    },
+  });
+  const runtime = new DesktopAppRuntime([
+    { name: "desktop launch", stop: () => launch.dispose() },
+    { name: "agent project windows", stop: () => projectWindows.closeAll() },
+    { name: "desktop process scope", stop: () => processContainer.dispose() },
+  ]);
 
-    const studioOnlyLaunch =
-      pendingDeepLinks.length > 0 &&
-      pendingDeepLinks.every((url) =>
-        isStudioOpenDeepLink(url, deepLinkScheme)
-      );
-    if (!studioOnlyLaunch) await mainWindows.open();
+  try {
+    registerMenuActions(
+      () => mainWindows.current()?.window,
+      (command, window) => windowFactory.executeCommand(command, window)
+    );
+    await launch.start();
 
     analytics.capture("app_opened", { isFirstOpen: analytics.isFirstRun });
     void updater.start();
@@ -284,39 +266,12 @@ async function _startDesktopApp(
         handleBeforeQuit(event)
     );
     Electrobun.events.on("reopen", () => {
-      void _requireMainWindows(mainWindows)
-        .open()
-        .catch((error) => {
-          console.error("Failed to reopen Main window:", error);
-        });
+      launch.reopen();
     });
 
     return runtime;
   } catch (error) {
     await runtime.stop();
     throw error;
-  }
-}
-
-function _requireMainWindows(
-  value: MainWindowManager<DesktopMainWindowHandle> | undefined
-): MainWindowManager<DesktopMainWindowHandle> {
-  if (value === undefined) throw new Error("Main window manager is not ready.");
-  return value;
-}
-
-function _errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-async function _stopDesktopApp(
-  cleanups: readonly [name: string, cleanup: () => Promise<void> | void][]
-): Promise<void> {
-  for (const [name, cleanup] of cleanups) {
-    try {
-      await cleanup();
-    } catch (error) {
-      console.error(`Failed to stop ${name}:`, error);
-    }
   }
 }
