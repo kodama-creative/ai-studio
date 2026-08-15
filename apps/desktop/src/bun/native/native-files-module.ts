@@ -15,15 +15,10 @@ import type { RpcRegistry } from "../di/rpc-registry";
 import { desktopToken, PROCESS_TOKENS } from "../di/tokens";
 import { revealResource } from "../fs/reveal-resource";
 
-export interface NativeFilesApplication {
-  directoryExists(path: string): Promise<boolean>;
-  reveal(pathOrLocator: string): Promise<void>;
-}
-
 export const NATIVE_FILES_APPLICATION =
   desktopToken<NativeFilesApplication>("native-files", "application");
 
-class NativeFileApplication implements NativeFilesApplication {
+export class NativeFilesApplication {
   constructor(private readonly _skills: Pick<SkillsManager, "findSkill">) {}
 
   directoryExists(path: string) {
@@ -56,7 +51,7 @@ export function nativeFilesApplicationModule(): ContainerModule {
     bind<NativeFilesApplication>(NATIVE_FILES_APPLICATION)
       .toDynamicValue(
         (context: ResolutionContext) =>
-          new NativeFileApplication(
+          new NativeFilesApplication(
             context.get<SkillsManager>(PROCESS_TOKENS.skillsManager)
           )
       )

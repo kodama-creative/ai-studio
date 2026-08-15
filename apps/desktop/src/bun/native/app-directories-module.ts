@@ -13,14 +13,10 @@ import type { RpcRegistry } from "../di/rpc-registry";
 import { desktopToken, PROCESS_TOKENS } from "../di/tokens";
 import { ensureRootDir } from "../fs/ensure-root-dir";
 
-export interface AppDirectoriesApplication {
-  ensure(relativePath: string): Promise<string>;
-}
-
 export const APP_DIRECTORIES_APPLICATION =
   desktopToken<AppDirectoriesApplication>("app-directories", "application");
 
-class DefaultAppDirectoriesApplication implements AppDirectoriesApplication {
+export class AppDirectoriesApplication {
   constructor(private readonly _homePath: string) {}
 
   ensure(relativePath: string) {
@@ -49,7 +45,7 @@ export function appDirectoriesApplicationModule(): ContainerModule {
     bind<AppDirectoriesApplication>(APP_DIRECTORIES_APPLICATION)
       .toDynamicValue(
         (context: ResolutionContext) =>
-          new DefaultAppDirectoriesApplication(
+          new AppDirectoriesApplication(
             context.get(PROCESS_TOKENS.homePath)
           )
       )

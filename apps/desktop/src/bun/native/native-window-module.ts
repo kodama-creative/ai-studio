@@ -5,7 +5,12 @@ import type { DesktopWindowContext } from "../../shared/agent-project";
 import type { Disposable } from "../../shared/disposable";
 import { EventHub } from "../../shared/event-hub";
 import type { RpcServer } from "../../shared/namespaced-rpc";
-import { WINDOW_RPC, type WindowRpc } from "../../shared/window-rpc";
+import {
+  WINDOW_RPC,
+  type WindowEvents,
+  type WindowRequests,
+  type WindowRpc,
+} from "../../shared/window-rpc";
 import type { WindowStateManager } from "../app/window-state";
 import {
   CommandContribution,
@@ -26,20 +31,11 @@ function _clampZoom(zoom: number): number {
   return Math.min(3, Math.max(0.3, zoom));
 }
 
-export interface WindowApplicationApi {
-  getContext(): Promise<DesktopWindowContext>;
-  getFullscreenState(): Promise<{ fullScreen: boolean }>;
-}
-
-export interface WindowApplicationEvents {
-  fullScreenChanged: { fullScreen: boolean };
-}
-
 export const WINDOW_APPLICATION =
   desktopToken<WindowApplication>("window", "application");
 
-export class WindowApplication implements WindowApplicationApi, Disposable {
-  readonly events = new EventHub<WindowApplicationEvents>();
+export class WindowApplication implements WindowRequests, Disposable {
+  readonly events = new EventHub<WindowEvents>();
 
   constructor(
     private readonly _window: () => BrowserWindow,
@@ -74,12 +70,9 @@ export class WindowApplication implements WindowApplicationApi, Disposable {
 class WindowRpcServer implements RpcServer<WindowRpc> {
   readonly namespace = WINDOW_RPC;
   readonly streams = {};
-  readonly eventSource: EventHub<WindowApplicationEvents>;
+  readonly eventSource: EventHub<WindowEvents>;
 
-  constructor(
-    readonly requests: WindowApplicationApi,
-    events: EventHub<WindowApplicationEvents>
-  ) {
+  constructor(readonly requests: WindowRequests, events: EventHub<WindowEvents>) {
     this.eventSource = events;
   }
 }
@@ -139,7 +132,7 @@ export function nativeWindowContributionsModule(
           scope.own(
             new WindowApplication(
               getWindow,
-              context.get<DesktopWindowContext>(WINDOW_TOKENS.context)
+              context.get(WINDOW_TOKENS.context)
             )
           )
       )

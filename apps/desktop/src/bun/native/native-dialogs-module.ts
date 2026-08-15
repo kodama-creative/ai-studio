@@ -23,15 +23,10 @@ import {
   importTextFromClipboard,
 } from "./import-files";
 
-export interface NativeDialogsApplication {
-  pickFile(): Promise<string | null>;
-  pickDirectory(): Promise<string | null>;
-}
-
 export const NATIVE_DIALOGS_APPLICATION =
   desktopToken<NativeDialogsApplication>("native-dialogs", "application");
 
-class NativeDialogApplication implements NativeDialogsApplication {
+export class NativeDialogsApplication {
   async pickFile() {
     return this._pick(false);
   }
@@ -91,7 +86,7 @@ class NativeDialogsContribution
 export function nativeDialogsApplicationModule(): ContainerModule {
   return new ContainerModule(({ bind }) => {
     bind<NativeDialogsApplication>(NATIVE_DIALOGS_APPLICATION)
-      .to(NativeDialogApplication)
+      .to(NativeDialogsApplication)
       .inSingletonScope();
   });
 }
