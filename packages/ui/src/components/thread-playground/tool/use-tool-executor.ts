@@ -5,14 +5,14 @@ import { useGetProviderProfileId } from "../model/provider-profile-selection-pro
 
 import { createToolExecutor, type ToolExecutor } from "./tool-executor";
 
-export function useToolExecutor(runtimeId?: string): ToolExecutor | null {
+export function useToolExecutor(): ToolExecutor | null {
   const { executeTool } = useHostServices();
   const getProfileId = useGetProviderProfileId();
   return useMemo(
     () =>
       executeTool
-        ? createToolExecutor({ executeTool, getProfileId, runtimeId })
+        ? createToolExecutor({ executeTool, getProfileId })
         : null,
-    [executeTool, getProfileId, runtimeId]
+    [executeTool, getProfileId]
   );
 }

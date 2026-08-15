@@ -15,7 +15,7 @@ export interface ShareThreadMeta {
   description?: string;
 }
 
-/** Read the thread selected for sharing from its owning runtime. */
+/** Read the selected Playground projection as a portable Thread snapshot. */
 export function readShareThread(
   playgroundId: string
 ): Promise<PortableThreadSnapshot> {
@@ -23,7 +23,8 @@ export function readShareThread(
 }
 
 /**
- * Publish a workspace thread as a secret GitHub Gist and return its shareable
+ * Publish a Playground Thread snapshot as a secret GitHub Gist and return its
+ * shareable
  * web link. Requires GitHub sign-in (the bun side throws otherwise); each call
  * creates a fresh gist. `meta.title`/`meta.description` set the shared copy's
  * viewer metadata.

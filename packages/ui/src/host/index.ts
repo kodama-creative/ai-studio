@@ -9,8 +9,6 @@ export type {
   McpHost,
   ModelClient,
   PathsHost,
-  RuntimeOwnedHostOptions,
-  RuntimeScopedHostOptions,
   ShareThreadActionInput,
   SkillsHost,
   ToolCallResult,

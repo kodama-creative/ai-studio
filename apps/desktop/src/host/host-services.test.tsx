@@ -8,7 +8,6 @@ import type {
   NamespacedRpcStreamEvent,
   NamespacedRpcStreamSubscribe,
 } from "@/shared/namespaced-rpc";
-import type { RuntimeId } from "@/shared/runtime";
 
 class ControllableRpc {
   readonly requests: NamespacedRpcRequest[] = [];
@@ -67,13 +66,13 @@ class ControllableRpc {
 
   private _value(input: NamespacedRpcRequest): unknown {
     if (input.namespace === "skills" && input.method === "getSettings") {
-      return { discoveryPaths: [{ path: "/remote/skills", hiddenSkills: [] }] };
+      return { discoveryPaths: [{ path: "/local/skills", hiddenSkills: [] }] };
     }
     if (input.namespace === "search" && input.method === "get") {
       return { provider: "builtin" };
     }
     if (input.namespace === "generator" && input.method === "resolveEnv") {
-      return { modelApiKey: "remote-secret", envValues: {} };
+      return { modelApiKey: "local-secret", envValues: {} };
     }
     return [];
   }
@@ -85,8 +84,6 @@ await mock.module("@/lib/electrobun", () => ({ electrobun: { rpc: RPC } }));
 const { CommandProvider } = await import("@/commands");
 const { DesktopHostProvider } = await import("./host-services");
 const { useHostServices } = await import("@llm-space/ui/host");
-
-const LOCAL_RUNTIME: RuntimeId = "local";
 
 function _captureHost(): HostServices {
   let captured: HostServices | null = null;
@@ -105,7 +102,7 @@ function _captureHost(): HostServices {
   return captured;
 }
 
-describe("Desktop runtime-scoped host services", () => {
+describe("Desktop local host services", () => {
   beforeEach(() => RPC.reset());
 
   test("streams stateless text through the auxiliaryGeneration namespace", async () => {
@@ -142,36 +139,31 @@ describe("Desktop runtime-scoped host services", () => {
     expect(RPC.unsubscribed).toContain(stream.subscriptionId);
   });
 
-  test("runtime-sensitive host calls use typed namespace arguments", async () => {
+  test("host calls omit the removed runtime-selection argument", async () => {
     const host = _captureHost();
     if (!host.generator) throw new Error("Generator services are unavailable");
-    await host.skills.getSettings({ runtimeId: LOCAL_RUNTIME });
-    await host.skills.listAvailable({ runtimeId: LOCAL_RUNTIME });
-    await host.skills.listSkills("/remote/skills", {
-      runtimeId: LOCAL_RUNTIME,
-    });
-    await host.mcp.listServers({ runtimeId: LOCAL_RUNTIME });
-    await host.generator.getSearchSettings({ runtimeId: LOCAL_RUNTIME });
-    await host.generator.resolveEnv("remote-provider", ["REMOTE_SEARCH_KEY"], {
-      runtimeId: LOCAL_RUNTIME,
-    });
+    await host.skills.getSettings();
+    await host.skills.listAvailable();
+    await host.skills.listSkills("/local/skills");
+    await host.mcp.listServers();
+    await host.generator.getSearchSettings();
+    await host.generator.resolveEnv("local-provider", ["SEARCH_KEY"]);
 
     expect(RPC.requests).toEqual([
-      { namespace: "skills", method: "getSettings", args: [LOCAL_RUNTIME] },
-      { namespace: "skills", method: "listAvailable", args: [LOCAL_RUNTIME] },
+      { namespace: "skills", method: "getSettings", args: [] },
+      { namespace: "skills", method: "listAvailable", args: [] },
       {
         namespace: "skills",
         method: "list",
-        args: [LOCAL_RUNTIME, "/remote/skills"],
+        args: ["/local/skills"],
       },
-      { namespace: "mcp", method: "listServers", args: [LOCAL_RUNTIME] },
-      { namespace: "search", method: "get", args: [LOCAL_RUNTIME] },
+      { namespace: "mcp", method: "listServers", args: [] },
+      { namespace: "search", method: "get", args: [] },
       {
         namespace: "generator",
         method: "resolveEnv",
         args: [
-          LOCAL_RUNTIME,
-          { providerId: "remote-provider", envNames: ["REMOTE_SEARCH_KEY"] },
+          { providerId: "local-provider", envNames: ["SEARCH_KEY"] },
         ],
       },
     ]);

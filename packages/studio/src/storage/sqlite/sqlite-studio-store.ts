@@ -140,6 +140,27 @@ class SqliteTransaction implements StudioStoreTransaction {
       );
   }
 
+  saveCommandReceipt(receipt: StudioCommandReceipt): void {
+    const result = this._database
+      .query(
+        `UPDATE studio_command_receipts
+         SET method = ?, fingerprint = ?, payload_json = ?
+         WHERE session_id = ? AND command_id = ?`
+      )
+      .run(
+        receipt.method,
+        receipt.fingerprint,
+        _json(receipt),
+        receipt.sessionId,
+        receipt.commandId
+      );
+    if (result.changes !== 1) {
+      throw new Error(
+        `Command "${receipt.commandId}" does not have a durable receipt.`
+      );
+    }
+  }
+
   getExperiment(experimentId: string): StudioExperimentRecord | undefined {
     const row = this._database
       .query<{ payload_json: string }, [string]>(

@@ -2,14 +2,11 @@
 
 import { memo, type ReactNode } from "react";
 
-import type { RuntimeId } from "@/shared/runtime";
-
-interface RuntimePane {
+interface Pane {
   id: string;
-  runtimeId: RuntimeId;
 }
 
-function _RuntimePane<T extends RuntimePane>({
+function _Pane<T extends Pane>({
   active,
   renderPane,
   tab,
@@ -21,9 +18,9 @@ function _RuntimePane<T extends RuntimePane>({
   return renderPane(tab, active);
 }
 
-const RuntimePane = memo(_RuntimePane) as typeof _RuntimePane;
+const MemoizedPane = memo(_Pane) as typeof _Pane;
 
-export function RuntimePaneHost<T extends RuntimePane>({
+export function PaneHost<T extends Pane>({
   tabs,
   activeId,
   getPaneKey,
@@ -35,7 +32,7 @@ export function RuntimePaneHost<T extends RuntimePane>({
   renderPane: (tab: T, active: boolean) => ReactNode;
 }) {
   return tabs.map((tab) => (
-    <RuntimePane
+    <MemoizedPane
       key={getPaneKey(tab)}
       active={tab.id === activeId}
       renderPane={renderPane}

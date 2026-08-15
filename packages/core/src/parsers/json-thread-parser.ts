@@ -108,7 +108,6 @@ function _looksNative(data: object): boolean {
     "evaluations",
     "evaluationRubrics",
     "modelName",
-    "runtimeId",
     "originalURL",
   ].some((key) => key in data);
 }

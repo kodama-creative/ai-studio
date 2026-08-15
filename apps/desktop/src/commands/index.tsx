@@ -47,7 +47,7 @@ const CommandContext = createContext<CommandContextValue | null>(null);
 
 /**
  * Holds the renderer command registry. Handlers live in a ref-based map keyed by
- * command type, so components that own the relevant state (tabs, file tree,
+ * command type, so modules that own the relevant state (tabs, Playgrounds,
  * sidebar) register their handlers where that state lives.
  */
 export function CommandProvider({ children }: { children: ReactNode }) {
@@ -65,6 +65,16 @@ export function CommandProvider({ children }: { children: ReactNode }) {
     }
     void handler(command.args);
   }, []);
+
+  // Native menu items and shortcuts enter through the Bun process. Owning the
+  // bridge here keeps every renderer window on the same command path instead
+  // of requiring each product page to remember transport wiring.
+  useEffect(() => {
+    const rpc = electrobun.rpc;
+    if (!rpc) return;
+    rpc.addMessageListener("executeCommand", executeCommand);
+    return () => rpc.removeMessageListener("executeCommand", executeCommand);
+  }, [executeCommand]);
 
   const registerCommandHandlers = useCallback((handlers: CommandHandlers) => {
     const map = handlersRef.current;

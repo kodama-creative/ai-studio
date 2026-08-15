@@ -70,13 +70,15 @@ export type StudioRunReceipt = StudioOperationReceipt;
 
 export type StudioRunInput = {
   readonly fromMessageId: string;
+  /** Stable admission identity used to reconcile Pi/Studio crash windows. */
+  readonly commandId: string;
+  readonly signal?: AbortSignal;
   /** Studio-only Pi model override frozen into this operation binding. */
   readonly modelOverride?: string;
 } & (
-  | { readonly mode?: undefined; readonly commandId?: undefined }
+  | { readonly mode?: undefined }
   | {
       readonly mode: "step" | "continue";
-      readonly commandId: string;
     }
 );
 

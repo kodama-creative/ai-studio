@@ -1,410 +1,173 @@
 import type {
+  CustomModel,
   ModelConfig,
 } from "@llm-space/core";
-import type {
-  RuntimeClient,
-  RuntimeId,
-  RuntimeRouter,
-} from "@llm-space/runtime/runtime";
+import { streamAgent } from "@llm-space/core/server";
+import {
+  getModelProviderGroups,
+  type ModelManager,
+} from "@llm-space/runtime/models";
 
+import type { ModelsRequests } from "../../shared/models-rpc";
 import type { Analytics } from "../analytics";
 
-/** Application interfaces are independent of the renderer RPC contracts. */
-export interface RuntimesApplication {
-  list(): Promise<ReturnType<RuntimeRouter["list"]>>;
-  getDefault(): Promise<RuntimeId>;
-  setDefault(runtimeId: RuntimeId): Promise<void>;
-}
+/** Models keeps an application layer because it owns analytics and use cases. */
+export interface ModelsApplication extends ModelsRequests {}
 
-export interface ModelsApplication {
-  list(id?: RuntimeId): ReturnType<RuntimeClient["availableModels"]>;
-  listBuiltin(id?: RuntimeId): ReturnType<RuntimeClient["builtinProviders"]>;
-  removeProvider(id: RuntimeId | undefined, providerId: string): ReturnType<RuntimeClient["removeProvider"]>;
-  addProvider(id: RuntimeId | undefined, providerId: string): ReturnType<RuntimeClient["addProvider"]>;
-  addCustomProvider(id: RuntimeId | undefined, input: Parameters<RuntimeClient["addCustomProvider"]>[0]): ReturnType<RuntimeClient["addCustomProvider"]>;
-  addProfile(id: RuntimeId | undefined, providerId: string): ReturnType<RuntimeClient["addProviderProfile"]>;
-  updateProfile(id: RuntimeId | undefined, input: Parameters<RuntimeClient["updateProviderProfile"]>[0]): ReturnType<RuntimeClient["updateProviderProfile"]>;
-  removeProfile(id: RuntimeId | undefined, providerId: string, profileId: string): ReturnType<RuntimeClient["removeProviderProfile"]>;
-  updateProvider(id: RuntimeId | undefined, input: Parameters<RuntimeClient["updateProvider"]>[0]): ReturnType<RuntimeClient["updateProvider"]>;
-  setEnabled(id: RuntimeId | undefined, providerId: string, modelId: string, enabled: boolean): ReturnType<RuntimeClient["setModelEnabled"]>;
-  setAllEnabled(id: RuntimeId | undefined, providerId: string, enabled: boolean): ReturnType<RuntimeClient["setAllModelsEnabled"]>;
-  getDefault(id?: RuntimeId): ReturnType<RuntimeClient["getDefaultModel"]>;
-  setDefault(id: RuntimeId | undefined, model: ModelConfig | null): ReturnType<RuntimeClient["setDefaultModel"]>;
-  testConnection(id: RuntimeId | undefined, input: Parameters<RuntimeClient["testModelConnection"]>[0]): ReturnType<RuntimeClient["testModelConnection"]>;
-  removeCustom(id: RuntimeId | undefined, providerId: string, modelId: string): ReturnType<RuntimeClient["removeCustomModel"]>;
-  upsertCustom(id: RuntimeId | undefined, providerId: string, model: Parameters<RuntimeClient["upsertCustomModel"]>[0]["model"], originalId?: string): ReturnType<RuntimeClient["upsertCustomModel"]>;
-  resolveGeneratorEnv(id: RuntimeId | undefined, input: Parameters<RuntimeClient["resolveGeneratorEnv"]>[0]): ReturnType<RuntimeClient["resolveGeneratorEnv"]>;
-}
-
-export interface WorkspaceApplication {
-  list(id: RuntimeId | undefined, path: string): ReturnType<RuntimeClient["fsLs"]>;
-  createDirectory(id: RuntimeId | undefined, path: string): ReturnType<RuntimeClient["fsMkdir"]>;
-  copy(id: RuntimeId | undefined, source: string, destination: string): ReturnType<RuntimeClient["fsCp"]>;
-  move(id: RuntimeId | undefined, source: string, destination: string): ReturnType<RuntimeClient["fsMv"]>;
-  remove(id: RuntimeId | undefined, path: string): ReturnType<RuntimeClient["fsRm"]>;
-  readThread(id: RuntimeId | undefined, path: string): ReturnType<RuntimeClient["fsRead"]>;
-  writeThread(id: RuntimeId | undefined, path: string, thread: Parameters<RuntimeClient["fsWrite"]>[1]): ReturnType<RuntimeClient["fsWrite"]>;
-  resolvePath(id: RuntimeId | undefined, path: string): ReturnType<RuntimeClient["fsRealpath"]>;
-}
-
-export interface PromptFilesApplication {
-  readText(id: RuntimeId, path: string): ReturnType<RuntimeClient["readTextFile"]>;
-  exists(id: RuntimeId, path: string): ReturnType<RuntimeClient["textFileExists"]>;
-}
-
-export interface McpApplication {
-  listServers(id?: RuntimeId): Promise<Awaited<ReturnType<RuntimeClient["mcpListServers"]>>>;
-  addServer(id: RuntimeId | undefined, server: Parameters<RuntimeClient["mcpAddServer"]>[0]): Promise<Awaited<ReturnType<RuntimeClient["mcpAddServer"]>>>;
-  updateServer(id: RuntimeId | undefined, serverId: string, server: Parameters<RuntimeClient["mcpUpdateServer"]>[1]): Promise<Awaited<ReturnType<RuntimeClient["mcpUpdateServer"]>>>;
-  removeServer(id: RuntimeId | undefined, serverId: string): Promise<Awaited<ReturnType<RuntimeClient["mcpRemoveServer"]>>>;
-  disconnectServer(id: RuntimeId | undefined, serverId: string): Promise<Awaited<ReturnType<RuntimeClient["mcpDisconnectServer"]>>>;
-  cancelTest(id: RuntimeId | undefined, serverId: string): Promise<Awaited<ReturnType<RuntimeClient["mcpCancelTest"]>>>;
-  listTools(id: RuntimeId | undefined, serverId: string): Promise<Awaited<ReturnType<RuntimeClient["mcpListTools"]>>>;
-  callTool(id: RuntimeId | undefined, input: Parameters<RuntimeClient["mcpCallTool"]>[0]): Promise<Awaited<ReturnType<RuntimeClient["mcpCallTool"]>>>;
-}
-
-export interface BuiltinToolsApplication {
-  list(id?: RuntimeId): Promise<Awaited<ReturnType<RuntimeClient["builtInListTools"]>>>;
-  call(id: RuntimeId | undefined, input: Parameters<RuntimeClient["builtInCallTool"]>[0]): Promise<Awaited<ReturnType<RuntimeClient["builtInCallTool"]>>>;
-}
-
-export interface SearchApplication {
-  get(id?: RuntimeId): Promise<Awaited<ReturnType<RuntimeClient["getSearchSettings"]>>>;
-  set(id: RuntimeId | undefined, settings: Parameters<RuntimeClient["setSearchSettings"]>[0]): Promise<Awaited<ReturnType<RuntimeClient["setSearchSettings"]>>>;
-}
-
-export interface NetworkApplication {
-  get(id?: RuntimeId): Promise<Awaited<ReturnType<RuntimeClient["getNetworkSettings"]>>>;
-  set(id: RuntimeId | undefined, settings: Parameters<RuntimeClient["setNetworkSettings"]>[0]): Promise<Awaited<ReturnType<RuntimeClient["setNetworkSettings"]>>>;
-  detectSystemProxy(id?: RuntimeId): Promise<Awaited<ReturnType<RuntimeClient["detectSystemProxy"]>>>;
-}
-
-export interface SkillsApplication {
-  getSettings(id?: RuntimeId): Promise<Awaited<ReturnType<RuntimeClient["skillsGetSettings"]>>>;
-  addPath(id: RuntimeId | undefined, path: string): Promise<Awaited<ReturnType<RuntimeClient["skillsAddPath"]>>>;
-  removePath(id: RuntimeId | undefined, path: string): Promise<Awaited<ReturnType<RuntimeClient["skillsRemovePath"]>>>;
-  setHidden(id: RuntimeId | undefined, input: Parameters<RuntimeClient["skillsSetSkillHidden"]>[0]): Promise<Awaited<ReturnType<RuntimeClient["skillsSetSkillHidden"]>>>;
-  setAllHidden(id: RuntimeId | undefined, path: string, hidden: boolean): Promise<Awaited<ReturnType<RuntimeClient["skillsSetAllSkillsHidden"]>>>;
-  listAvailable(id?: RuntimeId): Promise<Awaited<ReturnType<RuntimeClient["skillsListAvailable"]>>>;
-  list(id: RuntimeId | undefined, path: string): Promise<Awaited<ReturnType<RuntimeClient["skillsListSkills"]>>>;
-  read(id: RuntimeId | undefined, path: string): Promise<Awaited<ReturnType<RuntimeClient["skillsReadSkill"]>>>;
-}
-
-
-/** Runtime selection is an application concern shared by capability modules. */
-abstract class RuntimeApplication {
-  constructor(protected readonly _router: RuntimeRouter) {}
-  protected _runtime(
-    runtimeId: RuntimeId | undefined,
-    capability: Parameters<RuntimeRouter["require"]>[1]
-  ): RuntimeClient {
-    return this._router.require(runtimeId, capability);
-  }
-}
-
-export class RuntimesApplicationImpl implements RuntimesApplication {
-  constructor(private readonly _router: RuntimeRouter) {}
-  list() {
-    return Promise.resolve(this._router.list());
-  }
-  getDefault() {
-    return Promise.resolve(this._router.getDefaultRuntimeId());
-  }
-  setDefault(runtimeId: RuntimeId) {
-    this._router.setDefaultRuntime(runtimeId);
-    return Promise.resolve();
-  }
-}
-
-export class ModelsApplicationImpl
-  extends RuntimeApplication
-  implements ModelsApplication
-{
+/** Owns model configuration use cases and their product analytics. */
+export class ModelsApplicationImpl implements ModelsApplication {
   constructor(
-    router: RuntimeRouter,
+    private readonly _models: ModelManager,
     private readonly _analytics: Analytics
-  ) {
-    super(router);
+  ) {}
+
+  list() {
+    return getModelProviderGroups(this._models);
   }
-  list(id?: RuntimeId) {
-    return this._runtime(id, "models").availableModels();
+
+  listBuiltin() {
+    return this._models.getBuiltinProviders();
   }
-  listBuiltin(id?: RuntimeId) {
-    return this._runtime(id, "models").builtinProviders();
+
+  async removeProvider(providerId: string) {
+    this._models.removeProvider(providerId);
+    return this.list();
   }
-  removeProvider(id: RuntimeId | undefined, providerId: string) {
-    return this._runtime(id, "models").removeProvider(providerId);
-  }
-  async addProvider(id: RuntimeId | undefined, providerId: string) {
-    const groups = await this._runtime(id, "models").addProvider(providerId);
+
+  async addProvider(providerId: string) {
+    this._models.addBuiltInProvider({ id: providerId });
+    const groups = await this.list();
     this._analytics.capture("provider_added", { providerId, kind: "builtin" });
     return groups;
   }
+
   async addCustomProvider(
-    id: RuntimeId | undefined,
-    input: Parameters<RuntimeClient["addCustomProvider"]>[0]
+    input: Parameters<ModelsApplication["addCustomProvider"]>[0]
   ) {
-    const groups = await this._runtime(id, "models").addCustomProvider(input);
-    // Provider identity is useful for product metrics; names and URLs are never captured.
+    this._models.addCustomProvider(input);
+    const groups = await this.list();
     this._analytics.capture("provider_added", {
       providerId: input.id,
       kind: "custom",
     });
     return groups;
   }
-  addProfile(id: RuntimeId | undefined, providerId: string) {
-    return this._runtime(id, "models").addProviderProfile(providerId);
+
+  async addProfile(providerId: string) {
+    this._models.addProfile(providerId);
+    return this.list();
   }
-  updateProfile(
-    id: RuntimeId | undefined,
-    input: Parameters<RuntimeClient["updateProviderProfile"]>[0]
-  ) {
-    return this._runtime(id, "models").updateProviderProfile(input);
+
+  async updateProfile(input: Parameters<ModelsRequests["updateProfile"]>[0]) {
+    const { providerId, profileId, ...fields } = input;
+    this._models.updateProfile(providerId, profileId, fields);
+    return this.list();
   }
-  removeProfile(
-    id: RuntimeId | undefined,
-    providerId: string,
-    profileId: string
+
+  async removeProfile(providerId: string, profileId: string) {
+    this._models.removeProfile(providerId, profileId);
+    return this.list();
+  }
+
+  async updateProvider(
+    input: Parameters<ModelsApplication["updateProvider"]>[0]
   ) {
-    return this._runtime(id, "models").removeProviderProfile({
-      providerId,
-      profileId,
+    const { providerId, ...fields } = input;
+    this._models.updateProvider(providerId, fields);
+    return this.list();
+  }
+
+  async setEnabled(providerId: string, modelId: string, enabled: boolean) {
+    this._models.setModelEnabled(providerId, modelId, enabled);
+    return this.list();
+  }
+
+  async setAllEnabled(providerId: string, enabled: boolean) {
+    this._models.setAllModelsEnabled(providerId, enabled);
+    return this.list();
+  }
+
+  getDefault() {
+    return Promise.resolve(this._models.getDefaultModel());
+  }
+
+  setDefault(model: ModelConfig | null) {
+    this._models.setDefaultModel(model);
+    return this.getDefault();
+  }
+
+  async testConnection(
+    input: Parameters<ModelsApplication["testConnection"]>[0]
+  ) {
+    const models = input.candidate
+      ? this._models.buildModelsWithCandidate(input.providerId, input.candidate)
+      : await this._models.getAvailableModels();
+    const targetId = input.candidate?.id ?? input.modelId;
+    const connection = await this._models.resolveConnection({
+      providerId: input.providerId,
+      profileId: input.profileId,
     });
+    for await (const event of streamAgent(
+      {
+        model: { provider: input.providerId, id: targetId },
+        context: {
+          systemPrompt: "You are a connection tester.",
+          messages: [
+            {
+              role: "user",
+              content: [{ type: "text", text: 'Reply with "ok".' }],
+              timestamp: Date.now(),
+            },
+          ],
+          tools: [],
+          responseApiNativeTools: [],
+        },
+      },
+      {
+        models,
+        signal: new AbortController().signal,
+        getApiKey: () => connection.apiKey,
+        getBaseUrl: () => connection.baseUrl,
+        getHeaders: () => connection.headers,
+      }
+    )) {
+      if (event.type !== "agent_end") continue;
+      for (const message of event.messages) {
+        if (message.role === "assistant" && message.errorMessage) {
+          throw new Error(message.errorMessage);
+        }
+      }
+    }
   }
-  updateProvider(
-    id: RuntimeId | undefined,
-    input: Parameters<RuntimeClient["updateProvider"]>[0]
-  ) {
-    return this._runtime(id, "models").updateProvider(input);
+
+  async removeCustom(providerId: string, modelId: string) {
+    this._models.removeCustomModel(providerId, modelId);
+    return this.list();
   }
-  setEnabled(
-    id: RuntimeId | undefined,
+
+  async upsertCustom(
     providerId: string,
-    modelId: string,
-    enabled: boolean
-  ) {
-    return this._runtime(id, "models").setModelEnabled({
-      providerId,
-      modelId,
-      enabled,
-    });
-  }
-  setAllEnabled(
-    id: RuntimeId | undefined,
-    providerId: string,
-    enabled: boolean
-  ) {
-    return this._runtime(id, "models").setAllModelsEnabled({
-      providerId,
-      enabled,
-    });
-  }
-  getDefault(id?: RuntimeId) {
-    return this._runtime(id, "models").getDefaultModel();
-  }
-  setDefault(
-    id: RuntimeId | undefined,
-    model: ModelConfig | null
-  ) {
-    return this._runtime(id, "models").setDefaultModel(model);
-  }
-  testConnection(
-    id: RuntimeId | undefined,
-    input: Parameters<RuntimeClient["testModelConnection"]>[0]
-  ) {
-    return this._runtime(id, "models").testModelConnection(input);
-  }
-  removeCustom(id: RuntimeId | undefined, providerId: string, modelId: string) {
-    return this._runtime(id, "models").removeCustomModel({
-      providerId,
-      modelId,
-    });
-  }
-  upsertCustom(
-    id: RuntimeId | undefined,
-    providerId: string,
-    model: Parameters<RuntimeClient["upsertCustomModel"]>[0]["model"],
+    model: CustomModel,
     originalId?: string
   ) {
-    return this._runtime(id, "models").upsertCustomModel({
-      providerId,
-      model,
-      originalId,
-    });
+    this._models.upsertCustomModel(providerId, model, originalId);
+    return this.list();
   }
-  resolveGeneratorEnv(
-    id: RuntimeId | undefined,
-    input: Parameters<RuntimeClient["resolveGeneratorEnv"]>[0]
-  ) {
-    return this._runtime(id, "models").resolveGeneratorEnv(input);
-  }
-}
 
-export class WorkspaceApplicationImpl
-  extends RuntimeApplication
-  implements WorkspaceApplication
-{
-  list(id: RuntimeId | undefined, path: string) {
-    return this._runtime(id, "filesystem").fsLs(path);
-  }
-  createDirectory(id: RuntimeId | undefined, path: string) {
-    return this._runtime(id, "filesystem").fsMkdir(path);
-  }
-  copy(id: RuntimeId | undefined, source: string, destination: string) {
-    return this._runtime(id, "filesystem").fsCp(source, destination);
-  }
-  move(id: RuntimeId | undefined, source: string, destination: string) {
-    return this._runtime(id, "filesystem").fsMv(source, destination);
-  }
-  remove(id: RuntimeId | undefined, path: string) {
-    return this._runtime(id, "filesystem").fsRm(path);
-  }
-  readThread(id: RuntimeId | undefined, path: string) {
-    return this._runtime(id, "filesystem").fsRead(path);
-  }
-  writeThread(
-    id: RuntimeId | undefined,
-    path: string,
-    thread: Parameters<RuntimeClient["fsWrite"]>[1]
+  async resolveGeneratorEnv(
+    input: Parameters<ModelsApplication["resolveGeneratorEnv"]>[0]
   ) {
-    return this._runtime(id, "filesystem").fsWrite(path, thread);
-  }
-  resolvePath(id: RuntimeId | undefined, path: string) {
-    return this._runtime(id, "filesystem").fsRealpath(path);
-  }
-}
-
-export class PromptFilesApplicationImpl
-  extends RuntimeApplication
-  implements PromptFilesApplication
-{
-  readText(id: RuntimeId, path: string) {
-    return this._runtime(id, "filesystem").readTextFile(path);
-  }
-  exists(id: RuntimeId, path: string) {
-    return this._runtime(id, "filesystem").textFileExists(path);
-  }
-}
-
-export class McpApplicationImpl
-  extends RuntimeApplication
-  implements McpApplication
-{
-  async listServers(id?: RuntimeId) {
-    return this._runtime(id, "mcp").mcpListServers();
-  }
-  async addServer(
-    id: RuntimeId | undefined,
-    server: Parameters<RuntimeClient["mcpAddServer"]>[0]
-  ) {
-    return this._runtime(id, "mcp").mcpAddServer(server);
-  }
-  updateServer(
-    id: RuntimeId | undefined,
-    serverId: string,
-    server: Parameters<RuntimeClient["mcpUpdateServer"]>[1]
-  ) {
-    return this._runtime(id, "mcp").mcpUpdateServer(serverId, server);
-  }
-  removeServer(id: RuntimeId | undefined, serverId: string) {
-    return this._runtime(id, "mcp").mcpRemoveServer(serverId);
-  }
-  disconnectServer(id: RuntimeId | undefined, serverId: string) {
-    return this._runtime(id, "mcp").mcpDisconnectServer(serverId);
-  }
-  cancelTest(id: RuntimeId | undefined, serverId: string) {
-    return this._runtime(id, "mcp").mcpCancelTest(serverId);
-  }
-  listTools(id: RuntimeId | undefined, serverId: string) {
-    return this._runtime(id, "mcp").mcpListTools(serverId);
-  }
-  callTool(
-    id: RuntimeId | undefined,
-    input: Parameters<RuntimeClient["mcpCallTool"]>[0]
-  ) {
-    return this._runtime(id, "mcp").mcpCallTool(input);
-  }
-}
-
-export class BuiltinToolsApplicationImpl
-  extends RuntimeApplication
-  implements BuiltinToolsApplication
-{
-  async list(id?: RuntimeId) {
-    return this._runtime(id, "builtinTools").builtInListTools();
-  }
-  call(
-    id: RuntimeId | undefined,
-    input: Parameters<RuntimeClient["builtInCallTool"]>[0]
-  ) {
-    return this._runtime(id, "builtinTools").builtInCallTool(input);
-  }
-}
-
-export class SearchApplicationImpl
-  extends RuntimeApplication
-  implements SearchApplication
-{
-  async get(id?: RuntimeId) {
-    return this._runtime(id, "search").getSearchSettings();
-  }
-  async set(
-    id: RuntimeId | undefined,
-    settings: Parameters<RuntimeClient["setSearchSettings"]>[0]
-  ) {
-    return this._runtime(id, "search").setSearchSettings(settings);
-  }
-}
-export class NetworkApplicationImpl
-  extends RuntimeApplication
-  implements NetworkApplication
-{
-  async get(id?: RuntimeId) {
-    return this._runtime(id, "network").getNetworkSettings();
-  }
-  async set(
-    id: RuntimeId | undefined,
-    settings: Parameters<RuntimeClient["setNetworkSettings"]>[0]
-  ) {
-    return this._runtime(id, "network").setNetworkSettings(settings);
-  }
-  async detectSystemProxy(id?: RuntimeId) {
-    return this._runtime(id, "network").detectSystemProxy();
-  }
-}
-
-export class SkillsApplicationImpl
-  extends RuntimeApplication
-  implements SkillsApplication
-{
-  async getSettings(id?: RuntimeId) {
-    return this._runtime(id, "skills").skillsGetSettings();
-  }
-  async addPath(id: RuntimeId | undefined, path: string) {
-    return this._runtime(id, "skills").skillsAddPath(path);
-  }
-  async removePath(id: RuntimeId | undefined, path: string) {
-    return this._runtime(id, "skills").skillsRemovePath(path);
-  }
-  async setHidden(
-    id: RuntimeId | undefined,
-    input: Parameters<RuntimeClient["skillsSetSkillHidden"]>[0]
-  ) {
-    return this._runtime(id, "skills").skillsSetSkillHidden(input);
-  }
-  async setAllHidden(id: RuntimeId | undefined, path: string, hidden: boolean) {
-    return this._runtime(id, "skills").skillsSetAllSkillsHidden({
-      path,
-      hidden,
-    });
-  }
-  async listAvailable(id?: RuntimeId) {
-    return this._runtime(id, "skills").skillsListAvailable();
-  }
-  async list(id: RuntimeId | undefined, path: string) {
-    return this._runtime(id, "skills").skillsListSkills(path);
-  }
-  async read(id: RuntimeId | undefined, path: string) {
-    return this._runtime(id, "skills").skillsReadSkill(path);
+    const modelApiKey =
+      (
+        await this._models.resolveConnection({
+          providerId: input.providerId,
+          profileId: input.profileId,
+        })
+      ).apiKey ?? "";
+    const envValues: Record<string, string> = {};
+    for (const name of input.envNames) {
+      envValues[name] = process.env[name] ?? "";
+    }
+    return { modelApiKey, envValues };
   }
 }

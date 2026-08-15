@@ -37,7 +37,6 @@ import {
   setAllSkillsHidden,
   setSkillHidden,
 } from "@/client/skills";
-import type { RuntimeId } from "@/shared/runtime";
 
 import { SettingsPage } from "./settings-page";
 
@@ -72,7 +71,7 @@ async function openSkillFolder(skill: SkillInfo) {
   }
 }
 
-export function SkillsPage({ runtimeId }: { runtimeId: RuntimeId }) {
+export function SkillsPage() {
   const [settings, setSettings] = useState<SkillsSettings>({
     discoveryPaths: [],
   });
@@ -82,7 +81,7 @@ export function SkillsPage({ runtimeId }: { runtimeId: RuntimeId }) {
 
   const loadSources = useCallback(() => {
     let cancelled = false;
-    void getSkillsSettings(runtimeId)
+    void getSkillsSettings()
       .then((loadedSettings) => {
         if (!cancelled) {
           setSettings(loadedSettings);
@@ -94,7 +93,7 @@ export function SkillsPage({ runtimeId }: { runtimeId: RuntimeId }) {
     return () => {
       cancelled = true;
     };
-  }, [runtimeId]);
+  }, []);
 
   useEffect(() => loadSources(), [loadSources]);
 
@@ -121,7 +120,7 @@ export function SkillsPage({ runtimeId }: { runtimeId: RuntimeId }) {
       if (!path) {
         return;
       }
-      const next = await addSkillsPath(path, runtimeId);
+      const next = await addSkillsPath(path);
       setSettings(next);
       setSelectedSourceId(`folder:${path}`);
     } catch (error) {
@@ -130,12 +129,12 @@ export function SkillsPage({ runtimeId }: { runtimeId: RuntimeId }) {
           error instanceof Error ? error.message : "Please try again.",
       });
     }
-  }, [runtimeId]);
+  }, []);
 
   const handleRemove = useCallback(
     async (path: string) => {
       try {
-        setSettings(await removeSkillsPath(path, runtimeId));
+        setSettings(await removeSkillsPath(path));
       } catch (error) {
         toast.error("Failed to remove folder", {
           description:
@@ -143,13 +142,13 @@ export function SkillsPage({ runtimeId }: { runtimeId: RuntimeId }) {
         });
       }
     },
-    [runtimeId]
+    []
   );
 
   const handleSetAll = useCallback(
     async (path: string, hidden: boolean) => {
       try {
-        setSettings(await setAllSkillsHidden(path, hidden, runtimeId));
+        setSettings(await setAllSkillsHidden(path, hidden));
         // Refetch the skills pane so its switches reflect the bulk change.
         setReloadToken((token) => token + 1);
       } catch (error) {
@@ -162,7 +161,7 @@ export function SkillsPage({ runtimeId }: { runtimeId: RuntimeId }) {
         );
       }
     },
-    [runtimeId]
+    []
   );
 
   return (
@@ -185,9 +184,8 @@ export function SkillsPage({ runtimeId }: { runtimeId: RuntimeId }) {
         onDisableAll={(path) => void handleSetAll(path, true)}
       />
       <PathSkills
-        key={`${runtimeId}:${selectedSourceId}:${reloadToken}`}
+        key={`${selectedSourceId}:${reloadToken}`}
         path={selectedPath}
-        runtimeId={runtimeId}
       />
     </SettingsPage>
   );
@@ -348,13 +346,7 @@ function PathListItem({
   );
 }
 
-function PathSkills({
-  path,
-  runtimeId,
-}: {
-  path: string | null;
-  runtimeId: RuntimeId;
-}) {
+function PathSkills({ path }: { path: string | null }) {
   const [skills, setSkills] = useState<SkillInfo[] | null>(null);
   const [listRef] = useAutoAnimation<HTMLDivElement>();
 
@@ -365,7 +357,7 @@ function PathSkills({
     }
     let cancelled = false;
     setSkills(null);
-    void listSkills(path, runtimeId)
+    void listSkills(path)
       .then((loaded) => {
         if (!cancelled) {
           setSkills(loaded);
@@ -379,7 +371,7 @@ function PathSkills({
     return () => {
       cancelled = true;
     };
-  }, [path, runtimeId]);
+  }, [path]);
 
   const handleToggle = useCallback(
     async (name: string, enabled: boolean) => {
@@ -392,7 +384,7 @@ function PathSkills({
       );
       try {
         if (path) {
-          await setSkillHidden(path, name, !enabled, runtimeId);
+          await setSkillHidden(path, name, !enabled);
         }
       } catch (error) {
         // Roll back on failure.
@@ -409,7 +401,7 @@ function PathSkills({
         });
       }
     },
-    [path, runtimeId]
+    [path]
   );
 
   const content = useMemo(() => {

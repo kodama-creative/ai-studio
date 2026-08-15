@@ -233,7 +233,7 @@ test("evaluations target Pi operation ids and events use operation vocabulary", 
   }
 });
 
-test("shared Studio SQLite writes Pi/runtime-binding/Studio tables and no Engine tables", async () => {
+test("shared Studio SQLite writes Pi/runtime-binding/Studio tables and no legacy engine tables", async () => {
   const fixture = await _fixture("sqlite");
   try {
     const created = await fixture.app.createThread({
@@ -274,8 +274,57 @@ test("shared Studio SQLite writes Pi/runtime-binding/Studio tables and no Engine
   }
 });
 
+test("reconciles an admitted Pi operation when Studio metadata commit failed", async () => {
+  const fixture = await _fixture("memory", { failAdmissionCommit: true });
+  try {
+    const created = await fixture.app.createThread({
+      agent: AGENT,
+      conversation: {
+        messages: [
+          {
+            id: "user-crash",
+            role: "user",
+            content: [{ type: "text", text: "recover" }],
+          },
+        ],
+        state: { durable: true },
+      },
+    });
+    const input = {
+      fromMessageId: "user-crash",
+      commandId: "admission-crash",
+      mode: "step" as const,
+    };
+
+    expect(fixture.app.run(created.id, input)).rejects.toThrow(
+      "simulated Studio admission crash"
+    );
+    const receipt = await fixture.app.run(created.id, input);
+
+    expect(await fixture.app.listRunHistory(created.id)).toMatchObject([
+      {
+        reference: { operationId: receipt.operationId, relation: "executed" },
+        operation: { operationId: receipt.operationId, status: "completed" },
+      },
+    ]);
+    expect(await fixture.app.loadThread(created.id)).toMatchObject({
+      document: {
+        conversation: {
+          state: { durable: true },
+          messages: [{ role: "user" }, { role: "assistant" }],
+        },
+      },
+    });
+  } finally {
+    await fixture.close();
+  }
+});
+
 /** Creates Studio, Pi repository, and binding adapters over one test database. */
-async function _fixture(storageKind: "memory" | "sqlite") {
+async function _fixture(
+  storageKind: "memory" | "sqlite",
+  options: { readonly failAdmissionCommit?: boolean } = {}
+) {
   const root = await mkdtemp(join(tmpdir(), "llm-space-project-pi-"));
   const path = join(root, "studio.sqlite");
   const repository = new BunSqliteSessionRepository({ path });
@@ -292,10 +341,29 @@ async function _fixture(storageKind: "memory" | "sqlite") {
     bindings,
     assistantExecutor,
   });
-  const store: StudioStore =
+  const innerStore: StudioStore =
     storageKind === "memory"
       ? new InMemoryStudioStore()
       : createSqliteStudioStore({ path });
+  let failAdmissionCommit = options.failAdmissionCommit ?? false;
+  const store: StudioStore = failAdmissionCommit
+    ? {
+        transaction(fn) {
+          return innerStore.transaction((tx) => {
+            const faulting = Object.create(tx) as typeof tx;
+            faulting.saveExperiment = (experiment) => {
+              if (failAdmissionCommit && experiment.draft === undefined) {
+                failAdmissionCommit = false;
+                throw new Error("simulated Studio admission crash");
+              }
+              tx.saveExperiment(experiment);
+            };
+            return fn(faulting);
+          });
+        },
+        close: () => innerStore.close(),
+      }
+    : innerStore;
   const app = createStudioApplication({
     runtime,
     store,

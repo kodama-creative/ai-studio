@@ -45,7 +45,6 @@ export function ToolListView({
   readonly?: boolean;
 }) {
   const tools = useThreadStore((s) => s.thread.context?.tools);
-  const runtimeId = useThreadStore((s) => s.runtimeId);
   const { addTool, removeTool, updateTool } = useThreadStoreActions();
   const { presentational } = useHostServices();
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -199,7 +198,6 @@ export function ToolListView({
           initialServerId={initialMcpServerId}
           initialToolName={initialMcpToolName}
           existingToolNames={existingToolNames}
-          runtimeId={runtimeId}
           onAdd={addTool}
           onRemove={removeTool}
         />
@@ -214,7 +212,6 @@ export function ToolListView({
           initialToolName={initialBuiltInToolName}
           existingToolNames={existingToolNames}
           existingTools={existingBuiltInTools}
-          runtimeId={runtimeId}
           onAdd={addTool}
           onUpdate={updateTool}
           onRemove={removeTool}

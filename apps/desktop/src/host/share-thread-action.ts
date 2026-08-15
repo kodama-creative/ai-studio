@@ -1,24 +1,16 @@
 import type { Command } from "@/shared/commands";
-import type { RuntimeId } from "@/shared/runtime";
 import { buildShareThreadCommand } from "@/shared/share";
 
 interface HostShareThreadInput {
   path: string;
-  runtimeId: RuntimeId;
-}
-
-function _isRuntimeId(value: unknown): value is RuntimeId {
-  return value === "local";
 }
 
 function _isHostShareThreadInput(
   input: unknown
 ): input is HostShareThreadInput {
   if (typeof input !== "object" || input === null) return false;
-  const candidate = input as { path?: unknown; runtimeId?: unknown };
-  return (
-    typeof candidate.path === "string" && _isRuntimeId(candidate.runtimeId)
-  );
+  const candidate = input as { path?: unknown };
+  return typeof candidate.path === "string";
 }
 
 /** Adapt the shared UI HostAction into the desktop command boundary. */
@@ -29,6 +21,6 @@ export function createDesktopShareThreadAction(
     if (!_isHostShareThreadInput(input)) {
       throw new Error("Invalid Share thread host action");
     }
-    executeCommand(buildShareThreadCommand(input.path, input.runtimeId));
+    executeCommand(buildShareThreadCommand(input.path));
   };
 }

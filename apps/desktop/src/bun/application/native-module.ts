@@ -1,8 +1,4 @@
-import { mkdirSync } from "node:fs";
-import path from "node:path";
-
 import type { SkillsManager } from "@llm-space/runtime/skills";
-import { writeClipboardFilePaths } from "clip-filepaths";
 import { Utils, type BrowserWindow } from "electrobun/bun";
 import { ContainerModule, type ResolutionContext } from "inversify";
 
@@ -96,7 +92,6 @@ class NativeContribution implements CommandContributionApi, RpcContributionApi {
     private readonly _appDirectories: AppDirectoriesApplicationApi,
     private readonly _windowApplication: WindowApplication,
     private readonly _windowStates: WindowStateManager,
-    private readonly _homePath: string,
     private readonly _getWindow: () => BrowserWindow,
     private readonly _commandSink: CommandSink
   ) {}
@@ -116,19 +111,17 @@ class NativeContribution implements CommandContributionApi, RpcContributionApi {
 
   /** Register native import, window, link, and filesystem commands. */
   registerCommands(commands: CommandRegistry): void {
-    commands.registerCommand("workspace.importFiles", {
-      execute: (command) => {
+    commands.registerCommand("playground.importFiles", {
+      execute: () => {
         void importFilesWithNativePicker(
-          (next) => this._commandSink.sendToWebview(next),
-          command.args.parent
+          (next) => this._commandSink.sendToWebview(next)
         );
       },
     });
-    commands.registerCommand("workspace.importFromClipboard", {
-      execute: (command) =>
+    commands.registerCommand("playground.importFromClipboard", {
+      execute: () =>
         importTextFromClipboard(
-          (next) => this._commandSink.sendToWebview(next),
-          command.args.parent
+          (next) => this._commandSink.sendToWebview(next)
         ),
     });
     commands.registerCommand("window.zoomIn", {
@@ -159,22 +152,6 @@ class NativeContribution implements CommandContributionApi, RpcContributionApi {
     });
     commands.registerCommand("shell.reportBugs", {
       execute: () => Utils.openExternal(ISSUES_URL),
-    });
-    commands.registerCommand("workspace.copyFile", {
-      execute: (command) => {
-        try {
-          writeClipboardFilePaths([command.args.path]);
-        } catch (error) {
-          console.error("Failed to copy to clipboard:", error);
-        }
-      },
-    });
-    commands.registerCommand("shell.openWorkspaceFolder", {
-      execute: () => {
-        const workspacePath = path.join(this._homePath, "workspace");
-        mkdirSync(workspacePath, { recursive: true });
-        Utils.openPath(workspacePath);
-      },
     });
   }
 
@@ -220,7 +197,6 @@ export function nativeContributionsModule(
             scope.get(NATIVE_APPLICATION_TOKENS.appDirectories),
             scope.get(NATIVE_APPLICATION_TOKENS.window),
             scope.get(PROCESS_TOKENS.windowStates),
-            scope.get(PROCESS_TOKENS.homePath),
             input.getWindow,
             input.commandSink
           )

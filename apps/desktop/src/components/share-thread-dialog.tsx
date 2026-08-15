@@ -35,7 +35,6 @@ import {
 import { readShareThread, shareThread } from "@/client/share";
 import { useCommands } from "@/commands";
 import { useGithubAuth } from "@/components/github-auth-provider";
-import type { RuntimeId } from "@/shared/runtime";
 
 import {
   prepareShareThreadDialogCommit,
@@ -58,12 +57,10 @@ const URL_TAIL_MASK =
 export function ShareThreadDialog({
   open,
   path,
-  runtimeId,
   onOpenChange,
 }: {
   open: boolean;
   path: string;
-  runtimeId: RuntimeId;
   onOpenChange: (open: boolean) => void;
 }) {
   const { state: authState, signIn } = useGithubAuth();
@@ -87,8 +84,8 @@ export function ShareThreadDialog({
   // Preparing a target is deliberately pure: React may discard this render.
   // The layout phase below is the first point at which the target is committed.
   const targetCommit = useMemo(
-    () => prepareShareThreadDialogCommit(open, { runtimeId, path }),
-    [open, path, runtimeId]
+    () => prepareShareThreadDialogCommit(open, { path }),
+    [open, path]
   );
 
   // Reset every time the dialog (re)opens, and prefill the title from the thread

@@ -1,7 +1,8 @@
 import type { ModelProviderGroup } from "@llm-space/core";
 
-import type { ModelManager } from "../models";
+import type { ModelManager } from "./model-manager";
 
+/** Project the configured Pi model registry into the renderer-facing model view. */
 export async function getModelProviderGroups(
   modelManager: ModelManager
 ): Promise<ModelProviderGroup[]> {

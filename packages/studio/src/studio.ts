@@ -1,11 +1,10 @@
 import { join } from "node:path";
 
-import type { Models, Tool as PiTool } from "@earendil-works/pi-ai";
+import type { Models } from "@earendil-works/pi-ai";
 import { loadAgent } from "@llm-space/agent/loader";
 import {
   closeRuntimeServices,
-  createLoadSkillToolDefinition,
-  createRuntimeToolContext,
+  createAgentRuntimeHost,
   LOAD_SKILL_TOOL_IMPLEMENTATION_ID,
   mountAgentFrameworkTools,
   resolveAgentGeneration,
@@ -13,7 +12,6 @@ import {
   resolveAgentPreview,
   type RuntimeServices,
 } from "@llm-space/agent/runtime";
-import type { SkillHandle } from "@llm-space/agent/skills";
 import {
   BunSqliteRuntimeBindingStore,
   BunSqliteSessionRepository,
@@ -22,7 +20,6 @@ import {
   runtimeTool,
   type PiProviderConnection,
   type PiProviderConnectionInput,
-  type RuntimeBinding,
   type RuntimeTool,
 } from "@llm-space/pi-runtime";
 
@@ -88,31 +85,25 @@ export async function createStudio(
     const loaded = await _loadExecutable(options.projectRoot, input);
     return loaded;
   };
-  const resolveTools = async (
-    binding: RuntimeBinding
-  ): Promise<ReadonlyMap<string, RuntimeTool>> =>
-    _resolveRuntimeTools(binding, async () => (await resolveCurrentAgent()).tools);
+  const host = createAgentRuntimeHost({
+    services: options.runtimeServices,
+    loadCurrentTools: async () => (await resolveCurrentAgent()).tools,
+    wrapFrameworkTool: ({ definition, implementationId }) =>
+      runtimeTool(definition, { implementationId }),
+  });
   const assistantExecutor = new PiAssistantExecutor({
     models: options.models,
     ...(options.resolveConnection === undefined
       ? {}
       : { resolveConnection: options.resolveConnection }),
-    resolveTools: _modelTools,
+    resolveTools: (binding) => host.modelTools(binding),
   });
   const runtime = new DurablePiRuntime({
     repository,
     bindings,
     assistantExecutor,
-    resolveTools,
-    createToolContext: ({ binding, execution, signal }) =>
-      createRuntimeToolContext(
-        _withMountedSkills(options.runtimeServices, binding.skills ?? []),
-        {
-        agentId: first.snapshot.agentSpecId,
-        execution,
-        signal,
-        }
-      ),
+    resolveTools: (binding) => host.resolveTools(binding),
+    createToolContext: (input) => host.createToolContext(input),
   });
   let studioStore: ReturnType<typeof createSqliteStudioStore>;
   try {
@@ -250,6 +241,9 @@ class StudioImpl implements Studio {
   cancelRun(threadId: string, operationId: string) {
     return this._application.cancelRun(threadId, operationId);
   }
+  cancelActiveRun(threadId: string) {
+    return this._application.cancelActiveRun(threadId);
+  }
   inspectRun(threadId: string, operationId: string) {
     return this._application.inspectRun(threadId, operationId);
   }
@@ -338,66 +332,4 @@ async function _loadExecutable(
     skills: resolved.skills,
     tools,
   };
-}
-
-function _withMountedSkills(
-  services: RuntimeServices,
-  mountedSkills: readonly SkillHandle[]
-): RuntimeServices {
-  const mounted = new Map(mountedSkills.map((skill) => [skill.name, skill]));
-  return {
-    ...services,
-    skills: {
-      resolve(input) {
-        const skill = mounted.get(input.identifier);
-        if (skill !== undefined) return skill;
-        if (services.skills !== undefined) return services.skills.resolve(input);
-        throw new Error(
-          `Agent "${input.agentId}" does not mount Skill "${input.identifier}".`
-        );
-      },
-    },
-  };
-}
-
-/** Restores framework tools from the binding when current source no longer declares them. */
-async function _resolveRuntimeTools(
-  binding: RuntimeBinding,
-  loadCurrent: () => Promise<ReadonlyMap<string, RuntimeTool>>
-): Promise<ReadonlyMap<string, RuntimeTool>> {
-  const tools = new Map<string, RuntimeTool>();
-  for (const frozen of binding.tools) {
-    if (frozen.implementationId === LOAD_SKILL_TOOL_IMPLEMENTATION_ID) {
-      tools.set(
-        frozen.name,
-        runtimeTool(createLoadSkillToolDefinition(binding.skills ?? []), {
-          implementationId: LOAD_SKILL_TOOL_IMPLEMENTATION_ID,
-        })
-      );
-    }
-  }
-  try {
-    for (const [name, tool] of await loadCurrent()) {
-      if (!tools.has(name)) tools.set(name, tool);
-    }
-  } catch (error) {
-    if (tools.size === 0) throw error;
-  }
-  return tools;
-}
-
-/** Projects immutable binding schemas to Pi's model-visible Tool contract. */
-function _modelTools(binding: RuntimeBinding): PiTool[] {
-  return binding.tools.map((tool) => {
-    if (tool.description === undefined || tool.inputSchema === undefined) {
-      throw new Error(
-        `Frozen tool "${tool.name}" is missing its model-visible schema.`
-      );
-    }
-    return {
-      name: tool.name,
-      description: tool.description,
-      parameters: tool.inputSchema as never,
-    };
-  });
 }

@@ -16,7 +16,6 @@ import {
   getNetworkSettings,
   setNetworkSettings,
 } from "@/client/network";
-import type { RuntimeId } from "@/shared/runtime";
 
 import { SettingsPage } from "./settings-page";
 import { SettingsToggleRow } from "./settings-toggle-row";
@@ -104,7 +103,7 @@ function DetectedProxy({
   );
 }
 
-export function NetworkPage({ runtimeId }: { runtimeId: RuntimeId }) {
+export function NetworkPage() {
   const [settings, setSettings] = useState<NetworkSettings>(
     DEFAULT_NETWORK_SETTINGS
   );
@@ -112,7 +111,7 @@ export function NetworkPage({ runtimeId }: { runtimeId: RuntimeId }) {
 
   useEffect(() => {
     let cancelled = false;
-    void getNetworkSettings(runtimeId)
+    void getNetworkSettings()
       .then((loaded) => {
         if (!cancelled) {
           setSettings(loaded);
@@ -121,7 +120,7 @@ export function NetworkPage({ runtimeId }: { runtimeId: RuntimeId }) {
       .catch(() => {
         // Keep defaults; a load failure is non-fatal for the form.
       });
-    void detectSystemProxy(runtimeId)
+    void detectSystemProxy()
       .then((result) => {
         if (!cancelled) {
           setDetection(result);
@@ -133,13 +132,13 @@ export function NetworkPage({ runtimeId }: { runtimeId: RuntimeId }) {
     return () => {
       cancelled = true;
     };
-  }, [runtimeId]);
+  }, []);
 
   const persist = useCallback(
     async (next: NetworkSettings) => {
       setSettings(next);
       try {
-        const saved = await setNetworkSettings(next, runtimeId);
+        const saved = await setNetworkSettings(next);
         setSettings(saved);
       } catch (error) {
         toast.error("Failed to save network settings", {
@@ -148,7 +147,7 @@ export function NetworkPage({ runtimeId }: { runtimeId: RuntimeId }) {
         });
       }
     },
-    [runtimeId]
+    []
   );
 
   return (

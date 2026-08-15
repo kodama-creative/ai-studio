@@ -1,4 +1,3 @@
-import type { LocalFileSystem } from "@llm-space/core/server";
 import type {
   GistThreadReader,
   GistThreadWriter,
@@ -6,7 +5,6 @@ import type {
 import type { McpManager } from "@llm-space/runtime/mcp";
 import type { ModelManager } from "@llm-space/runtime/models";
 import type { NetworkSettingsManager } from "@llm-space/runtime/network";
-import type { RuntimeRouter } from "@llm-space/runtime/runtime";
 import type { SearchSettingsManager } from "@llm-space/runtime/search";
 import type { SkillsManager } from "@llm-space/runtime/skills";
 import type { Studio } from "@llm-space/studio/server";
@@ -48,7 +46,6 @@ export const PROCESS_TOKENS = {
   gistWriter: desktopToken<GistThreadWriter>("process", "gist-writer"),
   gistReader: desktopToken<GistThreadReader>("process", "gist-reader"),
   homePath: desktopToken<string>("process", "home-path"),
-  localFs: desktopToken<LocalFileSystem>("process", "local-filesystem"),
   mcpManager: desktopToken<McpManager>("process", "mcp-manager"),
   modelManager: desktopToken<ModelManager>("process", "model-manager"),
   networkSettings: desktopToken<NetworkSettingsManager>(
@@ -64,7 +61,6 @@ export const PROCESS_TOKENS = {
     "process",
     "project-windows"
   ),
-  runtimeRouter: desktopToken<RuntimeRouter>("process", "runtime-router"),
   searchSettings: desktopToken<SearchSettingsManager>(
     "process",
     "search-settings"

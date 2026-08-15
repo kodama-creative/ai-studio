@@ -1,4 +1,3 @@
-import type { RuntimeId } from "../../shared/runtime";
 import { checkUv, GeneratorProjectWorkspace } from "../fs";
 
 import type { NativeDialogApplication } from "./native-applications";
@@ -12,7 +11,7 @@ export interface ProjectGeneratorApplicationApi {
   writeFile(rootDir: string, relativePath: string, contents: string): ReturnType<GeneratorProjectWorkspace["writeFile"]>;
   removeFile(rootDir: string, relativePath: string): ReturnType<GeneratorProjectWorkspace["removeFile"]>;
   openDevTerminal(rootDir: string): ReturnType<GeneratorProjectWorkspace["openDevTerminal"]>;
-  resolveEnv(runtimeId: RuntimeId | undefined, input: Parameters<ModelsApplication["resolveGeneratorEnv"]>[1]): ReturnType<ModelsApplication["resolveGeneratorEnv"]>;
+  resolveEnv(input: Parameters<ModelsApplication["resolveGeneratorEnv"]>[0]): ReturnType<ModelsApplication["resolveGeneratorEnv"]>;
 }
 
 /** Coordinates native selection, guarded project writes, and model secrets. */
@@ -58,11 +57,8 @@ export class ProjectGeneratorApplication implements ProjectGeneratorApplicationA
     return this._workspace.openDevTerminal(rootDir);
   }
 
-  /** Resolve explicitly requested secrets through the selected Runtime. */
-  resolveEnv(
-    runtimeId: RuntimeId | undefined,
-    input: Parameters<ModelsApplication["resolveGeneratorEnv"]>[1]
-  ) {
-    return this._models.resolveGeneratorEnv(runtimeId, input);
+  /** Resolve explicitly requested secrets through the local model service. */
+  resolveEnv(input: Parameters<ModelsApplication["resolveGeneratorEnv"]>[0]) {
+    return this._models.resolveGeneratorEnv(input);
   }
 }

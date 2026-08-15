@@ -1,27 +1,6 @@
 import { Thread } from "../threads/thread";
 
 /**
- * Storage for threads: read and overwrite a single Thread by path.
- *
- * Designed to pair with ThreadPlayground — `read` provides its `initialValue`
- * and `write` persists its `onChange`. Serialization between Thread and its
- * on-disk representation is handled inside the implementation; callers only
- * ever see a Thread.
- */
-export interface ThreadStorage {
-  /**
-   * Read and parse the Thread stored at the given path.
-   */
-  read(path: string): Promise<Thread>;
-
-  /**
-   * Overwrite the file at the given path with the serialized Thread, creating
-   * parent directories as needed.
-   */
-  write(path: string, thread: Thread): Promise<void>;
-}
-
-/**
  * A fully-resolved address of one concrete Thread file/version inside a
  * backend. Returned by {@link ReadableThreadStorage.resolveLatest} and by
  * {@link WritableThreadStorage.write}; passed back to

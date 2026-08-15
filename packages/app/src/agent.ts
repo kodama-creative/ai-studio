@@ -1,12 +1,11 @@
 import { join } from "node:path";
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { Models, Tool as PiTool } from "@earendil-works/pi-ai";
+import type { Models } from "@earendil-works/pi-ai";
 import { loadAgent } from "@llm-space/agent/loader";
 import {
   closeRuntimeServices,
-  createLoadSkillToolDefinition,
-  createRuntimeToolContext,
+  createAgentRuntimeHost,
   LOAD_SKILL_TOOL_IMPLEMENTATION_ID,
   mountAgentFrameworkTools,
   resolveAgentGeneration,
@@ -14,7 +13,6 @@ import {
   type PreparedAgentDefinition,
   type RuntimeServices,
 } from "@llm-space/agent/runtime";
-import type { SkillHandle } from "@llm-space/agent/skills";
 import {
   BunSqliteRuntimeBindingStore,
   BunSqliteSessionRepository,
@@ -114,10 +112,12 @@ export async function createAgent(options: CreateAgentOptions): Promise<Agent> {
     }
     return current;
   };
-  const resolveTools = async (
-    binding: RuntimeBinding
-  ): Promise<ReadonlyMap<string, RuntimeTool>> =>
-    _resolveRuntimeTools(binding, async () => (await resolveCurrentAgent()).tools);
+  const host = createAgentRuntimeHost({
+    services: options.runtimeServices,
+    loadCurrentTools: async () => (await resolveCurrentAgent()).tools,
+    wrapFrameworkTool: ({ definition, implementationId }) =>
+      runtimeTool(definition, { implementationId }),
+  });
   const runtime = new DurablePiRuntime({
     repository,
     bindings,
@@ -126,18 +126,10 @@ export async function createAgent(options: CreateAgentOptions): Promise<Agent> {
       ...(options.resolveConnection === undefined
         ? {}
         : { resolveConnection: options.resolveConnection }),
-      resolveTools: _modelTools,
+      resolveTools: (binding) => host.modelTools(binding),
     }),
-    resolveTools,
-    createToolContext: ({ binding, execution, signal }) =>
-      createRuntimeToolContext(
-        _withMountedSkills(options.runtimeServices, binding.skills ?? []),
-        {
-        agentId: first.agentId,
-        execution,
-        signal,
-        }
-      ),
+    resolveTools: (binding) => host.resolveTools(binding),
+    createToolContext: (input) => host.createToolContext(input),
   });
   let store: ReturnType<typeof createSqliteApplicationStore>;
   try {
@@ -351,66 +343,4 @@ async function _operationBinding(
     skills: [...resolved.skills.values()],
     tools: executable.bindingTools,
   };
-}
-
-function _withMountedSkills(
-  services: RuntimeServices,
-  mountedSkills: readonly SkillHandle[]
-): RuntimeServices {
-  const mounted = new Map(mountedSkills.map((skill) => [skill.name, skill]));
-  return {
-    ...services,
-    skills: {
-      resolve(input) {
-        const skill = mounted.get(input.identifier);
-        if (skill !== undefined) return skill;
-        if (services.skills !== undefined) return services.skills.resolve(input);
-        throw new Error(
-          `Agent "${input.agentId}" does not mount Skill "${input.identifier}".`
-        );
-      },
-    },
-  };
-}
-
-/** Restores framework tools from the binding when current source no longer declares them. */
-async function _resolveRuntimeTools(
-  binding: RuntimeBinding,
-  loadCurrent: () => Promise<ReadonlyMap<string, RuntimeTool>>
-): Promise<ReadonlyMap<string, RuntimeTool>> {
-  const tools = new Map<string, RuntimeTool>();
-  for (const frozen of binding.tools) {
-    if (frozen.implementationId === LOAD_SKILL_TOOL_IMPLEMENTATION_ID) {
-      tools.set(
-        frozen.name,
-        runtimeTool(createLoadSkillToolDefinition(binding.skills ?? []), {
-          implementationId: LOAD_SKILL_TOOL_IMPLEMENTATION_ID,
-        })
-      );
-    }
-  }
-  try {
-    for (const [name, tool] of await loadCurrent()) {
-      if (!tools.has(name)) tools.set(name, tool);
-    }
-  } catch (error) {
-    if (tools.size === 0) throw error;
-  }
-  return tools;
-}
-
-/** Projects frozen tool schemas to Pi's model-visible contract. */
-function _modelTools(binding: RuntimeBinding): PiTool[] {
-  return binding.tools.map((tool) => {
-    if (tool.description === undefined || tool.inputSchema === undefined) {
-      throw new Error(
-        `Frozen tool "${tool.name}" is missing its model-visible schema.`
-      );
-    }
-    return {
-      name: tool.name,
-      description: tool.description,
-      parameters: tool.inputSchema as never,
-    };
-  });
 }

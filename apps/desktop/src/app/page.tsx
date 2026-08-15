@@ -21,15 +21,7 @@ import {
   ResizablePanelGroup,
 } from "@llm-space/ui/ui/resizable";
 import { useQueryClient } from "@tanstack/react-query";
-import {
-  lazy,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import { lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePanelRef } from "react-resizable-panels";
 import { toast } from "sonner";
 
@@ -49,6 +41,7 @@ import {
   useThreadTabs,
   type AppTab,
 } from "@/components/thread-tabs";
+import { PaneActivityTracker } from "@/components/thread-tabs/pane-activity-tracker";
 import type { PaneLifecycleHost } from "@/components/thread-tabs/pane-lifecycle-host";
 import {
   closeAllTabsIfAllowed,
@@ -57,7 +50,6 @@ import {
   paneIdForTab,
   refreshTabIfAllowed,
 } from "@/components/thread-tabs/pane-mutation-actions";
-import { RuntimeRunTracker } from "@/components/thread-tabs/runtime-run-tracker";
 import { UpdateIndicator } from "@/components/update-indicator";
 import { UpdateStatusProvider } from "@/components/update-status-provider";
 import { Welcome } from "@/components/welcome";
@@ -66,12 +58,10 @@ import {
   DesktopHostProvider,
 } from "@/host/host-services";
 import { track } from "@/lib/analytics";
-import { electrobun } from "@/lib/electrobun";
 import { useFullScreen } from "@/lib/use-full-screen";
 import type { SettingsTab } from "@/shared/commands";
-import type { RuntimeId } from "@/shared/runtime";
 
-import { WorkspaceModelScope } from "./workspace-model-scope";
+import { DesktopModelProvider } from "./desktop-model-provider";
 
 // Overlay surfaces that aren't part of the first paint — settings, the command
 // palette, onboarding, and examples. Loaded lazily so their code (and heavy
@@ -97,6 +87,11 @@ const StartFromExampleDialog = lazy(() =>
     default: m.StartFromExampleDialog,
   }))
 );
+const ShareThreadDialog = lazy(() =>
+  import("@/components/share-thread-dialog").then((m) => ({
+    default: m.ShareThreadDialog,
+  }))
+);
 
 export function Page() {
   return (
@@ -115,16 +110,10 @@ export function Page() {
 // Commands that need context the palette can't supply (a file path / URL) or
 // that make no sense to invoke from the palette itself.
 const COMMAND_PALETTE_BLACKLIST = [
-  "workspace.rename",
-  "workspace.duplicate",
-  "workspace.delete",
-  "workspace.reveal",
-  "workspace.revealInTree",
-  "workspace.copyFile",
   "shell.openLink",
   "app.openCommandPalette",
   "thread.openVariables",
-  "workspace.newFileFromPromptExample",
+  "playground.createFromExample",
   "tabs.close",
   "tabs.closeOthers",
   "project.createThread",
@@ -134,12 +123,12 @@ const COMMAND_PALETTE_BLACKLIST = [
   "updates.applyAndRestart",
 ];
 
-/** Whether a drag carries OS files (vs. the tree's internal node-reorder drag). */
+/** Whether a drag carries OS files that may contain Thread snapshots. */
 function hasFiles(e: React.DragEvent): boolean {
   return e.dataTransfer.types.includes("Files");
 }
 
-// Persisted width (in px) of the sidebar file-tree panel, so it survives
+// Persisted width (in px) of the Playground/Agent Project sidebar, so it survives
 // restarts. Collapsing sets the panel to 0 — we never store that, so reopening
 // restores the last dragged width.
 const DEFAULT_SIDEBAR_SIZE = "16.7%";
@@ -166,31 +155,19 @@ function writeSidebarSize(sizeInPixels: number): void {
 
 function PageInner() {
   return (
-    <WorkspaceModelScope
-      runtimeId="local"
-      createClient={createElectrobunModelClient}
-    >
+    <DesktopModelProvider createClient={createElectrobunModelClient}>
       <_PageWorkspace />
-    </WorkspaceModelScope>
+    </DesktopModelProvider>
   );
 }
 
 function _PageWorkspace() {
-  const workspaceRuntimeIdRef = useRef<RuntimeId>("local");
-  const runtimeRunTrackerRef = useRef(new RuntimeRunTracker());
-  const mutationRevision = useSyncExternalStore(
-    runtimeRunTrackerRef.current.subscribe,
-    runtimeRunTrackerRef.current.getSnapshot,
-    runtimeRunTrackerRef.current.getSnapshot
-  );
+  const paneActivityTrackerRef = useRef(new PaneActivityTracker());
   const canPruneRestoredTab = useCallback((tab: AppTab) => {
     const paneId = paneIdForTab(tab);
     return (
-      !runtimeRunTrackerRef.current.isPaneBusy(paneId) &&
-      !runtimeRunTrackerRef.current.isMutationReserved(
-        paneId,
-        tab.runtimeId
-      )
+      !paneActivityTrackerRef.current.isPaneBusy(paneId) &&
+      !paneActivityTrackerRef.current.isMutationReserved(paneId)
     );
   }, []);
   const tabs = useThreadTabs({ canPruneRestoredTab });
@@ -202,17 +179,11 @@ function _PageWorkspace() {
   const refreshModels = useRefreshModels();
   const queryClient = useQueryClient();
 
-  const {
-    close,
-    closeAll,
-    closeOthers,
-    reopenClosed,
-    openPlayground,
-  } = tabs;
+  const { close, closeAll, closeOthers, reopenClosed, openPlayground } = tabs;
   const visibleTabs = tabs.tabs;
   const visibleActiveId = tabs.activeId;
   // The visible active tab is read through a ref so command handlers never go
-  // stale or accidentally target a tab from another runtime.
+  // stale or accidentally target a previously active tab.
   const activeTabIdRef = useRef(visibleActiveId);
   const allTabsRef = useRef(tabs.tabs);
   useEffect(() => {
@@ -228,8 +199,7 @@ function _PageWorkspace() {
     [tabs, visibleTabs]
   );
   const reorderVisibleTabs = useCallback(
-    (from: number, to: number) =>
-      tabs.reorder(from, to),
+    (from: number, to: number) => tabs.reorder(from, to),
     [tabs]
   );
   const activateVisibleSibling = useCallback(
@@ -248,40 +218,28 @@ function _PageWorkspace() {
     },
     [tabs, visibleActiveId, visibleTabs]
   );
-  const showRuntimeRunBlocked = useCallback((action: string) => {
+  const showPaneBusy = useCallback((action: string) => {
     toast.info("Wait for active runs to finish", {
       description: `Completed output will be saved before ${action}.`,
     });
   }, []);
   const handlePaneRunStart = useCallback(
-    (paneId: string, runtimeId: RuntimeId, runId: string, path?: string) =>
-      runtimeRunTrackerRef.current.beginRun(paneId, runtimeId, runId, path),
+    (paneId: string, runId: string) =>
+      paneActivityTrackerRef.current.beginRun(paneId, runId),
     []
   );
   const handlePaneRunSettled = useCallback((paneId: string, runId: string) => {
-    runtimeRunTrackerRef.current.settleRun(paneId, runId);
+    paneActivityTrackerRef.current.settleRun(paneId, runId);
   }, []);
   const handlePanePersistenceChange = useCallback(
-    (
-      paneId: string,
-      runtimeId: RuntimeId,
-      owner: object,
-      busy: boolean,
-      path?: string
-    ) => {
-      runtimeRunTrackerRef.current.setPersistenceBusy(
-        paneId,
-        runtimeId,
-        owner,
-        busy,
-        path
-      );
+    (paneId: string, owner: object, busy: boolean) => {
+      paneActivityTrackerRef.current.setPersistenceBusy(paneId, owner, busy);
     },
     []
   );
   const isPaneMutationReserved = useCallback(
-    (paneId: string, runtimeId: RuntimeId, path?: string) =>
-      runtimeRunTrackerRef.current.isMutationReserved(paneId, runtimeId, path),
+    (paneId: string) =>
+      paneActivityTrackerRef.current.isMutationReserved(paneId),
     []
   );
   // Collapse / expand the left side panel. The initial width is recovered from
@@ -313,8 +271,8 @@ function _PageWorkspace() {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [onboardOpen, setOnboardOpen] = useState(false);
   const [examplesOpen, setExamplesOpen] = useState(false);
-  // Which folder a chosen example's thread is created into (default: root).
-  const examplesParentRef = useRef("");
+  const [sharePath, setSharePath] = useState<string | null>(null);
+  // Create and open a durable Playground, optionally seeded from an example.
   const createLocalPlayground = useCallback(
     async (input?: {
       readonly title?: string;
@@ -347,20 +305,13 @@ function _PageWorkspace() {
     [openPlayground, playgroundClient, queryClient]
   );
 
-  // File import: a hidden picker (opened by the `importFiles` command), the
-  // parent directory it should import into, and page-wide drag-and-drop state.
+  // Snapshot import: a hidden picker opened by the import command plus
+  // page-wide OS drag-and-drop state.
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const pendingParentRef = useRef("");
-  const pendingImportRuntimeIdRef = useRef<RuntimeId>("local");
   const dragDepthRef = useRef(0);
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const handleImportFiles = useCallback(
-    async (
-      files: FileList | (File | { name: string; text: string })[],
-      _parent: string,
-      _runtimeId: RuntimeId = workspaceRuntimeIdRef.current
-    ) => {
-      if (_runtimeId !== "local") return;
+    async (files: FileList | (File | { name: string; text: string })[]) => {
       const list = [...files];
       if (list.length === 0) return;
       let imported = 0;
@@ -384,22 +335,13 @@ function _PageWorkspace() {
         );
       }
     },
-    [
-      openPlayground,
-      queryClient,
-    ]
+    [openPlayground, queryClient]
   );
-  // Register the command handlers backed by page-level state (tabs, sidebar,
-  // settings). `newFile` / `newFolder` / the tree ops are registered by the
-  // file tree, which owns that state.
+  // Register command handlers backed by page-level state (Playgrounds, tabs,
+  // sidebar, and settings).
   useRegisterCommands({
-    "workspace.newFile": ({ runtimeId }) => {
-      const targetRuntimeId = runtimeId ?? workspaceRuntimeIdRef.current;
-      if (targetRuntimeId === "local") void createLocalPlayground();
-    },
-    "workspace.newFileFromPromptExample": ({ exampleId, runtimeId }) => {
-      const targetRuntimeId = runtimeId ?? workspaceRuntimeIdRef.current;
-      if (targetRuntimeId !== "local") return;
+    "playground.create": () => void createLocalPlayground(),
+    "playground.createFromExample": ({ exampleId }) => {
       const example = getPromptExample(exampleId);
       if (example === undefined) return;
       void (async () => {
@@ -429,37 +371,33 @@ function _PageWorkspace() {
         });
       })();
     },
-    "tabs.close": ({ id, path, runtimeId }) => {
-      void path;
-      void runtimeId;
+    "tabs.close": ({ id }) => {
       const target = id ?? activeTabIdRef.current;
       if (!target) return;
       closeTabIfAllowed({
-        tracker: runtimeRunTrackerRef.current,
+        tracker: paneActivityTrackerRef.current,
         tabs: tabs.tabs,
         targetId: target,
-        onBlocked: () => showRuntimeRunBlocked("closing this tab"),
+        onBlocked: () => showPaneBusy("closing this tab"),
         close,
       });
     },
-    "tabs.closeOthers": ({ id, path, runtimeId }) => {
-      void path;
-      void runtimeId;
+    "tabs.closeOthers": ({ id }) => {
       const target = id ?? activeTabIdRef.current;
       if (!target) return;
       closeOtherTabsIfAllowed({
-        tracker: runtimeRunTrackerRef.current,
+        tracker: paneActivityTrackerRef.current,
         tabs: tabs.tabs,
         keepId: target,
-        onBlocked: () => showRuntimeRunBlocked("closing other tabs"),
+        onBlocked: () => showPaneBusy("closing other tabs"),
         closeOthers,
       });
     },
     "tabs.closeAll": () => {
       closeAllTabsIfAllowed({
-        tracker: runtimeRunTrackerRef.current,
+        tracker: paneActivityTrackerRef.current,
         tabs: tabs.tabs,
-        onBlocked: () => showRuntimeRunBlocked("closing all tabs"),
+        onBlocked: () => showPaneBusy("closing all tabs"),
         closeAll,
       });
     },
@@ -477,21 +415,25 @@ function _PageWorkspace() {
     },
     "app.openCommandPalette": () => setCommandPaletteOpen(true),
     "app.openOnboard": () => setOnboardOpen(true),
-    "workspace.openStartFromExample": ({ parent = "", runtimeId }) => {
-      if (runtimeId && runtimeId !== "local") return;
-      examplesParentRef.current = parent;
-      setExamplesOpen(true);
-    },
-    "workspace.importFiles": ({ parent = "", files, runtimeId }) => {
-      const targetRuntimeId = runtimeId ?? workspaceRuntimeIdRef.current;
-      if (targetRuntimeId !== workspaceRuntimeIdRef.current) return;
+    "playground.openExamples": () => setExamplesOpen(true),
+    "playground.importFiles": ({ files }) => {
       if (files) {
-        void handleImportFiles(files, parent, targetRuntimeId);
+        void handleImportFiles(files);
         return;
       }
-      pendingParentRef.current = parent;
-      pendingImportRuntimeIdRef.current = targetRuntimeId;
       fileInputRef.current?.click();
+    },
+    "thread.share": ({ path }) => {
+      if (path !== undefined) {
+        setSharePath(path);
+        return;
+      }
+      const active = allTabsRef.current.find(
+        (tab) => tab.id === activeTabIdRef.current
+      );
+      if (active !== undefined) {
+        setSharePath(`playgrounds/${active.playgroundId}`);
+      }
     },
   });
 
@@ -502,15 +444,6 @@ function _PageWorkspace() {
     if (models.length === 0) setOnboardOpen(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot startup check; must not re-run when models change
   }, []);
-
-  // Bridge commands dispatched from the bun process (native menu / shortcuts)
-  // into the renderer dispatcher.
-  useEffect(() => {
-    const rpc = electrobun.rpc;
-    if (!rpc) return;
-    rpc.addMessageListener("executeCommand", executeCommand);
-    return () => rpc.removeMessageListener("executeCommand", executeCommand);
-  }, [executeCommand]);
 
   const fullScreen = useFullScreen();
   const handleCloseTab = useCallback(
@@ -531,10 +464,10 @@ function _PageWorkspace() {
       const tab = tabs.tabs.find((candidate) => candidate.id === id);
       if (!tab) return;
       const reservation = refreshTabIfAllowed({
-        tracker: runtimeRunTrackerRef.current,
+        tracker: paneActivityTrackerRef.current,
         tabs: tabs.tabs,
         targetId: tab.id,
-        onBlocked: () => showRuntimeRunBlocked("refreshing this tab"),
+        onBlocked: () => showPaneBusy("refreshing this tab"),
         refresh: tabs.refresh,
       });
       if (reservation) {
@@ -544,7 +477,7 @@ function _PageWorkspace() {
         );
       }
     },
-    [showRuntimeRunBlocked, tabs]
+    [showPaneBusy, tabs]
   );
   const handlePaneRefreshSettled = useCallback((paneId: string) => {
     const release = refreshReservationsRef.current.get(paneId);
@@ -555,6 +488,7 @@ function _PageWorkspace() {
   const paneLifecycleHost = useMemo<PaneLifecycleHost>(
     () => ({
       isMutationReserved: isPaneMutationReserved,
+      subscribeToMutationChanges: paneActivityTrackerRef.current.subscribe,
       onPersistenceChange: handlePanePersistenceChange,
       onRefreshSettled: handlePaneRefreshSettled,
       onRunSettled: handlePaneRunSettled,
@@ -575,7 +509,7 @@ function _PageWorkspace() {
     },
     []
   );
-  const handleNewFile = useCallback(() => {
+  const handleNewPlayground = useCallback(() => {
     void createLocalPlayground();
   }, [createLocalPlayground]);
   const handleToggleSidebar = useCallback(
@@ -609,11 +543,7 @@ function _PageWorkspace() {
         e.preventDefault();
         dragDepthRef.current = 0;
         setIsDraggingFiles(false);
-        void handleImportFiles(
-          e.dataTransfer.files,
-          "",
-          workspaceRuntimeIdRef.current
-        );
+        void handleImportFiles(e.dataTransfer.files);
       }}
     >
       <input
@@ -626,11 +556,7 @@ function _PageWorkspace() {
         onChange={(e) => {
           const files = e.target.files;
           if (files?.length) {
-            void handleImportFiles(
-              files,
-              pendingParentRef.current,
-              pendingImportRuntimeIdRef.current
-            );
+            void handleImportFiles(files);
           }
           e.target.value = "";
         }}
@@ -669,9 +595,7 @@ function _PageWorkspace() {
               emptyState={
                 <Welcome
                   onNewStarter={() => setExamplesOpen(true)}
-                  onNewFile={() =>
-                    void createLocalPlayground()
-                  }
+                  onNewPlayground={() => void createLocalPlayground()}
                   onModels={() =>
                     executeCommand({
                       type: "app.openSettings",
@@ -689,11 +613,10 @@ function _PageWorkspace() {
               closeOthers={handleCloseOtherTabs}
               closeAll={handleCloseAllTabs}
               reorder={reorderVisibleTabs}
-              onNewFile={handleNewFile}
+              onNewPlayground={handleNewPlayground}
               onPlaygroundTitleChange={tabs.handlePlaygroundTitleChange}
               onToggleSidebar={handleToggleSidebar}
               lifecycleHost={paneLifecycleHost}
-              mutationRevision={mutationRevision}
               toolbarSlot={<UpdateIndicator />}
             />
           </ResizablePanel>
@@ -752,6 +675,15 @@ function _PageWorkspace() {
                 messages,
               });
             })();
+          }}
+        />
+      </LazyMount>
+      <LazyMount open={sharePath !== null}>
+        <ShareThreadDialog
+          open={sharePath !== null}
+          path={sharePath ?? ""}
+          onOpenChange={(open) => {
+            if (!open) setSharePath(null);
           }}
         />
       </LazyMount>

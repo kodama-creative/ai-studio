@@ -22,7 +22,18 @@ export interface ThreadRunInput {
   readonly commandId: string;
   readonly mode: "step" | "continue";
   readonly modelOverride?: string;
+  readonly signal?: AbortSignal;
 }
+
+export type ThreadStepInput = StudioStepRunInput & {
+  readonly signal?: AbortSignal;
+};
+export type ThreadContinueInput = StudioContinueInput & {
+  readonly signal?: AbortSignal;
+};
+export type ThreadToolApprovalInput = StudioToolApprovalInput & {
+  readonly signal?: AbortSignal;
+};
 
 /** UI Thread execution commands shared by Playground and Studio windows. */
 export interface ThreadRpc {
@@ -43,19 +54,19 @@ export interface ThreadRequests {
   step(
     target: ThreadTarget,
     operationId: string,
-    input: StudioStepRunInput
+    input: ThreadStepInput
   ): Promise<StudioRunReceipt>;
   continue(
     target: ThreadTarget,
     operationId: string,
-    input: StudioContinueInput
+    input: ThreadContinueInput
   ): Promise<StudioRunReceipt>;
   resolveToolApproval(
     target: ThreadTarget,
     operationId: string,
-    input: StudioToolApprovalInput
+    input: ThreadToolApprovalInput
   ): Promise<StudioRunReceipt>;
-  cancel(target: ThreadTarget, operationId: string): Promise<void>;
+  cancel(target: ThreadTarget): Promise<void>;
 }
 
 export type ThreadClient = ThreadRequests;

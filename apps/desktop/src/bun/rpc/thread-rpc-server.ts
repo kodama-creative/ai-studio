@@ -19,37 +19,24 @@ export class PlaygroundThreadRpcServer implements RpcServer<ThreadRpc> {
   readonly streams = {};
 
   constructor(application: DesktopPlaygroundApplication) {
-    this.requests = {
-      run: async (target, input) =>
-        application.run(_playgroundId(target), {
+    this.requests = _threadRequests(_playgroundId, {
+      run: (playgroundId, input) =>
+        application.run(playgroundId, {
           fromMessageId: input.fromMessageId,
           commandId: input.commandId,
           mode: input.mode,
+          ...(input.signal === undefined ? {} : { signal: input.signal }),
         }),
-      inspect: async (target, operationId) => {
-        return application.inspectRun(_playgroundId(target), operationId);
-      },
-      step: async (target, operationId, input) => {
-        return application.stepRun(_playgroundId(target), operationId, input);
-      },
-      continue: async (target, operationId, input) => {
-        return application.continueRun(
-          _playgroundId(target),
-          operationId,
-          input
-        );
-      },
-      resolveToolApproval: async (target, operationId, input) => {
-        return application.resolveToolApproval(
-          _playgroundId(target),
-          operationId,
-          input
-        );
-      },
-      cancel: async (target, operationId) => {
-        return application.cancelRun(_playgroundId(target), operationId);
-      },
-    };
+      inspect: (playgroundId, operationId) =>
+        application.inspectRun(playgroundId, operationId),
+      step: (playgroundId, operationId, input) =>
+        application.stepRun(playgroundId, operationId, input),
+      continue: (playgroundId, operationId, input) =>
+        application.continueRun(playgroundId, operationId, input),
+      resolveToolApproval: (playgroundId, operationId, input) =>
+        application.resolveToolApproval(playgroundId, operationId, input),
+      cancel: (playgroundId) => application.cancelActiveRun(playgroundId),
+    });
   }
 }
 
@@ -60,36 +47,97 @@ export class StudioThreadRpcServer implements RpcServer<ThreadRpc> {
   readonly streams = {};
 
   constructor(application: StudioApplication, projectId: string) {
-    const experimentId = (target: ThreadTarget) =>
-      _experimentId(target, projectId);
-    this.requests = {
-      run: async (target, input) =>
-        application.run(experimentId(target), _studioRunInput(input)),
-      inspect: async (target, operationId) => {
-        return application.inspectRun(experimentId(target), operationId);
-      },
-      step: async (target, operationId, input) => {
-        return application.stepRun(experimentId(target), operationId, input);
-      },
-      continue: async (target, operationId, input) => {
-        return application.continueRun(
-          experimentId(target),
-          operationId,
-          input
-        );
-      },
-      resolveToolApproval: async (target, operationId, input) => {
-        return application.resolveToolApproval(
-          experimentId(target),
-          operationId,
-          input
-        );
-      },
-      cancel: async (target, operationId) => {
-        return application.cancelRun(experimentId(target), operationId);
-      },
-    };
+    this.requests = _threadRequests(
+      (target) => _experimentId(target, projectId),
+      {
+        run: (threadId, input) =>
+          application.run(threadId, _studioRunInput(input)),
+        inspect: (threadId, operationId) =>
+          application.inspectRun(threadId, operationId),
+        step: (threadId, operationId, input) =>
+          application.stepRun(threadId, operationId, input),
+        continue: (threadId, operationId, input) =>
+          application.continueRun(threadId, operationId, input),
+        resolveToolApproval: (threadId, operationId, input) =>
+          application.resolveToolApproval(threadId, operationId, input),
+        cancel: (threadId) => application.cancelActiveRun(threadId),
+      }
+    );
   }
+}
+
+interface ThreadOperations {
+  run(
+    id: string,
+    input: Parameters<ThreadRequests["run"]>[1]
+  ): ReturnType<ThreadRequests["run"]>;
+  inspect(
+    id: string,
+    operationId: string
+  ): ReturnType<ThreadRequests["inspect"]>;
+  step(
+    id: string,
+    operationId: string,
+    input: Parameters<ThreadRequests["step"]>[2]
+  ): ReturnType<ThreadRequests["step"]>;
+  continue(
+    id: string,
+    operationId: string,
+    input: Parameters<ThreadRequests["continue"]>[2]
+  ): ReturnType<ThreadRequests["continue"]>;
+  resolveToolApproval(
+    id: string,
+    operationId: string,
+    input: Parameters<ThreadRequests["resolveToolApproval"]>[2]
+  ): ReturnType<ThreadRequests["resolveToolApproval"]>;
+  cancel(id: string): Promise<void>;
+}
+
+/** Applies target resolution and request-local cancellation once for both products. */
+function _threadRequests(
+  resolveTarget: (target: ThreadTarget) => string,
+  operations: ThreadOperations
+): ThreadRequests {
+  return {
+    async run(target, input) {
+      const id = resolveTarget(target);
+      return _withCancellation(
+        input.signal,
+        () => operations.cancel(id),
+        () => operations.run(id, input)
+      );
+    },
+    async inspect(target, operationId) {
+      return operations.inspect(resolveTarget(target), operationId);
+    },
+    async step(target, operationId, input) {
+      const id = resolveTarget(target);
+      return _withCancellation(
+        input.signal,
+        () => operations.cancel(id),
+        () => operations.step(id, operationId, input)
+      );
+    },
+    async continue(target, operationId, input) {
+      const id = resolveTarget(target);
+      return _withCancellation(
+        input.signal,
+        () => operations.cancel(id),
+        () => operations.continue(id, operationId, input)
+      );
+    },
+    async resolveToolApproval(target, operationId, input) {
+      const id = resolveTarget(target);
+      return _withCancellation(
+        input.signal,
+        () => operations.cancel(id),
+        () => operations.resolveToolApproval(id, operationId, input)
+      );
+    },
+    async cancel(target) {
+      return operations.cancel(resolveTarget(target));
+    },
+  };
 }
 
 function _playgroundId(target: ThreadTarget): string {
@@ -116,8 +164,30 @@ function _studioRunInput(input: ThreadRunInput) {
     fromMessageId: input.fromMessageId,
     commandId: input.commandId,
     mode: input.mode,
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
     ...(input.modelOverride === undefined
       ? {}
       : { modelOverride: input.modelOverride }),
   };
+}
+
+/** Couples one request-local transport signal to the product's active Pi operation. */
+async function _withCancellation<T>(
+  signal: AbortSignal | undefined,
+  cancel: () => Promise<void>,
+  execute: () => Promise<T>
+): Promise<T> {
+  if (signal === undefined) return execute();
+  let cancellation: Promise<void> | undefined;
+  const onAbort = () => {
+    cancellation ??= cancel();
+  };
+  signal.addEventListener("abort", onAbort, { once: true });
+  if (signal.aborted) onAbort();
+  try {
+    return await execute();
+  } finally {
+    signal.removeEventListener("abort", onAbort);
+    await cancellation;
+  }
 }

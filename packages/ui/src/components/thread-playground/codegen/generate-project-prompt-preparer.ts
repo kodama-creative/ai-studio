@@ -2,7 +2,7 @@ import { getMessageText, type ThreadContext } from "@llm-space/core";
 import { renderThreadPromptVariables } from "@llm-space/core/thread";
 
 import type { FilesHost } from "../../../host/types";
-import { createRuntimePromptFiles } from "../runtime-prompt-files";
+import { createPromptFiles } from "../runtime-prompt-files";
 import type { ThreadStore } from "../stores/thread-store";
 import { listEnabledPromptVariableSkills } from "../variable/prompt-variable-skills";
 
@@ -44,17 +44,15 @@ async function _expandIncludes(
 async function _prepareGenerateProjectPromptContext({
   context,
   files,
-  runtimeId,
   skillList,
   useMetaUserPrompt,
 }: {
   context: ThreadContext;
   files: FilesHost;
-  runtimeId: string;
   skillList: Awaited<ReturnType<typeof listEnabledPromptVariableSkills>>;
   useMetaUserPrompt: boolean;
 }) {
-  const promptFiles = createRuntimePromptFiles(files, runtimeId);
+  const promptFiles = createPromptFiles(files);
   const rendered = await renderThreadPromptVariables({
     context,
     loadSkills: () => Promise.resolve(skillList),
@@ -82,7 +80,7 @@ async function _prepareGenerateProjectPromptContext({
   };
 }
 
-/** Bind Generate Project prompt reads directly to one owning thread store. */
+/** Bind Generate Project prompt reads directly to one Thread store. */
 export function createGenerateProjectPromptPreparer({
   files,
   store,
@@ -97,14 +95,10 @@ export function createGenerateProjectPromptPreparer({
     skillList: Awaited<ReturnType<typeof listEnabledPromptVariableSkills>>;
     useMetaUserPrompt: boolean;
   }) => {
-    const { runtimeId, thread } = store.getState();
-    if (!runtimeId) {
-      throw new Error("Generate Project requires an owning runtimeId");
-    }
+    const { thread } = store.getState();
     return _prepareGenerateProjectPromptContext({
       context: thread.context ?? {},
       files,
-      runtimeId,
       skillList,
       useMetaUserPrompt,
     });

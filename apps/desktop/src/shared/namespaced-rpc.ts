@@ -85,7 +85,9 @@ export type RpcClient<TInterface extends RpcNamespaceInterface> = {
 };
 
 export interface RpcClientTransport {
-  request(input: NamespacedRpcRequest): Promise<RpcResult<unknown>>;
+  request(
+    input: NamespacedRpcRequest & { readonly signal?: AbortSignal }
+  ): Promise<RpcResult<unknown>>;
   stream(input: NamespacedRpcStreamRequest): AsyncIterable<unknown>;
   subscribe(
     namespace: string,
@@ -95,6 +97,7 @@ export interface RpcClientTransport {
 }
 
 export interface NamespacedRpcRequest {
+  readonly requestId?: string;
   readonly namespace: string;
   readonly method: string;
   readonly args: readonly unknown[];
@@ -113,6 +116,10 @@ export interface NamespacedRpcStreamSubscribe {
 
 export interface NamespacedRpcStreamUnsubscribe {
   readonly subscriptionId: string;
+}
+
+export interface NamespacedRpcRequestCancel {
+  readonly requestId: string;
 }
 
 export type NamespacedRpcStreamEvent =
@@ -158,10 +165,12 @@ export function createRpcClient<TInterface extends RpcNamespaceInterface>(
   );
   for (const method of namespace.requestNames) {
     _defineClientMember(client, method, async (...args: readonly unknown[]) => {
+      const serializableArgs = args.map(_withoutSignal);
       const result = await transport.request({
         namespace: namespace.name,
         method,
-        args: _withoutTrailingUndefined(args),
+        args: _withoutTrailingUndefined(serializableArgs),
+        signal: _findSignal(args),
       });
       if (!result.ok) {
         throw new RpcClientError(result.error);

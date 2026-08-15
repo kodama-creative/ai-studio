@@ -38,6 +38,8 @@ export function createMainWindowRPC({
         rpcNamespaceStreamSubscribe: (input) => rpcRegistry.subscribe(input),
         rpcNamespaceStreamUnsubscribe: ({ subscriptionId }) =>
           rpcRegistry.unsubscribe(subscriptionId),
+        rpcNamespaceRequestCancel: ({ requestId }) =>
+          rpcRegistry.cancelRequest(requestId),
         executeCommand: (command) => executeCommand(command),
       },
     },

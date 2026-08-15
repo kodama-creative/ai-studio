@@ -10,9 +10,11 @@ import {
   fauxToolCall,
 } from "@earendil-works/pi-ai";
 import type { McpServerToolsResponse, McpTool } from "@llm-space/core";
-import type { RuntimeClient } from "@llm-space/runtime/runtime";
 
-import { createPlaygroundHost } from "./playground-host";
+import {
+  createPlaygroundHost,
+  type PlaygroundToolHost,
+} from "./playground-host";
 
 test("resolves and executes only the MCP tools frozen into a Playground Run", async () => {
   const homePath = await mkdtemp(
@@ -35,20 +37,22 @@ test("resolves and executes only the MCP tools frozen into a Playground Run", as
   };
   const listedServers: string[] = [];
   const calls: unknown[] = [];
-  const runtime = {
-    builtInListTools: () => [],
-    mcpListTools(serverId: string) {
+  const tools: PlaygroundToolHost = {
+    listBuiltinTools: () => [],
+    callBuiltinTool: () =>
+      Promise.reject(new Error("Unexpected built-in tool call.")),
+    listMcpTools(serverId: string) {
       listedServers.push(serverId);
       return Promise.resolve(_mcpToolsResponse(tool));
     },
-    mcpCallTool(input: unknown) {
+    callMcpTool(input: Parameters<PlaygroundToolHost["callMcpTool"]>[0]) {
       calls.push(input);
       return Promise.resolve({
         content: [{ type: "text" as const, text: "Weather service failed" }],
         isError: true,
       });
     },
-  } as unknown as RuntimeClient;
+  };
   const models = createModels();
   models.setProvider(faux.provider);
   faux.setResponses([
@@ -61,7 +65,7 @@ test("resolves and executes only the MCP tools frozen into a Playground Run", as
   const createHost = () =>
     createPlaygroundHost({
       homePath,
-      runtime,
+      tools,
       models,
     });
   let host = createHost();
@@ -149,7 +153,7 @@ test("reconstructs a durable Step receipt after Playground host restart", async 
     createPlaygroundHost({
       homePath,
       models,
-      runtime: _emptyRuntime(),
+      tools: _emptyTools(),
     });
   let host = createHost();
   try {
@@ -173,6 +177,7 @@ test("reconstructs a durable Step receipt after Playground host restart", async 
     });
     const run = await host.run(playground.id, {
       fromMessageId: "user-receipt",
+      commandId: "run-before-restart",
     });
     const admitted = await host.inspectRun(playground.id, run.operationId);
     const action = admitted.nextAction;
@@ -217,12 +222,15 @@ test("reconstructs a durable Step receipt after Playground host restart", async 
   }
 });
 
-/** Supplies a host runtime for tests that do not execute tools. */
-function _emptyRuntime(): RuntimeClient {
+/** Supplies a host tool seam for tests that do not execute tools. */
+function _emptyTools(): PlaygroundToolHost {
   return {
-    builtInListTools: () => [],
-    mcpListTools: () => Promise.reject(new Error("Unexpected MCP lookup.")),
-  } as unknown as RuntimeClient;
+    listBuiltinTools: () => [],
+    callBuiltinTool: () =>
+      Promise.reject(new Error("Unexpected built-in tool call.")),
+    listMcpTools: () => Promise.reject(new Error("Unexpected MCP lookup.")),
+    callMcpTool: () => Promise.reject(new Error("Unexpected MCP tool call.")),
+  };
 }
 
 function _mcpToolsResponse(tool: McpTool): McpServerToolsResponse {

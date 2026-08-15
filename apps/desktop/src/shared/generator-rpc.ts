@@ -1,5 +1,4 @@
 import { defineRpcNamespace } from "./namespaced-rpc";
-import type { RuntimeId } from "./runtime";
 
 export interface GeneratorRunResult {
   readonly code: number;
@@ -28,7 +27,6 @@ export interface GeneratorRequests {
   removeFile(rootDir: string, relativePath: string): Promise<void>;
   openDevTerminal(rootDir: string): Promise<boolean>;
   resolveEnv(
-    runtimeId: RuntimeId | undefined,
     input: { providerId: string; profileId?: string; envNames: string[] }
   ): Promise<{ modelApiKey: string; envValues: Record<string, string> }>;
 }

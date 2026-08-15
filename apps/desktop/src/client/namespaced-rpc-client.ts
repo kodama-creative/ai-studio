@@ -14,11 +14,34 @@ const EVENT_COMPACTION_THRESHOLD = 1024;
 /** Electrobun adapter for the shared, strongly typed namespace client. */
 export function createElectrobunRpcClientTransport(): RpcClientTransport {
   return {
-    request: (input) => _rpc().request.rpcNamespaceRequest(input),
+    request: (input) => _request(input),
     stream: (input) => _stream(input),
     subscribe: (namespace, event, listener) =>
       _subscribe(namespace, event, listener),
   };
+}
+
+async function _request(
+  input: NamespacedRpcRequest & { readonly signal?: AbortSignal }
+) {
+  const rpc = _rpc();
+  if (input.signal?.aborted) {
+    throw input.signal.reason ?? new DOMException("Aborted", "AbortError");
+  }
+  if (input.signal === undefined) return rpc.request.rpcNamespaceRequest(input);
+  const requestId = crypto.randomUUID();
+  const onAbort = () => rpc.send.rpcNamespaceRequestCancel({ requestId });
+  input.signal.addEventListener("abort", onAbort, { once: true });
+  try {
+    return await rpc.request.rpcNamespaceRequest({
+      requestId,
+      namespace: input.namespace,
+      method: input.method,
+      args: input.args,
+    });
+  } finally {
+    input.signal.removeEventListener("abort", onAbort);
+  }
 }
 
 function _subscribe(

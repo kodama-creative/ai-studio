@@ -119,7 +119,6 @@ export function GenerateProjectButton({
   } = useHostServices();
   const store = useThreadStoreApi();
   const context = useThreadStore((s) => s.thread.context);
-  const runtimeId = useThreadStore((s) => s.runtimeId);
   const savedModel = useThreadStore((s) => s.thread.model);
   const title = useThreadStore((s) => s.thread.title);
   const fallbackModel = useFirstAvailableModel();
@@ -203,11 +202,10 @@ export function GenerateProjectButton({
 
   const runGeneration = useCallback(
     async (targetDir: string) => {
-      if (!generator || !runtimeId || !model) {
+      if (!generator || !model) {
         return;
       }
       const generationRuntime = bindProjectGenerationRuntime({
-        runtimeId,
         auxiliaryGeneration,
         ...(selectedProfileId ? { profileId: selectedProfileId } : {}),
         skills,
@@ -298,7 +296,6 @@ export function GenerateProjectButton({
     [
       generator,
       auxiliaryGeneration,
-      runtimeId,
       model,
       context,
       skills,
@@ -473,7 +470,7 @@ export function GenerateProjectButton({
     openGeneratedProject,
   ]);
 
-  if (presentational || !generator || !runtimeId) {
+  if (presentational || !generator) {
     return null;
   }
 

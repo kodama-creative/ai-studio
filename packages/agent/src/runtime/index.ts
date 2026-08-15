@@ -1,4 +1,10 @@
 export {
+  createAgentRuntimeHost,
+  type AgentHostBinding,
+  type AgentModelTool,
+  type AgentRuntimeHost,
+} from "./agent-runtime-host";
+export {
   AgentGenerationResolutionError,
   mountAgentFrameworkTools,
   resolveAgentGeneration,

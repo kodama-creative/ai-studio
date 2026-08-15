@@ -1,4 +1,4 @@
-import type { RuntimeRunTracker } from "./runtime-run-tracker";
+import type { PaneActivityTracker } from "./pane-activity-tracker";
 import type { AppTab } from "./use-thread-tabs";
 
 export function paneIdForTab(tab: AppTab): string {
@@ -11,18 +11,13 @@ function _runIfIdle({
   onBlocked,
   action,
 }: {
-  tracker: RuntimeRunTracker;
+  tracker: PaneActivityTracker;
   tabs: AppTab[];
   onBlocked: () => void;
   action: () => void;
 }): boolean {
   if (
-    tabs.some((tab) =>
-      tracker.isMutationReserved(
-        paneIdForTab(tab),
-        tab.runtimeId
-      )
-    )
+    tabs.some((tab) => tracker.isMutationReserved(paneIdForTab(tab)))
   ) {
     onBlocked();
     return false;
@@ -47,7 +42,7 @@ export function closeTabIfAllowed({
   onBlocked,
   close,
 }: {
-  tracker: RuntimeRunTracker;
+  tracker: PaneActivityTracker;
   tabs: AppTab[];
   targetId: string;
   onBlocked: () => void;
@@ -70,7 +65,7 @@ export function closeOtherTabsIfAllowed({
   onBlocked,
   closeOthers,
 }: {
-  tracker: RuntimeRunTracker;
+  tracker: PaneActivityTracker;
   tabs: AppTab[];
   keepId: string;
   onBlocked: () => void;
@@ -91,7 +86,7 @@ export function closeAllTabsIfAllowed({
   onBlocked,
   closeAll,
 }: {
-  tracker: RuntimeRunTracker;
+  tracker: PaneActivityTracker;
   tabs: AppTab[];
   onBlocked: () => void;
   closeAll: () => void;
@@ -116,7 +111,7 @@ export function refreshTabIfAllowed({
   onBlocked,
   refresh,
 }: {
-  tracker: RuntimeRunTracker;
+  tracker: PaneActivityTracker;
   tabs: AppTab[];
   targetId: string;
   onBlocked: () => void;
@@ -124,12 +119,7 @@ export function refreshTabIfAllowed({
 }): PaneRefreshReservation | null {
   const target = tabs.find((tab) => tab.id === targetId);
   if (!target) return null;
-  if (
-    tracker.isMutationReserved(
-      paneIdForTab(target),
-      target.runtimeId
-    )
-  ) {
+  if (tracker.isMutationReserved(paneIdForTab(target))) {
     onBlocked();
     return null;
   }

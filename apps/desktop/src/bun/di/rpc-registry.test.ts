@@ -10,6 +10,7 @@ import { RpcRegistry } from "./rpc-registry";
 interface FixtureRpc {
   readonly requests: {
     greet(name: string): Promise<string>;
+    wait(input?: { readonly signal?: AbortSignal }): Promise<string>;
   };
   readonly streams: {
     values(input: {
@@ -23,7 +24,7 @@ interface FixtureRpc {
 }
 
 const FIXTURE_RPC = defineRpcNamespace<FixtureRpc>("fixture", {
-  requests: { greet: true },
+  requests: { greet: true, wait: true },
   streams: { values: true },
   events: { changed: true },
 });
@@ -41,6 +42,14 @@ test("RPC Registry collects contributions and owns streams and events", async ()
 
     greet(name: string): Promise<string> {
       return Promise.resolve(`hello ${name}`);
+    }
+
+    wait(input: { readonly signal?: AbortSignal } = {}): Promise<string> {
+      return new Promise((resolve) => {
+        input.signal?.addEventListener("abort", () => resolve("aborted"), {
+          once: true,
+        });
+      });
     }
 
     async *values(input: {
@@ -94,10 +103,107 @@ test("RPC Registry collects contributions and owns streams and events", async ()
   await registry.dispose();
 });
 
+test("RPC Registry injects and cancels request-local AbortSignals", async () => {
+  let signal: AbortSignal | undefined;
+  const registry = new RpcRegistry(
+    new SnapshotContributionProvider(() => [
+      {
+        registerRpc(rpc) {
+          rpc.registerServer({
+            namespace: FIXTURE_RPC,
+            requests: {
+              greet: () => Promise.resolve("hello"),
+              wait(input: { readonly signal?: AbortSignal } = {}) {
+                signal = input.signal;
+                return new Promise<string>((resolve) => {
+                  input.signal?.addEventListener(
+                    "abort",
+                    () => resolve("aborted"),
+                    { once: true }
+                  );
+                });
+              },
+            },
+            streams: {
+              async *values() {
+                await Promise.resolve();
+                yield* [];
+              },
+            },
+            eventSource: {
+              subscribe: () => ({ dispose: () => undefined }),
+            },
+          });
+        },
+      },
+    ]),
+    { sendStreamEvent: () => undefined, sendEvent: () => undefined }
+  );
+  registry.onStart();
+
+  const result = registry.request({
+    requestId: "request-1",
+    namespace: "fixture",
+    method: "wait",
+    args: [],
+  });
+  await Promise.resolve();
+  registry.cancelRequest("request-1");
+
+  expect(signal).toBeInstanceOf(AbortSignal);
+  expect(await result).toEqual({ ok: true, value: "aborted" });
+  await registry.dispose();
+});
+
+test("RPC Registry treats an AbortError as expected cancellation", async () => {
+  const registry = new RpcRegistry(
+    new SnapshotContributionProvider(() => [
+      {
+        registerRpc(rpc) {
+          rpc.registerServer({
+            namespace: FIXTURE_RPC,
+            requests: {
+              greet: () =>
+                Promise.reject(new DOMException("Aborted", "AbortError")),
+              wait: () => Promise.resolve("done"),
+            },
+            streams: {
+              async *values() {
+                await Promise.resolve();
+                yield* [];
+              },
+            },
+            eventSource: {
+              subscribe: () => ({ dispose: () => undefined }),
+            },
+          });
+        },
+      },
+    ]),
+    { sendStreamEvent: () => undefined, sendEvent: () => undefined }
+  );
+  registry.onStart();
+
+  expect(
+    await registry.request({
+      namespace: "fixture",
+      method: "greet",
+      args: ["Ada"],
+    })
+  ).toEqual({
+    ok: false,
+    error: { code: "CANCELLED", message: "RPC request was cancelled." },
+  });
+  await registry.dispose();
+});
+
 test("RPC Registry rejects duplicate and late namespace registration", () => {
   const server = {
     namespace: FIXTURE_RPC,
-    requests: { greet: () => Promise.resolve("hello") },
+    requests: {
+      greet: () => Promise.resolve("hello"),
+      wait: () => Promise.resolve("done"),
+    },
     streams: {
       async *values() {
         await Promise.resolve();
@@ -156,4 +262,32 @@ test("RPC Registry validates namespace implementations at startup", () => {
   expect(() => registry.onStart()).toThrow(
     'RPC request method "greet" is not registered.'
   );
+});
+
+test("RPC Registry reports synchronous stream admission errors through the envelope", () => {
+  const events: unknown[] = [];
+  const registry = new RpcRegistry(
+    new SnapshotContributionProvider(() => []),
+    {
+      sendStreamEvent: (event) => events.push(event),
+      sendEvent: () => undefined,
+    }
+  );
+  registry.onStart();
+
+  expect(() =>
+    registry.subscribe({
+      subscriptionId: "bad-stream",
+      namespace: "missing",
+      method: "values",
+      args: [],
+    })
+  ).not.toThrow();
+  expect(events).toEqual([
+    {
+      subscriptionId: "bad-stream",
+      type: "error",
+      error: { code: "INTERNAL", message: "Internal RPC error." },
+    },
+  ]);
 });

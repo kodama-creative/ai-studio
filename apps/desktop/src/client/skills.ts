@@ -1,14 +1,18 @@
 import type { SkillContent, SkillInfo, SkillsSettings } from "@llm-space/core";
 
-import type { RuntimeId } from "@/shared/runtime";
+import { createRpcClient } from "@/shared/namespaced-rpc";
+import { SKILLS_RPC } from "@/shared/skills-rpc";
 
+import { createElectrobunRpcClientTransport } from "./namespaced-rpc-client";
 import { pickNativeDirectory } from "./native-files";
-import { skillsClient } from "./runtime-rpc-clients";
 
-export async function getSkillsSettings(
-  runtimeId?: RuntimeId
-): Promise<SkillsSettings> {
-  return skillsClient.getSettings(runtimeId);
+const skillsClient = createRpcClient(
+  SKILLS_RPC,
+  createElectrobunRpcClientTransport()
+);
+
+export async function getSkillsSettings(): Promise<SkillsSettings> {
+  return skillsClient.getSettings();
 }
 
 /** Open the native folder picker; resolves to the chosen path or `null`. */
@@ -17,52 +21,40 @@ export async function browseForSkillsPath(): Promise<string | null> {
 }
 
 export async function addSkillsPath(
-  path: string,
-  runtimeId?: RuntimeId
+  path: string
 ): Promise<SkillsSettings> {
-  return skillsClient.addPath(runtimeId, path);
+  return skillsClient.addPath(path);
 }
 
 export async function removeSkillsPath(
-  path: string,
-  runtimeId?: RuntimeId
+  path: string
 ): Promise<SkillsSettings> {
-  return skillsClient.removePath(runtimeId, path);
+  return skillsClient.removePath(path);
 }
 
 export async function setSkillHidden(
   path: string,
   skillName: string,
-  hidden: boolean,
-  runtimeId?: RuntimeId
+  hidden: boolean
 ): Promise<SkillsSettings> {
-  return skillsClient.setHidden(runtimeId, { path, skillName, hidden });
+  return skillsClient.setHidden({ path, skillName, hidden });
 }
 
 export async function setAllSkillsHidden(
   path: string,
-  hidden: boolean,
-  runtimeId?: RuntimeId
+  hidden: boolean
 ): Promise<SkillsSettings> {
-  return skillsClient.setAllHidden(runtimeId, path, hidden);
+  return skillsClient.setAllHidden(path, hidden);
 }
 
-export async function listSkills(
-  path: string,
-  runtimeId?: RuntimeId
-): Promise<SkillInfo[]> {
-  return skillsClient.list(runtimeId, path);
+export async function listSkills(path: string): Promise<SkillInfo[]> {
+  return skillsClient.list(path);
 }
 
-export async function listAvailableSkills(
-  runtimeId?: RuntimeId
-): Promise<SkillInfo[]> {
-  return skillsClient.listAvailable(runtimeId);
+export async function listAvailableSkills(): Promise<SkillInfo[]> {
+  return skillsClient.listAvailable();
 }
 
-export async function readSkill(
-  path: string,
-  runtimeId?: RuntimeId
-): Promise<SkillContent> {
-  return skillsClient.read(runtimeId, path);
+export async function readSkill(path: string): Promise<SkillContent> {
+  return skillsClient.read(path);
 }

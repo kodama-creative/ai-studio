@@ -2,7 +2,15 @@ import path from "node:path";
 
 import type { Models, Tool as PiTool } from "@earendil-works/pi-ai";
 import type { ToolContext, ToolDefinition } from "@llm-space/agent/tools";
-import type { BuiltinTool, McpTool, ToolCallOutput } from "@llm-space/core";
+import type {
+  BuiltinTool,
+  BuiltinToolCallResponse,
+  McpCallToolResponse,
+  McpServerToolsResponse,
+  McpTool,
+  ProviderConnectionRef,
+  ToolCallOutput,
+} from "@llm-space/core";
 import {
   BunSqliteRuntimeBindingStore,
   BunSqliteSessionRepository,
@@ -13,7 +21,6 @@ import {
   type RuntimeBinding,
   type RuntimeTool,
 } from "@llm-space/pi-runtime";
-import type { RuntimeClient } from "@llm-space/runtime/runtime";
 import {
   createPlaygroundApplication,
   type PlaygroundApplication,
@@ -28,7 +35,24 @@ export interface CreatePlaygroundHostOptions {
     readonly providerId: string;
     readonly signal: AbortSignal;
   }) => PiProviderConnection | Promise<PiProviderConnection>;
-  readonly runtime: RuntimeClient;
+  readonly tools: PlaygroundToolHost;
+}
+
+/** Minimal host seam needed to restore and execute frozen Playground tools. */
+export interface PlaygroundToolHost {
+  listBuiltinTools(): BuiltinTool[] | Promise<BuiltinTool[]>;
+  callBuiltinTool(input: {
+    name: string;
+    arguments: Record<string, unknown>;
+    config?: Record<string, unknown>;
+    connection?: ProviderConnectionRef;
+  }): Promise<BuiltinToolCallResponse>;
+  listMcpTools(serverId: string): Promise<McpServerToolsResponse>;
+  callMcpTool(input: {
+    serverId: string;
+    toolName: string;
+    arguments: Record<string, unknown>;
+  }): Promise<McpCallToolResponse>;
 }
 
 export interface PlaygroundHost extends PlaygroundApplication {
@@ -96,12 +120,9 @@ async function _resolveRuntimeTools(
 ): Promise<ReadonlyMap<string, RuntimeTool>> {
   const tools = new Map<string, RuntimeTool>();
   const builtins = new Map(
-    (await options.runtime.builtInListTools()).map((tool) => [tool.name, tool])
+    (await options.tools.listBuiltinTools()).map((tool) => [tool.name, tool])
   );
-  const mcpResponses = new Map<
-    string,
-    Awaited<ReturnType<RuntimeClient["mcpListTools"]>>
-  >();
+  const mcpResponses = new Map<string, McpServerToolsResponse>();
   for (const frozen of binding.tools) {
     const tool = await _resolveFrozenTool(
       _toolFromBinding(frozen),
@@ -144,10 +165,7 @@ type ExecutableTool = BuiltinTool | McpTool;
 
 interface RuntimeToolIndex {
   readonly builtins: ReadonlyMap<string, BuiltinTool>;
-  readonly mcpResponses: Map<
-    string,
-    Awaited<ReturnType<RuntimeClient["mcpListTools"]>>
-  >;
+  readonly mcpResponses: Map<string, McpServerToolsResponse>;
 }
 
 /** Decodes the Studio-owned binding needed to resolve one frozen executor. */
@@ -208,7 +226,7 @@ async function _resolveFrozenTool(
   }
   let response = index.mcpResponses.get(frozen.serverId);
   if (response === undefined) {
-    response = await options.runtime.mcpListTools(frozen.serverId);
+    response = await options.tools.listMcpTools(frozen.serverId);
     index.mcpResponses.set(frozen.serverId, response);
   }
   const available = response.tools.find(
@@ -226,7 +244,7 @@ async function _resolveFrozenTool(
   return frozen;
 }
 
-/** Adapts a host RuntimeClient tool to the Pi runtime ToolDefinition seam. */
+/** Adapts one frozen host tool to the Pi runtime ToolDefinition seam. */
 function _definition(
   tool: ExecutableTool,
   options: CreatePlaygroundHostOptions
@@ -237,13 +255,13 @@ function _definition(
     async execute(args) {
       const input = args as Record<string, unknown>;
       if (tool.type === "builtin") {
-        return options.runtime.builtInCallTool({
+        return options.tools.callBuiltinTool({
           name: tool.name,
           arguments: input,
           config: tool.config,
         });
       }
-      return options.runtime.mcpCallTool({
+      return options.tools.callMcpTool({
         serverId: tool.serverId,
         toolName: tool.toolName,
         arguments: input,

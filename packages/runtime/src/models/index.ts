@@ -9,4 +9,5 @@ export {
   ModelManager,
   type ResolvedProviderConnection,
 } from "./model-manager";
+export { getModelProviderGroups } from "./model-provider-groups";
 export type { ModelsConfig, ProviderConfig } from "./types";

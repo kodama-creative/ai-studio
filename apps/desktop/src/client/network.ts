@@ -1,24 +1,25 @@
 import type { NetworkSettings, SystemProxyDetection } from "@llm-space/core";
 
-import type { RuntimeId } from "@/shared/runtime";
+import { createRpcClient } from "@/shared/namespaced-rpc";
+import { NETWORK_RPC } from "@/shared/network-rpc";
 
-import { networkClient } from "./runtime-rpc-clients";
+import { createElectrobunRpcClientTransport } from "./namespaced-rpc-client";
 
-export async function getNetworkSettings(
-  runtimeId?: RuntimeId
-): Promise<NetworkSettings> {
-  return networkClient.get(runtimeId);
+const networkClient = createRpcClient(
+  NETWORK_RPC,
+  createElectrobunRpcClientTransport()
+);
+
+export async function getNetworkSettings(): Promise<NetworkSettings> {
+  return networkClient.get();
 }
 
 export async function setNetworkSettings(
-  settings: NetworkSettings,
-  runtimeId?: RuntimeId
+  settings: NetworkSettings
 ): Promise<NetworkSettings> {
-  return networkClient.set(runtimeId, settings);
+  return networkClient.set(settings);
 }
 
-export async function detectSystemProxy(
-  runtimeId?: RuntimeId
-): Promise<SystemProxyDetection> {
-  return networkClient.detectSystemProxy(runtimeId);
+export async function detectSystemProxy(): Promise<SystemProxyDetection> {
+  return networkClient.detectSystemProxy();
 }

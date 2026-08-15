@@ -728,6 +728,24 @@ export class DurablePiRuntime {
     });
   }
 
+  /** Resolves the immutable binding owned by one already-admitted operation. */
+  async readOperationBinding(input: {
+    readonly sessionId: string;
+    readonly operationId: string;
+  }): Promise<RuntimeBinding | undefined> {
+    this._requireOpen();
+    const session = await this._session(input.sessionId);
+    const operation = (
+      await session.findRecords({
+        type: "operation_started",
+        runId: input.operationId,
+        limit: 1,
+      })
+    )[0];
+    if (operation?.type !== "operation_started") return undefined;
+    return this._bindings.resolve(_bindingReference(operation));
+  }
+
   /**
    * Observes committed Pi log items from a durable sequence. Notifications are
    * only a delivery mechanism: reconnect always resumes from `Session.getLog`.

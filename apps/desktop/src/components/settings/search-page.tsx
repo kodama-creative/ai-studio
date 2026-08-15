@@ -17,19 +17,18 @@ import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { getSearchSettings, setSearchSettings } from "@/client/search";
-import type { RuntimeId } from "@/shared/runtime";
 
 import { ApiKeyField } from "./api-key-field";
 import { SettingsPage } from "./settings-page";
 
-export function SearchPage({ runtimeId }: { runtimeId: RuntimeId }) {
+export function SearchPage() {
   const [settings, setSettings] = useState<SearchSettings>(
     DEFAULT_SEARCH_SETTINGS
   );
 
   useEffect(() => {
     let cancelled = false;
-    void getSearchSettings(runtimeId)
+    void getSearchSettings()
       .then((loaded) => {
         if (!cancelled) {
           setSettings(loaded);
@@ -41,12 +40,12 @@ export function SearchPage({ runtimeId }: { runtimeId: RuntimeId }) {
     return () => {
       cancelled = true;
     };
-  }, [runtimeId]);
+  }, []);
 
   const persist = useCallback(
     async (next: SearchSettings) => {
       try {
-        const saved = await setSearchSettings(next, runtimeId);
+        const saved = await setSearchSettings(next);
         setSettings(saved);
       } catch (error) {
         toast.error("Failed to save search settings", {
@@ -55,7 +54,7 @@ export function SearchPage({ runtimeId }: { runtimeId: RuntimeId }) {
         });
       }
     },
-    [runtimeId]
+    []
   );
 
   return (

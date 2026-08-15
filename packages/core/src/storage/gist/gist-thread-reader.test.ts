@@ -59,7 +59,7 @@ describe("GistThreadReader.resolveLatest", () => {
             "notes.txt": { filename: "notes.txt", content: "hi" },
             "browser-use.json": {
               filename: "browser-use.json",
-              content: JSON.stringify(THREAD),
+              content: JSON.stringify(SNAPSHOT),
             },
           },
           history: [{ version: VERSION }, { version: "older" }],
@@ -84,7 +84,7 @@ describe("GistThreadReader.read", () => {
           files: {
             "browser-use.json": {
               filename: "browser-use.json",
-              content: JSON.stringify(THREAD),
+              content: JSON.stringify(SNAPSHOT),
             },
           },
         }),
@@ -116,7 +116,7 @@ describe("GistThreadReader.read", () => {
             },
           },
         }),
-      [rawUrl]: () => new Response(JSON.stringify(THREAD), { status: 200 }),
+      [rawUrl]: () => new Response(JSON.stringify(SNAPSHOT), { status: 200 }),
     });
     const reader = new GistThreadReader({ fetch });
 
@@ -137,7 +137,7 @@ describe("GistThreadReader.read", () => {
     const gistBody = {
       id: GIST_ID,
       files: {
-        "t.json": { filename: "t.json", content: JSON.stringify(THREAD) },
+        "t.json": { filename: "t.json", content: JSON.stringify(SNAPSHOT) },
       },
       history: [{ version: VERSION }],
     };
@@ -191,7 +191,10 @@ describe("GistThreadReader.readShared", () => {
           files: {
             "general-agent.json": {
               filename: "general-agent.json",
-              content: JSON.stringify({ title: "General Agent" }),
+              content: JSON.stringify({
+                ...SNAPSHOT,
+                thread: { title: "General Agent" },
+              }),
               raw_url: `https://gist.githubusercontent.com/MagicCube/${GIST_ID}/raw/${VERSION}/general-agent.json`,
             },
           },

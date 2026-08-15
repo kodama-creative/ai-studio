@@ -24,14 +24,14 @@ import { useCommands } from "@/commands";
 interface WelcomeProps {
   className?: string;
   onNewStarter?: () => void;
-  onNewFile?: () => void;
+  onNewPlayground?: () => void;
   onModels?: () => void;
 }
 
 export function Welcome({
   className,
   onNewStarter,
-  onNewFile,
+  onNewPlayground,
   onModels,
 }: WelcomeProps) {
   const { executeCommand } = useCommands();
@@ -66,8 +66,8 @@ export function Welcome({
           </EmptyMedia>
           <EmptyTitle>Welcome to LLM Space 4</EmptyTitle>
           <EmptyDescription>
-            Start with a ready agent thread, create a blank one, or open an
-            existing file from the left side panel.
+            Start from an example, create a blank Playground, or open an Agent
+            Project.
           </EmptyDescription>
         </EmptyHeader>
         <EmptyContent className="flex-row justify-center gap-2">
@@ -75,9 +75,9 @@ export function Welcome({
             <SparklesIcon />
             Start from examples
           </Button>
-          <Button variant="outline" onClick={onNewFile}>
+          <Button variant="outline" onClick={onNewPlayground}>
             <PlusIcon />
-            Blank thread
+            Blank Playground
           </Button>
           <Button variant="outline" onClick={onModels}>
             <SettingsIcon />

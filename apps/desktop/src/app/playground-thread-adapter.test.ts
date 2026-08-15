@@ -65,6 +65,9 @@ test("Playground runtime starts and steps tools exclusively through Thread RPC",
     onPlayground: (next) => {
       playground = next;
     },
+    beforeAdmission: () => {
+      calls.push("draft.flush");
+    },
   });
 
   const updates: Thread[] = [];
@@ -79,6 +82,7 @@ test("Playground runtime starts and steps tools exclusively through Thread RPC",
   }
 
   expect(calls).toEqual([
+    "draft.flush",
     "metadata.save",
     "thread.run",
     "thread.inspect",
@@ -110,6 +114,9 @@ test("Playground runtime resumes the current Pi action through Thread RPC", asyn
     getPlayground: () => playground,
     onPlayground: (next) => {
       playground = next;
+    },
+    beforeAdmission: () => {
+      calls.push("draft.flush");
     },
   });
 
@@ -157,6 +164,48 @@ test("Playground runtime reports a Thread RPC execution failure", () => {
       }
     })()
   ).rejects.toThrow("Model request failed.");
+});
+
+test("Playground runtime forwards Stop through the active Thread RPC request", async () => {
+  let playground = _playground();
+  let requestSignal: AbortSignal | undefined;
+  const controller = new AbortController();
+  const runtime = createPlaygroundThreadExecutionRuntime({
+    client: _client({
+      save: (_id, document) => {
+        playground = { ...playground, ...document, dirty: true };
+        return Promise.resolve(playground);
+      },
+      load: () => Promise.resolve({ ...playground, operationId: undefined }),
+    }),
+    threadClient: _threadClient({
+      run: (_target, input) => {
+        requestSignal = input.signal;
+        return Promise.resolve({
+          sessionId: "session-1",
+          operationId: "operation-1",
+        });
+      },
+    }),
+    playgroundId: playground.id,
+    getPlayground: () => playground,
+    onPlayground: (next) => {
+      playground = next;
+    },
+  });
+
+  controller.abort();
+  for await (const event of runtime.execute({
+    thread: playgroundToEditorThread(playground),
+    fromMessageId: USER_MESSAGE.id,
+    autoRunTools: false,
+    reactLoop: true,
+    signal: controller.signal,
+  })) {
+    void event;
+  }
+
+  expect(requestSignal).toBe(controller.signal);
 });
 
 test("Playground runtime surfaces tool approval and resumes the same Pi operation", async () => {

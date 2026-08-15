@@ -17,9 +17,7 @@ export const LOCAL_STORAGE_KEYS = {
   experimentalReactScan: "llm-space-experimental-react-scan",
   sidebarSize: "llm-space:sidebar-size",
   openAppTabs: "llm-space:open-app-tabs",
-  legacyOpenTabs: "llm-space:open-tabs",
   activeTab: "llm-space:active-tab",
-  fileTreeExpanded: "llm-space:fs-tree:expanded",
 } as const;
 
 export type LocalStorageKey =

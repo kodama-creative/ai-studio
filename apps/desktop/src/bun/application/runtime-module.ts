@@ -1,6 +1,10 @@
+import type { McpManager } from "@llm-space/runtime/mcp";
 import type { ModelManager } from "@llm-space/runtime/models";
-import type { RuntimeRouter } from "@llm-space/runtime/runtime";
-import { ContainerModule, type ResolutionContext } from "inversify";
+import type { NetworkSettingsManager } from "@llm-space/runtime/network";
+import type { SearchSettingsManager } from "@llm-space/runtime/search";
+import type { SkillsManager } from "@llm-space/runtime/skills";
+import type { ToolRegistry } from "@llm-space/runtime/tools";
+import { ContainerModule } from "inversify";
 
 import type { DesktopWindowScope } from "../di/process-container";
 import {
@@ -10,69 +14,29 @@ import {
 import type { RpcRegistry } from "../di/rpc-registry";
 import { desktopToken, PROCESS_TOKENS } from "../di/tokens";
 import { AuxiliaryGenerationRpcServer } from "../rpc/auxiliary-generation-rpc-server";
-import {
-  BuiltinToolsRpcServer,
-  McpRpcServer,
-  ModelsRpcServer,
-  NetworkRpcServer,
-  PromptFilesRpcServer,
-  RuntimesRpcServer,
-  SearchRpcServer,
-  SkillsRpcServer,
-  WorkspaceRpcServer,
-} from "../rpc/runtime-rpc-servers";
+import { BuiltinToolsRpcContribution } from "../rpc/builtin-tools-rpc-feature";
+import { McpRpcContribution } from "../rpc/mcp-rpc-feature";
+import { ModelsRpcContribution } from "../rpc/models-rpc-feature";
+import { NetworkRpcContribution } from "../rpc/network-rpc-feature";
+import { PromptFilesRpcContribution } from "../rpc/prompt-files-rpc-feature";
+import { SearchRpcContribution } from "../rpc/search-rpc-feature";
+import { SkillsRpcContribution } from "../rpc/skills-rpc-feature";
 
 import { AuxiliaryGenerationApplication } from "./auxiliary-generation-application";
 import {
-  BuiltinToolsApplicationImpl,
-  type BuiltinToolsApplication,
-  McpApplicationImpl,
-  type McpApplication,
   ModelsApplicationImpl,
   type ModelsApplication,
-  NetworkApplicationImpl,
-  type NetworkApplication,
-  PromptFilesApplicationImpl,
-  type PromptFilesApplication,
-  RuntimesApplicationImpl,
-  type RuntimesApplication,
-  SearchApplicationImpl,
-  type SearchApplication,
-  SkillsApplicationImpl,
-  type SkillsApplication,
-  WorkspaceApplicationImpl,
-  type WorkspaceApplication,
 } from "./runtime-applications";
 
 export const RUNTIME_APPLICATION_TOKENS = {
   auxiliaryGeneration: desktopToken<AuxiliaryGenerationApplication>(
-    "runtime",
-    "auxiliary-generation-application"
+    "auxiliary-generation",
+    "application"
   ),
-  runtimes: desktopToken<RuntimesApplication>(
-    "runtime",
-    "runtimes-application"
-  ),
-  models: desktopToken<ModelsApplication>("runtime", "models-application"),
-  workspace: desktopToken<WorkspaceApplication>(
-    "runtime",
-    "workspace-application"
-  ),
-  promptFiles: desktopToken<PromptFilesApplication>(
-    "runtime",
-    "prompt-files-application"
-  ),
-  mcp: desktopToken<McpApplication>("runtime", "mcp-application"),
-  builtinTools: desktopToken<BuiltinToolsApplication>(
-    "runtime",
-    "builtin-tools-application"
-  ),
-  search: desktopToken<SearchApplication>("runtime", "search-application"),
-  network: desktopToken<NetworkApplication>("runtime", "network-application"),
-  skills: desktopToken<SkillsApplication>("runtime", "skills-application"),
+  models: desktopToken<ModelsApplication>("models", "application"),
 } as const;
 
-/** Register Runtime capability applications and their main-window RPC adapters. */
+/** Register the two host capabilities that own application use cases. */
 export function runtimeApplicationsModule(): ContainerModule {
   return new ContainerModule(({ bind }) => {
     bind<AuxiliaryGenerationApplication>(
@@ -89,103 +53,102 @@ export function runtimeApplicationsModule(): ContainerModule {
         });
       })
       .inSingletonScope();
-    const router = (context: ResolutionContext) =>
-      context.get<RuntimeRouter>(PROCESS_TOKENS.runtimeRouter);
-    bind<RuntimesApplication>(RUNTIME_APPLICATION_TOKENS.runtimes)
-      .toDynamicValue((context) => new RuntimesApplicationImpl(router(context)))
-      .inSingletonScope();
     bind<ModelsApplication>(RUNTIME_APPLICATION_TOKENS.models)
       .toDynamicValue(
         (context) =>
           new ModelsApplicationImpl(
-            router(context),
+            context.get(PROCESS_TOKENS.modelManager),
             context.get(PROCESS_TOKENS.analytics)
           )
       )
       .inSingletonScope();
-    bind<WorkspaceApplication>(RUNTIME_APPLICATION_TOKENS.workspace)
-      .toDynamicValue(
-        (context) => new WorkspaceApplicationImpl(router(context))
-      )
-      .inSingletonScope();
-    bind<PromptFilesApplication>(RUNTIME_APPLICATION_TOKENS.promptFiles)
-      .toDynamicValue(
-        (context) => new PromptFilesApplicationImpl(router(context))
-      )
-      .inSingletonScope();
-    bind<McpApplication>(RUNTIME_APPLICATION_TOKENS.mcp)
-      .toDynamicValue((context) => new McpApplicationImpl(router(context)))
-      .inSingletonScope();
-    bind<BuiltinToolsApplication>(RUNTIME_APPLICATION_TOKENS.builtinTools)
-      .toDynamicValue(
-        (context) => new BuiltinToolsApplicationImpl(router(context))
-      )
-      .inSingletonScope();
-    bind<SearchApplication>(RUNTIME_APPLICATION_TOKENS.search)
-      .toDynamicValue((context) => new SearchApplicationImpl(router(context)))
-      .inSingletonScope();
-    bind<NetworkApplication>(RUNTIME_APPLICATION_TOKENS.network)
-      .toDynamicValue((context) => new NetworkApplicationImpl(router(context)))
-      .inSingletonScope();
-    bind<SkillsApplication>(RUNTIME_APPLICATION_TOKENS.skills)
-      .toDynamicValue((context) => new SkillsApplicationImpl(router(context)))
-      .inSingletonScope();
   });
 }
 
-class RuntimeContribution implements RpcContributionApi {
-  constructor(
-    private readonly _auxiliaryGeneration: AuxiliaryGenerationApplication,
-    private readonly _runtimes: RuntimesApplication,
-    private readonly _models: ModelsApplication,
-    private readonly _workspace: WorkspaceApplication,
-    private readonly _promptFiles: PromptFilesApplication,
-    private readonly _mcp: McpApplication,
-    private readonly _builtinTools: BuiltinToolsApplication,
-    private readonly _search: SearchApplication,
-    private readonly _network: NetworkApplication,
-    private readonly _skills: SkillsApplication
-  ) {}
+class AuxiliaryGenerationContribution implements RpcContributionApi {
+  constructor(private readonly _application: AuxiliaryGenerationApplication) {}
 
-  /** Register the Runtime-owned request and stream namespaces. */
   registerRpc(rpc: RpcRegistry): void {
-    rpc.registerServer(
-      new AuxiliaryGenerationRpcServer(this._auxiliaryGeneration)
-    );
-    rpc.registerServer(new RuntimesRpcServer(this._runtimes));
-    rpc.registerServer(new ModelsRpcServer(this._models));
-    rpc.registerServer(new WorkspaceRpcServer(this._workspace));
-    rpc.registerServer(new PromptFilesRpcServer(this._promptFiles));
-    rpc.registerServer(new McpRpcServer(this._mcp));
-    rpc.registerServer(new BuiltinToolsRpcServer(this._builtinTools));
-    rpc.registerServer(new SearchRpcServer(this._search));
-    rpc.registerServer(new NetworkRpcServer(this._network));
-    rpc.registerServer(new SkillsRpcServer(this._skills));
+    rpc.registerServer(new AuxiliaryGenerationRpcServer(this._application));
   }
 }
 
-/** Bind Runtime RPC declarations as one window-scoped feature contribution. */
+/** Bind every host capability as its own window-scoped RPC contribution. */
 export function runtimeContributionsModule(
   scope: DesktopWindowScope
 ): ContainerModule {
   return new ContainerModule(({ bind }) => {
-    bind(RuntimeContribution)
+    bind(AuxiliaryGenerationContribution)
       .toDynamicValue(
         () =>
-          new RuntimeContribution(
-            scope.get(RUNTIME_APPLICATION_TOKENS.auxiliaryGeneration),
-            scope.get(RUNTIME_APPLICATION_TOKENS.runtimes),
-            scope.get(RUNTIME_APPLICATION_TOKENS.models),
-            scope.get(RUNTIME_APPLICATION_TOKENS.workspace),
-            scope.get(RUNTIME_APPLICATION_TOKENS.promptFiles),
-            scope.get(RUNTIME_APPLICATION_TOKENS.mcp),
-            scope.get(RUNTIME_APPLICATION_TOKENS.builtinTools),
-            scope.get(RUNTIME_APPLICATION_TOKENS.search),
-            scope.get(RUNTIME_APPLICATION_TOKENS.network),
-            scope.get(RUNTIME_APPLICATION_TOKENS.skills)
+          new AuxiliaryGenerationContribution(
+            scope.get(RUNTIME_APPLICATION_TOKENS.auxiliaryGeneration)
           )
       )
       .inSingletonScope();
-    bind<RpcContributionApi>(RpcContribution).toService(RuntimeContribution);
+    bind(ModelsRpcContribution)
+      .toDynamicValue(
+        () =>
+          new ModelsRpcContribution(
+            scope.get(RUNTIME_APPLICATION_TOKENS.models)
+          )
+      )
+      .inSingletonScope();
+    bind(PromptFilesRpcContribution)
+      .toDynamicValue(() => new PromptFilesRpcContribution())
+      .inSingletonScope();
+    bind(McpRpcContribution)
+      .toDynamicValue(
+        () =>
+          new McpRpcContribution(
+            scope.get<McpManager>(PROCESS_TOKENS.mcpManager)
+          )
+      )
+      .inSingletonScope();
+    bind(BuiltinToolsRpcContribution)
+      .toDynamicValue(
+        () =>
+          new BuiltinToolsRpcContribution(
+            scope.get<{ tools: ToolRegistry }>(PROCESS_TOKENS.desktopHost).tools
+          )
+      )
+      .inSingletonScope();
+    bind(SearchRpcContribution)
+      .toDynamicValue(
+        () =>
+          new SearchRpcContribution(
+            scope.get<SearchSettingsManager>(PROCESS_TOKENS.searchSettings)
+          )
+      )
+      .inSingletonScope();
+    bind(NetworkRpcContribution)
+      .toDynamicValue(
+        () =>
+          new NetworkRpcContribution(
+            scope.get<NetworkSettingsManager>(PROCESS_TOKENS.networkSettings)
+          )
+      )
+      .inSingletonScope();
+    bind(SkillsRpcContribution)
+      .toDynamicValue(
+        () =>
+          new SkillsRpcContribution(
+            scope.get<SkillsManager>(PROCESS_TOKENS.skillsManager)
+          )
+      )
+      .inSingletonScope();
+
+    for (const contribution of [
+      AuxiliaryGenerationContribution,
+      ModelsRpcContribution,
+      PromptFilesRpcContribution,
+      McpRpcContribution,
+      BuiltinToolsRpcContribution,
+      SearchRpcContribution,
+      NetworkRpcContribution,
+      SkillsRpcContribution,
+    ]) {
+      bind<RpcContributionApi>(RpcContribution).toService(contribution);
+    }
   });
 }

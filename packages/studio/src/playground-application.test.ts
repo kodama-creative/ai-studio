@@ -81,6 +81,7 @@ describe.each(["memory", "sqlite"] as const)(
 
         const receipt = await fixture.app.run(created.id, {
           fromMessageId: "user-1",
+          commandId: "run-1",
         });
         const paused = await fixture.runtime.open({
           sessionId: receipt.sessionId,
@@ -163,7 +164,10 @@ test("rejects Playground tool kinds without a Pi runtime execution path", async 
     });
 
     expect(
-      fixture.app.run(created.id, { fromMessageId: "user-native" })
+      fixture.app.run(created.id, {
+        fromMessageId: "user-native",
+        commandId: "run-native",
+      })
     ).rejects.toThrow(
       `Playground "${created.id}" uses tools that the Pi runtime cannot execute: web_search.`
     );
@@ -203,7 +207,10 @@ test("rejects non-JSON built-in config before admitting a Pi operation", async (
     });
 
     expect(
-      fixture.app.run(created.id, { fromMessageId: "user-config" })
+      fixture.app.run(created.id, {
+        fromMessageId: "user-config",
+        commandId: "run-config",
+      })
     ).rejects.toThrow(
       'Built-in tool "broken_config" config must be a JSON object.'
     );
@@ -212,8 +219,58 @@ test("rejects non-JSON built-in config before admitting a Pi operation", async (
   }
 });
 
+test("reconciles an admitted Playground operation after metadata commit failed", async () => {
+  const fixture = await _fixture("memory", { failAdmissionCommit: true });
+  try {
+    const created = await fixture.app.createPlayground({
+      agentSpec: {
+        schemaVersion: 1,
+        model: { provider: "test", id: "local" },
+        instructions: ["Recover."],
+        tools: [],
+      },
+      conversation: {
+        messages: [
+          {
+            id: "user-crash",
+            role: "user",
+            content: [{ type: "text", text: "recover" }],
+          },
+        ],
+        state: { durable: true },
+      },
+    });
+    const input = {
+      fromMessageId: "user-crash",
+      commandId: "admission-crash",
+      mode: "step" as const,
+    };
+
+    expect(fixture.app.run(created.id, input)).rejects.toThrow(
+      "simulated Playground admission crash"
+    );
+    const receipt = await fixture.app.run(created.id, input);
+
+    expect(await fixture.app.listRuns(created.id)).toMatchObject([
+      { operationId: receipt.operationId, status: "completed" },
+    ]);
+    expect(await fixture.app.loadPlayground(created.id)).toMatchObject({
+      dirty: false,
+      conversation: {
+        state: { durable: true },
+        messages: [{ role: "user" }, { role: "assistant" }],
+      },
+    });
+  } finally {
+    await fixture.close();
+  }
+});
+
 /** Creates all adapters over one physical SQLite path where applicable. */
-async function _fixture(storageKind: "memory" | "sqlite") {
+async function _fixture(
+  storageKind: "memory" | "sqlite",
+  options: { readonly failAdmissionCommit?: boolean } = {}
+) {
   const root = await mkdtemp(join(tmpdir(), "llm-space-studio-pi-"));
   const path = join(root, "studio.sqlite");
   const repository = new BunSqliteSessionRepository({ path });
@@ -226,10 +283,29 @@ async function _fixture(storageKind: "memory" | "sqlite") {
     bindings,
     assistantExecutor,
   });
-  const store: StudioStore =
+  const innerStore: StudioStore =
     storageKind === "memory"
       ? new InMemoryStudioStore()
       : createSqliteStudioStore({ path });
+  let failAdmissionCommit = options.failAdmissionCommit ?? false;
+  const store: StudioStore = failAdmissionCommit
+    ? {
+        transaction(fn) {
+          return innerStore.transaction((tx) => {
+            const faulting = Object.create(tx) as typeof tx;
+            faulting.savePlayground = (playground) => {
+              if (failAdmissionCommit && playground.draft === undefined) {
+                failAdmissionCommit = false;
+                throw new Error("simulated Playground admission crash");
+              }
+              tx.savePlayground(playground);
+            };
+            return fn(faulting);
+          });
+        },
+        close: () => innerStore.close(),
+      }
+    : innerStore;
   const app = createPlaygroundApplication({ runtime, store });
   return {
     app,

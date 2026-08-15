@@ -1,7 +1,4 @@
-import type { RuntimeId } from "@/shared/runtime";
-
 export interface ShareThreadTarget {
-  runtimeId: RuntimeId;
   path: string;
 }
 
@@ -75,13 +72,12 @@ interface SharePublishCallbacks<T extends SharePublishResult> {
 export class ShareThreadDialogFlow {
   private _epoch = 0;
   private _open = false;
-  private _target: ShareThreadTarget = { runtimeId: "local", path: "" };
+  private _target: ShareThreadTarget = { path: "" };
   private _pendingAuth: PendingAuth | null = null;
 
   sync(open: boolean, target: ShareThreadTarget): void {
     if (
       this._open === open &&
-      this._target.runtimeId === target.runtimeId &&
       this._target.path === target.path
     ) {
       return;
@@ -116,10 +112,7 @@ export class ShareThreadDialogFlow {
     if (!this._open) return;
     const operation = this._captureOperation();
     try {
-      const thread = await read({
-        runtimeId: operation.runtimeId,
-        path: operation.path,
-      });
+      const thread = await read({ path: operation.path });
       if (thread.title && this._isCurrent(operation)) display(thread.title);
     } catch {
       // Title prefill is non-fatal; the dialog keeps the path-derived title.
@@ -171,7 +164,6 @@ export class ShareThreadDialogFlow {
   private _captureOperation(): ShareThreadOperation {
     return {
       id: this._epoch,
-      runtimeId: this._target.runtimeId,
       path: this._target.path,
     };
   }
@@ -180,7 +172,6 @@ export class ShareThreadDialogFlow {
     return (
       this._open &&
       operation.id === this._epoch &&
-      operation.runtimeId === this._target.runtimeId &&
       operation.path === this._target.path
     );
   }

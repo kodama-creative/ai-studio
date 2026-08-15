@@ -29,9 +29,9 @@ import {
 
 import { windowClient } from "@/client/native-files";
 
+import { PaneHost } from "./pane-host";
 import type { PaneLifecycleHost } from "./pane-lifecycle-host";
 import { PlaygroundTabPane } from "./playground-tab-pane";
-import { RuntimePaneHost } from "./runtime-pane-host";
 import { tabLabel, type AppTab } from "./use-thread-tabs";
 
 function _getPaneKey(tab: AppTab): string {
@@ -66,11 +66,10 @@ interface ThreadTabsProps {
   closeAll: () => void;
   reorder: (from: number, to: number) => void;
   /** Create and open a new durable Playground. */
-  onNewFile?: () => void;
+  onNewPlayground?: () => void;
   onPlaygroundTitleChange?: (playgroundId: string, title: string) => void;
   onToggleSidebar?: () => void;
   lifecycleHost: PaneLifecycleHost;
-  mutationRevision: number;
   onThreadStateChange?: (tabId: string, thread: Thread | null) => void;
   /** Extra content pinned at the right end of the tab strip, before "+". */
   toolbarSlot?: ReactNode;
@@ -90,11 +89,10 @@ export function ThreadTabs({
   closeOthers,
   closeAll,
   reorder,
-  onNewFile,
+  onNewPlayground,
   onPlaygroundTitleChange,
   onToggleSidebar,
   lifecycleHost,
-  mutationRevision,
   onThreadStateChange,
   toolbarSlot,
 }: ThreadTabsProps) {
@@ -222,20 +220,13 @@ export function ThreadTabs({
         playgroundId={tab.playgroundId}
         active={active}
         lifecycleHost={lifecycleHost}
-        mutationRevision={mutationRevision}
         refreshNonce={tab.refreshNonce ?? 0}
         onClose={close}
         onTitleChange={onPlaygroundTitleChange}
         onThreadStateChange={onThreadStateChange}
       />
     ),
-    [
-      close,
-      lifecycleHost,
-      mutationRevision,
-      onPlaygroundTitleChange,
-      onThreadStateChange,
-    ]
+    [close, lifecycleHost, onPlaygroundTitleChange, onThreadStateChange]
   );
 
   return (
@@ -302,7 +293,7 @@ export function ThreadTabs({
                       variant="ghost"
                       aria-label="New Playground"
                       onMouseDown={_preventFocusSteal}
-                      onClick={onNewFile}
+                      onClick={onNewPlayground}
                     >
                       <PlusIcon className="size-3.5" />
                     </Button>
@@ -344,7 +335,7 @@ export function ThreadTabs({
       <div
         className={cn("relative min-h-0 flex-1", tabs.length === 0 && "hidden")}
       >
-        <RuntimePaneHost
+        <PaneHost
           tabs={paneTabs}
           activeId={activeId}
           getPaneKey={_getPaneKey}

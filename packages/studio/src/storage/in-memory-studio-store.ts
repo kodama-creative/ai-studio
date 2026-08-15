@@ -92,6 +92,16 @@ class MemoryTransaction implements StudioStoreTransaction {
     this._state.commandReceipts.set(key, structuredClone(receipt));
   }
 
+  saveCommandReceipt(receipt: StudioCommandReceipt): void {
+    const key = `${receipt.sessionId}\0${receipt.commandId}`;
+    if (!this._state.commandReceipts.has(key)) {
+      throw new Error(
+        `Command "${receipt.commandId}" does not have a durable receipt.`
+      );
+    }
+    this._state.commandReceipts.set(key, structuredClone(receipt));
+  }
+
   getExperiment(experimentId: string): StudioExperimentRecord | undefined {
     return _clone(this._state.experiments.get(experimentId));
   }

@@ -1,6 +1,6 @@
 import type { PiSessionSnapshot } from "@llm-space/pi-runtime";
 
-import type { StudioStore } from "./storage";
+import type { StudioCommandReceipt, StudioStore } from "./storage";
 
 interface ExecuteDebugCommandInput {
   readonly store: StudioStore;
@@ -10,6 +10,8 @@ interface ExecuteDebugCommandInput {
   readonly method: "step" | "continue";
   readonly input: unknown;
   readonly clock: () => number;
+  readonly readCurrent: () => Promise<PiSessionSnapshot>;
+  readonly needsExecution: (snapshot: PiSessionSnapshot) => boolean;
   readonly execute: () => Promise<PiSessionSnapshot>;
 }
 
@@ -40,13 +42,13 @@ export function readDebugCommandReceipt(
       `Command "${options.commandId}" was already used with other input.`
     );
   }
-  return operationId;
+  return existing.status === "applied" ? operationId : undefined;
 }
 
 /** Durably deduplicates one product debugger command across host restarts. */
 export async function executeDebugCommand(
   options: ExecuteDebugCommandInput
-): Promise<PiSessionSnapshot | undefined> {
+): Promise<PiSessionSnapshot> {
   const fingerprint = _fingerprint(
     options.method,
     options.operationId,
@@ -64,22 +66,49 @@ export async function executeDebugCommand(
         `Command "${options.commandId}" was already used with other input.`
       );
     }
-    return undefined;
+    const current = await options.readCurrent();
+    if (existing.status === "applied") return current;
+    if (!options.needsExecution(current)) {
+      _finalize(options.store, existing, current);
+      return current;
+    }
+  } else {
+    options.store.transaction((tx) =>
+      tx.insertCommandReceipt({
+        sessionId: options.sessionId,
+        commandId: options.commandId,
+        method: options.method,
+        status: "accepted",
+        fingerprint,
+        operationId: options.operationId,
+        createdAt: options.clock(),
+      })
+    );
   }
 
   const snapshot = await options.execute();
-  options.store.transaction((tx) =>
-    tx.insertCommandReceipt({
-      sessionId: options.sessionId,
-      commandId: options.commandId,
-      method: options.method,
-      fingerprint,
-      operationId: options.operationId,
+  const receipt = options.store.transaction((tx) =>
+    tx.getCommandReceipt(options.sessionId, options.commandId)
+  );
+  if (receipt === undefined) {
+    throw new Error(`Command "${options.commandId}" was not accepted.`);
+  }
+  _finalize(options.store, receipt, snapshot);
+  return snapshot;
+}
+
+function _finalize(
+  store: StudioStore,
+  receipt: StudioCommandReceipt,
+  snapshot: PiSessionSnapshot
+): void {
+  store.transaction((tx) =>
+    tx.saveCommandReceipt({
+      ...receipt,
+      status: "applied",
       ...(snapshot.leafId === null ? {} : { leafId: snapshot.leafId }),
-      createdAt: options.clock(),
     })
   );
-  return snapshot;
 }
 
 function _fingerprint(

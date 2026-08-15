@@ -7,7 +7,6 @@ import type { ExecuteToolOptions } from "@llm-space/ui/host";
 
 import { callBuiltInTool } from "@/client/built-in-tools";
 import { callMcpTool } from "@/client/mcp";
-import type { RuntimeId } from "@/shared/runtime";
 
 /**
  * A tool call's result, normalized across MCP and built-in backends.
@@ -27,30 +26,23 @@ export async function executeTool(
   args: Record<string, unknown>,
   options: ExecuteToolOptions
 ): Promise<ToolCallResult> {
-  const runtimeId = options.runtimeId as RuntimeId | undefined;
   if (tool.type === "mcp") {
-    const result = await callMcpTool(
-      {
-        serverId: tool.serverId,
-        toolName: tool.toolName,
-        arguments: args,
-      },
-      runtimeId
-    );
+    const result = await callMcpTool({
+      serverId: tool.serverId,
+      toolName: tool.toolName,
+      arguments: args,
+    });
     return {
       content: result.content,
       isError: result.isError ?? false,
     };
   }
-  const result = await callBuiltInTool(
-    {
-      name: tool.name,
-      arguments: args,
-      config: tool.config,
-      connection: options.connection,
-    },
-    runtimeId
-  );
+  const result = await callBuiltInTool({
+    name: tool.name,
+    arguments: args,
+    config: tool.config,
+    connection: options.connection,
+  });
   return {
     content: result.content,
     isError: false,

@@ -1,3 +1,4 @@
+import type { Thread } from "@llm-space/core";
 import type {
   StudioThread,
   StudioThreadEventData,
@@ -33,6 +34,7 @@ import { toast } from "sonner";
 
 import { createRpcProjectStudioClient } from "@/client/rpc-project-studio-client";
 import { useCommands, useRegisterCommands } from "@/commands";
+import { SerializedPersistence } from "@/components/thread-tabs/serialized-persistence";
 import { TreeView, type TreeDataItem } from "@/components/tree-view";
 import type { AgentProjectView } from "@/shared/agent-project";
 import type {
@@ -570,7 +572,6 @@ function _ProjectThreadPlaygroundPane({
 }) {
   const threadRef = useRef(thread);
   threadRef.current = thread;
-  const saveChain = useRef(Promise.resolve());
   const metadataSaveChain = useRef(Promise.resolve());
   const publishThread = useCallback(
     (next: StudioThread) => {
@@ -579,26 +580,41 @@ function _ProjectThreadPlaygroundPane({
     },
     [onThread]
   );
+  const persistence = useMemo(
+    () =>
+      new SerializedPersistence<Thread>(async (next) => {
+        const current = threadRef.current;
+        const saved = await client.saveDocument(
+          current.id,
+          playgroundThreadToStudioDocument(next, current)
+        );
+        publishThread(saved);
+      }, {
+        onWriteError: (error) => {
+          toast.error("Unable to save Studio Thread; retrying", {
+            description: _errorMessage(error),
+          });
+        },
+      }),
+    [client, publishThread]
+  );
+  const flushPending = useCallback(async () => {
+    // Preserve edits made between debugger Steps as the next Draft. Studio
+    // intentionally rejects Draft writes while Pi owns an active operation.
+    if (threadRef.current.operationId !== undefined) return;
+    await persistence.flush();
+  }, [persistence]);
   const persist = useCallback(
-    (next: import("@llm-space/core").Thread): Promise<void> => {
-      // Engine checkpoints already own execution projections. Queue a Draft
+    (next: Thread): Promise<void> => {
+      // Pi Session checkpoints already own execution projections. Queue a Draft
       // only when the editor changed fields Studio actually persists.
       if (!shouldPersistProjectThread(next, threadRef.current)) {
         return Promise.resolve();
       }
-      saveChain.current = saveChain.current
-        .catch(() => undefined)
-        .then(async () => {
-          const current = threadRef.current;
-          const saved = await client.saveDocument(
-            current.id,
-            playgroundThreadToStudioDocument(next, current)
-          );
-          publishThread(saved);
-        });
-      return saveChain.current;
+      persistence.setPending(next);
+      return flushPending();
     },
-    [client, publishThread]
+    [flushPending, persistence]
   );
   const persistRunMetadata = useCallback(
     (metadata: ThreadRunMetadata): Promise<void> => {
@@ -629,10 +645,13 @@ function _ProjectThreadPlaygroundPane({
         threadId: thread.id,
         getThread: () => threadRef.current,
         onThread: publishThread,
-        beforeExecute: () => saveChain.current,
-        onSettled,
+        beforeAdmission: flushPending,
+        onSettled: async () => {
+          await flushPending();
+          await onSettled();
+        },
       }),
-    [client, onSettled, projectId, publishThread, thread.id]
+    [client, flushPending, onSettled, projectId, publishThread, thread.id]
   );
   return (
     <ThreadPlayground
@@ -642,6 +661,7 @@ function _ProjectThreadPlaygroundPane({
       modelSelectionReadonly={false}
       executionRuntime={executionRuntime}
       runChangePersistence="runtime"
+      sharingEnabled={false}
       initialValue={studioThreadToPlaygroundThread(
         thread,
         history,

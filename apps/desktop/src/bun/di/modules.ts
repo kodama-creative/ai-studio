@@ -1,5 +1,5 @@
+import type { McpManager } from "@llm-space/runtime/mcp";
 import type { ModelManager } from "@llm-space/runtime/models";
-import type { RuntimeRouter } from "@llm-space/runtime/runtime";
 import type { SkillsManager } from "@llm-space/runtime/skills";
 import { createStudio, type Studio } from "@llm-space/studio/server";
 import type { BrowserWindow } from "electrobun/bun";
@@ -11,6 +11,7 @@ import {
 
 import type { AgentProjectView } from "../../shared/agent-project";
 import { DesktopPlaygroundApplicationImpl } from "../application/playground-application";
+import type { DesktopHost } from "../host/desktop-host";
 import { createPlaygroundHost } from "../playgrounds/playground-host";
 import type { AgentProject } from "../projects/agent-project";
 import { ProjectSandbox } from "../projects/project-sandbox";
@@ -57,15 +58,19 @@ export function processModule(services: ProcessServices): ContainerModule {
         const modelManager = context.get<ModelManager>(
           PROCESS_TOKENS.modelManager
         );
-        const runtimeRouter = context.get<RuntimeRouter>(
-          PROCESS_TOKENS.runtimeRouter
-        );
+        const desktopHost = context.get<DesktopHost>(PROCESS_TOKENS.desktopHost);
+        const mcpManager = context.get<McpManager>(PROCESS_TOKENS.mcpManager);
         return createPlaygroundHost({
           homePath: context.get(PROCESS_TOKENS.homePath),
           models: () => modelManager.getAvailableModels(),
           resolveConnection: ({ providerId }) =>
             modelManager.resolveConnection({ providerId }),
-          runtime: runtimeRouter.get("local"),
+          tools: {
+            listBuiltinTools: () => desktopHost.tools.listTools(),
+            callBuiltinTool: (input) => desktopHost.tools.call(input),
+            listMcpTools: (serverId) => mcpManager.listTools(serverId),
+            callMcpTool: (input) => mcpManager.callTool(input),
+          },
         });
       })
       .inSingletonScope();

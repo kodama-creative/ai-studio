@@ -15,6 +15,7 @@ interface FixtureRpc {
       id: string,
       options?: { readonly fresh?: boolean }
     ): Promise<{ readonly id: string }>;
+    wait(input: { readonly signal?: AbortSignal }): Promise<void>;
   };
   readonly streams: {
     changes(input?: {
@@ -28,7 +29,7 @@ interface FixtureRpc {
 }
 
 const FIXTURE_RPC = defineRpcNamespace<FixtureRpc>("fixture", {
-  requests: { read: true, readOptional: true },
+  requests: { read: true, readOptional: true, wait: true },
   streams: { changes: true },
   events: { changed: true },
 });
@@ -122,6 +123,33 @@ test("RPC clients are values rather than thenables", async () => {
   expect(calls).toEqual([]);
 });
 
+test("request signals stay local while reaching the transport cancellation seam", async () => {
+  const calls: unknown[] = [];
+  const controller = new AbortController();
+  const client = createRpcClient(FIXTURE_RPC, {
+    request(input) {
+      calls.push(input);
+      return Promise.resolve({ ok: true, value: undefined });
+    },
+    async *stream() {
+      await Promise.resolve();
+      yield* [];
+    },
+    subscribe: () => ({ dispose: () => undefined }),
+  });
+
+  await client.wait({ signal: controller.signal });
+
+  expect(calls).toEqual([
+    {
+      namespace: "fixture",
+      method: "wait",
+      args: [{}],
+      signal: controller.signal,
+    },
+  ]);
+});
+
 test("RPC clients expose only stable declared members", () => {
   const calls: NamespacedRpcRequest[] = [];
   const client = createRpcClient(FIXTURE_RPC, {
@@ -149,7 +177,11 @@ test("RPC clients expose only stable declared members", () => {
 test("RPC namespace manifests are runtime-immutable snapshots", () => {
   expect(Object.isFrozen(FIXTURE_RPC)).toBe(true);
   expect(Object.isFrozen(FIXTURE_RPC.requestNames)).toBe(true);
-  expect([...FIXTURE_RPC.requestNames]).toEqual(["read", "readOptional"]);
+  expect([...FIXTURE_RPC.requestNames]).toEqual([
+    "read",
+    "readOptional",
+    "wait",
+  ]);
   expect(Reflect.get(FIXTURE_RPC.requestNames, "add")).toBeUndefined();
   expect(Reflect.set(FIXTURE_RPC, "name", "mutated")).toBe(false);
   expect(FIXTURE_RPC.name).toBe("fixture");

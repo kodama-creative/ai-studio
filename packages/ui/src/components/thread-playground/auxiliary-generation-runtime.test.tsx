@@ -100,7 +100,7 @@ describe("stateless auxiliary generation", () => {
 
   test("project generation uses auxiliary text generation and local host settings", async () => {
     const attempts: AuxiliaryGenerateInput[] = [];
-    const calls: Array<{ operation: string; runtimeId?: string }> = [];
+    const calls: string[] = [];
     const auxiliaryGeneration: AuxiliaryGenerationHost = {
       async *generate(input) {
         attempts.push(input);
@@ -109,21 +109,21 @@ describe("stateless auxiliary generation", () => {
     };
     const skills: SkillsHost = {
       getSettings: async () => ({ discoveryPaths: [] }),
-      listAvailable: async (options) => {
-        calls.push({ operation: "skills.available", ...options });
+      listAvailable: async () => {
+        calls.push("skills.available");
         return [];
       },
       listSkills: async () => [],
     };
     const mcp = {
-      listServers: async (options) => {
-        calls.push({ operation: "mcp.list", ...options });
+      listServers: async () => {
+        calls.push("mcp.list");
         return [];
       },
     } as McpHost;
     const generator = {
-      getSearchSettings: async (options) => {
-        calls.push({ operation: "search.settings", ...options });
+      getSearchSettings: async () => {
+        calls.push("search.settings");
         return {
           provider: "firecrawl" as const,
           braveApiKey: "",
@@ -131,13 +131,12 @@ describe("stateless auxiliary generation", () => {
           tavilyApiKey: "",
         };
       },
-      resolveEnv: async (_providerId, _envNames, options) => {
-        calls.push({ operation: "generator.env", ...options });
+      resolveEnv: async () => {
+        calls.push("generator.env");
         return { modelApiKey: "local-secret", envValues: {} };
       },
     } as GeneratorHost;
     const runtime = bindProjectGenerationRuntime({
-      runtimeId: "local",
       auxiliaryGeneration,
       profileId: "work",
       skills,
@@ -164,10 +163,10 @@ describe("stateless auxiliary generation", () => {
       profileId: "work",
     });
     expect(calls).toEqual([
-      { operation: "skills.available", runtimeId: "local" },
-      { operation: "mcp.list", runtimeId: "local" },
-      { operation: "search.settings", runtimeId: "local" },
-      { operation: "generator.env", runtimeId: "local" },
+      "skills.available",
+      "mcp.list",
+      "search.settings",
+      "generator.env",
     ]);
   });
 });

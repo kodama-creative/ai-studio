@@ -8,7 +8,7 @@ import { resolveModelConfig } from "@llm-space/core/thread";
 /**
  * Build the immutable copy published by sharing.
  *
- * The web viewer has no provider registry, so the owning runtime's resolved
+ * The web viewer has no provider registry, so the Playground's resolved
  * model and display name must be frozen into the copy without mutating the
  * source Thread.
  */

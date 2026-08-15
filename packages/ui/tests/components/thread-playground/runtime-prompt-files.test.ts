@@ -4,33 +4,17 @@ import { renderThreadPromptVariables } from "@llm-space/core/thread";
 import type { ThreadContext } from "@llm-space/core/types";
 
 import { createGenerateProjectPromptPreparer } from "../../../src/components/thread-playground/codegen/generate-project-prompt-preparer";
-import { createRuntimePromptFiles } from "../../../src/components/thread-playground/runtime-prompt-files";
+import { createPromptFiles } from "../../../src/components/thread-playground/runtime-prompt-files";
 import { createThreadStore } from "../../../src/components/thread-playground/stores/thread-store";
 import type { FilesHost } from "../../../src/host/types";
 
-describe("runtime prompt files", () => {
-  test("preserves the owning runtime in the thread store", () => {
-    const store = createThreadStore(
-      {},
-      {
-        runtimeId: "remote:test",
-      }
-    );
-
-    expect(store.getState().runtimeId).toBe("remote:test");
-  });
-
-  test("prepares generated projects from the store's owning runtime", async () => {
-    const accesses: { path: string; runtimeId: string }[] = [];
+describe("prompt files", () => {
+  test("prepares generated projects through the injected file host", async () => {
+    const accesses: string[] = [];
     const files = {
-      readText: (
-        path: string,
-        { runtimeId }: { runtimeId: string }
-      ): Promise<string> => {
-        accesses.push({ path, runtimeId });
-        return Promise.resolve(
-          runtimeId === "remote:test" ? "REMOTE SENTINEL" : "LOCAL LEAK"
-        );
+      readText: (path: string): Promise<string> => {
+        accesses.push(path);
+        return Promise.resolve("FILE SENTINEL");
       },
       exists: () => Promise.resolve(true),
       directoryExists: () => Promise.resolve(null),
@@ -46,8 +30,7 @@ describe("runtime prompt files", () => {
             document: { type: "file", value: "/workspace/same.md" },
           },
         },
-      },
-      { runtimeId: "remote:test" }
+      }
     );
     const preparePrompt = createGenerateProjectPromptPreparer({
       files,
@@ -59,79 +42,41 @@ describe("runtime prompt files", () => {
     });
 
     expect(prepared.rendered.context.systemPrompt).toBe(
-      "REMOTE SENTINEL | REMOTE SENTINEL"
+      "FILE SENTINEL | FILE SENTINEL"
     );
     expect(prepared.systemPromptTemplate).toBe(
-      "REMOTE SENTINEL | {{ document }}"
+      "FILE SENTINEL | {{ document }}"
     );
     expect(accesses.length).toBeGreaterThan(0);
-    expect(accesses.every((access) => access.runtimeId === "remote:test")).toBe(
-      true
-    );
+    expect(accesses.every((path) => path === "/workspace/same.md")).toBe(true);
   });
 
-  test("requires explicit ownership instead of falling through to a default", () => {
-    const files = {
-      readText: () => Promise.resolve("LOCAL LEAK"),
-      exists: () => Promise.resolve(true),
-      directoryExists: () => Promise.resolve(null),
-      pickFile: () => Promise.resolve(null),
-      pickDirectory: () => Promise.resolve(null),
-    } satisfies FilesHost;
-
-    expect(() =>
-      createRuntimePromptFiles(files, undefined as unknown as string)
-    ).toThrow("runtimeId");
-  });
-
-  test("resolves includes, exists, file variables, and AGENTS.md only on the owning runtime", async () => {
-    const localFiles: Record<string, string> = {
-      "/workspace/AGENTS.md": "LOCAL AGENTS",
-      "/workspace/nested.md": "LOCAL NESTED",
-      "/workspace/local-only.md": "LOCAL LEAK",
-      "/workspace/unreadable.md": "LOCAL UNREADABLE LEAK",
-      "~/note.md": "LOCAL HOME",
-    };
-    const remoteFiles: Record<string, string> = {
+  test("resolves includes, exists, file variables, and AGENTS.md through one file host", async () => {
+    const hostFiles: Record<string, string> = {
       "/workspace/AGENTS.md":
-        'REMOTE AGENTS {{@include("/workspace/nested.md")}}',
-      "/workspace/nested.md": "REMOTE NESTED",
-      "/workspace/remote-only.md": "REMOTE FILE VARIABLE",
-      "~/note.md": "REMOTE HOME",
+        'HOST AGENTS {{@include("/workspace/nested.md")}}',
+      "/workspace/nested.md": "HOST NESTED",
+      "/workspace/document.md": "HOST FILE VARIABLE",
+      "~/note.md": "HOST HOME",
     };
     const accesses: {
       operation: "read" | "exists";
       path: string;
-      runtimeId?: string;
     }[] = [];
     const files = {
-      readText: (
-        path: string,
-        options?: { runtimeId?: string }
-      ): Promise<string> => {
-        accesses.push({ operation: "read", path, runtimeId: options?.runtimeId });
-        const source =
-          options?.runtimeId === "remote:test" ? remoteFiles : localFiles;
-        return Promise.resolve(source[path] ?? "");
+      readText: (path: string): Promise<string> => {
+        accesses.push({ operation: "read", path });
+        return Promise.resolve(hostFiles[path] ?? "");
       },
-      exists: (
-        path: string,
-        options?: { runtimeId?: string }
-      ): Promise<boolean> => {
-        accesses.push({
-          operation: "exists",
-          path,
-          runtimeId: options?.runtimeId,
-        });
-        const source =
-          options?.runtimeId === "remote:test" ? remoteFiles : localFiles;
-        return Promise.resolve(Object.hasOwn(source, path));
+      exists: (path: string): Promise<boolean> => {
+        accesses.push({ operation: "exists", path });
+        return Promise.resolve(Object.hasOwn(hostFiles, path));
       },
       directoryExists: () => Promise.resolve(null),
       pickFile: () => Promise.resolve(null),
       pickDirectory: () => Promise.resolve(null),
     } satisfies FilesHost;
-    const promptFiles = createRuntimePromptFiles(files, "remote:test");
+    const promptFiles = createPromptFiles(files);
     const context: ThreadContext = {
       systemPrompt: `
 {% set agents_path = current_working_directory ~ "/AGENTS.md" %}
@@ -145,7 +90,7 @@ describe("runtime prompt files", () => {
           type: "workingDirectory",
           value: "/workspace",
         },
-        doc: { type: "file", value: "/workspace/remote-only.md" },
+        doc: { type: "file", value: "/workspace/document.md" },
       },
     };
 
@@ -156,16 +101,12 @@ describe("runtime prompt files", () => {
     });
 
     expect((rendered.context.systemPrompt ?? "").replace(/\s+/g, " ").trim()).toBe(
-      "REMOTE AGENTS REMOTE NESTED |REMOTE FILE VARIABLE |REMOTE HOME | |SAFE"
+      "HOST AGENTS HOST NESTED |HOST FILE VARIABLE |HOST HOME | |SAFE"
     );
     expect(accesses.length).toBeGreaterThan(0);
-    expect(accesses.every(({ runtimeId }) => runtimeId === "remote:test")).toBe(
-      true
-    );
     expect(accesses).toContainEqual({
       operation: "read",
       path: "~/note.md",
-      runtimeId: "remote:test",
     });
   });
 });

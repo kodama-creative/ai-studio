@@ -20,6 +20,7 @@ import {
   writeProjectFile,
 } from "@/client/generator";
 import { listMcpServers, listMcpTools } from "@/client/mcp";
+import { modelsClient } from "@/client/models";
 import {
   directoryExists,
   ensureRootDir,
@@ -28,7 +29,6 @@ import {
   readTextFile,
   textFileExists,
 } from "@/client/paths";
-import { modelsClient } from "@/client/runtime-rpc-clients";
 import { getSearchSettings } from "@/client/search";
 import {
   getSkillsSettings,
@@ -38,42 +38,36 @@ import {
 import { executeTool } from "@/client/tool-execution";
 import { useCommands } from "@/commands";
 import type { SettingsTab } from "@/shared/commands";
-import type { RuntimeId } from "@/shared/runtime";
 
 import { createDesktopShareThreadAction } from "./share-thread-action";
 /** The desktop {@link ModelClient}, backed by Electrobun RPC. */
-export function createElectrobunModelClient(
-  runtimeId?: RuntimeId
-): ModelClient {
+export function createElectrobunModelClient(): ModelClient {
   return {
-    availableModels: () => modelsClient.list(runtimeId),
-    builtinProviders: () => modelsClient.listBuiltin(runtimeId),
-    getDefaultModel: () => modelsClient.getDefault(runtimeId),
-    setDefaultModel: (model) => modelsClient.setDefault(runtimeId, model),
-    removeProvider: (providerId) =>
-      modelsClient.removeProvider(runtimeId, providerId),
-    addProvider: (providerId) =>
-      modelsClient.addProvider(runtimeId, providerId),
-    addCustomProvider: (input) =>
-      modelsClient.addCustomProvider(runtimeId, input),
+    availableModels: () => modelsClient.list(),
+    builtinProviders: () => modelsClient.listBuiltin(),
+    getDefaultModel: () => modelsClient.getDefault(),
+    setDefaultModel: (model) => modelsClient.setDefault(model),
+    removeProvider: (providerId) => modelsClient.removeProvider(providerId),
+    addProvider: (providerId) => modelsClient.addProvider(providerId),
+    addCustomProvider: (input) => modelsClient.addCustomProvider(input),
     addProviderProfile: (providerId) =>
-      modelsClient.addProfile(runtimeId, providerId),
+      modelsClient.addProfile(providerId),
     updateProviderProfile: (providerId, profileId, fields) =>
-      modelsClient.updateProfile(runtimeId, {
+      modelsClient.updateProfile({
         providerId,
         profileId,
         ...fields,
       }),
     removeProviderProfile: (providerId, profileId) =>
-      modelsClient.removeProfile(runtimeId, providerId, profileId),
+      modelsClient.removeProfile(providerId, profileId),
     updateProvider: (providerId, fields) =>
-      modelsClient.updateProvider(runtimeId, { providerId, ...fields }),
+      modelsClient.updateProvider({ providerId, ...fields }),
     setModelEnabled: (providerId, modelId, enabled) =>
-      modelsClient.setEnabled(runtimeId, providerId, modelId, enabled),
+      modelsClient.setEnabled(providerId, modelId, enabled),
     setAllModelsEnabled: (providerId, enabled) =>
-      modelsClient.setAllEnabled(runtimeId, providerId, enabled),
+      modelsClient.setAllEnabled(providerId, enabled),
     testModelConnection: async (providerId, modelId, candidate, profileId) => {
-      await modelsClient.testConnection(runtimeId, {
+      await modelsClient.testConnection({
         providerId,
         profileId,
         modelId,
@@ -81,9 +75,9 @@ export function createElectrobunModelClient(
       });
     },
     removeCustomModel: (providerId, modelId) =>
-      modelsClient.removeCustom(runtimeId, providerId, modelId),
+      modelsClient.removeCustom(providerId, modelId),
     upsertCustomModel: (providerId, model, originalId) =>
-      modelsClient.upsertCustom(runtimeId, providerId, model, originalId),
+      modelsClient.upsertCustom(providerId, model, originalId),
   };
 }
 
@@ -105,30 +99,22 @@ export function DesktopHostProvider({ children }: { children: ReactNode }) {
       auxiliaryGeneration,
       executeTool,
       skills: {
-        getSettings: (options) =>
-          getSkillsSettings(options?.runtimeId as RuntimeId | undefined),
-        listAvailable: (options) =>
-          listAvailableSkills(options?.runtimeId as RuntimeId | undefined),
-        listSkills: (path, options) =>
-          listSkills(path, options?.runtimeId as RuntimeId | undefined),
+        getSettings: () => getSkillsSettings(),
+        listAvailable: () => listAvailableSkills(),
+        listSkills: (path) => listSkills(path),
       },
       mcp: {
-        listServers: (options) =>
-          listMcpServers(options?.runtimeId as RuntimeId | undefined),
-        listTools: (serverId, options) =>
-          listMcpTools(serverId, options?.runtimeId as RuntimeId | undefined),
+        listServers: () => listMcpServers(),
+        listTools: (serverId) => listMcpTools(serverId),
       },
       builtinTools: {
-        list: (options) =>
-          listBuiltInTools(options?.runtimeId as RuntimeId | undefined),
+        list: () => listBuiltInTools(),
         fsReveal,
       },
       paths: { ensureRootDir },
       files: {
-        readText: (path, options) =>
-          readTextFile(path, options.runtimeId as RuntimeId),
-        exists: (path, options) =>
-          textFileExists(path, options.runtimeId as RuntimeId),
+        readText: (path) => readTextFile(path),
+        exists: (path) => textFileExists(path),
         directoryExists,
         pickFile,
         pickDirectory,
@@ -141,18 +127,16 @@ export function DesktopHostProvider({ children }: { children: ReactNode }) {
         writeFile: writeProjectFile,
         removeFile: removeProjectFile,
         openDevTerminal: openGeneratorDevTerminal,
-        getSearchSettings: (options: { runtimeId: string }) =>
-          getSearchSettings(options.runtimeId as RuntimeId),
+        getSearchSettings: () => getSearchSettings(),
         resolveEnv: (
           providerId: string,
           envNames: string[],
-          options: { runtimeId: string; profileId?: string }
+          options?: { profileId?: string }
         ) =>
           resolveGeneratorEnv(
             providerId,
             envNames,
-            options.profileId,
-            options.runtimeId as RuntimeId
+            options?.profileId
           ),
       },
       actions: {

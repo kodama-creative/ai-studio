@@ -4,15 +4,19 @@ import type {
   ProviderConnectionRef,
 } from "@llm-space/core";
 
-import type { RuntimeId } from "@/shared/runtime";
+import { BUILTIN_TOOLS_RPC } from "@/shared/builtin-tools-rpc";
+import { createRpcClient } from "@/shared/namespaced-rpc";
 
+import { createElectrobunRpcClientTransport } from "./namespaced-rpc-client";
 import { revealNativeFile } from "./native-files";
-import { builtinToolsClient } from "./runtime-rpc-clients";
 
-export async function listBuiltInTools(
-  runtimeId?: RuntimeId
-): Promise<BuiltinTool[]> {
-  return builtinToolsClient.list(runtimeId);
+const builtinToolsClient = createRpcClient(
+  BUILTIN_TOOLS_RPC,
+  createElectrobunRpcClientTransport()
+);
+
+export async function listBuiltInTools(): Promise<BuiltinTool[]> {
+  return builtinToolsClient.list();
 }
 
 export async function callBuiltInTool(
@@ -21,10 +25,9 @@ export async function callBuiltInTool(
     arguments: Record<string, unknown>;
     config?: Record<string, unknown>;
     connection?: ProviderConnectionRef;
-  },
-  runtimeId?: RuntimeId
+  }
 ): Promise<BuiltinToolCallResponse> {
-  return builtinToolsClient.call(runtimeId, input);
+  return builtinToolsClient.call(input);
 }
 
 /** Open a directory itself, or reveal a file selected in its parent folder. */

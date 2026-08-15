@@ -38,7 +38,6 @@ import { toast } from "sonner";
 
 import { getAnalyticsSettings, setAnalyticsSettings } from "@/client/analytics";
 import { updatesClient } from "@/client/application-rpc-clients";
-import { getWorkspacePath } from "@/client/paths";
 import { useCommands } from "@/commands";
 import { DEFAULT_ANALYTICS_SETTINGS } from "@/shared/analytics";
 import { DEFAULT_UPDATE_MODE, type UpdateMode } from "@/shared/updates";
@@ -242,40 +241,6 @@ function AnalyticsRow() {
   );
 }
 
-function WorkspaceFolderLink() {
-  const { executeCommand } = useCommands();
-  const [path, setPath] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    void getWorkspacePath()
-      .then((loaded) => {
-        if (!cancelled) setPath(loaded);
-      })
-      .catch(() => {
-        // Non-fatal; leave the placeholder.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  if (!path) {
-    return <span className="text-muted-foreground text-sm">…</span>;
-  }
-
-  return (
-    <button
-      type="button"
-      onClick={() => executeCommand({ type: "shell.openWorkspaceFolder", args: {} })}
-      className="text-primary max-w-[50%] cursor-pointer truncate font-mono text-sm underline underline-offset-2 hover:opacity-80"
-      title={path}
-    >
-      {path}
-    </button>
-  );
-}
-
 /** Read/write the bun-owned update mode over RPC. */
 function useUpdateMode(): [UpdateMode, (mode: UpdateMode) => void] {
   const [mode, setMode] = useState<UpdateMode>(DEFAULT_UPDATE_MODE);
@@ -410,17 +375,6 @@ export function GeneralPage() {
         </SettingsSection>
 
         <SettingsSection title="Data & privacy">
-          <SettingsRow
-            label={
-              <RowLabel
-                title="Workspace folder"
-                hint="Where your threads are stored on disk."
-              />
-            }
-          >
-            <WorkspaceFolderLink />
-          </SettingsRow>
-
           <AnalyticsRow />
         </SettingsSection>
 

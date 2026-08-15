@@ -6,10 +6,13 @@ import type {
   DurablePiRuntime,
 } from "@llm-space/pi-runtime";
 
+import { executeDebugCommand } from "./debug-command";
 import {
-  executeDebugCommand,
-  readDebugCommandReceipt,
-} from "./debug-command";
+  cancelActiveOperation,
+  driveAdmittedOperation,
+  hasActiveOperation,
+  resolveOperationAdmission,
+} from "./operation-lifecycle";
 import {
   STUDIO_PI_LANE,
   STUDIO_PI_RUNTIME_FORMAT_VERSION,
@@ -53,13 +56,15 @@ export interface SavePlaygroundInput {
 export type RunPlaygroundInput =
   | {
       readonly fromMessageId: string;
+      readonly commandId: string;
+      readonly signal?: AbortSignal;
       readonly mode?: undefined;
-      readonly commandId?: undefined;
     }
   | {
       readonly fromMessageId: string;
       readonly mode: "step" | "continue";
       readonly commandId: string;
+      readonly signal?: AbortSignal;
     };
 
 export interface PlaygroundApplication {
@@ -90,6 +95,7 @@ export interface PlaygroundApplication {
     input: StudioToolApprovalInput
   ): Promise<StudioOperationReceipt>;
   cancelRun(playgroundId: string, operationId: string): Promise<void>;
+  cancelActiveRun(playgroundId: string): Promise<void>;
   inspectRun(
     playgroundId: string,
     operationId: string
@@ -175,7 +181,7 @@ class PlaygroundApplicationImpl implements PlaygroundApplication {
       sessionId: record.sessionId,
       lane: record.lane,
     });
-    if (_hasActiveOperation(snapshot)) {
+    if (hasActiveOperation(snapshot)) {
       throw new Error(`Playground "${playgroundId}" has an active operation.`);
     }
     const next: PlaygroundRecord = {
@@ -196,22 +202,27 @@ class PlaygroundApplicationImpl implements PlaygroundApplication {
   ): Promise<StudioOperationReceipt> {
     this._requireOpen();
     let record = this._requireRecord(playgroundId);
-    if (input.mode !== undefined) {
-      const operationId = readDebugCommandReceipt({
-        store: this._options.store,
-        sessionId: record.sessionId,
-        commandId: input.commandId,
-        method: input.mode,
-        input,
-      });
-      if (operationId !== undefined) {
-        return { sessionId: record.sessionId, operationId };
-      }
+    const admission = await resolveOperationAdmission({
+      store: this._options.store,
+      runtime: this._options.runtime,
+      productId: playgroundId,
+      productLabel: `Playground "${playgroundId}"`,
+      sessionId: record.sessionId,
+      lane: record.lane,
+      commandId: input.commandId,
+      commandInput: input,
+      mode: input.mode,
+    });
+    if (admission.kind === "receipt") {
+      return { sessionId: record.sessionId, operationId: admission.operationId };
     }
-    const view = await this._compose(record);
-    if (view.operationId !== undefined) {
-      throw new Error(`Playground "${playgroundId}" has an active operation.`);
+    const operationId = admission.operationId;
+    const current = admission.snapshot;
+    if (admission.kind === "recover") {
+      record = this._reconcileAdmittedOperation(record, current);
+      return this._driveAdmittedOperation(record, current, input);
     }
+    const view = await this._compose(record, current);
     const inputIndex = view.conversation.messages.findIndex(
       (message) => message.id === input.fromMessageId
     );
@@ -227,14 +238,13 @@ class PlaygroundApplicationImpl implements PlaygroundApplication {
       state: structuredClone(view.conversation.state),
     });
     record = prepared.record;
-    const operationId = this._generateId("operation");
     const binding = _runtimeBinding(record.id, record.agentSpec);
     const messages = coreMessagesToPi(
       [...prepared.baseMessages, inputMessage],
       binding.model,
       this._clock()
     );
-    let snapshot = await this._options.runtime.start({
+    const snapshot = await this._options.runtime.start({
       operationId,
       sessionId: record.sessionId,
       lane: record.lane,
@@ -262,52 +272,60 @@ class PlaygroundApplicationImpl implements PlaygroundApplication {
     // Pi admission is authoritative. Studio clears the Draft immediately after
     // that commit so a host crash cannot leave a second pending-run model.
     this._options.store.transaction((tx) => tx.savePlayground(next));
-    if (input.mode === "continue") {
-      snapshot =
-        (await executeDebugCommand({
-          store: this._options.store,
-          sessionId: record.sessionId,
-          operationId,
-          commandId: input.commandId,
-          method: "continue",
-          input,
-          clock: this._clock,
-          execute: () =>
-            this._options.runtime.continue({
-              sessionId: record.sessionId,
-              lane: record.lane,
-            }),
-        })) ??
-        (await this._options.runtime.open({
-          sessionId: record.sessionId,
-          lane: record.lane,
-        }));
-    } else if (input.mode === "step" && snapshot.nextAction !== undefined) {
-      const action = snapshot.nextAction;
-      snapshot =
-        (await executeDebugCommand({
-          store: this._options.store,
-          sessionId: record.sessionId,
-          operationId,
-          commandId: input.commandId,
-          method: "step",
-          input,
-          clock: this._clock,
-          execute: () =>
-            this._options.runtime.step({
-              sessionId: record.sessionId,
-              lane: record.lane,
-              expectedActionId: action.id,
-              kind: action.kind,
-            }),
-        })) ??
-        (await this._options.runtime.open({
-          sessionId: record.sessionId,
-          lane: record.lane,
-        }));
-    }
+    return this._driveAdmittedOperation(next, snapshot, input);
+  }
+
+  /** Applies the optional initial debugger mode after admission metadata commits. */
+  private async _driveAdmittedOperation(
+    record: PlaygroundRecord,
+    initial: PiSessionSnapshot,
+    input: RunPlaygroundInput
+  ): Promise<StudioOperationReceipt> {
+    const { operationId, snapshot } = await driveAdmittedOperation({
+      store: this._options.store,
+      runtime: this._options.runtime,
+      productId: record.id,
+      sessionId: record.sessionId,
+      lane: record.lane,
+      initial,
+      commandId: input.commandId,
+      commandInput: input,
+      mode: input.mode,
+      signal: input.signal,
+      clock: this._clock,
+    });
     this._recordSnapshot(operationId, snapshot);
     return { sessionId: record.sessionId, operationId };
+  }
+
+  /** Repairs a missing Playground reference from Pi's admitted identity. */
+  private _reconcileAdmittedOperation(
+    record: PlaygroundRecord,
+    snapshot: PiSessionSnapshot
+  ): PlaygroundRecord {
+    if (snapshot.operationId === undefined) return record;
+    const { draft, ...committed } = record;
+    const reference = {
+      sessionId: record.sessionId,
+      lane: record.lane,
+      operationId: snapshot.operationId,
+      ...(snapshot.leafId === null ? {} : { leafId: snapshot.leafId }),
+      agentSnapshot: agentSpecSnapshot(record.id, record.agentSpec),
+      relation: "executed" as const,
+    };
+    const next: PlaygroundRecord = {
+      ...committed,
+      state: structuredClone(draft?.state ?? record.state),
+      operationReferences: [
+        ...record.operationReferences.filter(
+          (item) => item.operationId !== snapshot.operationId
+        ),
+        reference,
+      ],
+      updatedAt: this._clock(),
+    };
+    this._options.store.transaction((tx) => tx.savePlayground(next));
+    return next;
   }
 
   /** Releases exactly the stable Pi semantic action selected by the caller. */
@@ -326,6 +344,13 @@ class PlaygroundApplicationImpl implements PlaygroundApplication {
       method: "step",
       input,
       clock: this._clock,
+      readCurrent: () =>
+        this._options.runtime.open({
+          sessionId: ownership.sessionId,
+          lane: ownership.lane,
+        }),
+      needsExecution: (current) =>
+        current.nextAction?.id === input.expectedActionId,
       execute: () =>
         this._options.runtime.step({
           sessionId: ownership.sessionId,
@@ -334,7 +359,7 @@ class PlaygroundApplicationImpl implements PlaygroundApplication {
           kind: input.kind,
         }),
     });
-    if (snapshot !== undefined) this._recordSnapshot(operationId, snapshot);
+    this._recordSnapshot(operationId, snapshot);
     return { sessionId: ownership.sessionId, operationId };
   }
 
@@ -354,13 +379,19 @@ class PlaygroundApplicationImpl implements PlaygroundApplication {
       method: "continue",
       input,
       clock: this._clock,
+      readCurrent: () =>
+        this._options.runtime.open({
+          sessionId: ownership.sessionId,
+          lane: ownership.lane,
+        }),
+      needsExecution: (current) => current.status === "paused",
       execute: () =>
         this._options.runtime.continue({
           sessionId: ownership.sessionId,
           lane: ownership.lane,
         }),
     });
-    if (snapshot !== undefined) this._recordSnapshot(operationId, snapshot);
+    this._recordSnapshot(operationId, snapshot);
     return { sessionId: ownership.sessionId, operationId };
   }
 
@@ -391,6 +422,19 @@ class PlaygroundApplicationImpl implements PlaygroundApplication {
       lane: ownership.lane,
     });
     this._recordSnapshot(operationId, snapshot);
+  }
+
+  /** Cancels the Pi-authoritative active operation without requiring a Studio reference. */
+  async cancelActiveRun(playgroundId: string): Promise<void> {
+    this._requireOpen();
+    const record = this._requireRecord(playgroundId);
+    const cancelled = await cancelActiveOperation({
+      runtime: this._options.runtime,
+      sessionId: record.sessionId,
+      lane: record.lane,
+    });
+    if (cancelled === undefined) return;
+    this._recordSnapshot(cancelled.operationId, cancelled.snapshot);
   }
 
   /** Reads the current durable debugger state for an owned operation. */
@@ -492,7 +536,7 @@ class PlaygroundApplicationImpl implements PlaygroundApplication {
       sessionId: record.sessionId,
       lane: record.lane,
       leafId: snapshot.leafId,
-      ...(_hasActiveOperation(snapshot) && snapshot.operationId !== undefined
+      ...(hasActiveOperation(snapshot) && snapshot.operationId !== undefined
         ? { operationId: snapshot.operationId }
         : {}),
       runtimeFormatVersion: record.runtimeFormatVersion,
@@ -668,11 +712,6 @@ function _runtimeBinding(
       hostBinding: structuredClone(tool.hostBinding),
     })),
   };
-}
-
-/** An operation remains active only while Pi exposes a next action or suspension. */
-function _hasActiveOperation(snapshot: PiSessionSnapshot): boolean {
-  return snapshot.nextAction !== undefined || snapshot.status === "suspended";
 }
 
 /** Compares editor messages without relying on reference identity. */

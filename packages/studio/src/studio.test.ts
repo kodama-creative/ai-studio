@@ -303,6 +303,90 @@ test("load_skill uses the Skill set frozen for the Studio operation", async () =
   });
 });
 
+test("ToolContext uses the Agent identity frozen for the current operation", async () => {
+  const projectRoot = await _project();
+  const dataRoot = await _temp("llm-space-studio-agent-id-data-");
+  const faux = fauxProvider({ tokensPerSecond: 0 });
+  const model = faux.getModel();
+  const models = createModels();
+  models.setProvider(faux.provider);
+  faux.setResponses([
+    fauxAssistantMessage(
+      [fauxToolCall("sandbox-id", {}, { id: "sandbox-call" })],
+      { stopReason: "toolUse" }
+    ),
+  ]);
+  await writeFile(
+    join(projectRoot, "agent", "agent.ts"),
+    `export default { model: "${model.provider}/${model.id}" };\n`
+  );
+  const observedAgentIds: string[] = [];
+  const studio = await _studio({
+    projectRoot,
+    dataRoot,
+    models,
+    runtimeServices: {
+      sandbox: {
+        getOrCreate(input) {
+          observedAgentIds.push(input.agentId);
+          return Promise.resolve({
+            run: () =>
+              Promise.resolve({ exitCode: 0, stdout: "", stderr: "" }),
+            readFile: () => Promise.resolve(new Uint8Array()),
+            writeFile: () => Promise.resolve(),
+          });
+        },
+      },
+    },
+  });
+  const thread = await studio.createThread({ title: "Frozen identity" });
+
+  await writeFile(
+    join(projectRoot, "package.json"),
+    `${JSON.stringify({ name: "test-studio-next", private: true })}\n`
+  );
+  await mkdir(join(projectRoot, "agent", "tools"), { recursive: true });
+  await writeFile(
+    join(projectRoot, "agent", "tools", "sandbox-id.ts"),
+    [
+      "export default {",
+      '  description: "Open the sandbox.",',
+      '  inputSchema: { type: "object", properties: {} },',
+      "  async execute(_input, context) { await context.getSandbox(); return { ok: true }; },",
+      "};",
+      "",
+    ].join("\n")
+  );
+  const saved = await studio.saveDocument(thread.id, {
+    ...thread.document,
+    conversation: {
+      messages: [
+        {
+          id: "user-agent-id",
+          role: "user",
+          content: [{ type: "text", text: "Open sandbox" }],
+        },
+      ],
+      state: {},
+    },
+  });
+
+  const receipt = await studio.run(saved.id, {
+    fromMessageId: "user-agent-id",
+    commandId: "frozen-agent-id",
+    mode: "step",
+  });
+  const paused = await studio.inspectRun(saved.id, receipt.operationId);
+  if (paused.nextAction === undefined) throw new Error("Expected tool action.");
+  await studio.stepRun(saved.id, receipt.operationId, {
+    commandId: "execute-sandbox-id",
+    expectedActionId: paused.nextAction.id,
+    kind: "tool",
+  });
+
+  expect(observedAgentIds).toEqual(["test-studio-next"]);
+});
+
 /** Wait for the durable Studio projection and return this Run's terminal event. */
 async function _terminalEvent(
   studio: Studio,

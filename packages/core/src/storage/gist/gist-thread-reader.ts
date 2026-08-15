@@ -14,11 +14,6 @@ import {
   threadFromSnapshotDocument,
   type PortableThreadSnapshot,
 } from "../../types/threads/thread-snapshot";
-import {
-  RecoverableThreadZodSchema,
-  ThreadZodSchema,
-} from "../../types/threads/thread-zod";
-import { parseJsonWithSchema } from "../../utils";
 
 import {
   GITHUB_API_BASE,
@@ -179,22 +174,7 @@ export class GistThreadReader
 }
 
 function _parseThread(content: string): Thread {
-  try {
-    return threadFromSnapshotDocument(JSON.parse(content));
-  } catch {
-    // Keep best-effort recovery for historical plain Thread documents.
-  }
-  const result = parseJsonWithSchema(content, ThreadZodSchema, {
-    recovery: "best-effort",
-    recoverySchema: RecoverableThreadZodSchema,
-  });
-  if (result.status === "strict" || result.status === "recovered") {
-    if (result.status === "recovered") {
-      console.warn("Recovered shared thread from truncated gist JSON.");
-    }
-    return result.value;
-  }
-  throw new Error("Gist content is not a valid thread file.");
+  return threadFromSnapshotDocument(JSON.parse(content));
 }
 
 function _parseThreadDocument(content: string): { thread: Thread } {

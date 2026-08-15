@@ -74,3 +74,42 @@ test("Thread RPC passes the selected product target to debugger mutations", asyn
 
   expect(calls).toEqual([["playground-selected", "operation-1"]]);
 });
+
+test("Thread RPC aborts the active Pi operation when its request is cancelled", async () => {
+  const calls: string[] = [];
+  let release: (() => void) | undefined;
+  const application = {
+    run() {
+      calls.push("run");
+      return new Promise<{ sessionId: string; operationId: string }>((resolve) => {
+        release = () =>
+          resolve({ sessionId: "session-1", operationId: "operation-1" });
+      });
+    },
+    cancelActiveRun() {
+      calls.push("cancel-active");
+      release?.();
+      return Promise.resolve();
+    },
+  } as unknown as DesktopPlaygroundApplication;
+  const server = new PlaygroundThreadRpcServer(application);
+  const controller = new AbortController();
+
+  const result = server.requests.run(
+    { kind: "playground", playgroundId: "playground-1" },
+    {
+      fromMessageId: "user-1",
+      commandId: "command-1",
+      mode: "continue",
+      signal: controller.signal,
+    }
+  );
+  await Promise.resolve();
+  controller.abort();
+
+  expect(await result).toEqual({
+    sessionId: "session-1",
+    operationId: "operation-1",
+  });
+  expect(calls).toEqual(["run", "cancel-active"]);
+});

@@ -7,8 +7,6 @@
  * one-RPC-method-per-action sprawl.
  */
 
-import type { RuntimeId } from "./runtime";
-
 /** Command identity always includes its owning business namespace. */
 export type NamespacedCommandType = `${string}.${string}`;
 
@@ -21,93 +19,28 @@ export interface GenericCommand<
   args: A;
 }
 
-// --- File tree -------------------------------------------------------------
+// --- Playground ------------------------------------------------------------
 
 /**
- * Create a new thread file. `parent` defaults to the workspace root. When
- * `rename` is true the tree starts an in-place rename on the new file (used by
- * the tree/root "New file" icons); otherwise it is auto-named and opened
- * immediately (used by the ⌘N menu, the tab-bar "+", and the welcome screen).
+ * Create and open a durable Playground.
  */
-export interface NewFileCommand extends GenericCommand<
-  "workspace.newFile",
-  { parent?: string; rename?: boolean; runtimeId?: RuntimeId }
-> {}
+export interface CreatePlaygroundCommand extends GenericCommand<"playground.create"> {}
 
 /**
  * Create a new thread from a built-in prompt example. The command carries only
- * the example's `id`; the file-tree handler resolves the full definition (system
- * prompt, seed tools, seed messages) from the example catalog via
- * `getPromptExample`. `parent` defaults to the workspace root.
+ * the example's `id`; the Playground handler resolves the full definition
+ * (system prompt, seed tools, seed messages) from the example catalog.
  */
-export interface NewFileFromPromptExampleCommand extends GenericCommand<
-  "workspace.newFileFromPromptExample",
-  { parent?: string; exampleId: string; runtimeId?: RuntimeId }
+export interface CreatePlaygroundFromExampleCommand extends GenericCommand<
+  "playground.createFromExample",
+  { exampleId: string }
 > {}
 
 /**
- * Open the "Start from Example" dialog. `parent` (default: workspace root) is
- * where the chosen example's thread will be created.
+ * Open the "Start from Example" dialog.
  */
-export interface OpenStartFromExampleCommand extends GenericCommand<
-  "workspace.openStartFromExample",
-  { parent?: string; runtimeId?: RuntimeId }
-> {}
-
-/** Create a new folder (with in-place rename). `parent` defaults to the root. */
-export interface NewFolderCommand extends GenericCommand<
-  "workspace.newFolder",
-  { parent?: string; runtimeId?: RuntimeId }
-> {}
-
-/** Start an in-place rename of the node at `path`. */
-export interface RenameFileCommand extends GenericCommand<
-  "workspace.rename",
-  { path: string; runtimeId?: RuntimeId }
-> {}
-
-/** Duplicate the node at `path`. */
-export interface DuplicateFileCommand extends GenericCommand<
-  "workspace.duplicate",
-  { path: string; runtimeId?: RuntimeId }
-> {}
-
-/** Move the node at `path` to the OS trash (via a confirm dialog). */
-export interface DeleteFileCommand extends GenericCommand<
-  "workspace.delete",
-  { path: string; runtimeId?: RuntimeId }
-> {}
-
-/** Reveal the node at `path` in the OS file manager (`""` = the root). */
-export interface RevealFileCommand extends GenericCommand<
-  "workspace.reveal",
-  { path: string; runtimeId?: RuntimeId }
-> {}
-
-/**
- * Copy the file at the **absolute** `path` to the OS clipboard as a file
- * reference, so it can be pasted into Finder/Explorer or other apps. Runs in the
- * bun process (native clipboard). macOS/Windows only.
- */
-export interface CopyFileCommand extends GenericCommand<
-  "workspace.copyFile",
-  { path: string; runtimeId?: RuntimeId }
-> {}
-
-/** Refresh (re-list) the file tree. */
-export interface RefreshTreeCommand extends GenericCommand<
-  "workspace.refresh",
-  { runtimeId?: RuntimeId }
-> {}
-
-/**
- * Reveal a workspace file in the tree: expand its ancestor folders, refresh the
- * listing, then select, open, and scroll to it once it appears (e.g. after a
- * deep-link import writes into `shared/`).
- */
-export interface RevealInTreeCommand extends GenericCommand<
-  "workspace.revealInTree",
-  { path: string; runtimeId?: RuntimeId }
+export interface OpenPlaygroundExamplesCommand extends GenericCommand<
+  "playground.openExamples"
 > {}
 
 export interface ImportFilePayload {
@@ -116,13 +49,13 @@ export interface ImportFilePayload {
 }
 
 /**
- * Import one or more external files (OpenAI / Anthropic / native thread JSON)
- * into the workspace as new thread files. When `files` is absent the renderer
- * opens its hidden picker; native menu actions fill `files` from the OS dialog.
+ * Import portable Thread Snapshot files as durable Playgrounds. When `files`
+ * is absent the renderer opens its hidden picker; native menu actions fill
+ * `files` from the OS dialog.
  */
 export interface ImportFilesCommand extends GenericCommand<
-  "workspace.importFiles",
-  { parent?: string; files?: ImportFilePayload[]; runtimeId?: RuntimeId }
+  "playground.importFiles",
+  { files?: ImportFilePayload[] }
 > {}
 
 /**
@@ -130,29 +63,24 @@ export interface ImportFilesCommand extends GenericCommand<
  * the native clipboard, then forwards a virtual JSON file to the renderer so
  * parsing/writing stays shared with file imports.
  */
-export interface ImportFromClipboardCommand extends GenericCommand<
-  "workspace.importFromClipboard",
-  { parent?: string; runtimeId?: RuntimeId }
-> {}
+export interface ImportFromClipboardCommand extends GenericCommand<"playground.importFromClipboard"> {}
 
 // --- Tabs ------------------------------------------------------------------
 
 /**
- * Close a tab. `id` is the app-tab id;
- * `path` is kept for legacy thread callers; omitting both closes the active tab.
+ * Close a tab. Omitting `id` closes the active tab.
  */
 export interface CloseTabCommand extends GenericCommand<
   "tabs.close",
-  { id?: string; path?: string; runtimeId?: RuntimeId }
+  { id?: string }
 > {}
 
 /**
- * Close every tab except the target. Prefer `id`; `path` is a legacy thread
- * path; omitting both keeps the active tab.
+ * Close every tab except the target. Omitting `id` keeps the active tab.
  */
 export interface CloseOtherTabsCommand extends GenericCommand<
   "tabs.closeOthers",
-  { id?: string; path?: string; runtimeId?: RuntimeId }
+  { id?: string }
 > {}
 
 /** Close every open tab. */
@@ -211,14 +139,14 @@ export interface ForkProjectThreadCommand extends GenericCommand<
 > {}
 
 /**
- * Open the Share dialog for a thread. `path` + `runtimeId` target a specific
- * thread file (tree/tab context menus and playground header); omitting them
+ * Open the Share dialog for a Playground. `path` targets a specific Playground
+ * projection; omitting it
  * shares the active thread (native menu and command palette). No-op when there
  * is no active thread tab. Webview only.
  */
 export interface ShareThreadCommand extends GenericCommand<
   "thread.share",
-  { path?: string; runtimeId?: RuntimeId }
+  { path?: string }
 > {}
 
 /**
@@ -254,14 +182,11 @@ export interface OpenLinkCommand extends GenericCommand<
  */
 export interface OpenDocumentCommand extends GenericCommand<
   "shell.openDocument",
-  { path?: string; runtimeId?: RuntimeId }
+  { path?: string }
 > {}
 
 /** Open the GitHub issues page in the user's default browser to report a bug. */
 export interface ReportBugsCommand extends GenericCommand<"shell.reportBugs"> {}
-
-/** Open the workspace folder (`LLM_SPACE_HOME/workspace`) in the OS file manager. */
-export interface OpenWorkspaceFolderCommand extends GenericCommand<"shell.openWorkspaceFolder"> {}
 
 /** Pick and open a code-first Agent project in its own desktop window. */
 export interface OpenAgentProjectCommand extends GenericCommand<"agentProjects.open"> {}
@@ -292,17 +217,9 @@ export interface ApplyUpdateAndRestartCommand extends GenericCommand<"updates.ap
 
 /** The discriminated union of every command. */
 export type Command =
-  | NewFileCommand
-  | NewFileFromPromptExampleCommand
-  | OpenStartFromExampleCommand
-  | NewFolderCommand
-  | RenameFileCommand
-  | DuplicateFileCommand
-  | DeleteFileCommand
-  | RevealFileCommand
-  | CopyFileCommand
-  | RefreshTreeCommand
-  | RevealInTreeCommand
+  | CreatePlaygroundCommand
+  | CreatePlaygroundFromExampleCommand
+  | OpenPlaygroundExamplesCommand
   | ImportFilesCommand
   | ImportFromClipboardCommand
   | CloseTabCommand
@@ -328,7 +245,6 @@ export type Command =
   | OpenLinkCommand
   | OpenDocumentCommand
   | ReportBugsCommand
-  | OpenWorkspaceFolderCommand
   | OpenAgentProjectCommand
   | GithubLoginCommand
   | GithubLogoutCommand
@@ -354,25 +270,17 @@ export const COMMAND_META: Record<
   CommandType,
   { label: string; target: "webview" | "bun" }
 > = {
-  "workspace.newFile": { label: "New File", target: "webview" },
-  "workspace.newFileFromPromptExample": {
+  "playground.create": { label: "New Playground", target: "webview" },
+  "playground.createFromExample": {
     label: "Start from Example",
     target: "webview",
   },
-  "workspace.openStartFromExample": {
+  "playground.openExamples": {
     label: "New from Examples...",
     target: "webview",
   },
-  "workspace.newFolder": { label: "New Folder", target: "webview" },
-  "workspace.rename": { label: "Rename", target: "webview" },
-  "workspace.duplicate": { label: "Duplicate", target: "webview" },
-  "workspace.delete": { label: "Move to Trash", target: "webview" },
-  "workspace.reveal": { label: "Reveal in Finder", target: "webview" },
-  "workspace.copyFile": { label: "Copy", target: "bun" },
-  "workspace.refresh": { label: "Refresh", target: "webview" },
-  "workspace.revealInTree": { label: "Reveal in Tree", target: "webview" },
-  "workspace.importFiles": { label: "Import from Files...", target: "webview" },
-  "workspace.importFromClipboard": {
+  "playground.importFiles": { label: "Import from Files...", target: "webview" },
+  "playground.importFromClipboard": {
     label: "Import from Clipboard",
     target: "bun",
   },
@@ -402,10 +310,6 @@ export const COMMAND_META: Record<
   "shell.openLink": { label: "Open Link", target: "bun" },
   "shell.openDocument": { label: "Documents", target: "bun" },
   "shell.reportBugs": { label: "Report Bug", target: "bun" },
-  "shell.openWorkspaceFolder": {
-    label: "Open Workspace Folder",
-    target: "bun",
-  },
   "agentProjects.open": { label: "Open Agent Project...", target: "bun" },
   "githubAccount.login": { label: "Sign in with GitHub", target: "bun" },
   "githubAccount.logout": { label: "Sign out of GitHub", target: "bun" },

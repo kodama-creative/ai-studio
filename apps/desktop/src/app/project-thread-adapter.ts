@@ -21,6 +21,8 @@ import type { ExternalThreadExecutionRuntime } from "@llm-space/ui/components/th
 import type { ProjectStudioTransport } from "@/shared/project-studio";
 import type { ThreadClient, ThreadTarget } from "@/shared/thread-rpc";
 
+import { createThreadExecutionRuntime } from "./thread-execution-runtime";
+
 /** Projects a Pi-backed Experiment and its operation metadata to the editor. */
 export function studioThreadToPlaygroundThread(
   thread: StudioThread,
@@ -113,7 +115,7 @@ export function createProjectThreadExecutionRuntime(input: {
   readonly threadId: string;
   readonly getThread: () => StudioThread;
   readonly onThread: (thread: StudioThread) => void;
-  readonly beforeExecute?: () => void | Promise<void>;
+  readonly beforeAdmission?: () => void | Promise<void>;
   readonly onSettled?: () => void | Promise<void>;
 }): ExternalThreadExecutionRuntime {
   const target: ThreadTarget = {
@@ -121,219 +123,43 @@ export function createProjectThreadExecutionRuntime(input: {
     projectId: input.projectId,
     experimentId: input.threadId,
   };
-  return {
-    async *execute(request) {
-      await input.beforeExecute?.();
-      const client = await _threadClient(input);
-      let studioThread = input.getThread();
-      try {
-        if (studioThread.operationId === undefined) {
-          studioThread = await input.client.saveDocument(
-            input.threadId,
-            playgroundThreadToStudioDocument(request.thread, studioThread)
-          );
-          input.onThread(studioThread);
-          const fromMessageId =
-            request.fromMessageId ??
-            request.thread.context?.messages?.at(-1)?.id;
-          if (fromMessageId === undefined) {
-            throw new Error(
-              "A Studio operation requires at least one Message."
-            );
-          }
-          const message = request.thread.context?.messages?.find(
-            (candidate) => candidate.id === fromMessageId
-          );
-          if (message?.role !== "user") {
-            throw new Error(
-              `Studio operation input "${fromMessageId}" must be a user Message.`
-            );
-          }
-          const modelOverride = _modelDefinition(request.thread.model);
-          await client.run(target, {
-            fromMessageId,
-            commandId: crypto.randomUUID(),
-            mode: request.reactLoop ? "continue" : "step",
-            ...(modelOverride === undefined ? {} : { modelOverride }),
-          });
-        } else if (request.reactLoop) {
-          await client.continue(target, studioThread.operationId, {
-            commandId: crypto.randomUUID(),
-          });
-        } else {
-          await _stepCurrent(client, target, studioThread.operationId);
-        }
-
-        if (!request.reactLoop && request.autoRunTools) {
-          studioThread = await _requireThread(input);
-          while (studioThread.operationId !== undefined) {
-            const snapshot = await client.inspect(
-              target,
-              studioThread.operationId
-            );
-            if (snapshot.nextAction?.kind !== "tool") break;
-            await _stepCurrent(
-              client,
-              target,
-              studioThread.operationId,
-              snapshot
-            );
-            studioThread = await _requireThread(input);
-          }
-        }
-        yield* _refresh(
-          input,
-          request.thread.model,
-          client,
-          target,
-          request.reactLoop ? "continue" : "step"
-        );
-      } finally {
-        if (request.signal.aborted && studioThread.operationId !== undefined) {
-          await client.cancel(target, studioThread.operationId);
-        }
-        await input.onSettled?.();
-      }
+  return createThreadExecutionRuntime({
+    productName: "Studio",
+    target,
+    getClient: () => _threadClient(input),
+    currentOperationId: () => input.getThread().operationId,
+    async persist(thread) {
+      const saved = await input.client.saveDocument(
+        input.threadId,
+        playgroundThreadToStudioDocument(thread, input.getThread())
+      );
+      input.onThread(saved);
     },
-
-    async *executeToolCall(request) {
-      await input.beforeExecute?.();
-      const client = await _threadClient(input);
-      const studioThread = input.getThread();
-      if (studioThread.operationId === undefined) {
-        throw new Error(
-          "The tool call does not belong to an active operation."
-        );
-      }
-      try {
-        const snapshot = await client.inspect(
-          target,
-          studioThread.operationId
-        );
-        const action = snapshot.nextAction;
-        if (
-          action?.kind !== "tool" ||
-          action.toolCallId !== request.toolCallId
-        ) {
-          throw new Error(
-            `Tool call "${request.toolCallId}" is not the current Pi action.`
-          );
-        }
-        yield { type: "tool.started", toolCallId: request.toolCallId };
-        await _stepCurrent(
-          client,
-          target,
-          studioThread.operationId,
-          snapshot
-        );
-        yield { type: "tool.completed", toolCallId: request.toolCallId };
-        yield* _refresh(
-          input,
-          request.thread.model,
-          client,
-          target,
-          "step"
-        );
-      } finally {
-        if (request.signal.aborted) {
-          await client.cancel(target, studioThread.operationId);
-        }
-        await input.onSettled?.();
-      }
+    async refresh(source) {
+      const [thread, history, evaluations] = await Promise.all([
+        _requireThread(input),
+        input.client.listRunHistory(input.threadId),
+        input.client.listEvaluationMetadata(input.threadId),
+      ]);
+      const projected = studioThreadToPlaygroundThread(
+        thread,
+        history,
+        evaluations
+      );
+      return {
+        operationId: thread.operationId,
+        thread:
+          source.model === undefined
+            ? projected
+            : { ...projected, model: structuredClone(source.model) },
+      };
     },
-
-    async *resolveToolApproval(request) {
-      await input.beforeExecute?.();
-      const client = await _threadClient(input);
-      const studioThread = input.getThread();
-      if (studioThread.operationId === undefined) {
-        throw new Error("The Tool approval does not belong to an active operation.");
-      }
-      try {
-        await client.resolveToolApproval(target, studioThread.operationId, {
-          toolCallId: request.toolCallId,
-          approved: request.approved,
-        });
-        if (request.resumeMode === "continue") {
-          await client.continue(target, studioThread.operationId, {
-            commandId: crypto.randomUUID(),
-          });
-        } else {
-          await _stepCurrent(client, target, studioThread.operationId);
-        }
-        yield* _refresh(
-          input,
-          request.thread.model,
-          client,
-          target,
-          request.resumeMode
-        );
-      } finally {
-        if (request.signal.aborted) {
-          await client.cancel(target, studioThread.operationId);
-        }
-        await input.onSettled?.();
-      }
+    runOverrides(thread) {
+      const modelOverride = _modelDefinition(thread.model);
+      return modelOverride === undefined ? {} : { modelOverride };
     },
-  };
-}
-
-/** Loads latest Experiment, operation history, and evaluation metadata together. */
-async function* _refresh(
-  input: Parameters<typeof createProjectThreadExecutionRuntime>[0],
-  selectedModel: ModelConfig | undefined,
-  client: ThreadClient,
-  target: ThreadTarget,
-  resumeMode: "step" | "continue"
-) {
-  const [thread, history, evaluations] = await Promise.all([
-    input.client.loadThread(input.threadId),
-    input.client.listRunHistory(input.threadId),
-    input.client.listEvaluationMetadata(input.threadId),
-  ]);
-  if (thread === undefined) {
-    throw new Error(`Studio Thread "${input.threadId}" was not found.`);
-  }
-  input.onThread(thread);
-  const projected = studioThreadToPlaygroundThread(
-    thread,
-    history,
-    evaluations
-  );
-  yield {
-    type: "thread.updated" as const,
-    thread:
-      selectedModel === undefined
-        ? projected
-        : { ...projected, model: structuredClone(selectedModel) },
-  };
-  if (thread.operationId === undefined) return;
-  const snapshot = await client.inspect(target, thread.operationId);
-  if (snapshot.approval?.status !== "pending") return;
-  yield {
-    type: "tool.approval.required" as const,
-    toolCallId: snapshot.approval.toolCallId,
-    toolName: snapshot.approval.toolName,
-    resumeMode,
-  };
-}
-
-/** Releases exactly the action identified by the current Pi snapshot. */
-async function _stepCurrent(
-  client: ThreadClient,
-  target: ThreadTarget,
-  operationId: string,
-  known?: Awaited<ReturnType<ThreadClient["inspect"]>>
-) {
-  const snapshot = known ?? (await client.inspect(target, operationId));
-  const action = snapshot.nextAction;
-  if (action === undefined) {
-    throw new Error(`Pi operation "${operationId}" has no action to Step.`);
-  }
-  return client.step(target, operationId, {
-    commandId: crypto.randomUUID(),
-    expectedActionId: action.id,
-    kind: action.kind,
+    beforeAdmission: input.beforeAdmission,
+    onSettled: input.onSettled,
   });
 }
 

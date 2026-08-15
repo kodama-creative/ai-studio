@@ -22,14 +22,12 @@ test("tool executor resolves a provider-backed tool connection once for every ca
       providerId === "ark" && selectionScope === "tool:generate_image"
         ? "profile-work"
         : undefined,
-    runtimeId: "remote-fixture",
   });
   const thread = { id: "thread-fixture" } as Thread;
 
   await execute(tool, { prompt: "A red circle" }, { thread, variables: {} });
 
   expect(receivedOptions).toEqual({
-    runtimeId: "remote-fixture",
     thread,
     variables: {},
     connection: { providerId: "ark", profileId: "profile-work" },

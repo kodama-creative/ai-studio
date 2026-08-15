@@ -10,6 +10,7 @@ export interface StudioCommandReceipt {
   readonly sessionId: string;
   readonly commandId: string;
   readonly method: "step" | "continue";
+  readonly status: "accepted" | "applied";
   readonly fingerprint: string;
   readonly operationId?: string;
   readonly leafId?: string;
@@ -27,6 +28,7 @@ export interface StudioStoreTransaction {
     commandId: string
   ): StudioCommandReceipt | undefined;
   insertCommandReceipt(receipt: StudioCommandReceipt): void;
+  saveCommandReceipt(receipt: StudioCommandReceipt): void;
 
   getExperiment(experimentId: string): StudioExperimentRecord | undefined;
   listExperiments(): readonly StudioExperimentRecord[];

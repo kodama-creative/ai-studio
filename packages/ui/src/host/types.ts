@@ -47,23 +47,12 @@ export interface ToolCallResult extends BuiltinToolCallResponse {
   isError: boolean;
 }
 
-/** Options for invoking an executable tool. */
-export interface RuntimeScopedHostOptions {
-  runtimeId?: string;
-}
-
-/** A runtime scope that must be present for ownership-sensitive operations. */
-export interface RuntimeOwnedHostOptions {
-  runtimeId: string;
-}
-
-/** Identifies the thread and runtime selected by a Playground Share action. */
+/** Identifies the thread selected by a Playground Share action. */
 export interface ShareThreadActionInput {
   path: string;
-  runtimeId: string;
 }
 
-export interface ExecuteToolOptions extends RuntimeScopedHostOptions {
+export interface ExecuteToolOptions {
   /** Ephemeral provider connection used by provider-backed built-in tools. */
   connection?: ProviderConnectionRef;
   /** Owning Thread snapshot and one resolved variable map for this call batch. */
@@ -80,26 +69,20 @@ export type ExecuteTool = (
 
 /** Read-only skills access used by prompt variables + examples. */
 export interface SkillsHost {
-  getSettings(options?: RuntimeScopedHostOptions): Promise<SkillsSettings>;
-  listAvailable(options?: RuntimeScopedHostOptions): Promise<SkillInfo[]>;
-  listSkills(
-    path: string,
-    options?: RuntimeScopedHostOptions
-  ): Promise<SkillInfo[]>;
+  getSettings(): Promise<SkillsSettings>;
+  listAvailable(): Promise<SkillInfo[]>;
+  listSkills(path: string): Promise<SkillInfo[]>;
 }
 
 /** Read-only MCP access used by the tool-import UI. */
 export interface McpHost {
-  listServers(options?: RuntimeScopedHostOptions): Promise<McpServerView[]>;
-  listTools(
-    serverId: string,
-    options?: RuntimeScopedHostOptions
-  ): Promise<McpServerToolsResponse>;
+  listServers(): Promise<McpServerView[]>;
+  listTools(serverId: string): Promise<McpServerToolsResponse>;
 }
 
 /** Built-in tool listing + OS filesystem reveal action. */
 export interface BuiltinToolsHost {
-  list(options?: RuntimeScopedHostOptions): Promise<BuiltinTool[]>;
+  list(): Promise<BuiltinTool[]>;
   /** Open a directory itself, or reveal a file selected in its parent folder. */
   fsReveal(path: string): Promise<void>;
 }
@@ -112,9 +95,9 @@ export interface PathsHost {
 /** Arbitrary text-file reads + native file picking for prompt variables. */
 export interface FilesHost {
   /** Read a file's UTF-8 contents (`~` expands to home); `""` when missing. */
-  readText(path: string, options: RuntimeOwnedHostOptions): Promise<string>;
+  readText(path: string): Promise<string>;
   /** Whether a path points to a readable regular file (`~` expands to home). */
-  exists(path: string, options: RuntimeOwnedHostOptions): Promise<boolean>;
+  exists(path: string): Promise<boolean>;
   /**
    * Whether a path points to an existing directory. `null` when the host cannot
    * inspect the local filesystem (e.g. the display-only web viewer).
@@ -183,7 +166,7 @@ export interface GeneratorHost {
    */
   openDevTerminal(rootDir: string): Promise<boolean>;
   /** The user's web-search settings, written into a generated project's `.env`. */
-  getSearchSettings(options: RuntimeOwnedHostOptions): Promise<SearchSettings>;
+  getSearchSettings(): Promise<SearchSettings>;
   /**
    * Resolve the model provider's real API key plus the values of the named
    * environment variables — used to write a `.env` with the user's actual
@@ -192,7 +175,7 @@ export interface GeneratorHost {
   resolveEnv(
     providerId: string,
     envNames: string[],
-    options: RuntimeOwnedHostOptions & { profileId?: string }
+    options?: { profileId?: string }
   ): Promise<{ modelApiKey: string; envValues: Record<string, string> }>;
 }
 
@@ -205,10 +188,7 @@ export interface HostActions {
   /** Open the host's settings surface on a tab (e.g. "models", "mcp", "search"). */
   openSettings(tab: string): void;
   openLink(url: string): void;
-  /**
-   * Open the host's Share surface for the thread owned by `runtimeId`. No-op on
-   * web (presentational).
-   */
+  /** Open the host's Share surface. No-op on web (presentational). */
   shareThread(input: ShareThreadActionInput): void;
   /** Request opening the variables dialog (handled within the playground). */
   openVariables(variableName?: string): void;

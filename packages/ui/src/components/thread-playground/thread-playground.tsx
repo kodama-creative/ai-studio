@@ -58,7 +58,7 @@ import {
 } from "./model/provider-profile-selection-provider";
 import { SystemPromptEditor } from "./prompt/system-prompt-editor";
 import { RunHistoryListView } from "./run-history-list-view";
-import { createRuntimePromptFiles } from "./runtime-prompt-files";
+import { createPromptFiles } from "./runtime-prompt-files";
 import {
   canRedo,
   canUndo,
@@ -114,8 +114,8 @@ export interface ThreadPlaygroundProps {
   modelSelectionReadonly?: boolean;
   /** Disable execution without making the editable Conversation read-only. */
   runDisabled?: boolean;
-  /** Runtime that owns this playground. Used to route tool calls. */
-  runtimeId?: string;
+  /** Show the host-provided Share action for this Thread projection. */
+  sharingEnabled?: boolean;
   /** Recreate only the thread store while preserving per-tab UI selections. */
   storeKey?: string | number;
 
@@ -166,14 +166,12 @@ function _ThreadPlaygroundStore({
   transport,
   executionRuntime,
   runChangePersistence = "editor",
-  runtimeId,
   onChange,
   onRunMetadataChange,
   onStreamingStart,
   onStreamingEnd,
   ...props
 }: ThreadPlaygroundProps) {
-  const [ownerRuntimeId] = useState(() => runtimeId ?? "local");
   // Keep live refs to the provider list and default model so the store can
   // resolve a thread's model (its own, else the default/first available) at
   // run/edit time without being recreated.
@@ -185,9 +183,9 @@ function _ThreadPlaygroundStore({
   defaultModelRef.current = defaultModel;
   const getProfileId = useGetProviderProfileId();
   const { skills, files } = useHostServices();
-  const toolExecutor = useToolExecutor(ownerRuntimeId);
+  const toolExecutor = useToolExecutor();
   const [store] = useState(() => {
-    const promptFiles = createRuntimePromptFiles(files, ownerRuntimeId);
+    const promptFiles = createPromptFiles(files);
     return createThreadStore(initialValue, {
       transport,
       executionRuntime,
@@ -201,12 +199,8 @@ function _ThreadPlaygroundStore({
       getAutoRunTools,
       getReactLoop,
       getProfileId,
-      runtimeId: ownerRuntimeId,
       executeTool: toolExecutor ?? undefined,
-      loadSkills: () =>
-        listEnabledPromptVariableSkills(skills, {
-          runtimeId: ownerRuntimeId,
-        }),
+      loadSkills: () => listEnabledPromptVariableSkills(skills),
       loadFile: promptFiles.loadFile,
       fileExists: promptFiles.fileExists,
     });
@@ -220,7 +214,7 @@ function _ThreadPlaygroundStore({
   });
   return (
     <ThreadStoreContext.Provider value={store}>
-      <ThreadPlaygroundContent runtimeId={ownerRuntimeId} {...props} />
+      <ThreadPlaygroundContent {...props} />
     </ThreadStoreContext.Provider>
   );
 }
@@ -234,13 +228,13 @@ function ThreadPlaygroundContent({
   title: titleFromProps,
   headerDetails,
   headerActions,
-  runtimeId,
   onRenameTitle,
   validateTitle,
   readonly: readonlyFromProps = false,
   definitionReadonly = false,
   modelSelectionReadonly,
   runDisabled = false,
+  sharingEnabled = true,
   active = false,
   compactImages = false,
 }: Omit<
@@ -383,14 +377,15 @@ function ThreadPlaygroundContent({
                   <HistoryIcon className="size-4" />
                 </Button>
               </Tooltip>
-              <Tooltip content="Share thread">
-                <ThreadShareButton
-                  path={path}
-                  runtimeId={runtimeId}
-                  disabled={status !== "idle"}
-                  onShare={(input) => actions.shareThread(input)}
-                />
-              </Tooltip>
+              {sharingEnabled && (
+                <Tooltip content="Share thread">
+                  <ThreadShareButton
+                    path={path}
+                    disabled={status !== "idle"}
+                    onShare={(input) => actions.shareThread(input)}
+                  />
+                </Tooltip>
+              )}
               <GenerateProjectButton disabled={status !== "idle"} />
             </div>
             <div className="flex items-center gap-1 px-3">

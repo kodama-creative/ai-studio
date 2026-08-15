@@ -43,11 +43,10 @@ export function findTool(
 export function useToolCallRunner(messageId: string) {
   const tools = useThreadStore((state) => state.thread.context?.tools);
   const thread = useThreadStore((state) => state.thread);
-  const runtimeId = useThreadStore((state) => state.runtimeId);
   const externalToolExecutionAvailable = useThreadStore(
     (state) => state.externalToolExecutionAvailable
   );
-  const executeTool = useToolExecutor(runtimeId);
+  const executeTool = useToolExecutor();
   const { updateToolCallOutput, updateToolCallOutputText } =
     useThreadStoreActions();
   const { runExternalToolCall } = useThreadStoreActions();

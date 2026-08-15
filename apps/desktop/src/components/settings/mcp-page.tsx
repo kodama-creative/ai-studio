@@ -76,7 +76,6 @@ import {
   removeMcpServer,
   updateMcpServer,
 } from "@/client/mcp";
-import type { RuntimeId } from "@/shared/runtime";
 
 import { SettingsEmptyState } from "./settings-empty-state";
 import { SettingsPage } from "./settings-page";
@@ -188,7 +187,7 @@ function _canCreateServer(form: ServerForm): boolean {
   }
 }
 
-export function McpPage({ runtimeId }: { runtimeId: RuntimeId }) {
+export function McpPage() {
   const [servers, setServers] = useState<McpServerView[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedIdBeforeCreate, setSelectedIdBeforeCreate] = useState<
@@ -220,7 +219,7 @@ export function McpPage({ runtimeId }: { runtimeId: RuntimeId }) {
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const next = await listMcpServers(runtimeId);
+      const next = await listMcpServers();
       setServers(next);
       setSelectedId((current) => {
         if (creating) {
@@ -239,7 +238,7 @@ export function McpPage({ runtimeId }: { runtimeId: RuntimeId }) {
     } finally {
       setLoading(false);
     }
-  }, [creating, runtimeId]);
+  }, [creating]);
 
   useEffect(() => {
     void refresh();
@@ -294,8 +293,8 @@ export function McpPage({ runtimeId }: { runtimeId: RuntimeId }) {
         const draft = _draftFromForm(snapshot);
         const next =
           isCreating || !targetId
-            ? await addMcpServer(draft, runtimeId)
-            : await updateMcpServer(targetId, draft, runtimeId);
+            ? await addMcpServer(draft)
+            : await updateMcpServer(targetId, draft);
         setServers(next);
         const saved =
           isCreating || !targetId
@@ -322,7 +321,7 @@ export function McpPage({ runtimeId }: { runtimeId: RuntimeId }) {
         setSaving(false);
       }
     },
-    [runtimeId]
+    []
   );
 
   useEffect(() => {
@@ -350,7 +349,7 @@ export function McpPage({ runtimeId }: { runtimeId: RuntimeId }) {
     cancelRequestedRef.current = false;
     setTestingServerId(server.id);
     try {
-      const response = await listMcpTools(server.id, runtimeId);
+      const response = await listMcpTools(server.id);
       setTools(response.tools);
       setServers((current) =>
         current.map((server) =>
@@ -384,7 +383,7 @@ export function McpPage({ runtimeId }: { runtimeId: RuntimeId }) {
     cancelRequestedRef.current = true;
     setCancellingTest(true);
     try {
-      const next = await cancelMcpTest(testingServerId, runtimeId);
+      const next = await cancelMcpTest(testingServerId);
       setServers(next);
       setTools([]);
     } catch (error) {
@@ -404,7 +403,7 @@ export function McpPage({ runtimeId }: { runtimeId: RuntimeId }) {
     }
     setDisconnecting(true);
     try {
-      const next = await disconnectMcpServer(selectedServer.id, runtimeId);
+      const next = await disconnectMcpServer(selectedServer.id);
       setServers(next);
       setTools([]);
       toast.success("MCP server disconnected");
@@ -424,7 +423,7 @@ export function McpPage({ runtimeId }: { runtimeId: RuntimeId }) {
     }
     setRemoveOpen(false);
     try {
-      const next = await removeMcpServer(selectedServer.id, runtimeId);
+      const next = await removeMcpServer(selectedServer.id);
       setServers(next);
       setSelectedId(next[0]?.id ?? null);
       toast.success("MCP server removed");

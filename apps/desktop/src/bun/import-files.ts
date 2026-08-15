@@ -22,8 +22,7 @@ async function _readImportFile(path: string): Promise<ImportFilePayload> {
  * parsing/writing so imports use the same model normalization as drag/drop.
  */
 export async function importFilesWithNativePicker(
-  sendCommand: SendCommand,
-  parent = ""
+  sendCommand: SendCommand
 ) {
   const paths = _normalizeSelectedPaths(
     await Utils.openFileDialog({
@@ -38,8 +37,8 @@ export async function importFilesWithNativePicker(
 
   const files = await Promise.all(paths.map((path) => _readImportFile(path)));
   sendCommand({
-    type: "workspace.importFiles",
-    args: { parent, files },
+    type: "playground.importFiles",
+    args: { files },
   });
 }
 
@@ -47,12 +46,11 @@ export async function importFilesWithNativePicker(
  * Native clipboard import entrypoint. Clipboard access belongs to the bun side;
  * the renderer still owns parsing/writing through the regular file-import path.
  */
-export function importTextFromClipboard(sendCommand: SendCommand, parent = "") {
+export function importTextFromClipboard(sendCommand: SendCommand) {
   const text = Utils.clipboardReadText();
   sendCommand({
-    type: "workspace.importFiles",
+    type: "playground.importFiles",
     args: {
-      parent,
       files: [{ name: "clipboard.json", text: text ?? "" }],
     },
   });

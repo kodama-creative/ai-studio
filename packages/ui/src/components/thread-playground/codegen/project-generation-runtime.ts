@@ -13,7 +13,6 @@ import { listEnabledPromptVariableSkills } from "../variable/prompt-variable-ski
 type GeneratorHost = NonNullable<HostServices["generator"]>;
 
 export interface ProjectGenerationRuntime {
-  readonly runtimeId: string;
   readonly runOneShot: OneShotRunner;
   listEnabledSkills(): Promise<SkillInfo[]>;
   listMcpServers(): Promise<McpServerView[]>;
@@ -26,19 +25,15 @@ export interface ProjectGenerationRuntime {
 }
 
 /**
- * Bind every runtime-sensitive project-generation capability to one immutable
- * owner. The generated project still writes to the local directory selected by
- * the user, but all model/config/credential reads come from this runtime.
+ * Bind project-generation capabilities to the injected host services.
  */
 export function bindProjectGenerationRuntime({
-  runtimeId,
   auxiliaryGeneration,
   profileId,
   skills,
   mcp,
   generator,
 }: {
-  runtimeId: string;
   auxiliaryGeneration: HostServices["auxiliaryGeneration"];
   profileId?: string;
   skills: SkillsHost;
@@ -50,7 +45,6 @@ export function bindProjectGenerationRuntime({
   }
 
   return {
-    runtimeId,
     runOneShot: async ({ systemPrompt, userPrompt, model, signal }) => {
       let text = "";
       for await (const event of auxiliaryGeneration.generate({
@@ -70,11 +64,10 @@ export function bindProjectGenerationRuntime({
       }
       return text;
     },
-    listEnabledSkills: () =>
-      listEnabledPromptVariableSkills(skills, { runtimeId }),
-    listMcpServers: () => mcp.listServers({ runtimeId }),
-    getSearchSettings: () => generator.getSearchSettings({ runtimeId }),
+    listEnabledSkills: () => listEnabledPromptVariableSkills(skills),
+    listMcpServers: () => mcp.listServers(),
+    getSearchSettings: () => generator.getSearchSettings(),
     resolveEnv: (providerId, envNames, profileId) =>
-      generator.resolveEnv(providerId, envNames, { runtimeId, profileId }),
+      generator.resolveEnv(providerId, envNames, { profileId }),
   };
 }

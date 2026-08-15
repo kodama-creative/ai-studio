@@ -22,6 +22,7 @@ export interface DesktopPlaygroundApplication {
   continueRun: PlaygroundApplication["continueRun"];
   resolveToolApproval: PlaygroundApplication["resolveToolApproval"];
   cancelRun: PlaygroundApplication["cancelRun"];
+  cancelActiveRun: PlaygroundApplication["cancelActiveRun"];
 }
 
 /** Keep RPC naming and follow policy out of the Studio Playground host. */
@@ -71,5 +72,8 @@ export class DesktopPlaygroundApplicationImpl implements DesktopPlaygroundApplic
   }
   cancelRun(playgroundId: string, operationId: string) {
     return this._host.cancelRun(playgroundId, operationId);
+  }
+  cancelActiveRun(playgroundId: string) {
+    return this._host.cancelActiveRun(playgroundId);
   }
 }

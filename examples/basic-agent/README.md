@@ -17,7 +17,7 @@ bun run dev
 Or execute one input with the configured model from `defineAgent()`:
 
 ```sh
-bun run start "hello local agent"
+bun run exec "hello local agent"
 ```
 
 Host composition, SQLite, streaming, model configuration, and terminal

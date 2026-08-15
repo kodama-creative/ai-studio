@@ -1,6 +1,5 @@
 import { GENERATOR_RPC } from "@/shared/generator-rpc";
 import { createRpcClient } from "@/shared/namespaced-rpc";
-import type { RuntimeId } from "@/shared/runtime";
 
 import { createElectrobunRpcClientTransport } from "./namespaced-rpc-client";
 
@@ -73,10 +72,9 @@ export function openGeneratorDevTerminal(rootDir: string): Promise<boolean> {
 export function resolveGeneratorEnv(
   providerId: string,
   envNames: string[],
-  profileId?: string,
-  runtimeId?: RuntimeId
+  profileId?: string
 ): Promise<{ modelApiKey: string; envValues: Record<string, string> }> {
-  return generatorClient.resolveEnv(runtimeId, {
+  return generatorClient.resolveEnv({
     providerId,
     profileId,
     envNames,

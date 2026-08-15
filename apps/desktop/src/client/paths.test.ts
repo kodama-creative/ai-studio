@@ -9,13 +9,12 @@ await mock.module("@/lib/electrobun", () => ({
     rpc: {
       request: {
         rpcNamespaceRequest: (request: NamespacedRpcRequest) => {
-          const [runtimeId, path] = request.args as [string | undefined, string];
-          const params = { path, runtimeId };
+          const [path] = request.args as [string];
           if (request.namespace !== "promptFiles") {
             throw new Error(`Unexpected namespace: ${request.namespace}`);
           }
           if (request.method === "readText") {
-            REQUESTS.push({ method: "readText", params });
+            REQUESTS.push({ method: "readText", params: { path } });
             return Promise.resolve({
               ok: true as const,
               value: "LOCAL CONTENT",
@@ -24,7 +23,7 @@ await mock.module("@/lib/electrobun", () => ({
           if (request.method !== "exists") {
             throw new Error(`Unexpected method: ${request.method}`);
           }
-          REQUESTS.push({ method: "exists", params });
+          REQUESTS.push({ method: "exists", params: { path } });
           return Promise.resolve({
             ok: true as const,
             value: true,
@@ -37,47 +36,24 @@ await mock.module("@/lib/electrobun", () => ({
 
 const { readTextFile, textFileExists } = await import("./paths");
 
-describe("runtime-scoped prompt files", () => {
+describe("local prompt files", () => {
   beforeEach(() => {
     REQUESTS.length = 0;
   });
 
-  test("forwards the owning runtime through desktop RPC", async () => {
-    const read = readTextFile as (
-      path: string,
-      runtimeId?: string
-    ) => Promise<string>;
-    const exists = textFileExists as (
-      path: string,
-      runtimeId?: string
-    ) => Promise<boolean>;
-
-    expect(await read("/same/path.md", "local")).toBe("LOCAL CONTENT");
-    expect(await exists("/local-only.md", "local")).toBe(true);
+  test("forwards paths without a runtime-selection argument", async () => {
+    expect(await readTextFile("/same/path.md")).toBe("LOCAL CONTENT");
+    expect(await textFileExists("/local-only.md")).toBe(true);
     expect(REQUESTS).toEqual([
       {
         method: "readText",
-        params: { path: "/same/path.md", runtimeId: "local" },
+        params: { path: "/same/path.md" },
       },
       {
         method: "exists",
-        params: { path: "/local-only.md", runtimeId: "local" },
+        params: { path: "/local-only.md" },
       },
     ]);
   });
 
-  test("rejects an omitted owning runtime instead of using a default", async () => {
-    let rejection: unknown;
-    try {
-      await (readTextFile as (path: string, runtimeId?: string) => Promise<string>)(
-        "/same/path.md"
-      );
-    } catch (error) {
-      rejection = error;
-    }
-
-    expect(rejection).toBeInstanceOf(Error);
-    expect((rejection as Error).message).toContain("runtimeId");
-    expect(REQUESTS).toEqual([]);
-  });
 });

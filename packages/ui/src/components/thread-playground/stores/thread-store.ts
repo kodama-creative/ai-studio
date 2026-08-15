@@ -154,7 +154,6 @@ export interface ThreadRunMetadata {
 
 export interface ThreadState {
   thread: Thread;
-  runtimeId?: string;
   streamingMessage: AssistantMessage | null;
   status: ThreadStoreStatus;
   abortController: AbortController | null;
@@ -258,7 +257,6 @@ export function createThreadStore(
     executionRuntime?: ExternalThreadExecutionRuntime;
     /** Persist host-owned Run/Evaluation resources after explicit metadata edits. */
     onRunMetadataChange?: (metadata: ThreadRunMetadata) => void;
-    runtimeId?: string;
     /**
      * Resolve the model a run/edit should use given the thread's saved model:
      * the saved model when still available, else the user's default, else the
@@ -710,7 +708,6 @@ export function createThreadStore(
 
       return {
         thread: normalizedInitialThread,
-        runtimeId: options.runtimeId,
         streamingMessage: null,
         status: "idle",
         abortController: null,

@@ -8,10 +8,10 @@ import {
 } from "@/host/host-services";
 import type { DesktopWindowContext } from "@/shared/agent-project";
 
+import { DesktopModelProvider } from "./desktop-model-provider";
 import { Layout } from "./layout";
 import { Page } from "./page";
 import { ProjectPage } from "./project-page";
-import { WorkspaceModelScope } from "./workspace-model-scope";
 
 export function App() {
   const [context, setContext] = useState<DesktopWindowContext>();
@@ -36,12 +36,9 @@ export function App() {
       ) : context.kind === "agentProject" ? (
         <CommandProvider>
           <DesktopHostProvider>
-            <WorkspaceModelScope
-              runtimeId="local"
-              createClient={createElectrobunModelClient}
-            >
+            <DesktopModelProvider createClient={createElectrobunModelClient}>
               <ProjectPage project={context.project} />
-            </WorkspaceModelScope>
+            </DesktopModelProvider>
           </DesktopHostProvider>
         </CommandProvider>
       ) : (

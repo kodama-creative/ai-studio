@@ -5,10 +5,7 @@ import type {
   DurablePiRuntime,
 } from "@llm-space/pi-runtime";
 
-import {
-  executeDebugCommand,
-  readDebugCommandReceipt,
-} from "./debug-command";
+import { executeDebugCommand } from "./debug-command";
 import type {
   StudioEventCursor,
   StudioExperimentRecord,
@@ -27,6 +24,12 @@ import type {
   StudioEvaluationMetadata,
   StudioEvaluationMetadataInput,
 } from "./evaluation";
+import {
+  cancelActiveOperation,
+  driveAdmittedOperation,
+  hasActiveOperation,
+  resolveOperationAdmission,
+} from "./operation-lifecycle";
 import {
   STUDIO_PI_LANE,
   STUDIO_PI_RUNTIME_FORMAT_VERSION,
@@ -102,6 +105,7 @@ export interface StudioApplication {
     input: StudioToolApprovalInput
   ): Promise<StudioRunReceipt>;
   cancelRun(threadId: string, operationId: string): Promise<void>;
+  cancelActiveRun(threadId: string): Promise<void>;
   inspectRun(threadId: string, operationId: string): Promise<PiSessionSnapshot>;
   events(
     threadId: string,
@@ -167,7 +171,7 @@ class StudioApplicationImpl implements StudioApplication {
       : this._composeThread(experiment);
   }
 
-  /** Lists Project Experiments without reading or migrating Engine state. */
+  /** Lists Project Experiments from Studio metadata over Pi Session state. */
   async listThreads(): Promise<readonly StudioThread[]> {
     this._requireOpen();
     const experiments = this._options.store.transaction((tx) =>
@@ -390,7 +394,7 @@ class StudioApplicationImpl implements StudioApplication {
       sessionId: experiment.sessionId,
       lane: experiment.lane,
     });
-    if (_hasActiveOperation(snapshot)) {
+    if (hasActiveOperation(snapshot)) {
       throw new Error(`Studio Thread "${threadId}" has an active operation.`);
     }
     const next: StudioExperimentRecord = {
@@ -410,22 +414,34 @@ class StudioApplicationImpl implements StudioApplication {
   ): Promise<StudioRunReceipt> {
     this._requireOpen();
     let experiment = this._requireExperiment(threadId);
-    if (input.mode !== undefined) {
-      const operationId = readDebugCommandReceipt({
-        store: this._options.store,
+    const admission = await resolveOperationAdmission({
+      store: this._options.store,
+      runtime: this._options.runtime,
+      productId: threadId,
+      productLabel: `Studio Thread "${threadId}"`,
+      sessionId: experiment.sessionId,
+      lane: experiment.lane,
+      commandId: input.commandId,
+      commandInput: input,
+      mode: input.mode,
+    });
+    if (admission.kind === "receipt") {
+      return {
         sessionId: experiment.sessionId,
-        commandId: input.commandId,
-        method: input.mode,
-        input,
-      });
-      if (operationId !== undefined) {
-        return { sessionId: experiment.sessionId, operationId };
-      }
+        operationId: admission.operationId,
+      };
     }
-    const view = await this._composeThread(experiment);
-    if (view.operationId !== undefined) {
-      throw new Error(`Studio Thread "${threadId}" has an active operation.`);
+    const operationId = admission.operationId;
+    const current = admission.snapshot;
+    if (admission.kind === "recover") {
+      experiment = await this._reconcileAdmittedOperation(
+        threadId,
+        experiment,
+        current
+      );
+      return this._driveAdmittedOperation(threadId, experiment, current, input);
     }
+    const view = await this._composeThread(experiment, current);
     const messages = view.document.conversation.messages;
     const inputIndex = messages.findIndex(
       (message) => message.id === input.fromMessageId
@@ -441,40 +457,29 @@ class StudioApplicationImpl implements StudioApplication {
       state: structuredClone(view.document.conversation.state),
     });
     experiment = prepared.experiment;
-    const operationId = this._generateId("operation");
     const operationMessages = coreMessagesToPi(
       [...prepared.baseMessages, inputMessage],
       _runtimeBinding(view.document.agent).model,
       this._clock()
     );
-    let effectiveAgent: StudioAgentSnapshot | undefined;
-    let effectiveSkills: StudioExecutableAgent["skills"] | undefined;
-    let snapshot = await this._options.runtime.start({
+    const currentAgent = await this._options.resolveCurrentAgent({
+      sessionId: experiment.sessionId,
+      operationId,
+      messages: operationMessages,
+    });
+    const effectiveAgent: StudioAgentSnapshot = {
+      ...structuredClone(currentAgent.snapshot),
+      ...(input.modelOverride === undefined
+        ? {}
+        : { model: input.modelOverride }),
+    };
+    const snapshot = await this._options.runtime.start({
       operationId,
       sessionId: experiment.sessionId,
       lane: experiment.lane,
       messages: operationMessages,
-      binding: async () => {
-        const currentAgent = await this._options.resolveCurrentAgent({
-          sessionId: experiment.sessionId,
-          operationId,
-          messages: operationMessages,
-        });
-        effectiveAgent = {
-          ...structuredClone(currentAgent.snapshot),
-          ...(input.modelOverride === undefined
-            ? {}
-            : { model: input.modelOverride }),
-        };
-        effectiveSkills = currentAgent.skills;
-        return _runtimeBinding(effectiveAgent, effectiveSkills);
-      },
+      binding: _runtimeBinding(effectiveAgent, currentAgent.skills),
     });
-    if (effectiveAgent === undefined) {
-      throw new Error(
-        `Studio operation "${operationId}" did not resolve its Agent binding.`
-      );
-    }
     const { draft: _consumedDraft, ...committedExperiment } = experiment;
     void _consumedDraft;
     const next: StudioExperimentRecord = {
@@ -503,52 +508,75 @@ class StudioApplicationImpl implements StudioApplication {
       operationId,
       sessionId: experiment.sessionId,
     });
-    if (input.mode === "continue") {
-      snapshot =
-        (await executeDebugCommand({
-          store: this._options.store,
-          sessionId: experiment.sessionId,
-          operationId,
-          commandId: input.commandId,
-          method: "continue",
-          input,
-          clock: this._clock,
-          execute: () =>
-            this._options.runtime.continue({
-              sessionId: experiment.sessionId,
-              lane: experiment.lane,
-            }),
-        })) ??
-        (await this._options.runtime.open({
-          sessionId: experiment.sessionId,
-          lane: experiment.lane,
-        }));
-    } else if (input.mode === "step" && snapshot.nextAction !== undefined) {
-      const action = snapshot.nextAction;
-      snapshot =
-        (await executeDebugCommand({
-          store: this._options.store,
-          sessionId: experiment.sessionId,
-          operationId,
-          commandId: input.commandId,
-          method: "step",
-          input,
-          clock: this._clock,
-          execute: () =>
-            this._options.runtime.step({
-              sessionId: experiment.sessionId,
-              lane: experiment.lane,
-              expectedActionId: action.id,
-              kind: action.kind,
-            }),
-        })) ??
-        (await this._options.runtime.open({
-          sessionId: experiment.sessionId,
-          lane: experiment.lane,
-        }));
-    }
+    return this._driveAdmittedOperation(threadId, next, snapshot, input);
+  }
+
+  /** Applies the optional initial debugger mode after durable admission metadata exists. */
+  private async _driveAdmittedOperation(
+    threadId: string,
+    experiment: StudioExperimentRecord,
+    initial: PiSessionSnapshot,
+    input: StudioRunInput
+  ): Promise<StudioRunReceipt> {
+    const { operationId, snapshot } = await driveAdmittedOperation({
+      store: this._options.store,
+      runtime: this._options.runtime,
+      productId: threadId,
+      sessionId: experiment.sessionId,
+      lane: experiment.lane,
+      initial,
+      commandId: input.commandId,
+      commandInput: input,
+      mode: input.mode,
+      signal: input.signal,
+      clock: this._clock,
+    });
     await this._recordSnapshot(threadId, snapshot);
     return { sessionId: experiment.sessionId, operationId };
+  }
+
+  /** Rebuilds missing Studio metadata from Pi's immutable operation binding. */
+  private async _reconcileAdmittedOperation(
+    threadId: string,
+    experiment: StudioExperimentRecord,
+    snapshot: PiSessionSnapshot
+  ): Promise<StudioExperimentRecord> {
+    if (snapshot.operationId === undefined) return experiment;
+    const binding = await this._options.runtime.readOperationBinding({
+      sessionId: experiment.sessionId,
+      operationId: snapshot.operationId,
+    });
+    if (binding === undefined) {
+      throw new Error(
+        `Studio operation "${snapshot.operationId}" does not have a frozen binding.`
+      );
+    }
+    const agent = _agentSnapshot(binding);
+    const { draft, ...committed } = experiment;
+    const next: StudioExperimentRecord = {
+      ...committed,
+      agent,
+      state: structuredClone(draft?.state ?? experiment.state),
+      updatedAt: this._clock(),
+    };
+    const reference: StudioOperationReference = {
+      sessionId: experiment.sessionId,
+      lane: experiment.lane,
+      operationId: snapshot.operationId,
+      ...(snapshot.leafId === null ? {} : { leafId: snapshot.leafId }),
+      agentSnapshot: agent,
+      relation: "executed",
+    };
+    this._options.store.transaction((tx) => {
+      tx.saveExperiment(next);
+      tx.replaceOperationReferences(threadId, [
+        ...tx
+          .listOperationReferences(threadId)
+          .filter((item) => item.operationId !== snapshot.operationId),
+        reference,
+      ]);
+    });
+    return next;
   }
 
   /** Releases exactly one stable semantic action for an owned Pi operation. */
@@ -567,6 +595,13 @@ class StudioApplicationImpl implements StudioApplication {
       method: "step",
       input,
       clock: this._clock,
+      readCurrent: () =>
+        this._options.runtime.open({
+          sessionId: owner.reference.sessionId,
+          lane: owner.reference.lane,
+        }),
+      needsExecution: (current) =>
+        current.nextAction?.id === input.expectedActionId,
       execute: () =>
         this._options.runtime.step({
           sessionId: owner.reference.sessionId,
@@ -575,9 +610,7 @@ class StudioApplicationImpl implements StudioApplication {
           kind: input.kind,
         }),
     });
-    if (snapshot !== undefined) {
-      await this._recordSnapshot(owner.threadId, snapshot);
-    }
+    await this._recordSnapshot(owner.threadId, snapshot);
     return { sessionId: owner.reference.sessionId, operationId };
   }
 
@@ -597,15 +630,19 @@ class StudioApplicationImpl implements StudioApplication {
       method: "continue",
       input,
       clock: this._clock,
+      readCurrent: () =>
+        this._options.runtime.open({
+          sessionId: owner.reference.sessionId,
+          lane: owner.reference.lane,
+        }),
+      needsExecution: (current) => current.status === "paused",
       execute: () =>
         this._options.runtime.continue({
           sessionId: owner.reference.sessionId,
           lane: owner.reference.lane,
         }),
     });
-    if (snapshot !== undefined) {
-      await this._recordSnapshot(owner.threadId, snapshot);
-    }
+    await this._recordSnapshot(owner.threadId, snapshot);
     return { sessionId: owner.reference.sessionId, operationId };
   }
 
@@ -636,6 +673,19 @@ class StudioApplicationImpl implements StudioApplication {
       lane: owner.reference.lane,
     });
     await this._recordSnapshot(owner.threadId, snapshot);
+  }
+
+  /** Cancels the Pi-authoritative active operation even during metadata recovery. */
+  async cancelActiveRun(threadId: string): Promise<void> {
+    this._requireOpen();
+    const experiment = this._requireExperiment(threadId);
+    const cancelled = await cancelActiveOperation({
+      runtime: this._options.runtime,
+      sessionId: experiment.sessionId,
+      lane: experiment.lane,
+    });
+    if (cancelled === undefined) return;
+    await this._recordSnapshot(threadId, cancelled.snapshot);
   }
 
   /** Reads the current durable debugger state for an owned operation. */
@@ -704,7 +754,7 @@ class StudioApplicationImpl implements StudioApplication {
       sessionId: experiment.sessionId,
       lane: experiment.lane,
       leafId: snapshot.leafId,
-      ...(_hasActiveOperation(snapshot) && snapshot.operationId !== undefined
+      ...(hasActiveOperation(snapshot) && snapshot.operationId !== undefined
         ? { operationId: snapshot.operationId }
         : {}),
       runtimeFormatVersion: experiment.runtimeFormatVersion,
@@ -927,9 +977,32 @@ function _runtimeBinding(
   };
 }
 
-/** Active identity exists only while Pi exposes a next action or suspension. */
-function _hasActiveOperation(snapshot: PiSessionSnapshot): boolean {
-  return snapshot.nextAction !== undefined || snapshot.status === "suspended";
+/** Restores product metadata exclusively from the operation's frozen binding. */
+function _agentSnapshot(binding: RuntimeBinding): StudioAgentSnapshot {
+  return {
+    agentSpecId: binding.agent.agentSpecId,
+    sourceRevision: binding.agent.sourceRevision,
+    model: `${binding.model.provider}/${binding.model.modelId}`,
+    instructions: binding.systemPrompt.length === 0 ? [] : [binding.systemPrompt],
+    tools: binding.tools.map((tool) => {
+      if (tool.description === undefined || tool.inputSchema === undefined) {
+        throw new Error(
+          `Frozen tool "${tool.name}" is missing its Studio-visible schema.`
+        );
+      }
+      return {
+        name: tool.name,
+        description: tool.description,
+        inputSchema: structuredClone(tool.inputSchema),
+        ...(tool.outputSchema === undefined
+          ? {}
+          : { outputSchema: structuredClone(tool.outputSchema) }),
+        implementationId: tool.implementationId,
+        replay: tool.replay,
+        hostBinding: structuredClone(tool.hostBinding ?? {}),
+      };
+    }),
+  };
 }
 
 /** Validates stable resource ids before replacing ordered metadata. */

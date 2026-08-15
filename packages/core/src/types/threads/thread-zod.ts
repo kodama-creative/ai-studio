@@ -183,7 +183,6 @@ function _hasRecognizableThreadData(value: Thread): boolean {
     "evaluations",
     "evaluationRubrics",
     "modelName",
-    "runtimeId",
     "originalURL",
   ].some((key) => key in value);
 }

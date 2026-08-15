@@ -9,7 +9,6 @@ test("restoration pruning preserves busy and subsequently opened pane owners", (
     paneId: "busy-pane",
     playgroundId: "busy",
     title: "Busy",
-    runtimeId: "local",
     type: "playground",
   };
   const idle: AppTab = {
@@ -17,7 +16,6 @@ test("restoration pruning preserves busy and subsequently opened pane owners", (
     paneId: "idle-pane",
     playgroundId: "idle",
     title: "Idle",
-    runtimeId: "local",
     type: "playground",
   };
   const added: AppTab = {
@@ -25,7 +23,6 @@ test("restoration pruning preserves busy and subsequently opened pane owners", (
     paneId: "added-pane",
     playgroundId: "added",
     title: "Added",
-    runtimeId: "local",
     type: "playground",
   };
 

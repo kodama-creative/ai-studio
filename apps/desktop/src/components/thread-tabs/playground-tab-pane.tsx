@@ -5,7 +5,15 @@ import type { Playground } from "@llm-space/studio";
 import { ThreadPlayground } from "@llm-space/ui/components/thread-playground";
 import { cn } from "@llm-space/ui/lib/utils";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { toast } from "sonner";
 
 import {
@@ -25,21 +33,19 @@ interface PlaygroundTabPaneProps {
   playgroundId: string;
   active: boolean;
   lifecycleHost: PaneLifecycleHost;
-  mutationRevision: number;
   refreshNonce?: number;
   onClose: (tabId: string) => void;
   onTitleChange?: (playgroundId: string, title: string) => void;
   onThreadStateChange?: (tabId: string, thread: Thread | null) => void;
 }
 
-/** One local Studio Playground backed by application + Engine SQLite state. */
+/** One local Studio Playground backed by Studio metadata + Pi Session state. */
 function _PlaygroundTabPane({
   tabId,
   paneId,
   playgroundId,
   active,
   lifecycleHost,
-  mutationRevision,
   refreshNonce = 0,
   onClose,
   onTitleChange,
@@ -138,12 +144,7 @@ function _PlaygroundTabPane({
         },
         {
           onBusyChange: (busy) =>
-            lifecycleHost.onPersistenceChange(
-              paneId,
-              "local",
-              persistenceOwner,
-              busy
-            ),
+            lifecycleHost.onPersistenceChange(paneId, persistenceOwner, busy),
           onWriteError: (writeError) => {
             toast.error("Failed to save Playground; retrying", {
               description:
@@ -171,13 +172,17 @@ function _PlaygroundTabPane({
       clearTimeout(writeTimer.current);
       writeTimer.current = null;
     }
+    // A paused Pi operation owns the current Session projection. Keep editor
+    // changes queued as the next Draft; they become writable after the
+    // operation reaches a terminal state and must never block its next Step.
+    if (playgroundRef.current?.operationId !== undefined) return;
     await persistence.flush();
   }, [persistence]);
   const handleChange = useCallback(
     (next: Thread) => {
       onThreadStateChange?.(tabId, next);
       // External execution already persisted this exact editor projection in
-      // Engine. Treat only divergent editor state as a dirty application Draft.
+      // Pi Session. Treat only divergent editor state as a dirty application Draft.
       if (_sameThread(next, durableThreadRef.current)) return;
       persistence.setPending(next);
       if (writeTimer.current !== null) clearTimeout(writeTimer.current);
@@ -207,12 +212,12 @@ function _PlaygroundTabPane({
           queryClient.setQueryData(queryKey, next);
           onTitleChange?.(playgroundId, next.title);
         },
-        beforeExecute: flushPending,
+        beforeAdmission: flushPending,
       }),
     [client, flushPending, onTitleChange, playgroundId, queryClient, queryKey]
   );
   const handleStreamingStart = useCallback(
-    (runId: string) => lifecycleHost.onRunStart(paneId, "local", runId),
+    (runId: string) => lifecycleHost.onRunStart(paneId, runId),
     [lifecycleHost, paneId]
   );
   const handleStreamingEnd = useCallback(
@@ -273,10 +278,15 @@ function _PlaygroundTabPane({
     settleWithoutCommit,
   ]);
 
-  const mutationReserved = useMemo(() => {
-    void mutationRevision;
-    return lifecycleHost.isMutationReserved(paneId, "local");
-  }, [lifecycleHost, mutationRevision, paneId]);
+  const getMutationReserved = useCallback(
+    () => lifecycleHost.isMutationReserved(paneId),
+    [lifecycleHost, paneId]
+  );
+  const mutationReserved = useSyncExternalStore(
+    lifecycleHost.subscribeToMutationChanges,
+    getMutationReserved,
+    getMutationReserved
+  );
 
   return (
     <div className={cn("size-full", !active && "hidden")}>
@@ -289,7 +299,6 @@ function _PlaygroundTabPane({
           initialValue={editorThread}
           readonly={mutationReserved}
           active={active}
-          runtimeId="local"
           executionRuntime={runtime}
           onChange={handleChange}
           onStreamingStart={handleStreamingStart}

@@ -41,15 +41,7 @@ export function parsePortableThreadSnapshot(
   return { ...snapshot, thread: normalizeThread(snapshot.thread) };
 }
 
-/** Read either the current snapshot envelope or its viewer Thread projection. */
+/** Read the Thread projection from the required versioned snapshot envelope. */
 export function threadFromSnapshotDocument(value: unknown): Thread {
-  if (
-    typeof value === "object" &&
-    value !== null &&
-    "kind" in value &&
-    value.kind === THREAD_SNAPSHOT_KIND
-  ) {
-    return parsePortableThreadSnapshot(value).thread;
-  }
-  return normalizeThread(ThreadZodSchema.parse(value));
+  return parsePortableThreadSnapshot(value).thread;
 }

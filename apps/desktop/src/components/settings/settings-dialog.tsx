@@ -21,7 +21,6 @@ import {
 
 import { createElectrobunModelClient } from "@/host/host-services";
 import type { SettingsTab } from "@/shared/commands";
-import type { RuntimeId } from "@/shared/runtime";
 
 import { AccountPage } from "./account-page";
 import { ExperimentalPage } from "./experimental-page";
@@ -52,8 +51,8 @@ const PAGES = [
     value: "models",
     label: "Models",
     icon: Boxes,
-    Page: ({ runtimeId }: { runtimeId: RuntimeId }) => (
-      <ModelProvider client={createElectrobunModelClient(runtimeId)}>
+    Page: () => (
+      <ModelProvider client={createElectrobunModelClient()}>
         <ModelsPage />
       </ModelProvider>
     ),
@@ -63,36 +62,28 @@ const PAGES = [
     value: "skills",
     label: "Skills",
     icon: Sparkles,
-    Page: ({ runtimeId }: { runtimeId: RuntimeId }) => (
-      <SkillsPage runtimeId={runtimeId} />
-    ),
+    Page: () => <SkillsPage />,
   },
   {
     group: "Agent",
     value: "mcp",
     label: "MCP Servers",
     icon: Cable,
-    Page: ({ runtimeId }: { runtimeId: RuntimeId }) => (
-      <McpPage runtimeId={runtimeId} />
-    ),
+    Page: () => <McpPage />,
   },
   {
     group: "Agent",
     value: "search",
     label: "Web Search",
     icon: Search,
-    Page: ({ runtimeId }: { runtimeId: RuntimeId }) => (
-      <SearchPage runtimeId={runtimeId} />
-    ),
+    Page: () => <SearchPage />,
   },
   {
     group: "Connections",
     value: "network",
     label: "Network",
     icon: Network,
-    Page: ({ runtimeId }: { runtimeId: RuntimeId }) => (
-      <NetworkPage runtimeId={runtimeId} />
-    ),
+    Page: () => <NetworkPage />,
   },
   {
     group: null,
@@ -116,8 +107,6 @@ export function SettingsDialog({
   tab: SettingsTab;
   onTabChange: (tab: SettingsTab) => void;
 }) {
-  const runtimeId: RuntimeId = "local";
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
@@ -184,7 +173,7 @@ export function SettingsDialog({
           <div className="min-w-0 grow">
             {PAGES.map(({ value, Page }) => (
               <TabsContent key={value} value={value} className="size-full">
-                <Page runtimeId={runtimeId} />
+                <Page />
               </TabsContent>
             ))}
           </div>

@@ -8,10 +8,8 @@ import {
   ModelManager,
 } from "@llm-space/runtime/models";
 import { NetworkSettingsManager } from "@llm-space/runtime/network";
-import { LocalRuntimeClient, RuntimeRouter } from "@llm-space/runtime/runtime";
 import { SearchSettingsManager } from "@llm-space/runtime/search";
 import { SkillsManager } from "@llm-space/runtime/skills";
-import { createLocalFileSystem } from "@llm-space/runtime/storage";
 import { createBuiltInToolsModule } from "@llm-space/runtime/tools/built-in";
 import type { Studio } from "@llm-space/studio/server";
 import Electrobun, {
@@ -72,7 +70,7 @@ import { RpcRegistry, type RpcEventSink } from "../di/rpc-registry";
 import { PROCESS_TOKENS, PROJECT_WINDOW_TOKENS } from "../di/tokens";
 import { windowRegistryModule } from "../di/window-registry-module";
 import { attachWindowScope } from "../di/window-scope";
-import { moveToTrash, openPath, revealInFileManager } from "../fs";
+import { openPath, revealInFileManager } from "../fs";
 import { DesktopHost } from "../host/desktop-host";
 import { ProjectWindowManager } from "../projects/project-window-manager";
 import {
@@ -130,7 +128,6 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
   const githubAuth = new GitHubAuthManager({
     onChange: (state) => notifyGithubChanged(state),
   });
-  const localFs = createLocalFileSystem(homePath);
   // Write-side gist connector for the "Share thread" flow. Reuses the signed-in
   // GitHub token (the `gist` scope); creates secret gists readable by URL.
   const gistWriter = new GistThreadWriter({
@@ -153,23 +150,6 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
     ],
   });
   await host.start();
-  const localRuntime = new LocalRuntimeClient({
-    localFs,
-    mcpManager,
-    modelManager,
-    networkSettings,
-    searchSettings,
-    skillsManager,
-    tools: host.tools,
-    rmPath: async (workspacePath) => {
-      const abs = localFs.realpath(workspacePath);
-      if (abs === localFs.realpath("")) {
-        throw new Error("Cannot delete the workspace root.");
-      }
-      await moveToTrash(abs);
-    },
-  });
-  const runtimeRouter = new RuntimeRouter(localRuntime);
 
   let notifyUpdateChanged: (
     message: import("../../shared/updates").UpdateStatusChangedPayload
@@ -281,12 +261,10 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
       gistWriter,
       gistReader,
       homePath,
-      localFs,
       mcpManager,
       modelManager,
       networkSettings,
       projectWindows,
-      runtimeRouter,
       searchSettings,
       skillsManager,
       updater,

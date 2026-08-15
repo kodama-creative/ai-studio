@@ -20,7 +20,6 @@ export interface PlaygroundTab {
   readonly type: "playground";
   readonly playgroundId: string;
   readonly title: string;
-  readonly runtimeId: "local";
   readonly paneId: string;
   readonly refreshNonce?: number;
 }
@@ -74,7 +73,6 @@ function _createTab(playgroundId: string, title: string): PlaygroundTab {
     type: "playground",
     playgroundId,
     title,
-    runtimeId: "local",
     paneId: `playground-pane:${uuid()}`,
   };
 }

@@ -6,7 +6,7 @@ import { expandHomePath } from "@llm-space/core/server";
 
 /**
  * Filesystem/exec backing for the code Generator, deliberately kept OUTSIDE the
- * root-confined `LocalFileSystem`: a generated project is written into a
+ * root-confined generator filesystem: a generated project is written into a
  * user-picked directory anywhere on disk. Two guards keep this narrow:
  *
  * 1. Only directories the user explicitly picked via the native dialog

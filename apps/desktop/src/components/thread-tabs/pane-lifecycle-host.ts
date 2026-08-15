@@ -1,17 +1,12 @@
-import type { RuntimeId } from "@/shared/runtime";
-
 import type {
   PanePersistenceChange,
   PaneRunSettled,
   PaneRunStart,
-} from "./runtime-run-tracker";
+} from "./pane-activity-tracker";
 
 export interface PaneLifecycleHost {
-  isMutationReserved: (
-    paneId: string,
-    runtimeId: RuntimeId,
-    path?: string
-  ) => boolean;
+  isMutationReserved: (paneId: string) => boolean;
+  subscribeToMutationChanges: (listener: () => void) => () => void;
   onPersistenceChange: PanePersistenceChange;
   onRefreshSettled: (paneId: string) => void;
   onRunSettled: PaneRunSettled;

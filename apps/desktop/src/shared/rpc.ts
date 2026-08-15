@@ -4,6 +4,7 @@ import type { Command } from "./commands";
 import type {
   NamespacedRpcEvent,
   NamespacedRpcRequest,
+  NamespacedRpcRequestCancel,
   NamespacedRpcStreamEvent,
   NamespacedRpcStreamSubscribe,
   NamespacedRpcStreamUnsubscribe,
@@ -25,6 +26,7 @@ export interface DesktopRPCType {
     messages: {
       rpcNamespaceStreamSubscribe: NamespacedRpcStreamSubscribe;
       rpcNamespaceStreamUnsubscribe: NamespacedRpcStreamUnsubscribe;
+      rpcNamespaceRequestCancel: NamespacedRpcRequestCancel;
       executeCommand: Command;
     };
   }>;

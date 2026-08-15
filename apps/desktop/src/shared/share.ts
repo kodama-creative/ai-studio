@@ -7,7 +7,6 @@
  */
 
 import type { ShareThreadCommand } from "./commands";
-import type { RuntimeId } from "./runtime";
 
 /** The static site root (see `apps/web` `base` + the Pages deploy). */
 export const SHARE_WEB_BASE_URL = "https://deer-flow.github.io/llm-space/";
@@ -24,8 +23,7 @@ export function buildWebShareUrl(connectorId: string, threadId: string): string 
 
 /** Build a path-specific Share command without separating it from its owner. */
 export function buildShareThreadCommand(
-  path: string,
-  runtimeId: RuntimeId
+  path: string
 ): ShareThreadCommand {
-  return { type: "thread.share", args: { path, runtimeId } };
+  return { type: "thread.share", args: { path } };
 }

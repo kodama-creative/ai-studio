@@ -12,11 +12,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-import type {
-  PathsHost,
-  RuntimeScopedHostOptions,
-  SkillsHost,
-} from "@llm-space/ui/host";
+import type { PathsHost, SkillsHost } from "@llm-space/ui/host";
 
 /** The host capabilities needed to resolve an example's dynamic seed data. */
 export interface SeedHost {
@@ -127,10 +123,9 @@ function userPrompts(texts: string[]): Message[] {
  * current list at the moment a thread is created — not a snapshot from load.
  */
 async function listEnabledSkills(
-  skills: SkillsHost,
-  options?: RuntimeScopedHostOptions
+  skills: SkillsHost
 ): Promise<SkillInfo[]> {
-  const available = await skills.listAvailable(options);
+  const available = await skills.listAvailable();
   const byName = new Map<string, SkillInfo>();
   for (const skill of available) {
     if (skill.enabled && !byName.has(skill.name)) {

@@ -1,8 +1,3 @@
-import {
-  RuntimeCapabilityUnavailableError,
-  RuntimeNotFoundError,
-} from "@llm-space/runtime/runtime";
-
 import { isDisposable, type Disposable } from "../../shared/disposable";
 import type {
   NamespacedRpcEvent,
@@ -42,6 +37,7 @@ type RegistryState = "idle" | "starting" | "started" | "disposed";
 export class RpcRegistry implements Disposable {
   private readonly _servers = new Map<string, RegisteredRpcServer>();
   private readonly _subscriptions = new Map<string, AbortController>();
+  private readonly _requests = new Map<string, AbortController>();
   private readonly _registrations: Disposable[] = [];
   private _disposePromise: Promise<void> | undefined;
   private _state: RegistryState = "idle";
@@ -109,6 +105,12 @@ export class RpcRegistry implements Disposable {
 
   /** Dispatch one request to its owning namespace server. */
   async request(input: NamespacedRpcRequest): Promise<RpcResult<unknown>> {
+    const controller =
+      input.requestId === undefined ? undefined : new AbortController();
+    if (input.requestId !== undefined && controller !== undefined) {
+      this.cancelRequest(input.requestId);
+      this._requests.set(input.requestId, controller);
+    }
     try {
       this._assertStarted();
       const server = this._requireServer(input.namespace);
@@ -118,26 +120,54 @@ export class RpcRegistry implements Disposable {
         );
       }
       const method = _requireMethod(server.requests, input.method, "request");
-      return { ok: true, value: await method(...input.args) };
+      return {
+        ok: true,
+        value: await method(
+          ...(controller === undefined
+            ? input.args
+            : _withSignal(input.args, controller.signal))
+        ),
+      };
     } catch (error) {
       return { ok: false, error: _rpcError(error) };
+    } finally {
+      if (
+        input.requestId !== undefined &&
+        this._requests.get(input.requestId) === controller
+      ) {
+        this._requests.delete(input.requestId);
+      }
     }
+  }
+
+  /** Abort one cancellable request without affecting sibling work. */
+  cancelRequest(requestId: string): void {
+    this._requests.get(requestId)?.abort();
+    this._requests.delete(requestId);
   }
 
   /** Start one stream; items and terminal state are emitted to the renderer. */
   subscribe(input: NamespacedRpcStreamSubscribe): void {
-    this._assertStarted();
-    this.unsubscribe(input.subscriptionId);
-    const server = this._requireServer(input.namespace);
-    if (!server.namespace.streamNames.has(input.method)) {
-      throw new Error(
-        `RPC stream "${input.namespace}.${input.method}" is not declared.`
-      );
+    try {
+      this._assertStarted();
+      this.unsubscribe(input.subscriptionId);
+      const server = this._requireServer(input.namespace);
+      if (!server.namespace.streamNames.has(input.method)) {
+        throw new Error(
+          `RPC stream "${input.namespace}.${input.method}" is not declared.`
+        );
+      }
+      const method = _requireMethod(server.streams, input.method, "stream");
+      const controller = new AbortController();
+      this._subscriptions.set(input.subscriptionId, controller);
+      void this._consume(input, method, controller);
+    } catch (error) {
+      this._sink.sendStreamEvent({
+        subscriptionId: input.subscriptionId,
+        type: "error",
+        error: _rpcError(error),
+      });
     }
-    const method = _requireMethod(server.streams, input.method, "stream");
-    const controller = new AbortController();
-    this._subscriptions.set(input.subscriptionId, controller);
-    void this._consume(input, method, controller);
   }
 
   /** Abort one stream without affecting sibling namespace subscriptions. */
@@ -157,6 +187,8 @@ export class RpcRegistry implements Disposable {
     this._state = "disposed";
     for (const controller of this._subscriptions.values()) controller.abort();
     this._subscriptions.clear();
+    for (const controller of this._requests.values()) controller.abort();
+    this._requests.clear();
     for (const registration of this._registrations.reverse()) {
       await registration.dispose();
     }
@@ -278,22 +310,11 @@ function _isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
 
 function _rpcError(error: unknown): RpcError {
   if (error instanceof RpcDomainError) return error.rpcError;
-  if (error instanceof RuntimeNotFoundError) {
-    return {
-      code: "NOT_FOUND",
-      message: error.message,
-      details: { runtimeId: error.runtimeId },
-    };
-  }
-  if (error instanceof RuntimeCapabilityUnavailableError) {
-    return {
-      code: "CAPABILITY_UNAVAILABLE",
-      message: error.message,
-      details: {
-        runtimeId: error.runtimeId,
-        capability: error.capability,
-      },
-    };
+  if (
+    (error instanceof DOMException && error.name === "AbortError") ||
+    (_isRecord(error) && error.name === "AbortError")
+  ) {
+    return { code: "CANCELLED", message: "RPC request was cancelled." };
   }
   console.error("Unhandled namespaced RPC error:", error);
   return { code: "INTERNAL", message: "Internal RPC error." };

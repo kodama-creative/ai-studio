@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
 
+import { PaneActivityTracker } from "./pane-activity-tracker";
 import {
   closeAllTabsIfAllowed,
   closeOtherTabsIfAllowed,
   closeTabIfAllowed,
   refreshTabIfAllowed,
 } from "./pane-mutation-actions";
-import { RuntimeRunTracker } from "./runtime-run-tracker";
 import type { AppTab } from "./use-thread-tabs";
 
 const TABS: AppTab[] = [
@@ -15,7 +15,6 @@ const TABS: AppTab[] = [
     paneId: "pane-a",
     playgroundId: "a",
     title: "A",
-    runtimeId: "local",
     type: "playground",
   },
   {
@@ -23,16 +22,15 @@ const TABS: AppTab[] = [
     paneId: "pane-b",
     playgroundId: "b",
     title: "B",
-    runtimeId: "local",
     type: "playground",
   },
 ];
 
 describe("pane mutation production actions", () => {
   test("close, close others, close all, and refresh stop before their mutations", () => {
-    const tracker = new RuntimeRunTracker();
-    tracker.beginRun("pane-a", "local", "run-a");
-    tracker.beginRun("pane-b", "local", "run-b");
+    const tracker = new PaneActivityTracker();
+    tracker.beginRun("pane-a", "run-a");
+    tracker.beginRun("pane-b", "run-b");
     let mutations = 0;
     let blocked = 0;
     const onBlocked = () => {
@@ -86,7 +84,7 @@ describe("pane mutation production actions", () => {
   });
 
   test("refresh keeps its pane reserved until the remount acknowledges it", () => {
-    const tracker = new RuntimeRunTracker();
+    const tracker = new PaneActivityTracker();
     let refreshCalls = 0;
 
     const reservation = refreshTabIfAllowed({
@@ -100,12 +98,10 @@ describe("pane mutation production actions", () => {
     });
 
     expect(refreshCalls).toBe(1);
-    expect(tracker.beginRun("pane-a", "local", "during-refresh")).toBe(
-      false
-    );
+    expect(tracker.beginRun("pane-a", "during-refresh")).toBe(false);
     expect(typeof reservation).toBe("object");
     if (!reservation || typeof reservation !== "object") return;
     reservation.release();
-    expect(tracker.beginRun("pane-a", "local", "after-remount")).toBe(true);
+    expect(tracker.beginRun("pane-a", "after-remount")).toBe(true);
   });
 });

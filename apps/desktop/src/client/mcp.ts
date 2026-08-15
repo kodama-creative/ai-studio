@@ -5,57 +5,47 @@ import type {
   McpServerView,
 } from "@llm-space/core";
 
-import type { RuntimeId } from "@/shared/runtime";
+import { MCP_RPC } from "@/shared/mcp-rpc";
+import { createRpcClient } from "@/shared/namespaced-rpc";
 
-import { mcpClient } from "./runtime-rpc-clients";
+import { createElectrobunRpcClientTransport } from "./namespaced-rpc-client";
 
-export async function listMcpServers(
-  runtimeId?: RuntimeId
-): Promise<McpServerView[]> {
-  return mcpClient.listServers(runtimeId);
+const mcpClient = createRpcClient(
+  MCP_RPC,
+  createElectrobunRpcClientTransport()
+);
+
+export async function listMcpServers(): Promise<McpServerView[]> {
+  return mcpClient.listServers();
 }
 
 export async function addMcpServer(
-  server: McpServerDraft,
-  runtimeId?: RuntimeId
+  server: McpServerDraft
 ): Promise<McpServerView[]> {
-  return mcpClient.addServer(runtimeId, server);
+  return mcpClient.addServer(server);
 }
 
 export async function updateMcpServer(
   serverId: string,
-  server: McpServerDraft,
-  runtimeId?: RuntimeId
+  server: McpServerDraft
 ): Promise<McpServerView[]> {
-  return mcpClient.updateServer(runtimeId, serverId, server);
+  return mcpClient.updateServer(serverId, server);
 }
 
-export async function removeMcpServer(
-  serverId: string,
-  runtimeId?: RuntimeId
-): Promise<McpServerView[]> {
-  return mcpClient.removeServer(runtimeId, serverId);
+export async function removeMcpServer(serverId: string): Promise<McpServerView[]> {
+  return mcpClient.removeServer(serverId);
 }
 
-export async function disconnectMcpServer(
-  serverId: string,
-  runtimeId?: RuntimeId
-): Promise<McpServerView[]> {
-  return mcpClient.disconnectServer(runtimeId, serverId);
+export async function disconnectMcpServer(serverId: string): Promise<McpServerView[]> {
+  return mcpClient.disconnectServer(serverId);
 }
 
-export async function cancelMcpTest(
-  serverId: string,
-  runtimeId?: RuntimeId
-): Promise<McpServerView[]> {
-  return mcpClient.cancelTest(runtimeId, serverId);
+export async function cancelMcpTest(serverId: string): Promise<McpServerView[]> {
+  return mcpClient.cancelTest(serverId);
 }
 
-export async function listMcpTools(
-  serverId: string,
-  runtimeId?: RuntimeId
-): Promise<McpServerToolsResponse> {
-  return mcpClient.listTools(runtimeId, serverId);
+export async function listMcpTools(serverId: string): Promise<McpServerToolsResponse> {
+  return mcpClient.listTools(serverId);
 }
 
 export async function callMcpTool(
@@ -63,8 +53,7 @@ export async function callMcpTool(
     serverId: string;
     toolName: string;
     arguments: Record<string, unknown>;
-  },
-  runtimeId?: RuntimeId
+  }
 ): Promise<McpCallToolResponse> {
-  return mcpClient.callTool(runtimeId, input);
+  return mcpClient.callTool(input);
 }

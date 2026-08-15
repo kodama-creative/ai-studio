@@ -6,12 +6,10 @@ import { Button } from "../../ui/button";
 
 export function ThreadShareButton({
   path,
-  runtimeId,
   disabled,
   onShare,
 }: {
   path: string;
-  runtimeId?: string;
   disabled: boolean;
   onShare: (input: ShareThreadActionInput) => void;
 }) {
@@ -21,7 +19,7 @@ export function ThreadShareButton({
       size="icon-lg"
       aria-label="Share thread"
       disabled={disabled}
-      onClick={() => onShare(createShareThreadAction(path, runtimeId))}
+      onClick={() => onShare(createShareThreadAction(path))}
     >
       <Share2Icon className="size-4" />
     </Button>

@@ -38,15 +38,13 @@ export function getToolConnectionProviderId(
   );
 }
 
-/** Bind host/runtime/profile concerns once for both manual and automatic calls. */
+/** Bind host/profile concerns once for both manual and automatic calls. */
 export function createToolExecutor({
   executeTool,
   getProfileId,
-  runtimeId,
 }: {
   executeTool: ExecuteTool;
   getProfileId: GetProviderProfileId;
-  runtimeId?: string;
 }): ToolExecutor {
   return (tool, args, context) => {
     const providerId = getToolConnectionProviderId(tool);
@@ -54,7 +52,6 @@ export function createToolExecutor({
       ? getProfileId(providerId, toolProfileSelectionScope(tool.name))
       : undefined;
     return executeTool(tool, args, {
-      runtimeId,
       ...context,
       ...(providerId
         ? {
