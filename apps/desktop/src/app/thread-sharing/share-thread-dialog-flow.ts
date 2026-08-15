@@ -66,8 +66,8 @@ interface SharePublishCallbacks<T extends SharePublishResult> {
  * Owns the monotonic lifetime of one Share dialog target.
  *
  * Every async operation captures the current epoch and target. Closing,
- * reopening, or changing either target field invalidates prior work, even when
- * a later target happens to reuse the same path.
+ * reopening, or changing target identity invalidates prior work, even when a
+ * later target happens to reuse the same path.
  */
 export class ShareThreadDialogFlow {
   private _epoch = 0;
@@ -76,12 +76,7 @@ export class ShareThreadDialogFlow {
   private _pendingAuth: PendingAuth | null = null;
 
   sync(open: boolean, target: ShareThreadTarget): void {
-    if (
-      this._open === open &&
-      this._target.path === target.path
-    ) {
-      return;
-    }
+    if (this._open === open && this._target.path === target.path) return;
     this._epoch += 1;
     this._open = open;
     this._target = { ...target };

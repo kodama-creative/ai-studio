@@ -33,14 +33,13 @@ import {
 } from "react";
 
 import { useGithubAuth } from "@/app/account/github-auth-provider";
-import { createThreadSharingClient } from "@/client/share";
-import { useCommands } from "@/commands";
-
 import {
   prepareShareThreadDialogCommit,
   ShareThreadDialogFlow,
   type ShareThreadTransaction,
-} from "./share-thread-dialog-flow";
+} from "@/app/thread-sharing/share-thread-dialog-flow";
+import { createThreadSharingClient } from "@/client/share";
+import { useCommands } from "@/commands";
 
 type ShareStatus = "idle" | "awaitingAuth" | "generating" | "success" | "error";
 
@@ -94,7 +93,6 @@ export function ShareThreadDialog({
   // effect both commits ownership and clears target-specific UI before paint.
   useLayoutEffect(() => {
     targetCommit.commit(flow);
-    if (!open) return;
     if (copyFeedbackTimerRef.current !== null) {
       clearTimeout(copyFeedbackTimerRef.current);
       copyFeedbackTimerRef.current = null;
@@ -105,6 +103,7 @@ export function ShareThreadDialog({
     setErrorMessage("");
     setCopied(false);
     setConfirmSignInOpen(false);
+    if (!open) return;
     setDescription("");
     setTitle(threadTitleFromPath(path));
     void flow.prefillTitle(
