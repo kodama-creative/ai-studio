@@ -1,10 +1,10 @@
 import { ContainerModule } from "inversify";
 
+import type { RpcServer } from "../../shared/namespaced-rpc";
 import {
   REMINDERS_RPC,
   type RemindersRpc,
-} from "../../shared/application-rpc";
-import type { RpcServer } from "../../shared/namespaced-rpc";
+} from "../../shared/reminders-rpc";
 import {
   REMINDERS_APPLICATION,
   type RemindersApplication,

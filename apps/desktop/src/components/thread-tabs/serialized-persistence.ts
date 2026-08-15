@@ -1,4 +1,6 @@
 interface SerializedPersistenceOptions {
+  /** Keep pending revisions queued while their owning domain is read-only. */
+  canWrite?: () => boolean;
   onBusyChange?: (busy: boolean) => void;
   onWriteError?: (error: unknown) => void;
   waitBeforeRetry?: (attempt: number) => Promise<void>;
@@ -15,9 +17,9 @@ const _waitBeforeRetry = (attempt: number) =>
   });
 
 /**
- * Persists only ordered revisions. Failed writes stay inside the drain loop, so
- * a terminal flush remains a real durability barrier and never needs a second
- * user action to recover after storage becomes writable again.
+ * Persists only ordered revisions. Failed writes stay inside the drain loop;
+ * when the domain closes its write gate, the newest revision remains pending
+ * and a later flush resumes it without retrying against read-only state.
  */
 export class SerializedPersistence<T> {
   private _drainPromise: Promise<void> | null = null;
@@ -25,6 +27,7 @@ export class SerializedPersistence<T> {
   private _pending: PendingValue<T> | null = null;
   private _persistedRevision = 0;
   private _busy = false;
+  private readonly _canWrite: () => boolean;
   private readonly _onBusyChange?: (busy: boolean) => void;
   private readonly _onWriteError?: (error: unknown) => void;
   private readonly _waitBeforeRetry: (attempt: number) => Promise<void>;
@@ -33,6 +36,7 @@ export class SerializedPersistence<T> {
     private readonly _write: (value: T) => Promise<void>,
     options: SerializedPersistenceOptions = {}
   ) {
+    this._canWrite = options.canWrite ?? (() => true);
     this._onBusyChange = options.onBusyChange;
     this._onWriteError = options.onWriteError;
     this._waitBeforeRetry = options.waitBeforeRetry ?? _waitBeforeRetry;
@@ -60,6 +64,7 @@ export class SerializedPersistence<T> {
     const targetRevision = this._latestRevision;
     if (this._drainPromise) await this._drainPromise;
     while (this._persistedRevision < targetRevision) {
+      if (!this._canWrite()) return;
       await this._ensureDrain();
     }
   }
@@ -79,6 +84,7 @@ export class SerializedPersistence<T> {
   private async _drain(): Promise<void> {
     let attempt = 0;
     while (this._pending) {
+      if (!this._canWrite()) return;
       const candidate = this._pending;
       this._pending = null;
       try {

@@ -1,12 +1,12 @@
 import { ContainerModule, type ResolutionContext } from "inversify";
 
-import type {
-  GithubAccountEvents,
-  GithubAccountRequests,
-} from "../../shared/application-rpc";
 import type { GithubAuthState } from "../../shared/auth";
 import type { Disposable } from "../../shared/disposable";
 import { EventHub } from "../../shared/event-hub";
+import type {
+  GithubAccountEvents,
+  GithubAccountRequests,
+} from "../../shared/github-account-rpc";
 import type { GitHubAuthManager } from "../auth/github-auth-manager";
 import { desktopToken, PROCESS_TOKENS } from "../di/tokens";
 

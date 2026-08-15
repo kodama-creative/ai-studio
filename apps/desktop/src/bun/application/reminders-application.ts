@@ -1,6 +1,6 @@
 import { ContainerModule } from "inversify";
 
-import type { RemindersRequests } from "../../shared/application-rpc";
+import type { RemindersRequests } from "../../shared/reminders-rpc";
 import { desktopToken } from "../di/tokens";
 import {
   dismissGithubStarReminder,

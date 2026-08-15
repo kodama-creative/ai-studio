@@ -3,7 +3,7 @@ import { ContainerModule } from "inversify";
 import {
   GITHUB_ACCOUNT_RPC,
   type GithubAccountRpc,
-} from "../../shared/application-rpc";
+} from "../../shared/github-account-rpc";
 import type { RpcServer } from "../../shared/namespaced-rpc";
 import {
   GITHUB_ACCOUNT_APPLICATION,

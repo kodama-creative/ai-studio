@@ -1,16 +1,11 @@
 import { useEffect, useState } from "react";
 
 import { windowClient } from "@/client/native-files";
-import { CommandProvider } from "@/commands";
-import {
-  createElectrobunModelClient,
-  DesktopHostProvider,
-} from "@/host/host-services";
 import type { DesktopWindowContext } from "@/shared/agent-project";
 
-import { DesktopModelProvider } from "./desktop-model-provider";
+import { DesktopWindowProviders } from "./desktop-window-providers";
 import { Layout } from "./layout";
-import { Page } from "./page";
+import { MainWindowPage } from "./page";
 import { ProjectPage } from "./project-page";
 
 export function App() {
@@ -33,16 +28,14 @@ export function App() {
         <div className="text-muted-foreground grid size-full place-items-center text-sm">
           Opening workspace…
         </div>
-      ) : context.kind === "agentProject" ? (
-        <CommandProvider>
-          <DesktopHostProvider>
-            <DesktopModelProvider createClient={createElectrobunModelClient}>
-              <ProjectPage project={context.project} />
-            </DesktopModelProvider>
-          </DesktopHostProvider>
-        </CommandProvider>
       ) : (
-        <Page />
+        <DesktopWindowProviders>
+          {context.kind === "agentProject" ? (
+            <ProjectPage project={context.project} />
+          ) : (
+            <MainWindowPage />
+          )}
+        </DesktopWindowProviders>
       )}
     </Layout>
   );

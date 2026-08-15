@@ -28,7 +28,7 @@ import { toast } from "sonner";
 import { createAgentProjectClient } from "@/client/agent-project-client";
 import { createPlaygroundClient } from "@/client/playground-client";
 import { importThreadSnapshot } from "@/client/share";
-import { CommandProvider, useCommands, useRegisterCommands } from "@/commands";
+import { useCommands, useRegisterCommands } from "@/commands";
 import { AccountStatus } from "@/components/account-status";
 import { FeatureReminderDialog } from "@/components/feature-reminder-dialog";
 import { GithubAuthProvider } from "@/components/github-auth-provider";
@@ -53,15 +53,9 @@ import {
 import { UpdateIndicator } from "@/components/update-indicator";
 import { UpdateStatusProvider } from "@/components/update-status-provider";
 import { Welcome } from "@/components/welcome";
-import {
-  createElectrobunModelClient,
-  DesktopHostProvider,
-} from "@/host/host-services";
 import { track } from "@/lib/analytics";
 import { useFullScreen } from "@/lib/use-full-screen";
 import type { SettingsTab } from "@/shared/commands";
-
-import { DesktopModelProvider } from "./desktop-model-provider";
 
 // Overlay surfaces that aren't part of the first paint — settings, the command
 // palette, onboarding, and examples. Loaded lazily so their code (and heavy
@@ -93,17 +87,13 @@ const ShareThreadDialog = lazy(() =>
   }))
 );
 
-export function Page() {
+export function MainWindowPage() {
   return (
-    <CommandProvider>
-      <DesktopHostProvider>
-        <UpdateStatusProvider>
-          <GithubAuthProvider>
-            <PageInner />
-          </GithubAuthProvider>
-        </UpdateStatusProvider>
-      </DesktopHostProvider>
-    </CommandProvider>
+    <UpdateStatusProvider>
+      <GithubAuthProvider>
+        <PageWorkspace />
+      </GithubAuthProvider>
+    </UpdateStatusProvider>
   );
 }
 
@@ -153,15 +143,7 @@ function writeSidebarSize(sizeInPixels: number): void {
   );
 }
 
-function PageInner() {
-  return (
-    <DesktopModelProvider createClient={createElectrobunModelClient}>
-      <_PageWorkspace />
-    </DesktopModelProvider>
-  );
-}
-
-function _PageWorkspace() {
+function PageWorkspace() {
   const paneActivityTrackerRef = useRef(new PaneActivityTracker());
   const canPruneRestoredTab = useCallback((tab: AppTab) => {
     const paneId = paneIdForTab(tab);

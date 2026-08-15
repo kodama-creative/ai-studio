@@ -10,8 +10,8 @@ import {
 } from "@llm-space/studio";
 import { ContainerModule, type ResolutionContext } from "inversify";
 
-import type { ThreadSharingRequests } from "../../shared/application-rpc";
 import { buildWebShareUrl } from "../../shared/share";
+import type { ThreadSharingRequests } from "../../shared/thread-sharing-rpc";
 import { desktopToken, PROCESS_TOKENS } from "../di/tokens";
 
 import type { ModelsApplication } from "./models-application";

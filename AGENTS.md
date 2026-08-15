@@ -98,10 +98,11 @@ server, contribution, and window module in its `bun/rpc/*-rpc-feature.ts` file.
 Do not recreate central `runtime-module` or catch-all `di/modules` files.
 Cross-cutting capabilities such as GitHub account, updates, reminders,
 analytics, and thread sharing also keep separate `*-application.ts` and
-`*-rpc-feature.ts` modules; do not merge them back into generic
-`application-services` or `application-rpc-servers` aggregations. Bun feature
-modules must not export import-time manager instances or let application
-classes reach through a service locator.
+`*-rpc-feature.ts` modules, plus one feature-owned shared RPC contract and
+renderer client; do not merge them back into generic `application-services`,
+`application-rpc-servers`, `application-rpc`, or `application-rpc-clients`
+aggregations. Bun feature modules must not export import-time manager instances
+or let application classes reach through a service locator.
 
 Feature `ContainerModule` factories resolve constructor dependencies through
 Inversify `ResolutionContext`; they do not call `DesktopWindowScope.get(...)`.
@@ -225,14 +226,14 @@ Playground/Experiment target on every request.
 ### App layout (`apps/desktop/src`)
 
 - `mainview/` — the Vite entry: `index.html` + `main.tsx` mounting `<App>`.
-- `app/` — `index.tsx` (App), `layout.tsx` (providers: React Query, `ModelProvider`, tooltips, sonner toaster), `page.tsx` (resizable sidebar + tabs, settings/command-palette/onboard dialogs).
+- `app/` — `index.tsx` resolves the native window context; `layout.tsx` owns visual/query providers; `desktop-window-providers.tsx` is the shared Main/Project renderer composition root (`CommandProvider` → `DesktopHostProvider` → `ModelProvider`); `page.tsx` exports `MainWindowPage` and owns only the Main-window product UI plus its Main-only account/update providers.
 - `bun/` — main-process code: `app/` (window, menu, window-state), `rpc/`, `streaming/`, `storage/`, `models/` (`ModelManager` + builtin/custom providers), `auth/` (`GitHubAuthManager` — OAuth Device Flow + `settings/auth.json`), `fs/` (trash/reveal), `reminders/` (one-time feature reminders + GitHub-star reminder, persisted to `settings/reminders.json`; reminder definitions ship in code at `shared/feature-reminders.ts` — append to `FEATURE_REMINDERS`, never reorder or reuse an `id`), `env/hydrate` (loads login-shell env — API keys/PATH — before anything reads `process.env`), `workspace/seed`.
 
 > **GitHub calls go through the proxy.** GitHub auth (`bun/auth/`) and any future gist calls run from the **bun process** using the global `fetch`, which `NetworkSettingsManager` (`bun/network/`) routes through the user's configured proxy by writing `HTTP(S)_PROXY` onto `process.env`. Just call `fetch` — never add a bypassing custom dispatcher, or corporate/proxied users' GitHub requests will fail.
 
-- `client/` — renderer-side namespaced RPC clients, including `thread-client.ts` and `auxiliary-generation-client.ts`.
+- `client/` — renderer-side namespaced RPC clients. Each feature owns its client file; do not introduce cross-feature client aggregations.
 - `host/` — `host-services.tsx`: the desktop `HostServices` + `ModelClient` impls (`DesktopHostProvider`, `createElectrobunModelClient`) feeding the shared `@llm-space/ui` playground.
-- `shared/` — code used by both contexts: `rpc.ts`, `commands.ts`.
+- `shared/` — code used by both contexts: the Electrobun envelope, commands, and one `*-rpc.ts` contract per feature.
 - `components/` — desktop-only UI: `thread-tabs/`, `settings/`, `command-palette.tsx`, `onboard-dialog.tsx`, `feature-reminder-dialog.tsx` (the "what's new" reminder popup), and the account/update/github widgets. **The Thread Playground, model-provider, code-editor, shadcn `ui/`, and design tokens moved to `@llm-space/ui`** — import them from there, not from `@/components`.
 - Design tokens live in `@llm-space/ui/styles/globals.css` (Tailwind v4 + OKLch), imported once by `app/layout.tsx`. The app is dark-themed.
 

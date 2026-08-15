@@ -13,7 +13,7 @@ import {
 } from "react";
 import { toast } from "sonner";
 
-import { updatesClient } from "@/client/application-rpc-clients";
+import { updatesClient } from "@/client/updates";
 import { useCommands } from "@/commands";
 import { UpdateDialog } from "@/components/update-dialog";
 import type {

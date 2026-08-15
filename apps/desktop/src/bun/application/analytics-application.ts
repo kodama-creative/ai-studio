@@ -1,7 +1,7 @@
 import { ContainerModule, type ResolutionContext } from "inversify";
 
 import type { AnalyticsEvent } from "../../shared/analytics";
-import type { AnalyticsRequests } from "../../shared/application-rpc";
+import type { AnalyticsRequests } from "../../shared/analytics-rpc";
 import type { Analytics } from "../analytics";
 import { desktopToken, PROCESS_TOKENS } from "../di/tokens";
 

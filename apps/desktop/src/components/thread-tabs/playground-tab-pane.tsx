@@ -143,6 +143,7 @@ function _PlaygroundTabPane({
           onTitleChange?.(playgroundId, saved.title);
         },
         {
+          canWrite: () => playgroundRef.current?.operationId === undefined,
           onBusyChange: (busy) =>
             lifecycleHost.onPersistenceChange(paneId, persistenceOwner, busy),
           onWriteError: (writeError) => {
@@ -172,10 +173,6 @@ function _PlaygroundTabPane({
       clearTimeout(writeTimer.current);
       writeTimer.current = null;
     }
-    // A paused Pi operation owns the current Session projection. Keep editor
-    // changes queued as the next Draft; they become writable after the
-    // operation reaches a terminal state and must never block its next Step.
-    if (playgroundRef.current?.operationId !== undefined) return;
     await persistence.flush();
   }, [persistence]);
   const handleChange = useCallback(

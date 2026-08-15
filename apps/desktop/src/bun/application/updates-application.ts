@@ -1,15 +1,15 @@
 import { ContainerModule, type ResolutionContext } from "inversify";
 
-import type {
-  UpdatesEvents,
-  UpdatesRequests,
-} from "../../shared/application-rpc";
 import type { Disposable } from "../../shared/disposable";
 import { EventHub } from "../../shared/event-hub";
 import type {
   UpdateMode,
   UpdateStatusChangedPayload,
 } from "../../shared/updates";
+import type {
+  UpdatesEvents,
+  UpdatesRequests,
+} from "../../shared/updates-rpc";
 import { desktopToken, PROCESS_TOKENS } from "../di/tokens";
 import type { UpdaterService } from "../updates";
 

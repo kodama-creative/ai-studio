@@ -1,10 +1,10 @@
 import { ContainerModule } from "inversify";
 
+import type { RpcServer } from "../../shared/namespaced-rpc";
 import {
   THREAD_SHARING_RPC,
   type ThreadSharingRpc,
-} from "../../shared/application-rpc";
-import type { RpcServer } from "../../shared/namespaced-rpc";
+} from "../../shared/thread-sharing-rpc";
 import {
   THREAD_SHARING_APPLICATION,
   type ThreadSharingApplication,

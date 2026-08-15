@@ -72,4 +72,59 @@ describe("SerializedPersistence", () => {
 
     expect(writes).toEqual(["A", "B"]);
   });
+
+  test("keeps a Draft queued while its operation owns the document", async () => {
+    let writable = false;
+    const writes: string[] = [];
+    const busy: boolean[] = [];
+    const persistence = new SerializedPersistence<string>(
+      (value) => {
+        writes.push(value);
+        return Promise.resolve();
+      },
+      {
+        canWrite: () => writable,
+        onBusyChange: (value) => busy.push(value),
+      }
+    );
+
+    persistence.setPending("between-step edit");
+    await persistence.flush();
+
+    expect(writes).toEqual([]);
+    expect(busy).toEqual([true]);
+
+    writable = true;
+    await persistence.flush();
+
+    expect(writes).toEqual(["between-step edit"]);
+    expect(busy).toEqual([true, false]);
+  });
+
+  test("stops retrying when the document becomes read-only", async () => {
+    let writable = true;
+    let attempts = 0;
+    const persistence = new SerializedPersistence<string>(
+      () => {
+        attempts += 1;
+        if (attempts === 1) {
+          writable = false;
+          return Promise.reject(new Error("operation admitted during write"));
+        }
+        return Promise.resolve();
+      },
+      {
+        canWrite: () => writable,
+        waitBeforeRetry: () => Promise.resolve(),
+      }
+    );
+
+    persistence.setPending("draft");
+    await persistence.flush();
+    expect(attempts).toBe(1);
+
+    writable = true;
+    await persistence.flush();
+    expect(attempts).toBe(2);
+  });
 });

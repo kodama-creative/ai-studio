@@ -37,7 +37,7 @@ import {
 import { toast } from "sonner";
 
 import { getAnalyticsSettings, setAnalyticsSettings } from "@/client/analytics";
-import { updatesClient } from "@/client/application-rpc-clients";
+import { updatesClient } from "@/client/updates";
 import { useCommands } from "@/commands";
 import { DEFAULT_ANALYTICS_SETTINGS } from "@/shared/analytics";
 import { DEFAULT_UPDATE_MODE, type UpdateMode } from "@/shared/updates";

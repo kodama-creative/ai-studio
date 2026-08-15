@@ -582,26 +582,27 @@ function _ProjectThreadPlaygroundPane({
   );
   const persistence = useMemo(
     () =>
-      new SerializedPersistence<Thread>(async (next) => {
-        const current = threadRef.current;
-        const saved = await client.saveDocument(
-          current.id,
-          playgroundThreadToStudioDocument(next, current)
-        );
-        publishThread(saved);
-      }, {
-        onWriteError: (error) => {
-          toast.error("Unable to save Studio Thread; retrying", {
-            description: _errorMessage(error),
-          });
+      new SerializedPersistence<Thread>(
+        async (next) => {
+          const current = threadRef.current;
+          const saved = await client.saveDocument(
+            current.id,
+            playgroundThreadToStudioDocument(next, current)
+          );
+          publishThread(saved);
         },
-      }),
+        {
+          canWrite: () => threadRef.current.operationId === undefined,
+          onWriteError: (error) => {
+            toast.error("Unable to save Studio Thread; retrying", {
+              description: _errorMessage(error),
+            });
+          },
+        }
+      ),
     [client, publishThread]
   );
   const flushPending = useCallback(async () => {
-    // Preserve edits made between debugger Steps as the next Draft. Studio
-    // intentionally rejects Draft writes while Pi owns an active operation.
-    if (threadRef.current.operationId !== undefined) return;
     await persistence.flush();
   }, [persistence]);
   const persist = useCallback(

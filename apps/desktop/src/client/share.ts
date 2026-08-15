@@ -1,7 +1,16 @@
 import type { PortableThreadSnapshot } from "@llm-space/core";
 import type { Playground } from "@llm-space/studio";
 
-import { threadSharingClient } from "./application-rpc-clients";
+import { createRpcClient } from "@/shared/namespaced-rpc";
+import { THREAD_SHARING_RPC } from "@/shared/thread-sharing-rpc";
+
+import { createElectrobunRpcClientTransport } from "./namespaced-rpc-client";
+
+/** Renderer client owned by the Thread Sharing RPC feature. */
+const threadSharingClient = createRpcClient(
+  THREAD_SHARING_RPC,
+  createElectrobunRpcClientTransport()
+);
 
 /** The result of publishing a thread: the web viewer link + the gist id. */
 export interface ShareThreadResult {

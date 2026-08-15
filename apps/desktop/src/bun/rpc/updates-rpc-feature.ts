@@ -1,7 +1,7 @@
 import { ContainerModule } from "inversify";
 
-import { UPDATES_RPC, type UpdatesRpc } from "../../shared/application-rpc";
 import type { RpcServer } from "../../shared/namespaced-rpc";
+import { UPDATES_RPC, type UpdatesRpc } from "../../shared/updates-rpc";
 import {
   UPDATES_APPLICATION,
   type UpdatesApplication,

@@ -1,6 +1,5 @@
 "use client";
 
-import { ModelProvider } from "@llm-space/ui/components/model-provider";
 import { Dialog, DialogContent } from "@llm-space/ui/ui/dialog";
 import {
   Tabs,
@@ -19,7 +18,6 @@ import {
   Sparkles,
 } from "lucide-react";
 
-import { createElectrobunModelClient } from "@/host/host-services";
 import type { SettingsTab } from "@/shared/commands";
 
 import { AccountPage } from "./account-page";
@@ -51,11 +49,7 @@ const PAGES = [
     value: "models",
     label: "Models",
     icon: Boxes,
-    Page: () => (
-      <ModelProvider client={createElectrobunModelClient()}>
-        <ModelsPage />
-      </ModelProvider>
-    ),
+    Page: () => <ModelsPage />,
   },
   {
     group: "Agent",

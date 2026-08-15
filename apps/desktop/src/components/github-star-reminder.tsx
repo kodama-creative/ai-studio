@@ -2,7 +2,7 @@ import { cn } from "@llm-space/ui/lib/utils";
 import { XIcon } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
-import { remindersClient } from "@/client/application-rpc-clients";
+import { remindersClient } from "@/client/reminders";
 import { useCommands } from "@/commands";
 
 /** The repository we nudge users to star. */

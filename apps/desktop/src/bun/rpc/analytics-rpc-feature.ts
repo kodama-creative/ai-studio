@@ -3,7 +3,7 @@ import { ContainerModule } from "inversify";
 import {
   ANALYTICS_RPC,
   type AnalyticsRpc,
-} from "../../shared/application-rpc";
+} from "../../shared/analytics-rpc";
 import type { RpcServer } from "../../shared/namespaced-rpc";
 import {
   ANALYTICS_APPLICATION,

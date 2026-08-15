@@ -4,7 +4,7 @@ import { Dialog, DialogClose, DialogContent } from "@llm-space/ui/ui/dialog";
 import { ArrowUpRightIcon, XIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { remindersClient } from "@/client/application-rpc-clients";
+import { remindersClient } from "@/client/reminders";
 import { useCommands } from "@/commands";
 import type { FeatureReminder } from "@/shared/feature-reminders";
 

@@ -1,4 +1,4 @@
-import { analyticsClient } from "@/client/application-rpc-clients";
+import { analyticsClient } from "@/client/analytics";
 import type { AnalyticsEvent } from "@/shared/analytics";
 
 
