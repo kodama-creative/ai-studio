@@ -57,12 +57,12 @@ export class WindowApplication implements WindowRequests, Disposable {
     if (this._window !== undefined) {
       throw new Error("Native window is already attached.");
     }
-    this._window = window;
     this._windowStates.attach(window, {
       ...state,
       onFullScreenChange: (fullScreen) =>
-        this.notifyFullScreenChanged(fullScreen),
+        this._notifyFullScreenChanged(fullScreen),
     });
+    this._window = window;
   }
 
   getContext() {
@@ -96,7 +96,7 @@ export class WindowApplication implements WindowRequests, Disposable {
   }
 
   /** Publish a native fullscreen transition to the owning renderer. */
-  notifyFullScreenChanged(fullScreen: boolean): void {
+  private _notifyFullScreenChanged(fullScreen: boolean): void {
     this.events.publish("fullScreenChanged", { fullScreen });
   }
 

@@ -100,7 +100,6 @@ export class DesktopWindowRuntime {
     if (this._window !== undefined) {
       throw new Error(`Desktop ${this._kind} window runtime is already attached.`);
     }
-    this._windowApplication.attach(window, state);
     this._window = window;
     window.on("close", () => {
       this._nativeClosed = true;
@@ -111,6 +110,7 @@ export class DesktopWindowRuntime {
         );
       });
     });
+    this._windowApplication.attach(window, state);
   }
 
   /** Dispatch a native menu action into this window's command registry. */

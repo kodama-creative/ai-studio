@@ -133,3 +133,28 @@ test("WindowApplication owns window-state attachment and fullscreen events", () 
   attached?.options.onFullScreenChange(true);
   expect(fullScreenEvents).toEqual([true]);
 });
+
+test("WindowApplication remains unattached when window-state attachment fails", async () => {
+  const window = { isFullScreen: () => true } as BrowserWindow;
+  let attempts = 0;
+  const windowStates = {
+    attach: () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error("state attach failed");
+    },
+  } as unknown as WindowStateManager;
+  const application = new WindowApplication(
+    { kind: "playground" },
+    windowStates
+  );
+
+  expect(() => application.attach(window, STATE_BINDING)).toThrow(
+    "state attach failed"
+  );
+  expect(() => application.getFullscreenState()).toThrow(
+    "Native window is not attached."
+  );
+
+  application.attach(window, STATE_BINDING);
+  expect(await application.getFullscreenState()).toEqual({ fullScreen: true });
+});

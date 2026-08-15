@@ -19,6 +19,11 @@ const DEV_SERVER_PORT = Number(
 );
 const DEV_SERVER_URL = `http://localhost:${DEV_SERVER_PORT}`;
 
+type NativeWindowCreated = (
+  window: BrowserWindow,
+  state: NativeWindowStateBinding
+) => void;
+
 // Check if Vite dev server is running for HMR
 async function _getMainViewUrl(): Promise<string> {
   const channel = await Updater.localInfo.channel();
@@ -41,10 +46,7 @@ export async function createMainWindow({
   onCreated,
 }: {
   rpc: MainWindowRPC;
-  onCreated: (
-    window: BrowserWindow,
-    state: NativeWindowStateBinding
-  ) => void;
+  onCreated: NativeWindowCreated;
 }): Promise<BrowserWindow> {
   const url = await _getMainViewUrl();
   const windowStateStore = await WindowStateStore.load();
@@ -81,10 +83,7 @@ export async function createAgentProjectWindow({
   rpc: MainWindowRPC;
   project: AgentProjectView;
   stateStore: WindowStatePersistenceStore;
-  onCreated: (
-    window: BrowserWindow,
-    state: NativeWindowStateBinding
-  ) => void;
+  onCreated: NativeWindowCreated;
 }): Promise<BrowserWindow> {
   const state = stateStore.state;
   const baseUrl = await _getMainViewUrl();

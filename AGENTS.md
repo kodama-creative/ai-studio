@@ -137,9 +137,9 @@ reach through a service locator.
 
 Feature `ContainerModule` factories resolve constructor dependencies through
 Inversify `ResolutionContext`; they do not call `DesktopWindowScope.get(...)`.
-The sole ownership exception is `nativeWindowContributionsModule`, which uses
-`scope.own(...)` to attach the disposable per-window `WindowApplication` to its
-native scope after constructing it from injected dependencies.
+`DesktopWindowRuntime` resolves the window-scoped `WindowApplication` once as a
+lifecycle root before starting the Registries; that resolution lets the scope's
+disposable tracker adopt it without passing the scope into the feature module.
 
 Each native window has a child Inversify scope. Feature modules bind window
 contribution classes with `toService(...)`; one class may implement both
