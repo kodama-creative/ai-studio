@@ -24,22 +24,27 @@ import type { Command } from "../../shared/commands";
 import { resolveDeepLinkScheme } from "../../shared/deep-link-scheme";
 import { Analytics } from "../analytics";
 import { agentProjectsModule } from "../application/agent-projects-module";
-import {
-  applicationModule,
-  APPLICATION_TOKENS,
-} from "../application/application-module";
-import type {
-  GithubAccountApplication,
-  UpdatesApplication,
-} from "../application/application-services";
+import { analyticsApplicationModule } from "../application/analytics-application";
 import { auxiliaryGenerationModule } from "../application/auxiliary-generation-module";
 import { generatorModule } from "../application/generator-module";
+import {
+  GITHUB_ACCOUNT_APPLICATION,
+  GithubAccountApplication,
+  githubAccountApplicationModule,
+} from "../application/github-account-application";
 import { modelsModule } from "../application/models-module";
 import type { WindowApplication } from "../application/native-applications";
 import {
   nativeApplicationsModule,
   NATIVE_APPLICATION_TOKENS,
 } from "../application/native-module";
+import { remindersApplicationModule } from "../application/reminders-application";
+import { threadSharingApplicationModule } from "../application/thread-sharing-application";
+import {
+  UPDATES_APPLICATION,
+  UpdatesApplication,
+  updatesApplicationModule,
+} from "../application/updates-application";
 import { GitHubAuthManager } from "../auth/github-auth-manager";
 import { isStudioOpenDeepLink } from "../deep-link";
 import { activateWindowForDeepLink } from "../deep-link/activate-window";
@@ -238,14 +243,18 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
   processContainer.load(nativeApplicationsModule());
   processContainer.load(generatorModule());
   processContainer.load(agentProjectsModule());
-  processContainer.load(applicationModule());
+  processContainer.load(threadSharingApplicationModule());
+  processContainer.load(githubAccountApplicationModule());
+  processContainer.load(updatesApplicationModule());
+  processContainer.load(remindersApplicationModule());
+  processContainer.load(analyticsApplicationModule());
   notifyGithubChanged = (state) =>
     processContainer
-      .get<GithubAccountApplication>(APPLICATION_TOKENS.github)
+      .get<GithubAccountApplication>(GITHUB_ACCOUNT_APPLICATION)
       .notifyChanged(state);
   notifyUpdateChanged = (message) =>
     processContainer
-      .get<UpdatesApplication>(APPLICATION_TOKENS.updates)
+      .get<UpdatesApplication>(UPDATES_APPLICATION)
       .notifyStatus(message);
   // Resolve the lazy application root through DI so its Disposable lifecycle
   // is adopted by the process scope before any window can request it.

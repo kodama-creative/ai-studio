@@ -2,7 +2,6 @@ import type { BrowserWindow } from "electrobun/bun";
 
 import type { Command } from "../../shared/commands";
 import { agentProjectsContributionsModule } from "../application/agent-projects-module";
-import { applicationContributionsModule } from "../application/application-module";
 import { generatorContributionsModule } from "../application/generator-module";
 import { nativeContributionsModule } from "../application/native-module";
 import { CommandRegistry, type CommandSink } from "../di/command-registry";
@@ -17,14 +16,19 @@ import {
   type MainWindowRPC,
   type MainWindowRPCController,
 } from "../rpc";
+import { analyticsRpcModule } from "../rpc/analytics-rpc-feature";
 import { auxiliaryGenerationRpcModule } from "../rpc/auxiliary-generation-rpc-feature";
 import { builtinToolsRpcModule } from "../rpc/builtin-tools-rpc-feature";
+import { githubAccountRpcModule } from "../rpc/github-account-rpc-feature";
 import { mcpRpcModule } from "../rpc/mcp-rpc-feature";
 import { modelsRpcModule } from "../rpc/models-rpc-feature";
 import { networkRpcModule } from "../rpc/network-rpc-feature";
 import { promptFilesRpcModule } from "../rpc/prompt-files-rpc-feature";
+import { remindersRpcModule } from "../rpc/reminders-rpc-feature";
 import { searchRpcModule } from "../rpc/search-rpc-feature";
 import { skillsRpcModule } from "../rpc/skills-rpc-feature";
+import { threadSharingRpcModule } from "../rpc/thread-sharing-rpc-feature";
+import { updatesRpcModule } from "../rpc/updates-rpc-feature";
 
 export type DesktopWindowKind = "main" | "project";
 
@@ -113,7 +117,11 @@ export class DesktopWindowRuntime {
   }
 
   private _loadFeatureModules(commandSink: CommandSink): void {
-    this._scope.load(applicationContributionsModule(this._scope));
+    this._scope.load(threadSharingRpcModule(this._scope));
+    this._scope.load(githubAccountRpcModule(this._scope));
+    this._scope.load(updatesRpcModule(this._scope));
+    this._scope.load(remindersRpcModule(this._scope));
+    this._scope.load(analyticsRpcModule(this._scope));
     this._scope.load(
       agentProjectsContributionsModule(this._scope, this._kind === "main")
     );

@@ -96,7 +96,11 @@ factories in feature-owned modules. Playground and Project Studio composition
 lives under `bun/playgrounds/` and `bun/projects/`; each RPC capability owns its
 server, contribution, and window module in its `bun/rpc/*-rpc-feature.ts` file.
 Do not recreate central `runtime-module` or catch-all `di/modules` files. Bun
-feature modules must not export import-time manager instances or let application
+Cross-cutting capabilities such as GitHub account, updates, reminders,
+analytics, and thread sharing also keep separate `*-application.ts` and
+`*-rpc-feature.ts` modules; do not merge them back into generic
+`application-services` or `application-rpc-servers` aggregations. Bun feature
+modules must not export import-time manager instances or let application
 classes reach through a service locator.
 
 Each native window has a child Inversify scope. Feature modules bind window

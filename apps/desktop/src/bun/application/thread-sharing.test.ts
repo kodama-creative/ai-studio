@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test";
 
 import type { ModelProviderGroup, Thread } from "@llm-space/core";
 
-import { ThreadSharingApplication } from "./application-services";
 import { buildSharedThread } from "./thread-sharing";
+import { ThreadSharingApplication } from "./thread-sharing-application";
 
 function _model(
   provider: string,
