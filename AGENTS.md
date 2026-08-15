@@ -91,13 +91,21 @@ Every native window owns one `RpcRegistry`. Window-scoped feature classes implem
 
 The Bun process object graph is assembled in one production composition root,
 `src/bun/app/start-desktop-app.ts`. Process-scoped managers are constructed
-there and passed explicitly to RPC, streaming, commands, updates, and tool
-factories; Bun feature modules must not export import-time manager instances or
-reach through a service locator.
+there, bound once through `di/process-module.ts`, and consumed by constructor
+factories in feature-owned modules. Playground and Project Studio composition
+lives under `bun/playgrounds/` and `bun/projects/`; each RPC capability owns its
+server, contribution, and window module in its `bun/rpc/*-rpc-feature.ts` file.
+Do not recreate central `runtime-module` or catch-all `di/modules` files. Bun
+feature modules must not export import-time manager instances or let application
+classes reach through a service locator.
 
 Each native window has a child Inversify scope. Feature modules bind window
 contribution classes with `toService(...)`; one class may implement both
 `CommandContribution` and `RpcContribution` without creating two instances.
+`DesktopWindowRuntime` is the deep lifecycle module around that scope: it
+loads the installed feature modules, freezes and starts both Registries, owns
+the Electrobun bridge, attaches the eventual native window, and disposes
+transports before closing the window. Callers must not reproduce that sequence.
 The named generic `ContributionProvider<T>` keeps both Registries independent
 from Inversify. Registries start once before the Electrobun bridge and native
 window are created, reject late registration, then dispose registrations before

@@ -1,4 +1,5 @@
 import type { McpManager } from "@llm-space/runtime/mcp";
+import { ContainerModule } from "inversify";
 
 import {
   MCP_RPC,
@@ -6,8 +7,13 @@ import {
   type McpRpc,
 } from "../../shared/mcp-rpc";
 import type { RpcServer } from "../../shared/namespaced-rpc";
-import type { RpcContribution } from "../di/rpc-contribution";
+import type { DesktopWindowScope } from "../di/process-container";
+import {
+  RpcContribution,
+  type RpcContribution as RpcContributionApi,
+} from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
+import { PROCESS_TOKENS } from "../di/tokens";
 
 class McpRpcServer implements RpcServer<McpRpc> {
   readonly namespace = MCP_RPC;
@@ -29,10 +35,25 @@ class McpRpcServer implements RpcServer<McpRpc> {
 }
 
 /** Owns MCP configuration and tool-call RPC for one native window. */
-export class McpRpcContribution implements RpcContribution {
+class McpRpcContribution implements RpcContributionApi {
   constructor(private readonly _mcp: McpManager) {}
 
   registerRpc(rpc: RpcRegistry): void {
     rpc.registerServer(new McpRpcServer(this._mcp));
   }
+}
+
+/** Bind MCP configuration and tool RPC as one window contribution. */
+export function mcpRpcModule(scope: DesktopWindowScope): ContainerModule {
+  return new ContainerModule(({ bind }) => {
+    bind(McpRpcContribution)
+      .toDynamicValue(
+        () =>
+          new McpRpcContribution(
+            scope.get<McpManager>(PROCESS_TOKENS.mcpManager)
+          )
+      )
+      .inSingletonScope();
+    bind<RpcContributionApi>(RpcContribution).toService(McpRpcContribution);
+  });
 }

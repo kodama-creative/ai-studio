@@ -2,6 +2,7 @@ import {
   readUserTextFile,
   userTextFileExists,
 } from "@llm-space/core/server";
+import { ContainerModule } from "inversify";
 
 import type { RpcServer } from "../../shared/namespaced-rpc";
 import {
@@ -9,7 +10,10 @@ import {
   type PromptFilesRequests,
   type PromptFilesRpc,
 } from "../../shared/prompt-files-rpc";
-import type { RpcContribution } from "../di/rpc-contribution";
+import {
+  RpcContribution,
+  type RpcContribution as RpcContributionApi,
+} from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
 
 class PromptFilesRpcServer implements RpcServer<PromptFilesRpc> {
@@ -22,8 +26,18 @@ class PromptFilesRpcServer implements RpcServer<PromptFilesRpc> {
 }
 
 /** Owns guarded prompt-file reads for one native window. */
-export class PromptFilesRpcContribution implements RpcContribution {
+class PromptFilesRpcContribution implements RpcContributionApi {
   registerRpc(rpc: RpcRegistry): void {
     rpc.registerServer(new PromptFilesRpcServer());
   }
+}
+
+/** Bind guarded prompt-file reads as one window RPC contribution. */
+export function promptFilesRpcModule(): ContainerModule {
+  return new ContainerModule(({ bind }) => {
+    bind(PromptFilesRpcContribution).toSelf().inSingletonScope();
+    bind<RpcContributionApi>(RpcContribution).toService(
+      PromptFilesRpcContribution
+    );
+  });
 }

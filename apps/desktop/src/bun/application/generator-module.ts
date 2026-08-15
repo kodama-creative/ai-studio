@@ -9,14 +9,14 @@ import type { RpcRegistry } from "../di/rpc-registry";
 import { desktopToken } from "../di/tokens";
 import { GeneratorRpcServer } from "../rpc/generator-rpc-server";
 
+import type { ModelsApplication } from "./models-application";
+import { MODELS_APPLICATION } from "./models-module";
 import type { NativeDialogApplication } from "./native-applications";
 import { NATIVE_APPLICATION_TOKENS } from "./native-module";
 import {
   ProjectGeneratorApplication,
   type ProjectGeneratorApplicationApi,
 } from "./project-generator-application";
-import type { ModelsApplication } from "./runtime-applications";
-import { RUNTIME_APPLICATION_TOKENS } from "./runtime-module";
 
 export const GENERATOR_APPLICATION =
   desktopToken<ProjectGeneratorApplicationApi>("generator", "application");
@@ -31,7 +31,7 @@ export function generatorModule(): ContainerModule {
             context.get<NativeDialogApplication>(
               NATIVE_APPLICATION_TOKENS.dialogs
             ),
-            context.get<ModelsApplication>(RUNTIME_APPLICATION_TOKENS.models)
+            context.get<ModelsApplication>(MODELS_APPLICATION)
           )
       )
       .inSingletonScope();

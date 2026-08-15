@@ -29,8 +29,8 @@ import {
 } from "../reminders/state";
 import type { UpdaterService } from "../updates";
 
+import type { ModelsApplication } from "./models-application";
 import type { DesktopPlaygroundApplication } from "./playground-application";
-import type { ModelsApplication } from "./runtime-applications";
 import { buildSharedThread } from "./thread-sharing";
 
 export interface ThreadSharingApplicationApi {

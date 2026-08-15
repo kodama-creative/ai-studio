@@ -24,9 +24,7 @@ import type { Command } from "../../shared/commands";
 import { resolveDeepLinkScheme } from "../../shared/deep-link-scheme";
 import { Analytics } from "../analytics";
 import { agentProjectsModule } from "../application/agent-projects-module";
-import { agentProjectsContributionsModule } from "../application/agent-projects-module";
 import {
-  applicationContributionsModule,
   applicationModule,
   APPLICATION_TOKENS,
 } from "../application/application-module";
@@ -34,58 +32,42 @@ import type {
   GithubAccountApplication,
   UpdatesApplication,
 } from "../application/application-services";
-import {
-  generatorContributionsModule,
-  generatorModule,
-} from "../application/generator-module";
+import { auxiliaryGenerationModule } from "../application/auxiliary-generation-module";
+import { generatorModule } from "../application/generator-module";
+import { modelsModule } from "../application/models-module";
 import type { WindowApplication } from "../application/native-applications";
 import {
   nativeApplicationsModule,
-  nativeContributionsModule,
   NATIVE_APPLICATION_TOKENS,
 } from "../application/native-module";
-import {
-  runtimeApplicationsModule,
-  runtimeContributionsModule,
-} from "../application/runtime-module";
 import { GitHubAuthManager } from "../auth/github-auth-manager";
 import { isStudioOpenDeepLink } from "../deep-link";
 import { activateWindowForDeepLink } from "../deep-link/activate-window";
 import { getPendingDeepLinks, setDeepLinkHandler } from "../deep-link/launch";
-import { CommandRegistry, type CommandSink } from "../di/command-registry";
-import {
-  mainWindowModule,
-  playgroundContributionsModule,
-  processModule,
-  projectContributionsModule,
-  projectWindowIdentityModule,
-  projectWindowModule,
-  windowModule,
-} from "../di/modules";
-import {
-  createDesktopProcessContainer,
-  type DesktopWindowScope,
-} from "../di/process-container";
-import { RpcRegistry, type RpcEventSink } from "../di/rpc-registry";
+import { createDesktopProcessContainer } from "../di/process-container";
+import { processServicesModule } from "../di/process-module";
 import { PROCESS_TOKENS, PROJECT_WINDOW_TOKENS } from "../di/tokens";
-import { windowRegistryModule } from "../di/window-registry-module";
-import { attachWindowScope } from "../di/window-scope";
 import { openPath, revealInFileManager } from "../fs";
 import { DesktopHost } from "../host/desktop-host";
+import {
+  playgroundModule,
+  playgroundWindowModule,
+} from "../playgrounds/playground-module";
+import {
+  projectWindowIdentityModule,
+  projectWindowModule,
+} from "../projects/project-module";
 import { ProjectWindowManager } from "../projects/project-window-manager";
 import {
   FileAgentProjectCatalogStore,
   FileProjectWindowStateStore,
   ProjectWindowStateFile,
 } from "../projects/project-window-state";
-import {
-  createMainWindowRPC,
-  type MainWindowRPC,
-  type MainWindowRPCController,
-} from "../rpc";
+import type { MainWindowRPC } from "../rpc";
 import { getManagedSkillsDir } from "../skills/seed";
 import { UpdaterService } from "../updates";
 
+import { DesktopWindowRuntime } from "./desktop-window-runtime";
 import { MainWindowManager } from "./main-window-manager";
 import { registerMenuActions } from "./menu";
 import { createShutdownCoordinator } from "./shutdown-coordinator";
@@ -156,15 +138,18 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
   ) => void = () => undefined;
   const updater = new UpdaterService((message) => notifyUpdateChanged(message));
   const windowStates = new WindowStateManager();
-  const commandRegistries = new Map<number, CommandRegistry>();
-  const executeCommand = (command: Command, window: BrowserWindow): void => {
-    const commands = commandRegistries.get(window.id);
-    if (commands === undefined) {
+  const windowRuntimes = new Map<number, DesktopWindowRuntime>();
+  const executeCommand = (
+    command: Command,
+    window: BrowserWindow
+  ): void => {
+    const runtime = windowRuntimes.get(window.id);
+    if (runtime === undefined) {
       throw new Error(
-        `CommandRegistry is unavailable for window ${window.id}.`
+        `DesktopWindowRuntime is unavailable for window ${window.id}.`
       );
     }
-    commands.execute(command);
+    runtime.execute(command);
   };
   const projectWindows = new ProjectWindowManager({
     state: new FileProjectWindowStateStore(homePath),
@@ -190,24 +175,13 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
           scope.load(projectWindowIdentityModule(projectView));
           const closed = new Set<() => void>();
           scope.onDisposed(() => closed.forEach((listener) => listener()));
-          const projectWindowRef: { current?: BrowserWindow } = {};
-          const getProjectWindow = (): BrowserWindow => {
-            if (projectWindowRef.current === undefined) {
-              throw new Error("Agent project window is not ready.");
-            }
-            return projectWindowRef.current;
-          };
-          const infrastructure = _createWindowInfrastructure(
-            scope,
-            "project",
-            getProjectWindow
-          );
+          const runtime = new DesktopWindowRuntime(scope, "project");
           const stateStore = await ProjectWindowStateFile.load(
             homePath,
             project.id
           );
           const projectWindow = await createAgentProjectWindow({
-            rpc: infrastructure.controller.rpc,
+            rpc: runtime.rpc,
             project: scope.get(PROJECT_WINDOW_TOKENS.project),
             stateStore,
             windowStates,
@@ -216,22 +190,9 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
                 .get<WindowApplication>(NATIVE_APPLICATION_TOKENS.window)
                 .notifyFullScreenChanged(fullScreen),
           });
-          projectWindowRef.current = projectWindow;
-          scope.load(
-            windowModule({
-              window: projectWindow,
-              rpcController: infrastructure.controller,
-            })
-          );
-          attachWindowScope(scope);
-          commandRegistries.set(projectWindow.id, infrastructure.commands);
-          scope.onDisposed(() => commandRegistries.delete(projectWindow.id));
-          scope.onDispose(() =>
-            _disposeWindowRegistries(
-              infrastructure.commands,
-              infrastructure.rpc
-            )
-          );
+          runtime.attach(projectWindow);
+          windowRuntimes.set(projectWindow.id, runtime);
+          scope.onDisposed(() => windowRuntimes.delete(projectWindow.id));
           return {
             activate: () => projectWindow.activate(),
             close: () => scope.dispose(),
@@ -254,7 +215,7 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
   // DI resolution remains confined to this composition root; feature classes
   // still receive ordinary constructor arguments instead of the Container.
   processContainer.load(
-    processModule({
+    processServicesModule({
       analytics,
       desktopHost: host,
       githubAuth,
@@ -271,7 +232,9 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
       windowStates,
     })
   );
-  processContainer.load(runtimeApplicationsModule());
+  processContainer.load(playgroundModule());
+  processContainer.load(auxiliaryGenerationModule());
+  processContainer.load(modelsModule());
   processContainer.load(nativeApplicationsModule());
   processContainer.load(generatorModule());
   processContainer.load(agentProjectsModule());
@@ -314,43 +277,22 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
 
   try {
     mainWindows = new MainWindowManager(processContainer, async (scope) => {
-      scope.load(mainWindowModule());
-      const windowRef: { current?: BrowserWindow } = {};
-      const getWindow = (): BrowserWindow => {
-        if (windowRef.current === undefined) {
-          throw new Error("Main window is not ready.");
-        }
-        return windowRef.current;
-      };
-      const infrastructure = _createWindowInfrastructure(
-        scope,
-        "main",
-        getWindow
-      );
+      scope.load(playgroundWindowModule());
+      const runtime = new DesktopWindowRuntime(scope, "main");
       const window = await createMainWindow({
-        rpc: infrastructure.controller.rpc,
+        rpc: runtime.rpc,
         windowStates,
         onFullScreenChange: (fullScreen) =>
           scope
             .get<WindowApplication>(NATIVE_APPLICATION_TOKENS.window)
             .notifyFullScreenChanged(fullScreen),
       });
-      windowRef.current = window;
-      scope.load(
-        windowModule({
-          window,
-          rpcController: infrastructure.controller,
-        })
-      );
-      attachWindowScope(scope);
-      commandRegistries.set(window.id, infrastructure.commands);
-      scope.onDisposed(() => commandRegistries.delete(window.id));
-      scope.onDispose(() =>
-        _disposeWindowRegistries(infrastructure.commands, infrastructure.rpc)
-      );
+      runtime.attach(window);
+      windowRuntimes.set(window.id, runtime);
+      scope.onDisposed(() => windowRuntimes.delete(window.id));
       return {
         window,
-        rpc: infrastructure.controller.rpc,
+        rpc: runtime.rpc,
         activate: () => window.activate(),
       };
     });
@@ -414,72 +356,6 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
     await runtime.stop();
     throw error;
   }
-}
-
-type DesktopWindowKind = "main" | "project";
-
-interface WindowInfrastructure {
-  readonly commands: CommandRegistry;
-  readonly rpc: RpcRegistry;
-  readonly controller: MainWindowRPCController;
-}
-
-/**
- * Compose and start one window's feature contributions before Electrobun
- * exposes the bridge. Only this composition root can see the window DI scope.
- */
-function _createWindowInfrastructure(
-  scope: DesktopWindowScope,
-  kind: DesktopWindowKind,
-  getWindow: () => BrowserWindow
-): WindowInfrastructure {
-  const rpcRef: { current?: MainWindowRPC } = {};
-  const requireRpc = (): MainWindowRPC => {
-    if (rpcRef.current === undefined) {
-      throw new Error(`RPC bridge for ${kind} window is not ready.`);
-    }
-    return rpcRef.current;
-  };
-  const commandSink: CommandSink = {
-    sendToWebview: (command) => requireRpc().send.executeCommand(command),
-  };
-  const rpcEventSink: RpcEventSink = {
-    sendStreamEvent: (event) =>
-      requireRpc().send.rpcNamespaceStreamEvent(event),
-    sendEvent: (event) => requireRpc().send.rpcNamespaceEvent(event),
-  };
-
-  scope.load(applicationContributionsModule(scope));
-  scope.load(agentProjectsContributionsModule(scope, kind === "main"));
-  scope.load(generatorContributionsModule(scope));
-  scope.load(nativeContributionsModule(scope, { getWindow, commandSink }));
-  scope.load(runtimeContributionsModule(scope));
-  if (kind === "main") {
-    scope.load(playgroundContributionsModule(scope));
-  } else {
-    scope.load(projectContributionsModule(scope));
-  }
-  scope.load(windowRegistryModule(scope, { commandSink, rpcEventSink }));
-
-  const commands = scope.get(CommandRegistry);
-  const rpc = scope.get(RpcRegistry);
-  commands.onStart();
-  rpc.onStart();
-  const controller = createMainWindowRPC({
-    executeCommand: (command) => commands.execute(command),
-    rpcRegistry: rpc,
-  });
-  rpcRef.current = controller.rpc;
-  return { commands, rpc, controller };
-}
-
-/** Stop transport registries before feature contribution instances are freed. */
-async function _disposeWindowRegistries(
-  commands: CommandRegistry,
-  rpc: RpcRegistry
-): Promise<void> {
-  await rpc.dispose();
-  await commands.dispose();
 }
 
 function _requireMainWindows(

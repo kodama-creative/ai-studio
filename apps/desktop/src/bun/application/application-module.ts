@@ -27,7 +27,7 @@ import {
   ThreadSharingApplication,
   UpdatesApplication,
 } from "./application-services";
-import { RUNTIME_APPLICATION_TOKENS } from "./runtime-module";
+import { MODELS_APPLICATION } from "./models-module";
 
 export const APPLICATION_TOKENS = {
   sharing: desktopToken<ThreadSharingApplication>(
@@ -51,7 +51,7 @@ export function applicationModule(): ContainerModule {
         (context: ResolutionContext) =>
           new ThreadSharingApplication(
             context.get(PROCESS_TOKENS.playgroundApplication),
-            context.get(RUNTIME_APPLICATION_TOKENS.models),
+            context.get(MODELS_APPLICATION),
             context.get(PROCESS_TOKENS.gistWriter),
             context.get(PROCESS_TOKENS.gistReader)
           )

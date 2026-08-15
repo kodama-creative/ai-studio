@@ -1,4 +1,5 @@
 import type { ToolRegistry } from "@llm-space/runtime/tools";
+import { ContainerModule } from "inversify";
 
 import {
   BUILTIN_TOOLS_RPC,
@@ -6,8 +7,13 @@ import {
   type BuiltinToolsRpc,
 } from "../../shared/builtin-tools-rpc";
 import type { RpcServer } from "../../shared/namespaced-rpc";
-import type { RpcContribution } from "../di/rpc-contribution";
+import type { DesktopWindowScope } from "../di/process-container";
+import {
+  RpcContribution,
+  type RpcContribution as RpcContributionApi,
+} from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
+import { PROCESS_TOKENS } from "../di/tokens";
 
 class BuiltinToolsRpcServer implements RpcServer<BuiltinToolsRpc> {
   readonly namespace = BUILTIN_TOOLS_RPC;
@@ -23,10 +29,29 @@ class BuiltinToolsRpcServer implements RpcServer<BuiltinToolsRpc> {
 }
 
 /** Owns bundled-tool discovery and execution RPC for one native window. */
-export class BuiltinToolsRpcContribution implements RpcContribution {
+class BuiltinToolsRpcContribution implements RpcContributionApi {
   constructor(private readonly _tools: ToolRegistry) {}
 
   registerRpc(rpc: RpcRegistry): void {
     rpc.registerServer(new BuiltinToolsRpcServer(this._tools));
   }
+}
+
+/** Bind bundled-tool RPC as one window contribution. */
+export function builtinToolsRpcModule(
+  scope: DesktopWindowScope
+): ContainerModule {
+  return new ContainerModule(({ bind }) => {
+    bind(BuiltinToolsRpcContribution)
+      .toDynamicValue(
+        () =>
+          new BuiltinToolsRpcContribution(
+            scope.get<{ tools: ToolRegistry }>(PROCESS_TOKENS.desktopHost).tools
+          )
+      )
+      .inSingletonScope();
+    bind<RpcContributionApi>(RpcContribution).toService(
+      BuiltinToolsRpcContribution
+    );
+  });
 }

@@ -1,7 +1,7 @@
 import { checkUv, GeneratorProjectWorkspace } from "../fs";
 
+import type { ModelsApplication } from "./models-application";
 import type { NativeDialogApplication } from "./native-applications";
-import type { ModelsApplication } from "./runtime-applications";
 
 export interface ProjectGeneratorApplicationApi {
   pickDirectory(): ReturnType<NativeDialogApplication["pickDirectory"]>;
