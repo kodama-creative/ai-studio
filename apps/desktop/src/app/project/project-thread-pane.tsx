@@ -18,15 +18,15 @@ import {
   shouldPersistProjectThread,
   studioThreadToPlaygroundThread,
 } from "./project-thread-adapter";
-import type { ProjectThreadsController } from "./project-threads-controller";
 
 interface ProjectThreadPaneProps {
   readonly client: StudioTransport;
-  readonly controller: ProjectThreadsController;
   readonly projectId: string;
   readonly history: readonly StudioRunHistoryEntry[];
   readonly evaluationMetadata: StudioEvaluationMetadata;
   readonly thread: StudioThread;
+  readonly onThreadProjection: (thread: StudioThread) => void;
+  readonly onRunSettled: () => Promise<void>;
 }
 
 /**
@@ -39,11 +39,12 @@ export function ProjectThreadPane(props: ProjectThreadPaneProps) {
 
 function ProjectThreadPaneOwner({
   client,
-  controller,
   projectId,
   history,
   evaluationMetadata,
   thread,
+  onThreadProjection,
+  onRunSettled,
 }: ProjectThreadPaneProps) {
   const threadRef = useRef(thread);
   threadRef.current = thread;
@@ -51,9 +52,9 @@ function ProjectThreadPaneOwner({
   const publishThread = useCallback(
     (next: StudioThread) => {
       threadRef.current = next;
-      controller.acceptThreadProjection(next);
+      onThreadProjection(next);
     },
-    [controller]
+    [onThreadProjection]
   );
   const persistence = useMemo(
     () =>
@@ -124,10 +125,10 @@ function ProjectThreadPaneOwner({
         beforeAdmission: flushPending,
         onSettled: async () => {
           await flushPending();
-          await controller.refresh();
+          await onRunSettled();
         },
       }),
-    [client, controller, flushPending, projectId, publishThread, thread.id]
+    [client, flushPending, onRunSettled, projectId, publishThread, thread.id]
   );
   return (
     <ThreadPlayground

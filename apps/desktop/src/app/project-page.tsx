@@ -1,4 +1,3 @@
-import type { StudioThread } from "@llm-space/studio";
 import { CodeEditor } from "@llm-space/ui/components/code-editor";
 import { Button } from "@llm-space/ui/ui/button";
 import {
@@ -20,7 +19,6 @@ import {
   XIcon,
 } from "lucide-react";
 import {
-  useCallback,
   useEffect,
   useMemo,
   useState,
@@ -35,59 +33,34 @@ import { TreeView, type TreeDataItem } from "@/components/tree-view";
 import type { AgentProjectView } from "@/shared/agent-project";
 import type { ProjectSourceNode } from "@/shared/project-source-rpc";
 
-import { ProjectSourceController } from "./project/project-source-controller";
 import { ProjectThreadPane } from "./project/project-thread-pane";
-import { ProjectThreadsController } from "./project/project-threads-controller";
-
-type ProjectTab =
-  | {
-      readonly id: string;
-      readonly type: "thread";
-      readonly threadId: string;
-      readonly title: string;
-    }
-  | {
-      readonly id: string;
-      readonly type: "code";
-      readonly path: string;
-      readonly title: string;
-    };
+import { ProjectWorkspaceController } from "./project/project-workspace-controller";
 
 export function ProjectPage({ project }: { project: AgentProjectView }) {
   const studioClient = useMemo(() => createStudioClient(), []);
   const sourceClient = useMemo(() => createProjectSourceClient(), []);
-  const threadController = useMemo(
+  const workspace = useMemo(
     () =>
-      new ProjectThreadsController({
-        client: studioClient,
+      new ProjectWorkspaceController({
+        studioClient,
+        sourceClient,
         reportError: _reportError,
       }),
-    [studioClient]
+    [sourceClient, studioClient]
   );
-  const threadState = useSyncExternalStore(
-    threadController.subscribe,
-    threadController.getSnapshot,
-    threadController.getSnapshot
+  const workspaceState = useSyncExternalStore(
+    workspace.subscribe,
+    workspace.getSnapshot,
+    workspace.getSnapshot
   );
-  const sourceController = useMemo(
-    () =>
-      new ProjectSourceController({
-        client: sourceClient,
-        reportError: _reportError,
-      }),
-    [sourceClient]
-  );
-  const sourceState = useSyncExternalStore(
-    sourceController.subscribe,
-    sourceController.getSnapshot,
-    sourceController.getSnapshot
-  );
+  const threadState = workspaceState.threads;
+  const sourceState = workspaceState.source;
   const { executeCommand } = useCommands();
   const [expandedSourceIds, setExpandedSourceIds] = useState<readonly string[]>(
     []
   );
-  const [tabs, setTabs] = useState<readonly ProjectTab[]>([]);
-  const [activeTabId, setActiveTabId] = useState<string>();
+  const tabs = workspaceState.tabs;
+  const activeTabId = workspaceState.activeTabId;
   const activeTab = tabs.find((tab) => tab.id === activeTabId);
   const activeThreadId = threadState.activeThread?.id;
   const openingThreadId = threadState.openingThreadId;
@@ -98,136 +71,24 @@ export function ProjectPage({ project }: { project: AgentProjectView }) {
   const openingThread =
     activeTab?.type === "thread" && openingThreadId === activeTab.threadId;
 
-  const openThreadTab = useCallback((thread: StudioThread) => {
-    const id = `thread:${thread.id}`;
-    setTabs((current) =>
-      current.some((tab) => tab.id === id)
-        ? current.map((tab) =>
-            tab.id === id ? { ...tab, title: thread.document.title } : tab
-          )
-        : [
-            ...current,
-            {
-              id,
-              type: "thread" as const,
-              threadId: thread.id,
-              title: thread.document.title,
-            },
-          ]
-    );
-    setActiveTabId(id);
-  }, []);
-
-  const openCodeFile = useCallback(
-    async (path: string) => {
-      const id = `code:${path}`;
-      if (!(await sourceController.open(path))) return;
-      setTabs((current) =>
-        current.some((tab) => tab.id === id)
-          ? current
-          : [
-              ...current,
-              {
-                id,
-                type: "code",
-                path,
-                title: path.split("/").at(-1) ?? path,
-              },
-            ]
-      );
-      setActiveTabId(id);
-    },
-    [sourceController]
-  );
-
-  const closeTab = useCallback(
-    (tabId: string) => {
-      const closing = tabs.find((tab) => tab.id === tabId);
-      if (closing?.type === "code") sourceController.close(closing.path);
-      setTabs((current) => {
-        const index = current.findIndex((tab) => tab.id === tabId);
-        const next = current.filter((tab) => tab.id !== tabId);
-        if (activeTabId === tabId) {
-          setActiveTabId(next[Math.min(index, next.length - 1)]?.id);
-        }
-        return next;
-      });
-    },
-    [activeTabId, sourceController, tabs]
-  );
-
-  const openThread = useCallback(
-    async (threadId: string) => {
-      const thread = await threadController.open(threadId);
-      if (thread !== undefined) openThreadTab(thread);
-    },
-    [openThreadTab, threadController]
-  );
-
-  const createThread = useCallback(async () => {
-    const thread = await threadController.create();
-    if (thread !== undefined) openThreadTab(thread);
-  }, [openThreadTab, threadController]);
-
-  const forkThread = useCallback(
-    async (threadId: string, entryId?: string) => {
-      const thread = await threadController.fork(threadId, entryId);
-      if (thread !== undefined) openThreadTab(thread);
-    },
-    [openThreadTab, threadController]
-  );
-
   useRegisterCommands({
-    "project.createThread": createThread,
+    "project.createThread": workspace.createThread,
     "project.forkThread": ({ threadId, checkpointId }) =>
-      forkThread(threadId, checkpointId),
+      workspace.forkThread(threadId, checkpointId),
   });
 
   useEffect(() => {
-    const tab = tabs.find((item) => item.id === activeTabId);
-    if (
-      tab?.type === "thread" &&
-      activeThreadId !== tab.threadId &&
-      openingThreadId !== tab.threadId
-    ) {
-      void openThread(tab.threadId);
-    }
-  }, [activeTabId, activeThreadId, openThread, openingThreadId, tabs]);
-
-  useEffect(() => {
-    const thread = threadState.activeThread;
-    if (thread === undefined) return;
-    setTabs((current) => {
-      const id = `thread:${thread.id}`;
-      const title = thread.document.title;
-      if (current.find((tab) => tab.id === id)?.title === title) return current;
-      return current.map((tab) => (tab.id === id ? { ...tab, title } : tab));
-    });
-  }, [threadState.activeThread]);
-
-  useEffect(() => {
-    let cancelled = false;
-    void threadController.start().then((thread) => {
-      if (!cancelled && thread !== undefined) openThreadTab(thread);
-    });
+    workspace.start();
     return () => {
-      cancelled = true;
-      threadController.stop();
+      workspace.stop();
     };
-  }, [openThreadTab, threadController]);
-
-  useEffect(() => {
-    sourceController.start();
-    return () => {
-      sourceController.stop();
-    };
-  }, [sourceController]);
+  }, [workspace]);
 
   const sourceTree = useMemo<TreeDataItem[]>(
     () =>
       _sourceTreeItems(
         sourceState.files,
-        (path) => void openCodeFile(path),
+        (path) => void workspace.openSourceFile(path),
         (path) =>
           setExpandedSourceIds((current) => {
             const id = `source:${path}`;
@@ -236,7 +97,7 @@ export function ProjectPage({ project }: { project: AgentProjectView }) {
               : [...current, id];
           })
       ),
-    [openCodeFile, sourceState.files]
+    [sourceState.files, workspace]
   );
 
   return (
@@ -306,7 +167,7 @@ export function ProjectPage({ project }: { project: AgentProjectView }) {
                   }`}
                   key={thread.id}
                   type="button"
-                  onClick={() => void openThread(thread.id)}
+                  onClick={() => void workspace.openThread(thread.id)}
                 >
                   <span className="block truncate">
                     {thread.document.title}
@@ -330,7 +191,7 @@ export function ProjectPage({ project }: { project: AgentProjectView }) {
                 }`}
                 key={tab.id}
                 type="button"
-                onClick={() => setActiveTabId(tab.id)}
+                onClick={() => workspace.selectTab(tab.id)}
               >
                 {tab.type === "code" ? (
                   <FileCodeIcon className="size-3.5 shrink-0" />
@@ -345,12 +206,12 @@ export function ProjectPage({ project }: { project: AgentProjectView }) {
                   tabIndex={0}
                   onClick={(event) => {
                     event.stopPropagation();
-                    closeTab(tab.id);
+                    workspace.closeTab(tab.id);
                   }}
                   onKeyDown={(event) => {
                     if (event.key === "Enter" || event.key === " ") {
                       event.stopPropagation();
-                      closeTab(tab.id);
+                      workspace.closeTab(tab.id);
                     }
                   }}
                 >
@@ -404,7 +265,6 @@ export function ProjectPage({ project }: { project: AgentProjectView }) {
         ) : (
           <ProjectThreadPane
             client={studioClient}
-            controller={threadController}
             projectId={project.id}
             history={threadState.runHistory.get(visibleThread.id) ?? []}
             evaluationMetadata={
@@ -414,6 +274,8 @@ export function ProjectPage({ project }: { project: AgentProjectView }) {
               }
             }
             thread={visibleThread}
+            onThreadProjection={workspace.acceptThreadProjection}
+            onRunSettled={workspace.refreshThreads}
           />
         )}
       </main>
