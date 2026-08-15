@@ -61,6 +61,14 @@ export interface ThreadRequests {
 export type ThreadClient = ThreadRequests;
 
 export const THREAD_RPC = defineRpcNamespace<ThreadRpc>("thread", {
-  streams: [],
-  events: [],
+  requests: {
+    run: true,
+    inspect: true,
+    step: true,
+    continue: true,
+    resolveToolApproval: true,
+    cancel: true,
+  },
+  streams: {},
+  events: {},
 });

@@ -82,7 +82,7 @@ Bun-workspace monorepo. Workspaces are `packages/*`, `apps/*`, and the runnable
 
 ### The RPC bridge
 
-`src/shared/rpc.ts` (`DesktopRPCType`) is only the Electrobun transport envelope: one namespaced request, stream subscribe/unsubscribe messages, namespace events, and `executeCommand`. Business methods are never flattened into that contract. Each feature owns a shared `RpcNamespace` interface, a Bun `RpcServer` class, and a renderer `createRpcClientProxy()` client with exact request/response/stream/event types.
+`src/shared/rpc.ts` (`DesktopRPCType`) is only the Electrobun transport envelope: one namespaced request, stream subscribe/unsubscribe messages, namespace events, and `executeCommand`. Business methods are never flattened into that contract. Each feature owns a shared `RpcNamespace` interface, a Bun `RpcServer` class, and a renderer `createRpcClient()` client with exact request/response/stream/event types. Namespace manifests explicitly enumerate every request, stream, and event; the client exposes only those declared members so JavaScript reflection protocols can never become accidental RPC calls.
 
 Every native window owns one `RpcRegistry`. Window-scoped feature classes implement the same-name `RpcContribution` symbol + interface and register their server classes during `RpcRegistry.onStart()`. A named `ContributionProvider<RpcContribution>` takes one frozen snapshot after all window modules are bound; duplicate namespaces and late registration fail. The Registry owns request dispatch, stream abort, event subscriptions, and reverse-order registration cleanup. `createMainWindowRPC()` only forwards the Electrobun envelope to that Registry and never constructs business services.
 

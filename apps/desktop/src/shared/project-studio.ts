@@ -63,7 +63,24 @@ export type ProjectStudioTransport = ProjectStudioRequests &
 
 export const PROJECT_STUDIO_RPC = defineRpcNamespace<ProjectStudioRpc>(
   "studio",
-  { streams: ["watchSourceFiles", "events"], events: [] }
+  {
+    requests: {
+      getSourceRevision: true,
+      listSourceFiles: true,
+      readSourceFile: true,
+      listThreads: true,
+      listRunHistory: true,
+      saveRunHistory: true,
+      listEvaluationMetadata: true,
+      saveEvaluationMetadata: true,
+      forkThread: true,
+      createThread: true,
+      loadThread: true,
+      saveDocument: true,
+    },
+    streams: { watchSourceFiles: true, events: true },
+    events: {},
+  }
 );
 
 export type { ProjectSourceNode, ProjectSourceSnapshot };

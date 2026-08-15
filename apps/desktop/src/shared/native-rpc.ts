@@ -21,8 +21,13 @@ export interface WindowRpc {
   readonly events: WindowEvents;
 }
 export const WINDOW_RPC = defineRpcNamespace<WindowRpc>("window", {
-  streams: [],
-  events: ["fullScreenChanged"],
+  requests: {
+    getContext: true,
+    toggleMaximized: true,
+    getFullscreenState: true,
+  },
+  streams: {},
+  events: { fullScreenChanged: true },
 });
 
 export interface NativeDialogsRequests {
@@ -32,7 +37,11 @@ export interface NativeDialogsRequests {
 export type NativeDialogsRpc = RpcShape<NativeDialogsRequests>;
 export const NATIVE_DIALOGS_RPC = defineRpcNamespace<NativeDialogsRpc>(
   "nativeDialogs",
-  { streams: [], events: [] }
+  {
+    requests: { pickFile: true, pickDirectory: true },
+    streams: {},
+    events: {},
+  }
 );
 
 export interface NativeFilesRequests {
@@ -42,7 +51,11 @@ export interface NativeFilesRequests {
 export type NativeFilesRpc = RpcShape<NativeFilesRequests>;
 export const NATIVE_FILES_RPC = defineRpcNamespace<NativeFilesRpc>(
   "nativeFiles",
-  { streams: [], events: [] }
+  {
+    requests: { directoryExists: true, reveal: true },
+    streams: {},
+    events: {},
+  }
 );
 
 export interface AppDirectoriesRequests {
@@ -51,5 +64,5 @@ export interface AppDirectoriesRequests {
 export type AppDirectoriesRpc = RpcShape<AppDirectoriesRequests>;
 export const APP_DIRECTORIES_RPC = defineRpcNamespace<AppDirectoriesRpc>(
   "appDirectories",
-  { streams: [], events: [] }
+  { requests: { ensure: true }, streams: {}, events: {} }
 );

@@ -1,4 +1,4 @@
-import { createRpcClientProxy } from "../shared/namespaced-rpc";
+import { createRpcClient } from "../shared/namespaced-rpc";
 import {
   BUILTIN_TOOLS_RPC,
   MCP_RPC,
@@ -14,12 +14,12 @@ import {
 import { createElectrobunRpcClientTransport } from "./namespaced-rpc-client";
 
 const transport = createElectrobunRpcClientTransport();
-export const runtimesClient = createRpcClientProxy(RUNTIMES_RPC, transport);
-export const modelsClient = createRpcClientProxy(MODELS_RPC, transport);
-export const workspaceClient = createRpcClientProxy(WORKSPACE_RPC, transport);
-export const promptFilesClient = createRpcClientProxy(PROMPT_FILES_RPC, transport);
-export const mcpClient = createRpcClientProxy(MCP_RPC, transport);
-export const builtinToolsClient = createRpcClientProxy(BUILTIN_TOOLS_RPC, transport);
-export const searchClient = createRpcClientProxy(SEARCH_RPC, transport);
-export const networkClient = createRpcClientProxy(NETWORK_RPC, transport);
-export const skillsClient = createRpcClientProxy(SKILLS_RPC, transport);
+export const runtimesClient = createRpcClient(RUNTIMES_RPC, transport);
+export const modelsClient = createRpcClient(MODELS_RPC, transport);
+export const workspaceClient = createRpcClient(WORKSPACE_RPC, transport);
+export const promptFilesClient = createRpcClient(PROMPT_FILES_RPC, transport);
+export const mcpClient = createRpcClient(MCP_RPC, transport);
+export const builtinToolsClient = createRpcClient(BUILTIN_TOOLS_RPC, transport);
+export const searchClient = createRpcClient(SEARCH_RPC, transport);
+export const networkClient = createRpcClient(NETWORK_RPC, transport);
+export const skillsClient = createRpcClient(SKILLS_RPC, transport);

@@ -24,6 +24,7 @@ export interface AuxiliaryGenerationRpc {
 
 export const AUXILIARY_GENERATION_RPC =
   defineRpcNamespace<AuxiliaryGenerationRpc>("auxiliaryGeneration", {
-    streams: ["generate"],
-    events: [],
+    requests: {},
+    streams: { generate: true },
+    events: {},
   });

@@ -1,10 +1,10 @@
 import { GENERATOR_RPC } from "@/shared/generator-rpc";
-import { createRpcClientProxy } from "@/shared/namespaced-rpc";
+import { createRpcClient } from "@/shared/namespaced-rpc";
 import type { RuntimeId } from "@/shared/runtime";
 
 import { createElectrobunRpcClientTransport } from "./namespaced-rpc-client";
 
-const generatorClient = createRpcClientProxy(
+const generatorClient = createRpcClient(
   GENERATOR_RPC,
   createElectrobunRpcClientTransport()
 );

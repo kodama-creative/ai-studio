@@ -8,29 +8,52 @@ export interface RpcNamespaceInterface {
   readonly events: object;
 }
 
+/** Minimal runtime-immutable collection used by namespace manifests. */
+export interface RpcNameSet extends Iterable<string> {
+  readonly size: number;
+  has(value: string): boolean;
+}
+
 /** Runtime identity for a compile-time RPC interface. */
 export interface RpcNamespace<TInterface extends RpcNamespaceInterface> {
   readonly name: string;
-  readonly streamNames: ReadonlySet<string>;
-  readonly eventNames: ReadonlySet<string>;
+  readonly requestNames: RpcNameSet;
+  readonly streamNames: RpcNameSet;
+  readonly eventNames: RpcNameSet;
   /** Retain the interface in the namespace type without emitting runtime data. */
   readonly __interface?: TInterface;
 }
+
+type RpcMemberManifest<TMembers extends object> = Readonly<
+  Record<keyof TMembers & string, true>
+>;
 
 /** Define a namespace once beside its shared interface. */
 export function defineRpcNamespace<TInterface extends RpcNamespaceInterface>(
   name: string,
   input: {
-    readonly streams: readonly (keyof TInterface["streams"] & string)[];
-    readonly events: readonly (keyof TInterface["events"] & string)[];
+    readonly requests: RpcMemberManifest<TInterface["requests"]>;
+    readonly streams: RpcMemberManifest<TInterface["streams"]>;
+    readonly events: RpcMemberManifest<TInterface["events"]>;
   }
 ): RpcNamespace<TInterface> {
   if (name.trim().length === 0) throw new Error("RPC namespace is required.");
-  return {
+  const requestNames = _manifestNames(name, "request", input.requests);
+  const streamNames = _manifestNames(name, "stream", input.streams);
+  const eventNames = _manifestNames(name, "event", input.events);
+  for (const method of requestNames) {
+    if (streamNames.has(method)) {
+      throw new Error(
+        `RPC method "${name}.${method}" cannot be both a request and a stream.`
+      );
+    }
+  }
+  return Object.freeze({
     name,
-    streamNames: new Set(input.streams),
-    eventNames: new Set(input.events),
-  };
+    requestNames,
+    streamNames,
+    eventNames,
+  });
 }
 
 /** Concrete server modules implement the same interface consumed by clients. */
@@ -112,51 +135,121 @@ export interface NamespacedRpcEvent {
 }
 
 /**
- * Build a strongly typed client without duplicating a hand-written adapter.
- * The only cast is contained at the transport seam; callers retain the exact
- * request arguments, response types, and stream item types from the interface.
+ * Build a strongly typed, immutable client from the namespace manifest.
+ * Only declared members exist at runtime, so language protocols such as
+ * Promise thenable assimilation and JSON serialization cannot become RPCs.
  */
-export function createRpcClientProxy<TInterface extends RpcNamespaceInterface>(
+export function createRpcClient<TInterface extends RpcNamespaceInterface>(
   namespace: RpcNamespace<TInterface>,
   transport: RpcClientTransport
 ): RpcClient<TInterface> {
-  return new Proxy(Object.create(null) as RpcClient<TInterface>, {
-    get(_target, property) {
-      if (typeof property !== "string") return undefined;
-      if (property === "on") {
-        return (event: string, listener: (payload: unknown) => void) => {
-          if (!namespace.eventNames.has(event)) {
-            throw new Error(
-              `RPC event "${namespace.name}.${event}" is not declared.`
-            );
-          }
-          return transport.subscribe(namespace.name, event, listener);
-        };
+  const client = Object.create(null) as RpcClient<TInterface>;
+  _defineClientMember(
+    client,
+    "on",
+    (event: string, listener: (payload: unknown) => void) => {
+      if (!namespace.eventNames.has(event)) {
+        throw new Error(
+          `RPC event "${namespace.name}.${event}" is not declared.`
+        );
       }
-      if (namespace.streamNames.has(property)) {
-        return (...args: readonly unknown[]) => {
-          const serializableArgs = args.map(_withoutSignal);
-          return transport.stream({
-            namespace: namespace.name,
-            method: property,
-            args: _withoutTrailingUndefined(serializableArgs),
-            signal: _findSignal(args),
-          });
-        };
+      return transport.subscribe(namespace.name, event, listener);
+    }
+  );
+  for (const method of namespace.requestNames) {
+    _defineClientMember(client, method, async (...args: readonly unknown[]) => {
+      const result = await transport.request({
+        namespace: namespace.name,
+        method,
+        args: _withoutTrailingUndefined(args),
+      });
+      if (!result.ok) {
+        throw new RpcClientError(result.error);
       }
-      return async (...args: readonly unknown[]) => {
-        const result = await transport.request({
-          namespace: namespace.name,
-          method: property,
-          args: _withoutTrailingUndefined(args),
-        });
-        if (!result.ok) {
-          throw new RpcClientError(result.error);
-        }
-        return result.value;
-      };
-    },
+      return result.value;
+    });
+  }
+  for (const method of namespace.streamNames) {
+    _defineClientMember(client, method, (...args: readonly unknown[]) => {
+      const serializableArgs = args.map(_withoutSignal);
+      return transport.stream({
+        namespace: namespace.name,
+        method,
+        args: _withoutTrailingUndefined(serializableArgs),
+        signal: _findSignal(args),
+      });
+    });
+  }
+  return Object.freeze(client);
+}
+
+function _defineClientMember(
+  client: object,
+  name: string,
+  value: unknown
+): void {
+  Object.defineProperty(client, name, {
+    configurable: false,
+    enumerable: false,
+    value,
+    writable: false,
   });
+}
+
+const RESERVED_RPC_METHOD_NAMES = new Set([
+  "on",
+  "then",
+  "catch",
+  "finally",
+  "toJSON",
+  ...Object.getOwnPropertyNames(Object.prototype),
+]);
+
+function _manifestNames(
+  namespace: string,
+  kind: "request" | "stream" | "event",
+  manifest: object
+): RpcNameSet {
+  const names = new Set<string>();
+  for (const [name, declared] of Object.entries(manifest)) {
+    if (declared !== true) {
+      throw new Error(
+        `RPC ${kind} "${namespace}.${name}" must be declared with true.`
+      );
+    }
+    if (name.trim().length === 0 || name !== name.trim()) {
+      throw new Error(`RPC ${kind} name "${name}" is invalid.`);
+    }
+    if (kind !== "event" && RESERVED_RPC_METHOD_NAMES.has(name)) {
+      throw new Error(
+        `RPC ${kind} method "${namespace}.${name}" uses reserved client member "${name}".`
+      );
+    }
+    names.add(name);
+  }
+  return new ImmutableNameSet(names);
+}
+
+/** Runtime-immutable ReadonlySet facade for one validated manifest snapshot. */
+class ImmutableNameSet implements RpcNameSet {
+  readonly #values: Set<string>;
+
+  constructor(values: Iterable<string>) {
+    this.#values = new Set(values);
+    Object.freeze(this);
+  }
+
+  get size(): number {
+    return this.#values.size;
+  }
+
+  has(value: string): boolean {
+    return this.#values.has(value);
+  }
+
+  [Symbol.iterator](): SetIterator<string> {
+    return this.#values.values();
+  }
 }
 
 /** Preserve omitted optional arguments across JSON transports. */
@@ -169,7 +262,7 @@ function _withoutTrailingUndefined(
 }
 
 function _withoutSignal(input: unknown): unknown {
-  if (!_isRecord(input) || !("signal" in input)) return input;
+  if (!_isRecord(input) || !(input.signal instanceof AbortSignal)) return input;
   const serializable = { ...input };
   delete serializable.signal;
   return serializable;

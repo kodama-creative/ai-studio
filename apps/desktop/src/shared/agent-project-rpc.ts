@@ -15,5 +15,9 @@ export interface AgentProjectsRpc {
 
 export const AGENT_PROJECTS_RPC = defineRpcNamespace<AgentProjectsRpc>(
   "agentProjects",
-  { streams: [], events: [] }
+  {
+    requests: { list: true, open: true, pickAndOpen: true },
+    streams: {},
+    events: {},
+  }
 );

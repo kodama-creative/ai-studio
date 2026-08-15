@@ -28,6 +28,7 @@ export type PlaygroundStreams = Record<never, never>;
 export type PlaygroundClient = PlaygroundRequests & PlaygroundStreams;
 
 export const PLAYGROUND_RPC = defineRpcNamespace<PlaygroundRpc>("playground", {
-  streams: [],
-  events: [],
+  requests: { list: true, create: true, load: true, save: true },
+  streams: {},
+  events: {},
 });

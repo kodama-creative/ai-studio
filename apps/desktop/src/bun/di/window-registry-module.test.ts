@@ -18,9 +18,16 @@ import {
 import { RpcRegistry } from "./rpc-registry";
 import { windowRegistryModule } from "./window-registry-module";
 
-const FIXTURE_RPC = defineRpcNamespace("fixture", {
-  streams: [],
-  events: [],
+interface FixtureRpc {
+  readonly requests: { ping(): Promise<string> };
+  readonly streams: Record<never, never>;
+  readonly events: Record<never, never>;
+}
+
+const FIXTURE_RPC = defineRpcNamespace<FixtureRpc>("fixture", {
+  requests: { ping: true },
+  streams: {},
+  events: {},
 });
 
 test("window Registries resolve one shared multi-contribution instance", async () => {

@@ -11,7 +11,7 @@ import type { RpcError } from "../shared/rpc-error";
 
 const EVENT_COMPACTION_THRESHOLD = 1024;
 
-/** Electrobun adapter for the shared, strongly typed namespace client proxy. */
+/** Electrobun adapter for the shared, strongly typed namespace client. */
 export function createElectrobunRpcClientTransport(): RpcClientTransport {
   return {
     request: (input) => _rpc().request.rpcNamespaceRequest(input),

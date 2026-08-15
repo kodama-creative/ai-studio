@@ -1,6 +1,6 @@
 import type { AgentProjectSummary } from "@/shared/agent-project";
 import { AGENT_PROJECTS_RPC } from "@/shared/agent-project-rpc";
-import { createRpcClientProxy } from "@/shared/namespaced-rpc";
+import { createRpcClient } from "@/shared/namespaced-rpc";
 
 import { createElectrobunRpcClientTransport } from "./namespaced-rpc-client";
 
@@ -12,7 +12,7 @@ export interface AgentProjectClient {
 
 /** Access the main-process Agent Project catalog and window manager. */
 export function createAgentProjectClient(): AgentProjectClient {
-  const client = createRpcClientProxy(
+  const client = createRpcClient(
     AGENT_PROJECTS_RPC,
     createElectrobunRpcClientTransport()
   );

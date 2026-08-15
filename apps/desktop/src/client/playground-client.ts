@@ -1,4 +1,4 @@
-import { createRpcClientProxy, type RpcClient } from "../shared/namespaced-rpc";
+import { createRpcClient, type RpcClient } from "../shared/namespaced-rpc";
 import {
   PLAYGROUND_RPC,
   type PlaygroundClient,
@@ -11,7 +11,7 @@ export type { PlaygroundClient } from "../shared/playground-rpc";
 
 /** Create the Playground namespace proxy from its shared interface. */
 export function createPlaygroundClient(): PlaygroundClient {
-  const client: RpcClient<PlaygroundRpc> = createRpcClientProxy(
+  const client: RpcClient<PlaygroundRpc> = createRpcClient(
     PLAYGROUND_RPC,
     createElectrobunRpcClientTransport()
   );

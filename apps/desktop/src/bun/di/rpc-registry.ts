@@ -9,6 +9,7 @@ import type {
   NamespacedRpcRequest,
   NamespacedRpcStreamEvent,
   NamespacedRpcStreamSubscribe,
+  RpcNameSet,
 } from "../../shared/namespaced-rpc";
 import type { RpcError, RpcResult } from "../../shared/rpc-error";
 import { RpcDomainError } from "../../shared/rpc-error";
@@ -19,8 +20,9 @@ import type { AnyRpcServer, RpcContribution } from "./rpc-contribution";
 interface RegisteredRpcServer {
   readonly namespace: {
     readonly name: string;
-    readonly streamNames: ReadonlySet<string>;
-    readonly eventNames: ReadonlySet<string>;
+    readonly requestNames: RpcNameSet;
+    readonly streamNames: RpcNameSet;
+    readonly eventNames: RpcNameSet;
   };
   readonly requests: object;
   readonly streams: object;
@@ -79,6 +81,7 @@ export class RpcRegistry implements Disposable {
     }
     const eventSubscriptions: Disposable[] = [];
     const registered = server as RegisteredRpcServer;
+    _validateServer(registered);
     this._servers.set(namespace, registered);
     const registration: Disposable = {
       dispose: async () => {
@@ -109,6 +112,11 @@ export class RpcRegistry implements Disposable {
     try {
       this._assertStarted();
       const server = this._requireServer(input.namespace);
+      if (!server.namespace.requestNames.has(input.method)) {
+        throw new Error(
+          `RPC request "${input.namespace}.${input.method}" is not declared.`
+        );
+      }
       const method = _requireMethod(server.requests, input.method, "request");
       return { ok: true, value: await method(...input.args) };
     } catch (error) {
@@ -212,6 +220,23 @@ export class RpcRegistry implements Disposable {
       throw new Error(`RPC namespace "${namespace}" is not registered.`);
     }
     return server;
+  }
+}
+
+function _validateServer(server: RegisteredRpcServer): void {
+  for (const method of server.namespace.requestNames) {
+    _requireMethod(server.requests, method, "request");
+  }
+  for (const method of server.namespace.streamNames) {
+    _requireMethod(server.streams, method, "stream");
+  }
+  if (
+    server.namespace.eventNames.size > 0 &&
+    server.eventSource === undefined
+  ) {
+    throw new Error(
+      `RPC namespace "${server.namespace.name}" declares events but has no event source.`
+    );
   }
 }
 

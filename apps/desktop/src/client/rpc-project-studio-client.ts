@@ -1,4 +1,4 @@
-import { createRpcClientProxy, type RpcClient } from "../shared/namespaced-rpc";
+import { createRpcClient, type RpcClient } from "../shared/namespaced-rpc";
 import {
   PROJECT_STUDIO_RPC,
   type ProjectStudioRpc,
@@ -9,7 +9,7 @@ import { createElectrobunRpcClientTransport } from "./namespaced-rpc-client";
 
 /** Create the Project namespace proxy from its shared compile-time interface. */
 export function createRpcProjectStudioClient(): ProjectStudioTransport {
-  const client: RpcClient<ProjectStudioRpc> = createRpcClientProxy(
+  const client: RpcClient<ProjectStudioRpc> = createRpcClient(
     PROJECT_STUDIO_RPC,
     createElectrobunRpcClientTransport()
   );

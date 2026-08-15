@@ -23,7 +23,16 @@ export interface ThreadSharingRpc {
 }
 export const THREAD_SHARING_RPC = defineRpcNamespace<ThreadSharingRpc>(
   "threadSharing",
-  { streams: [], events: [] }
+  {
+    requests: {
+      read: true,
+      publish: true,
+      importSnapshot: true,
+      importGist: true,
+    },
+    streams: {},
+    events: {},
+  }
 );
 
 export interface GithubAccountRequests {
@@ -39,7 +48,11 @@ export interface GithubAccountRpc {
 }
 export const GITHUB_ACCOUNT_RPC = defineRpcNamespace<GithubAccountRpc>(
   "githubAccount",
-  { streams: [], events: ["changed"] }
+  {
+    requests: { getState: true },
+    streams: {},
+    events: { changed: true },
+  }
 );
 
 export interface UpdatesRequests {
@@ -56,8 +69,9 @@ export interface UpdatesRpc {
   readonly events: UpdatesEvents;
 }
 export const UPDATES_RPC = defineRpcNamespace<UpdatesRpc>("updates", {
-  streams: [],
-  events: ["statusChanged"],
+  requests: { getMode: true, setMode: true, takeInstalledVersion: true },
+  streams: {},
+  events: { statusChanged: true },
 });
 
 export interface RemindersRequests {
@@ -72,8 +86,14 @@ export interface RemindersRpc {
   readonly events: Record<never, never>;
 }
 export const REMINDERS_RPC = defineRpcNamespace<RemindersRpc>("reminders", {
-  streams: [],
-  events: [],
+  requests: {
+    shouldShowGithubStar: true,
+    dismissGithubStarForever: true,
+    nextFeature: true,
+    markFeatureSeen: true,
+  },
+  streams: {},
+  events: {},
 });
 
 export interface AnalyticsRequests {
@@ -87,6 +107,7 @@ export interface AnalyticsRpc {
   readonly events: Record<never, never>;
 }
 export const ANALYTICS_RPC = defineRpcNamespace<AnalyticsRpc>("analytics", {
-  streams: [],
-  events: [],
+  requests: { getSettings: true, setEnabled: true, capture: true },
+  streams: {},
+  events: {},
 });

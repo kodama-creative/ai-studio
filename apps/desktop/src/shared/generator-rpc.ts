@@ -40,6 +40,16 @@ export interface GeneratorRpc {
 }
 
 export const GENERATOR_RPC = defineRpcNamespace<GeneratorRpc>("generator", {
-  streams: [],
-  events: [],
+  requests: {
+    pickDirectory: true,
+    prepareDirectory: true,
+    checkUv: true,
+    runUv: true,
+    writeFile: true,
+    removeFile: true,
+    openDevTerminal: true,
+    resolveEnv: true,
+  },
+  streams: {},
+  events: {},
 });

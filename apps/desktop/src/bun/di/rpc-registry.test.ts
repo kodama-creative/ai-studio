@@ -23,8 +23,9 @@ interface FixtureRpc {
 }
 
 const FIXTURE_RPC = defineRpcNamespace<FixtureRpc>("fixture", {
-  streams: ["values"],
-  events: ["changed"],
+  requests: { greet: true },
+  streams: { values: true },
+  events: { changed: true },
 });
 
 test("RPC Registry collects contributions and owns streams and events", async () => {
@@ -103,6 +104,9 @@ test("RPC Registry rejects duplicate and late namespace registration", () => {
         yield 1;
       },
     },
+    eventSource: {
+      subscribe: () => ({ dispose: () => undefined }),
+    },
   };
   const contribution = (): RpcContribution => ({
     registerRpc: (rpc) => void rpc.registerServer(server),
@@ -122,5 +126,34 @@ test("RPC Registry rejects duplicate and late namespace registration", () => {
   started.onStart();
   expect(() => started.registerServer(server)).toThrow(
     "can only be registered while RpcRegistry is starting"
+  );
+});
+
+test("RPC Registry validates namespace implementations at startup", () => {
+  const registry = new RpcRegistry(
+    new SnapshotContributionProvider(() => [
+      {
+        registerRpc(rpc) {
+          rpc.registerServer({
+            namespace: FIXTURE_RPC,
+            requests: {},
+            streams: {
+              async *values() {
+                await Promise.resolve();
+                yield* [];
+              },
+            },
+            eventSource: {
+              subscribe: () => ({ dispose: () => undefined }),
+            },
+          });
+        },
+      },
+    ]),
+    { sendStreamEvent: () => undefined, sendEvent: () => undefined }
+  );
+
+  expect(() => registry.onStart()).toThrow(
+    'RPC request method "greet" is not registered.'
   );
 });

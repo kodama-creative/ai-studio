@@ -40,8 +40,9 @@ export interface RuntimesRequests {
 }
 export type RuntimesRpc = RpcShape<RuntimesRequests>;
 export const RUNTIMES_RPC = defineRpcNamespace<RuntimesRpc>("runtimes", {
-  streams: [],
-  events: [],
+  requests: { list: true, getDefault: true, setDefault: true },
+  streams: {},
+  events: {},
 });
 
 export interface ModelsRequests {
@@ -131,8 +132,27 @@ export interface ModelsRequests {
 }
 export type ModelsRpc = RpcShape<ModelsRequests>;
 export const MODELS_RPC = defineRpcNamespace<ModelsRpc>("models", {
-  streams: [],
-  events: [],
+  requests: {
+    list: true,
+    listBuiltin: true,
+    removeProvider: true,
+    addProvider: true,
+    addCustomProvider: true,
+    addProfile: true,
+    updateProfile: true,
+    removeProfile: true,
+    updateProvider: true,
+    setEnabled: true,
+    setAllEnabled: true,
+    getDefault: true,
+    setDefault: true,
+    testConnection: true,
+    removeCustom: true,
+    upsertCustom: true,
+    resolveGeneratorEnv: true,
+  },
+  streams: {},
+  events: {},
 });
 
 export interface WorkspaceRequests {
@@ -162,8 +182,18 @@ export interface WorkspaceRequests {
 }
 export type WorkspaceRpc = RpcShape<WorkspaceRequests>;
 export const WORKSPACE_RPC = defineRpcNamespace<WorkspaceRpc>("workspace", {
-  streams: [],
-  events: [],
+  requests: {
+    list: true,
+    createDirectory: true,
+    copy: true,
+    move: true,
+    remove: true,
+    readThread: true,
+    writeThread: true,
+    resolvePath: true,
+  },
+  streams: {},
+  events: {},
 });
 
 export interface PromptFilesRequests {
@@ -173,7 +203,11 @@ export interface PromptFilesRequests {
 export type PromptFilesRpc = RpcShape<PromptFilesRequests>;
 export const PROMPT_FILES_RPC = defineRpcNamespace<PromptFilesRpc>(
   "promptFiles",
-  { streams: [], events: [] }
+  {
+    requests: { readText: true, exists: true },
+    streams: {},
+    events: {},
+  }
 );
 
 export interface McpRequests {
@@ -214,8 +248,18 @@ export interface McpRequests {
 }
 export type McpRpc = RpcShape<McpRequests>;
 export const MCP_RPC = defineRpcNamespace<McpRpc>("mcp", {
-  streams: [],
-  events: [],
+  requests: {
+    listServers: true,
+    addServer: true,
+    updateServer: true,
+    removeServer: true,
+    disconnectServer: true,
+    cancelTest: true,
+    listTools: true,
+    callTool: true,
+  },
+  streams: {},
+  events: {},
 });
 
 export interface BuiltinToolsRequests {
@@ -233,7 +277,11 @@ export interface BuiltinToolsRequests {
 export type BuiltinToolsRpc = RpcShape<BuiltinToolsRequests>;
 export const BUILTIN_TOOLS_RPC = defineRpcNamespace<BuiltinToolsRpc>(
   "builtinTools",
-  { streams: [], events: [] }
+  {
+    requests: { list: true, call: true },
+    streams: {},
+    events: {},
+  }
 );
 
 export interface SearchRequests {
@@ -245,8 +293,9 @@ export interface SearchRequests {
 }
 export type SearchRpc = RpcShape<SearchRequests>;
 export const SEARCH_RPC = defineRpcNamespace<SearchRpc>("search", {
-  streams: [],
-  events: [],
+  requests: { get: true, set: true },
+  streams: {},
+  events: {},
 });
 
 export interface NetworkRequests {
@@ -259,8 +308,9 @@ export interface NetworkRequests {
 }
 export type NetworkRpc = RpcShape<NetworkRequests>;
 export const NETWORK_RPC = defineRpcNamespace<NetworkRpc>("network", {
-  streams: [],
-  events: [],
+  requests: { get: true, set: true, detectSystemProxy: true },
+  streams: {},
+  events: {},
 });
 
 export interface SkillsRequests {
@@ -288,6 +338,16 @@ export interface SkillsRequests {
 }
 export type SkillsRpc = RpcShape<SkillsRequests>;
 export const SKILLS_RPC = defineRpcNamespace<SkillsRpc>("skills", {
-  streams: [],
-  events: [],
+  requests: {
+    getSettings: true,
+    addPath: true,
+    removePath: true,
+    setHidden: true,
+    setAllHidden: true,
+    listAvailable: true,
+    list: true,
+    read: true,
+  },
+  streams: {},
+  events: {},
 });
