@@ -6,24 +6,12 @@ import {
   closeOtherTabsIfAllowed,
   closeTabIfAllowed,
   refreshTabIfAllowed,
+  type PaneTab,
 } from "./pane-mutation-actions";
-import type { AppTab } from "./use-thread-tabs";
 
-const TABS: AppTab[] = [
-  {
-    id: "playground:a",
-    paneId: "pane-a",
-    playgroundId: "a",
-    title: "A",
-    type: "playground",
-  },
-  {
-    id: "playground:b",
-    paneId: "pane-b",
-    playgroundId: "b",
-    title: "B",
-    type: "playground",
-  },
+const TABS: PaneTab[] = [
+  { id: "playground:a", paneId: "pane-a" },
+  { id: "playground:b", paneId: "pane-b" },
 ];
 
 describe("pane mutation production actions", () => {

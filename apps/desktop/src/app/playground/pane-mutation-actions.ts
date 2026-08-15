@@ -1,7 +1,11 @@
 import type { PaneActivityTracker } from "./pane-activity-tracker";
-import type { AppTab } from "./use-thread-tabs";
 
-export function paneIdForTab(tab: AppTab): string {
+export interface PaneTab {
+  readonly id: string;
+  readonly paneId: string;
+}
+
+export function paneIdForTab(tab: PaneTab): string {
   return tab.paneId;
 }
 
@@ -12,13 +16,11 @@ function _runIfIdle({
   action,
 }: {
   tracker: PaneActivityTracker;
-  tabs: AppTab[];
+  tabs: readonly PaneTab[];
   onBlocked: () => void;
   action: () => void;
 }): boolean {
-  if (
-    tabs.some((tab) => tracker.isMutationReserved(paneIdForTab(tab)))
-  ) {
+  if (tabs.some((tab) => tracker.isMutationReserved(paneIdForTab(tab)))) {
     onBlocked();
     return false;
   }
@@ -43,7 +45,7 @@ export function closeTabIfAllowed({
   close,
 }: {
   tracker: PaneActivityTracker;
-  tabs: AppTab[];
+  tabs: readonly PaneTab[];
   targetId: string;
   onBlocked: () => void;
   close: (id: string) => void;
@@ -66,7 +68,7 @@ export function closeOtherTabsIfAllowed({
   closeOthers,
 }: {
   tracker: PaneActivityTracker;
-  tabs: AppTab[];
+  tabs: readonly PaneTab[];
   keepId: string;
   onBlocked: () => void;
   closeOthers: (id: string) => void;
@@ -87,16 +89,11 @@ export function closeAllTabsIfAllowed({
   closeAll,
 }: {
   tracker: PaneActivityTracker;
-  tabs: AppTab[];
+  tabs: readonly PaneTab[];
   onBlocked: () => void;
   closeAll: () => void;
 }): boolean {
-  return _runIfIdle({
-    tracker,
-    tabs,
-    onBlocked,
-    action: closeAll,
-  });
+  return _runIfIdle({ tracker, tabs, onBlocked, action: closeAll });
 }
 
 export interface PaneRefreshReservation {
@@ -112,7 +109,7 @@ export function refreshTabIfAllowed({
   refresh,
 }: {
   tracker: PaneActivityTracker;
-  tabs: AppTab[];
+  tabs: readonly PaneTab[];
   targetId: string;
   onBlocked: () => void;
   refresh: (id: string) => void;

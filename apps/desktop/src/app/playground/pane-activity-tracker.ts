@@ -1,11 +1,3 @@
-export type PaneRunStart = (paneId: string, runId: string) => boolean;
-export type PaneRunSettled = (paneId: string, runId: string) => void;
-export type PanePersistenceChange = (
-  paneId: string,
-  owner: object,
-  busy: boolean
-) => void;
-
 /** Coordinates tab mutations with in-flight execution and persistence. */
 export class PaneActivityTracker {
   private readonly _mutatingPanes = new Set<string>();
@@ -39,11 +31,7 @@ export class PaneActivityTracker {
     return true;
   }
 
-  setPersistenceBusy(
-    paneId: string,
-    owner: object,
-    busy: boolean
-  ): void {
+  setPersistenceBusy(paneId: string, owner: object, busy: boolean): void {
     if (busy) {
       let owners = this._persistingPanes.get(paneId);
       if (!owners) {

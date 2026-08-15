@@ -1,14 +1,12 @@
-import type {
-  PanePersistenceChange,
-  PaneRunSettled,
-  PaneRunStart,
-} from "./pane-activity-tracker";
-
 export interface PaneLifecycleHost {
   isMutationReserved: (paneId: string) => boolean;
   subscribeToMutationChanges: (listener: () => void) => () => void;
-  onPersistenceChange: PanePersistenceChange;
+  onPersistenceChange: (
+    paneId: string,
+    owner: object,
+    busy: boolean
+  ) => void;
   onRefreshSettled: (paneId: string) => void;
-  onRunSettled: PaneRunSettled;
-  onRunStart: PaneRunStart;
+  onRunSettled: (paneId: string, runId: string) => void;
+  onRunStart: (paneId: string, runId: string) => boolean;
 }
