@@ -218,6 +218,8 @@ Releases ship for **macOS arm64 + x64** (so four build jobs per tag: 2 arches ×
 
 Every cross-boundary user action (menus, context menus, toolbar buttons, shortcuts) is a `Command` — a namespaced `type` discriminant (`playground.create`, `window.toggleMaximized`, `updates.check`) plus typed `args` — defined in `src/shared/commands.ts`. Read/event capabilities such as window context and fullscreen state remain namespaced RPC. `COMMAND_META` tags each command with a target of `"webview"` or `"bun"`; the single `executeCommand` RPC message is only a transport envelope. On the Bun side, every window owns one `CommandRegistry`. Feature classes implement the same-name `CommandContribution` symbol + interface and register one typed handler per command during `onStart()`; duplicate ownership and late registration fail. Unclaimed renderer commands are forwarded through the window's `CommandSink`. On the renderer side, the state-owning UI module registers its handlers through `CommandProvider`. The native menu maps shell action ids into commands. DI symbols use `desktopToken(namespace, name)` so every service identity has an explicit namespace.
 
+Command results are intentionally ignored, but both Bun and renderer registries contain synchronous throws and rejected handler promises at the dispatch seam. Features needing user-visible completion or error state publish it through their own typed RPC events. Agent Project open/pick is command-only; its RPC namespace exposes the catalog read plus `changed` and `openFailed` events.
+
 Interactive Thread editor execution (`run`, `step`, `continue`, tool approval,
 and cancellation) is the deliberate exception: these actions belong to the
 injected `ExternalThreadExecutionRuntime`, which calls the product-scoped

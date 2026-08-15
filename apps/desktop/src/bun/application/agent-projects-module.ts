@@ -1,6 +1,11 @@
 import { ContainerModule, type ResolutionContext } from "inversify";
 
 import {
+  AGENT_PROJECTS_RPC,
+  type AgentProjectsRpc,
+} from "../../shared/agent-project-rpc";
+import type { RpcServer } from "../../shared/namespaced-rpc";
+import {
   CommandContribution,
   type CommandContribution as CommandContributionApi,
 } from "../di/command-contribution";
@@ -11,22 +16,30 @@ import {
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
 import { desktopToken, PROCESS_TOKENS } from "../di/tokens";
-import { AgentProjectsRpcServer } from "../rpc/agent-projects-rpc-server";
 
 import {
   AgentProjectsApplication,
-  type AgentProjectsApplicationApi,
   type DirectoryPicker,
 } from "./agent-projects-application";
 import { NATIVE_DIALOGS_APPLICATION } from "./native-dialogs-module";
 
 export const AGENT_PROJECTS_APPLICATION =
-  desktopToken<AgentProjectsApplicationApi>("agent-projects", "application");
+  desktopToken<AgentProjectsApplication>("agent-projects", "application");
+
+class AgentProjectsRpcServer implements RpcServer<AgentProjectsRpc> {
+  readonly namespace = AGENT_PROJECTS_RPC;
+  readonly streams = {};
+  readonly eventSource;
+
+  constructor(readonly requests: AgentProjectsApplication) {
+    this.eventSource = requests.events;
+  }
+}
 
 /** Register main-window Agent Project use cases and RPC transport. */
 export function agentProjectsModule(): ContainerModule {
   return new ContainerModule(({ bind }) => {
-    bind<AgentProjectsApplicationApi>(AGENT_PROJECTS_APPLICATION)
+    bind<AgentProjectsApplication>(AGENT_PROJECTS_APPLICATION)
       .toDynamicValue(
         (context: ResolutionContext) =>
           new AgentProjectsApplication(
@@ -39,18 +52,18 @@ export function agentProjectsModule(): ContainerModule {
 }
 
 class AgentProjectsCommandContribution implements CommandContributionApi {
-  constructor(private readonly _application: AgentProjectsApplicationApi) {}
+  constructor(private readonly _application: AgentProjectsApplication) {}
 
   /** Register the native project picker command for every desktop window. */
   registerCommands(commands: CommandRegistry): void {
     commands.registerCommand("agentProjects.open", {
-      execute: () => void this._application.pickAndOpen(),
+      execute: (command) => void this._application.open(command.args.rootPath),
     });
   }
 }
 
 class AgentProjectsRpcContribution implements RpcContributionApi {
-  constructor(private readonly _application: AgentProjectsApplicationApi) {}
+  constructor(private readonly _application: AgentProjectsApplication) {}
 
   /** Expose project catalog operations only to the Main renderer. */
   registerRpc(rpc: RpcRegistry): void {

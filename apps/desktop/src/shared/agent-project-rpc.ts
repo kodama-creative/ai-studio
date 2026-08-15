@@ -3,21 +3,24 @@ import { defineRpcNamespace } from "./namespaced-rpc";
 
 export interface AgentProjectsRequests {
   list(): Promise<readonly AgentProjectSummary[]>;
-  open(rootPath: string): Promise<void>;
-  pickAndOpen(): Promise<void>;
+}
+
+export interface AgentProjectsEvents {
+  changed: Record<string, never>;
+  openFailed: { message: string };
 }
 
 export interface AgentProjectsRpc {
   readonly requests: AgentProjectsRequests;
   readonly streams: Record<never, never>;
-  readonly events: Record<never, never>;
+  readonly events: AgentProjectsEvents;
 }
 
 export const AGENT_PROJECTS_RPC = defineRpcNamespace<AgentProjectsRpc>(
   "agentProjects",
   {
-    requests: { list: true, open: true, pickAndOpen: true },
+    requests: { list: true },
     streams: {},
-    events: {},
+    events: { changed: true, openFailed: true },
   }
 );

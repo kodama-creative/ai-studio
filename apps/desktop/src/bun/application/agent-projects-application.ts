@@ -1,20 +1,26 @@
-import type { AgentProjectSummary } from "../../shared/agent-project";
+import type {
+  AgentProjectsEvents,
+  AgentProjectsRequests,
+} from "../../shared/agent-project-rpc";
+import type { Disposable } from "../../shared/disposable";
+import { EventHub } from "../../shared/event-hub";
 import type { ProjectWindowManager } from "../projects/project-window-manager";
-
-export interface AgentProjectsApplicationApi {
-  list(): Promise<readonly AgentProjectSummary[]>;
-  open(rootPath: string): Promise<void>;
-  pickAndOpen(): Promise<void>;
-}
 
 export interface DirectoryPicker {
   pickDirectory(): Promise<string | null>;
 }
 
 /** Main-window use cases for cataloging and opening Agent Project windows. */
-export class AgentProjectsApplication implements AgentProjectsApplicationApi {
+export class AgentProjectsApplication
+  implements AgentProjectsRequests, Disposable
+{
+  readonly events = new EventHub<AgentProjectsEvents>();
+
   constructor(
-    private readonly _projects: ProjectWindowManager,
+    private readonly _projects: Pick<
+      ProjectWindowManager,
+      "listProjects" | "openProject"
+    >,
     private readonly _dialogs: DirectoryPicker
   ) {}
 
@@ -27,14 +33,23 @@ export class AgentProjectsApplication implements AgentProjectsApplicationApi {
     }));
   }
 
-  /** Open or activate the unique window for a project root. */
-  open(rootPath: string): Promise<void> {
-    return this._projects.openProject(rootPath);
+  /** Own the complete user action; failures are events, never unhandled tasks. */
+  async open(rootPath?: string): Promise<void> {
+    try {
+      const selected = rootPath ?? (await this._dialogs.pickDirectory());
+      if (selected === null) return;
+      await this._projects.openProject(selected);
+      this.events.publish("changed", {});
+    } catch (error) {
+      this.events.publish("openFailed", { message: _errorMessage(error) });
+    }
   }
 
-  /** Pick a project directory and open it; cancellation is a no-op. */
-  async pickAndOpen(): Promise<void> {
-    const rootPath = await this._dialogs.pickDirectory();
-    if (rootPath !== null) await this.open(rootPath);
+  dispose(): void {
+    this.events.dispose();
   }
+}
+
+function _errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

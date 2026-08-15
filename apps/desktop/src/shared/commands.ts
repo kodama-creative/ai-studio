@@ -190,8 +190,11 @@ export interface OpenDocumentCommand extends GenericCommand<
 /** Open the GitHub issues page in the user's default browser to report a bug. */
 export interface ReportBugsCommand extends GenericCommand<"shell.reportBugs"> {}
 
-/** Pick and open a code-first Agent project in its own desktop window. */
-export interface OpenAgentProjectCommand extends GenericCommand<"agentProjects.open"> {}
+/** Open a known Agent Project root, or show the native picker when omitted. */
+export interface OpenAgentProjectCommand extends GenericCommand<
+  "agentProjects.open",
+  { rootPath?: string }
+> {}
 
 // --- GitHub auth (bun-side) ------------------------------------------------
 

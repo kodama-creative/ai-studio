@@ -12,11 +12,12 @@ import {
 import { Spinner } from "@llm-space/ui/ui/spinner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { FolderGit2Icon, MessagesSquareIcon, PlusIcon } from "lucide-react";
-import { memo } from "react";
+import { memo, useEffect } from "react";
 import { toast } from "sonner";
 
 import type { AgentProjectClient } from "@/client/agent-project-client";
 import type { PlaygroundClient } from "@/client/playground-client";
+import { useCommands } from "@/commands";
 
 function _PlaygroundSidebar({
   client,
@@ -30,6 +31,7 @@ function _PlaygroundSidebar({
   onCreate: () => void;
 }) {
   const queryClient = useQueryClient();
+  const { executeCommand } = useCommands();
   const { data: playgrounds = [], isLoading: loadingPlaygrounds } = useQuery({
     queryKey: ["playgrounds"],
     queryFn: () => client.list(),
@@ -39,26 +41,20 @@ function _PlaygroundSidebar({
     queryFn: () => projectClient.list(),
   });
 
-  const openProject = async (rootPath: string) => {
-    try {
-      await projectClient.open(rootPath);
-      await queryClient.invalidateQueries({ queryKey: ["agent-projects"] });
-    } catch (error) {
+  useEffect(() => {
+    const changed = projectClient.on("changed", () => {
+      void queryClient.invalidateQueries({ queryKey: ["agent-projects"] });
+    });
+    const failed = projectClient.on("openFailed", ({ message }) => {
       toast.error("Unable to open Agent Project", {
-        description: error instanceof Error ? error.message : String(error),
+        description: message,
       });
-    }
-  };
-  const addProject = async () => {
-    try {
-      await projectClient.pickAndOpen();
-      await queryClient.invalidateQueries({ queryKey: ["agent-projects"] });
-    } catch (error) {
-      toast.error("Unable to open Agent Project", {
-        description: error instanceof Error ? error.message : String(error),
-      });
-    }
-  };
+    });
+    return () => {
+      void failed.dispose();
+      void changed.dispose();
+    };
+  }, [projectClient, queryClient]);
 
   return (
     <section className="flex min-h-0 flex-1 flex-col">
@@ -112,7 +108,9 @@ function _PlaygroundSidebar({
           size="icon-sm"
           variant="ghost"
           aria-label="Open Agent Project"
-          onClick={() => void addProject()}
+          onClick={() =>
+            executeCommand({ type: "agentProjects.open", args: {} })
+          }
         >
           <PlusIcon className="size-3.5" />
         </Button>
@@ -132,7 +130,12 @@ function _PlaygroundSidebar({
               key={project.id}
               type="button"
               className="hover:bg-accent flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs"
-              onClick={() => void openProject(project.rootPath)}
+              onClick={() =>
+                executeCommand({
+                  type: "agentProjects.open",
+                  args: { rootPath: project.rootPath },
+                })
+              }
             >
               <FolderGit2Icon className="text-muted-foreground size-3.5 shrink-0" />
               <span className="truncate">{project.name}</span>

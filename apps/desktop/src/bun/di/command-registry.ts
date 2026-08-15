@@ -13,7 +13,8 @@ export interface CommandSink {
 }
 
 export interface CommandHandler<TType extends CommandType = CommandType> {
-  execute(command: Extract<Command, { type: TType }>): void;
+  /** The registry ignores results but contains synchronous/async failures. */
+  execute(command: Extract<Command, { type: TType }>): unknown;
 }
 
 interface RegisteredCommandHandler {
@@ -31,7 +32,13 @@ export class CommandRegistry implements Disposable {
 
   constructor(
     private readonly _contributions: ContributionProvider<CommandContribution>,
-    private readonly _sink: CommandSink
+    private readonly _sink: CommandSink,
+    private readonly _reportError: (
+      type: CommandType,
+      error: unknown
+    ) => void = (type, error) => {
+      console.error(`Command "${type}" failed:`, error);
+    }
   ) {}
 
   /** Collect every contribution exactly once, then freeze command ownership. */
@@ -68,8 +75,15 @@ export class CommandRegistry implements Disposable {
     }
     const registered: RegisteredCommandHandler = {
       // The map key and the dispatch discriminant enforce this narrowing.
-      execute: (command) =>
-        handler.execute(command as Extract<Command, { type: TType }>),
+      execute: (command) => {
+        try {
+          void Promise.resolve(
+            handler.execute(command as Extract<Command, { type: TType }>)
+          ).catch((error: unknown) => this._reportError(type, error));
+        } catch (error) {
+          this._reportError(type, error);
+        }
+      },
     };
     this._handlers.set(type, registered);
     const registration: Disposable = {

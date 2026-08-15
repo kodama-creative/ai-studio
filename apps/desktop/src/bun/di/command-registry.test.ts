@@ -8,11 +8,13 @@ import { SnapshotContributionProvider } from "./contribution-provider";
 
 function _registry(
   contributions: readonly CommandContribution[],
-  forwarded: unknown[] = []
+  forwarded: unknown[] = [],
+  reportError?: (type: keyof typeof COMMAND_META, error: unknown) => void
 ): CommandRegistry {
   return new CommandRegistry(
     new SnapshotContributionProvider(() => contributions),
-    { sendToWebview: (command) => forwarded.push(command) }
+    { sendToWebview: (command) => forwarded.push(command) },
+    reportError
   );
 }
 
@@ -75,5 +77,38 @@ describe("CommandRegistry", () => {
         execute: () => undefined,
       })
     ).toThrow("can only be registered while CommandRegistry is starting");
+  });
+
+  test("contains synchronous and asynchronous handler failures", async () => {
+    const failures: { type: string; error: unknown }[] = [];
+    const contribution: CommandContribution = {
+      registerCommands(commands) {
+        commands.registerCommand("updates.check", {
+          execute: () => Promise.reject(new Error("async failure")),
+        });
+        commands.registerCommand("shell.reportBugs", {
+          execute: () => {
+            throw new Error("sync failure");
+          },
+        });
+      },
+    };
+    const registry = _registry([contribution], [], (type, error) => {
+      failures.push({ type, error });
+    });
+    registry.onStart();
+
+    registry.execute({ type: "updates.check", args: {} });
+    registry.execute({ type: "shell.reportBugs", args: {} });
+    await Promise.resolve();
+
+    expect(failures.map(({ type }) => type)).toEqual([
+      "shell.reportBugs",
+      "updates.check",
+    ]);
+    expect(failures.map(({ error }) => (error as Error).message)).toEqual([
+      "sync failure",
+      "async failure",
+    ]);
   });
 });

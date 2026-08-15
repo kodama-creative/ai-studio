@@ -29,6 +29,20 @@ export type CommandHandlers = {
 
 type StoredHandler = (args: unknown) => void | Promise<void>;
 
+function _executeHandler(
+  type: CommandType,
+  handler: StoredHandler,
+  args: unknown
+): void {
+  try {
+    void Promise.resolve(handler(args)).catch((error: unknown) => {
+      console.error(`Command "${type}" failed:`, error);
+    });
+  } catch (error) {
+    console.error(`Command "${type}" failed:`, error);
+  }
+}
+
 interface CommandContextValue {
   /**
    * Run a command. `webview`-target commands invoke the registered handler here;
@@ -63,7 +77,7 @@ export function CommandProvider({ children }: { children: ReactNode }) {
       console.warn(`No handler registered for command: ${command.type}`);
       return;
     }
-    void handler(command.args);
+    _executeHandler(command.type, handler, command.args);
   }, []);
 
   // Native menu items and shortcuts enter through the Bun process. Owning the
