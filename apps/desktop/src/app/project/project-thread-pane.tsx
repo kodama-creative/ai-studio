@@ -20,22 +20,31 @@ import {
 } from "./project-thread-adapter";
 import type { ProjectThreadsController } from "./project-threads-controller";
 
-/** Pi-backed editor pane for one Project Studio Thread. */
-export function ProjectThreadPane({
-  client,
-  controller,
-  projectId,
-  history,
-  evaluationMetadata,
-  thread,
-}: {
+interface ProjectThreadPaneProps {
   readonly client: ProjectStudioTransport;
   readonly controller: ProjectThreadsController;
   readonly projectId: string;
   readonly history: readonly StudioRunHistoryEntry[];
   readonly evaluationMetadata: StudioEvaluationMetadata;
   readonly thread: StudioThread;
-}) {
+}
+
+/**
+ * Pi-backed editor pane whose persistence and execution owners are scoped to
+ * exactly one durable Thread identity.
+ */
+export function ProjectThreadPane(props: ProjectThreadPaneProps) {
+  return <ProjectThreadPaneOwner key={props.thread.id} {...props} />;
+}
+
+function ProjectThreadPaneOwner({
+  client,
+  controller,
+  projectId,
+  history,
+  evaluationMetadata,
+  thread,
+}: ProjectThreadPaneProps) {
   const threadRef = useRef(thread);
   threadRef.current = thread;
   const metadataSaveChain = useRef(Promise.resolve());
