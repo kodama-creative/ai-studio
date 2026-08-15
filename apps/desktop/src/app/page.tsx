@@ -17,8 +17,15 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from "@llm-space/ui/ui/resizable";
-import { useQueryClient } from "@tanstack/react-query";
-import { lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  lazy,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { usePanelRef } from "react-resizable-panels";
 import { toast } from "sonner";
 
@@ -162,7 +169,6 @@ function PageWorkspace() {
   const { executeCommand } = useCommands();
   const models = useModels();
   const refreshModels = useRefreshModels();
-  const queryClient = useQueryClient();
 
   const { close, closeAll, closeOthers, reopenClosed, openPlayground } = tabs;
   const visibleTabs = tabs.tabs;
@@ -266,8 +272,6 @@ function PageWorkspace() {
         importSnapshot: (snapshot) =>
           threadSharingClient.importSnapshot(snapshot),
         seedHost,
-        refreshCatalog: () =>
-          queryClient.invalidateQueries({ queryKey: ["playgrounds"] }),
         openPlayground: (playground) =>
           openPlayground(playground.id, playground.title),
         notifySuccess: (message) => toast.success(message),
@@ -286,11 +290,19 @@ function PageWorkspace() {
     [
       openPlayground,
       playgroundClient,
-      queryClient,
       seedHost,
       threadSharingClient,
     ]
   );
+  const playgroundCatalog = useSyncExternalStore(
+    playgroundWorkspace.subscribe,
+    playgroundWorkspace.getSnapshot,
+    playgroundWorkspace.getSnapshot
+  );
+  useEffect(() => {
+    playgroundWorkspace.start();
+    return () => playgroundWorkspace.stop();
+  }, [playgroundWorkspace]);
 
   // Snapshot import: a hidden picker opened by the import command plus
   // page-wide OS drag-and-drop state.
@@ -454,9 +466,15 @@ function PageWorkspace() {
         refreshNonce={tab.refreshNonce ?? 0}
         onClose={close}
         onTitleChange={tabs.handlePlaygroundTitleChange}
+        onPlaygroundChange={playgroundWorkspace.acceptProjection}
       />
     ),
-    [close, paneLifecycleHost, tabs.handlePlaygroundTitleChange]
+    [
+      close,
+      paneLifecycleHost,
+      playgroundWorkspace.acceptProjection,
+      tabs.handlePlaygroundTitleChange,
+    ]
   );
   useEffect(
     () => () => {
@@ -534,7 +552,8 @@ function PageWorkspace() {
             }}
           >
             <PlaygroundSidebar
-              client={playgroundClient}
+              playgrounds={playgroundCatalog.playgrounds}
+              loadingPlaygrounds={playgroundCatalog.loading}
               projectClient={agentProjectClient}
               onOpen={(playground) =>
                 openPlayground(playground.id, playground.title)

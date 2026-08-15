@@ -23,20 +23,98 @@ export interface SnapshotDocument {
 }
 
 export interface PlaygroundWorkspaceControllerOptions {
-  readonly client: Pick<PlaygroundClient, "create">;
+  readonly client: Pick<PlaygroundClient, "create" | "list">;
   readonly importSnapshot: (
     snapshot: PortableThreadSnapshot
   ) => Promise<Playground>;
   readonly seedHost: SeedHost;
-  readonly refreshCatalog: () => void | Promise<void>;
   readonly openPlayground: (playground: Playground) => void;
   readonly notifySuccess: (message: string) => void;
   readonly notifyError: (title: string, error?: unknown) => void;
 }
 
-/** Owns durable Playground creation and snapshot-import application behavior. */
+export interface PlaygroundWorkspaceSnapshot {
+  readonly playgrounds: readonly Playground[];
+  readonly loading: boolean;
+}
+
+type Listener = () => void;
+
+/**
+ * Owns the Main window's durable Playground catalog and its creation/import
+ * behavior. Saved pane projections enter through `acceptProjection`, so list
+ * presentation cannot drift from the latest durable title or metadata.
+ */
 export class PlaygroundWorkspaceController {
+  private readonly _listeners = new Set<Listener>();
+  private readonly _projections = new Map<string, Playground>();
+  private _lifecycle = 0;
+  private _request = 0;
+  private _started = false;
+  private _snapshot: PlaygroundWorkspaceSnapshot = {
+    playgrounds: [],
+    loading: true,
+  };
+
   constructor(private readonly _options: PlaygroundWorkspaceControllerOptions) {}
+
+  readonly getSnapshot = (): PlaygroundWorkspaceSnapshot => this._snapshot;
+
+  readonly subscribe = (listener: Listener): (() => void) => {
+    this._listeners.add(listener);
+    return () => this._listeners.delete(listener);
+  };
+
+  /** Start or restart the catalog read lifecycle. */
+  start(): void {
+    if (this._started) this.stop();
+    this._started = true;
+    this._lifecycle += 1;
+    this._setSnapshot({ ...this._snapshot, loading: true });
+    void this.refresh();
+  }
+
+  /** Invalidate catalog reads while leaving the last projection renderable. */
+  stop(): void {
+    if (!this._started) return;
+    this._started = false;
+    this._lifecycle += 1;
+    this._request += 1;
+  }
+
+  /** Refresh from persistence while preserving newer pane projections. */
+  async refresh(): Promise<void> {
+    if (!this._started) return;
+    const lifecycle = this._lifecycle;
+    const request = ++this._request;
+    try {
+      const playgrounds = await this._options.client.list();
+      if (!this._isCurrent(lifecycle, request)) return;
+      this._setSnapshot({
+        playgrounds: this._mergeProjections(playgrounds),
+        loading: false,
+      });
+    } catch (error) {
+      if (!this._isCurrent(lifecycle, request)) return;
+      this._setSnapshot({ ...this._snapshot, loading: false });
+      this._options.notifyError("Unable to refresh Playgrounds", error);
+    }
+  }
+
+  /** Accept one durable pane projection into both current and future lists. */
+  readonly acceptProjection = (playground: Playground): void => {
+    this._projections.set(playground.id, playground);
+    const index = this._snapshot.playgrounds.findIndex(
+      (candidate) => candidate.id === playground.id
+    );
+    const playgrounds =
+      index === -1
+        ? [...this._snapshot.playgrounds, playground]
+        : this._snapshot.playgrounds.map((candidate) =>
+            candidate.id === playground.id ? playground : candidate
+          );
+    this._setSnapshot({ ...this._snapshot, playgrounds });
+  };
 
   async createBlank(): Promise<void> {
     await this._create({});
@@ -83,13 +161,14 @@ export class PlaygroundWorkspaceController {
             : document.text;
         const snapshot = parsePortableThreadSnapshot(JSON.parse(text));
         const playground = await this._options.importSnapshot(snapshot);
+        this.acceptProjection(playground);
         this._options.openPlayground(playground);
         imported += 1;
       } catch {
         // One malformed snapshot must not block the remaining documents.
       }
     }
-    await this._options.refreshCatalog();
+    await this.refresh();
     if (imported === 0) {
       this._options.notifyError(
         "No valid LLM Space Thread Snapshots were selected."
@@ -121,10 +200,46 @@ export class PlaygroundWorkspaceController {
           state: {},
         },
       });
-      await this._options.refreshCatalog();
+      this.acceptProjection(playground);
+      await this.refresh();
       this._options.openPlayground(playground);
     } catch (error) {
       this._options.notifyError("Unable to create Playground", error);
     }
+  }
+
+  private _mergeProjections(
+    playgrounds: readonly Playground[]
+  ): readonly Playground[] {
+    const merged = playgrounds.map((playground) => {
+      const projection = this._projections.get(playground.id);
+      if (projection === undefined) return playground;
+      if (
+        playground.updatedAt > projection.updatedAt ||
+        JSON.stringify(playground) === JSON.stringify(projection)
+      ) {
+        this._projections.delete(playground.id);
+        return playground;
+      }
+      return projection;
+    });
+    const known = new Set(merged.map((playground) => playground.id));
+    for (const projection of this._projections.values()) {
+      if (!known.has(projection.id)) merged.push(projection);
+    }
+    return merged;
+  }
+
+  private _isCurrent(lifecycle: number, request: number): boolean {
+    return (
+      this._started &&
+      this._lifecycle === lifecycle &&
+      this._request === request
+    );
+  }
+
+  private _setSnapshot(snapshot: PlaygroundWorkspaceSnapshot): void {
+    this._snapshot = snapshot;
+    for (const listener of this._listeners) listener();
   }
 }

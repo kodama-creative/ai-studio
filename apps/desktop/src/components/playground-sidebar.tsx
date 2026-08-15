@@ -17,26 +17,23 @@ import { toast } from "sonner";
 
 import { disposeBestEffort } from "@/app/lifecycle/dispose-best-effort";
 import type { AgentProjectClient } from "@/client/agent-project-client";
-import type { PlaygroundClient } from "@/client/playground-client";
 import { useCommands } from "@/commands";
 
 function _PlaygroundSidebar({
-  client,
+  playgrounds,
+  loadingPlaygrounds,
   projectClient,
   onOpen,
   onCreate,
 }: {
-  client: PlaygroundClient;
+  playgrounds: readonly Playground[];
+  loadingPlaygrounds: boolean;
   projectClient: AgentProjectClient;
   onOpen: (playground: Playground) => void;
   onCreate: () => void;
 }) {
   const queryClient = useQueryClient();
   const { executeCommand } = useCommands();
-  const { data: playgrounds = [], isLoading: loadingPlaygrounds } = useQuery({
-    queryKey: ["playgrounds"],
-    queryFn: () => client.list(),
-  });
   const { data: projects = [], isLoading: loadingProjects } = useQuery({
     queryKey: ["agent-projects"],
     queryFn: () => projectClient.list(),

@@ -12,6 +12,7 @@ import {
 describe("PlaygroundWorkspaceController", () => {
   test("resolves one example and opens the created durable Playground", async () => {
     const fixture = _fixture();
+    await _start(fixture);
     const example = {
       type: "example",
       id: "agent-example",
@@ -62,6 +63,7 @@ describe("PlaygroundWorkspaceController", () => {
 
   test("imports every valid versioned snapshot and reports invalid documents once", async () => {
     const fixture = _fixture();
+    await _start(fixture);
     await fixture.controller.importDocuments([
       { text: () => Promise.resolve(JSON.stringify(_snapshot("one"))) },
       { text: () => Promise.resolve("not json") },
@@ -93,6 +95,7 @@ describe("PlaygroundWorkspaceController", () => {
     const fixture = _fixture({
       create: () => Promise.reject(new Error("storage unavailable")),
     });
+    await _start(fixture);
 
     await fixture.controller.createBlank();
 
@@ -100,10 +103,33 @@ describe("PlaygroundWorkspaceController", () => {
       "error:Unable to create Playground:storage unavailable",
     ]);
   });
+
+  test("keeps a pane projection authoritative over an older catalog read", async () => {
+    const stale = _deferred<readonly Playground[]>();
+    let reads = 0;
+    const fixture = _fixture({
+      list: () => {
+        reads += 1;
+        return reads === 1 ? Promise.resolve([]) : stale.promise;
+      },
+    });
+    await _start(fixture);
+
+    const refresh = fixture.controller.refresh();
+    fixture.controller.acceptProjection(_playground("one", "Latest title"));
+    stale.resolve([_playground("one", "Older title")]);
+    await refresh;
+
+    expect(fixture.controller.getSnapshot().playgrounds).toEqual([
+      _playground("one", "Latest title"),
+    ]);
+    fixture.controller.stop();
+  });
 });
 
 function _fixture(overrides: {
   readonly create?: PlaygroundWorkspaceControllerOptions["client"]["create"];
+  readonly list?: PlaygroundWorkspaceControllerOptions["client"]["list"];
 } = {}) {
   const created: Parameters<PlaygroundWorkspaceControllerOptions["client"]["create"]>[0][] = [];
   const imported: PortableThreadSnapshot[] = [];
@@ -116,6 +142,12 @@ function _fixture(overrides: {
         ((input) => {
           created.push(input);
           return Promise.resolve(createdPlayground);
+        }),
+      list:
+        overrides.list ??
+        (() => {
+          events.push("refresh");
+          return Promise.resolve([]);
         }),
     },
     importSnapshot: (snapshot) => {
@@ -134,9 +166,6 @@ function _fixture(overrides: {
         ensureRootDir: () => Promise.resolve("/workspace"),
       },
     },
-    refreshCatalog: () => {
-      events.push("refresh");
-    },
     openPlayground: (playground) => events.push(`open:${playground.id}`),
     notifySuccess: (message) => events.push(`success:${message}`),
     notifyError: (title, error) =>
@@ -145,6 +174,12 @@ function _fixture(overrides: {
       ),
   });
   return { controller, created, events, imported };
+}
+
+async function _start(fixture: ReturnType<typeof _fixture>): Promise<void> {
+  fixture.controller.start();
+  await _eventually(() => fixture.controller.getSnapshot().loading, false);
+  fixture.events.length = 0;
 }
 
 function _snapshot(productId: string): PortableThreadSnapshot {
@@ -177,4 +212,20 @@ function _playground(id: string, title: string): Playground {
     createdAt: 1,
     updatedAt: 1,
   };
+}
+
+function _deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((nextResolve) => {
+    resolve = nextResolve;
+  });
+  return { promise, resolve };
+}
+
+async function _eventually<T>(read: () => T, expected: T): Promise<void> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    if (read() === expected) return;
+    await Promise.resolve();
+  }
+  expect(read()).toBe(expected);
 }

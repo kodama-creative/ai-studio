@@ -36,6 +36,7 @@ export interface PlaygroundTabPaneProps {
   refreshNonce?: number;
   onClose: (tabId: string) => void;
   onTitleChange?: (playgroundId: string, title: string) => void;
+  onPlaygroundChange?: (playground: Playground) => void;
   onThreadStateChange?: (tabId: string, thread: Thread | null) => void;
 }
 
@@ -49,6 +50,7 @@ function _PlaygroundTabPane({
   refreshNonce = 0,
   onClose,
   onTitleChange,
+  onPlaygroundChange,
   onThreadStateChange,
 }: PlaygroundTabPaneProps) {
   const queryClient = useQueryClient();
@@ -83,8 +85,16 @@ function _PlaygroundTabPane({
     if (loaded !== undefined) {
       onThreadStateChange?.(tabId, playgroundToEditorThread(loaded));
       onTitleChange?.(playgroundId, loaded.title);
+      onPlaygroundChange?.(loaded);
     }
-  }, [loaded, onThreadStateChange, onTitleChange, playgroundId, tabId]);
+  }, [
+    loaded,
+    onPlaygroundChange,
+    onThreadStateChange,
+    onTitleChange,
+    playgroundId,
+    tabId,
+  ]);
   useEffect(
     () => () => onThreadStateChange?.(tabId, null),
     [onThreadStateChange, tabId]
@@ -141,6 +151,7 @@ function _PlaygroundTabPane({
           playgroundRef.current = saved;
           queryClient.setQueryData(queryKey, saved);
           onTitleChange?.(playgroundId, saved.title);
+          onPlaygroundChange?.(saved);
         },
         {
           onBusyChange: (busy) =>
@@ -158,6 +169,7 @@ function _PlaygroundTabPane({
     [
       client,
       lifecycleHost,
+      onPlaygroundChange,
       onTitleChange,
       paneId,
       persistenceOwner,
@@ -207,10 +219,19 @@ function _PlaygroundTabPane({
           durableThreadRef.current = playgroundToEditorThread(next);
           queryClient.setQueryData(queryKey, next);
           onTitleChange?.(playgroundId, next.title);
+          onPlaygroundChange?.(next);
         },
         beforeAdmission: flushPending,
       }),
-    [client, flushPending, onTitleChange, playgroundId, queryClient, queryKey]
+    [
+      client,
+      flushPending,
+      onPlaygroundChange,
+      onTitleChange,
+      playgroundId,
+      queryClient,
+      queryKey,
+    ]
   );
   const handleStreamingStart = useCallback(
     (runId: string) => lifecycleHost.onRunStart(paneId, runId),
@@ -236,9 +257,17 @@ function _PlaygroundTabPane({
       playgroundRef.current = saved;
       queryClient.setQueryData(queryKey, saved);
       onTitleChange?.(playgroundId, saved.title);
+      onPlaygroundChange?.(saved);
       return true;
     },
-    [client, onTitleChange, playgroundId, queryClient, queryKey]
+    [
+      client,
+      onPlaygroundChange,
+      onTitleChange,
+      playgroundId,
+      queryClient,
+      queryKey,
+    ]
   );
 
   const [reloadKey, setReloadKey] = useState(0);
