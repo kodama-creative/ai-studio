@@ -15,7 +15,6 @@ import Electrobun, { app, type ElectrobunEvent, Utils } from "electrobun/bun";
 
 import { resolveDeepLinkScheme } from "../../shared/deep-link-scheme";
 import { Analytics } from "../analytics";
-import { analyticsApplicationModule } from "../application/analytics-application";
 import { auxiliaryGenerationModule } from "../application/auxiliary-generation-module";
 import {
   GITHUB_ACCOUNT_APPLICATION,
@@ -23,7 +22,6 @@ import {
   githubAccountApplicationModule,
 } from "../application/github-account-application";
 import { modelsModule } from "../application/models-module";
-import { remindersApplicationModule } from "../application/reminders-application";
 import { threadSharingApplicationModule } from "../application/thread-sharing-application";
 import {
   UPDATES_APPLICATION,
@@ -187,8 +185,6 @@ async function _startDesktopApp(
   processContainer.load(threadSharingApplicationModule());
   processContainer.load(githubAccountApplicationModule());
   processContainer.load(updatesApplicationModule());
-  processContainer.load(remindersApplicationModule());
-  processContainer.load(analyticsApplicationModule());
   notifyGithubChanged = (state) =>
     processContainer
       .get<GithubAccountApplication>(GITHUB_ACCOUNT_APPLICATION)

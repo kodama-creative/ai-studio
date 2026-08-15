@@ -107,13 +107,16 @@ the transport naming projection; do not add a second pass-through Playground
 facade or duplicate host/application token. Likewise, a DI token backed by one
 concrete application class does not need an empty `*Application` interface plus
 an `*ApplicationImpl` class; implement the shared request contract directly.
-Cross-cutting capabilities such as GitHub account, updates, reminders,
-analytics, and thread sharing also keep separate `*-application.ts` and
-`*-rpc-feature.ts` modules, plus one feature-owned shared RPC contract and
-renderer client; do not merge them back into generic `application-services`,
-`application-rpc-servers`, `application-rpc`, or `application-rpc-clients`
-aggregations. Bun feature modules must not export import-time manager instances
-or let application classes reach through a service locator.
+Stateful or orchestrating cross-cutting capabilities such as GitHub Account,
+Updates, Models, Auxiliary Generation, and Thread Sharing keep separate
+application and `*-rpc-feature.ts` modules. Transport-only features such as
+Analytics and Reminders adapt their existing manager/state owner directly in
+the RPC feature; do not add a second process singleton merely to mirror the RPC
+methods. Every feature still owns one shared RPC contract and renderer client;
+do not merge them into generic `application-services`, `application-rpc-servers`,
+`application-rpc`, or `application-rpc-clients` aggregations. Bun feature
+modules must not export import-time manager instances or let application classes
+reach through a service locator.
 
 Feature `ContainerModule` factories resolve constructor dependencies through
 Inversify `ResolutionContext`; they do not call `DesktopWindowScope.get(...)`.

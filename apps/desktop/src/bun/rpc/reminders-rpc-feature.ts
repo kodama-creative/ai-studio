@@ -3,42 +3,42 @@ import { ContainerModule } from "inversify";
 import type { RpcServer } from "../../shared/namespaced-rpc";
 import {
   REMINDERS_RPC,
+  type RemindersRequests,
   type RemindersRpc,
 } from "../../shared/reminders-rpc";
-import {
-  REMINDERS_APPLICATION,
-  type RemindersApplication,
-} from "../application/reminders-application";
 import {
   RpcContribution,
   type RpcContribution as RpcContributionApi,
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
+import {
+  dismissGithubStarReminder,
+  getNextFeatureReminder,
+  markFeatureReminderSeen,
+  resolveGithubStarReminder,
+} from "../reminders/state";
 
 class RemindersRpcServer implements RpcServer<RemindersRpc> {
   readonly namespace = REMINDERS_RPC;
   readonly streams = {};
-
-  constructor(readonly requests: RemindersApplication) {}
+  readonly requests: RemindersRequests = {
+    shouldShowGithubStar: () => resolveGithubStarReminder(),
+    dismissGithubStarForever: () => dismissGithubStarReminder(),
+    nextFeature: () => getNextFeatureReminder(),
+    markFeatureSeen: (id) => markFeatureReminderSeen(id),
+  };
 }
 
 class RemindersContribution implements RpcContributionApi {
-  constructor(private readonly _application: RemindersApplication) {}
-
   registerRpc(rpc: RpcRegistry): void {
-    rpc.registerServer(new RemindersRpcServer(this._application));
+    rpc.registerServer(new RemindersRpcServer());
   }
 }
 
 /** Bind reminder RPC as one window contribution. */
 export function remindersRpcModule(): ContainerModule {
   return new ContainerModule(({ bind }) => {
-    bind(RemindersContribution)
-      .toDynamicValue(
-        (context) =>
-          new RemindersContribution(context.get(REMINDERS_APPLICATION))
-      )
-      .inSingletonScope();
+    bind(RemindersContribution).toSelf().inSingletonScope();
     bind<RpcContributionApi>(RpcContribution).toService(RemindersContribution);
   });
 }
