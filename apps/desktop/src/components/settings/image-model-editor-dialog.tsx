@@ -24,7 +24,18 @@ import {
   SelectValue,
 } from "@llm-space/ui/ui/select";
 import { Switch } from "@llm-space/ui/ui/switch";
-import { useEffect, useState } from "react";
+import { Loader2 } from "lucide-react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import { toast } from "sonner";
+
+import { ImageModelEditorController } from "@/app/settings/image-model-editor-controller";
 
 interface ImageModelFormState {
   id: string;
@@ -67,17 +78,33 @@ export function ImageModelEditorDialog({
   onOpenChange: (open: boolean) => void;
   model?: SeedreamImageModelDefinition | null;
   existingIds: readonly string[];
-  onSave: (model: SeedreamImageModelDefinition, originalId?: string) => void;
+  onSave: (
+    model: SeedreamImageModelDefinition,
+    originalId?: string
+  ) => Promise<void>;
 }) {
   const [form, setForm] = useState<ImageModelFormState>(() =>
     _initialState(model)
   );
+  const controller = useMemo(
+    () => new ImageModelEditorController({ save: onSave }),
+    [onSave]
+  );
+  const operation = useSyncExternalStore(
+    controller.subscribe,
+    controller.getSnapshot,
+    controller.getSnapshot
+  ).operation;
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (open) {
       setForm(_initialState(model));
+      controller.open(model?.id);
+    } else {
+      controller.close();
     }
-  }, [model, open]);
+  }, [controller, model, open]);
+  useEffect(() => () => controller.close(), [controller]);
 
   const id = form.id.trim();
   const duplicateId = existingIds.some(
@@ -106,26 +133,40 @@ export function ImageModelEditorDialog({
   };
 
   /** Persist a trimmed definition; provider credentials remain shared. */
-  const handleSave = () => {
+  const handleOpenChange = useCallback(
+    (next: boolean) => {
+      if (!next) controller.close();
+      onOpenChange(next);
+    },
+    [controller, onOpenChange]
+  );
+
+  const handleSave = async () => {
     if (!canSave) {
       return;
     }
     const icon = form.icon.trim();
-    onSave(
-      {
-        id,
-        name: form.name.trim() || id,
-        supportedSizes: form.supportedSizes,
-        defaultSize: form.defaultSize,
-        ...(icon ? { icon } : {}),
-      },
-      model?.id
-    );
-    onOpenChange(false);
+    const result = await controller.save({
+      id,
+      name: form.name.trim() || id,
+      supportedSizes: form.supportedSizes,
+      defaultSize: form.defaultSize,
+      ...(icon ? { icon } : {}),
+    });
+    if (result.type === "saved") {
+      handleOpenChange(false);
+    } else if (result.type === "failed") {
+      toast.error("Failed to save custom image model", {
+        description:
+          result.error instanceof Error
+            ? result.error.message
+            : "Please try again.",
+      });
+    }
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
         className="max-h-[85vh] overflow-y-auto sm:max-w-md"
         onInteractOutside={(event) => event.preventDefault()}
@@ -240,10 +281,16 @@ export function ImageModelEditorDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>
+          <Button variant="ghost" onClick={() => handleOpenChange(false)}>
             Cancel
           </Button>
-          <Button onClick={handleSave} disabled={!canSave}>
+          <Button
+            onClick={() => void handleSave()}
+            disabled={!canSave || operation !== "idle"}
+          >
+            {operation === "saving" ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : null}
             {model ? "Save" : "Add"}
           </Button>
         </DialogFooter>

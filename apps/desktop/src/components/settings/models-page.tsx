@@ -1163,17 +1163,6 @@ function _ArkImageGenerationEditor({
     );
   };
 
-  /** Add or replace a custom image model and preserve its disabled state. */
-  const handleSaveCustomModel = (
-    model: SeedreamImageModelDefinition,
-    originalId?: string
-  ) => {
-    runModelMutation(
-      "Failed to save custom image model",
-      () => upsertCustomImageModel(model, originalId)
-    );
-  };
-
   /** Remove one custom image model without repairing Thread tool bindings. */
   const handleDeleteCustomModel = (modelId: string) => {
     runModelMutation(
@@ -1282,7 +1271,7 @@ function _ArkImageGenerationEditor({
         onOpenChange={setEditorOpen}
         model={editingModel}
         existingIds={models.map((model) => model.id)}
-        onSave={handleSaveCustomModel}
+        onSave={upsertCustomImageModel}
       />
     </>
   );
