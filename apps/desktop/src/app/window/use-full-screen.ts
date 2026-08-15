@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useSyncExternalStore } from "react";
 
-import { disposeBestEffort } from "@/app/lifecycle/dispose-best-effort";
 import { createWindowClient } from "@/client/window";
+
+import { FullScreenController } from "./full-screen-controller";
 
 /**
  * Track the window's OS-level (Electrobun) fullscreen state. Seeds the initial
@@ -10,28 +11,20 @@ import { createWindowClient } from "@/client/window";
  */
 export function useFullScreen(): boolean {
   const windowClient = useMemo(() => createWindowClient(), []);
-  const [fullScreen, setFullScreen] = useState(false);
+  const controller = useMemo(
+    () => new FullScreenController(windowClient),
+    [windowClient]
+  );
+  const snapshot = useSyncExternalStore(
+    controller.subscribe,
+    controller.getSnapshot,
+    controller.getSnapshot
+  );
 
   useEffect(() => {
-    let cancelled = false;
+    controller.start();
+    return () => controller.stop();
+  }, [controller]);
 
-    void windowClient
-      .getFullscreenState()
-      .then((res) => {
-        if (!cancelled) setFullScreen(res.fullScreen);
-      })
-      .catch(() => {
-        // Ignore: fall back to the default (not fullscreen).
-      });
-
-    const onChange = ({ fullScreen }: { fullScreen: boolean }) =>
-      setFullScreen(fullScreen);
-    const subscription = windowClient.on("fullScreenChanged", onChange);
-    return () => {
-      cancelled = true;
-      disposeBestEffort(subscription);
-    };
-  }, [windowClient]);
-
-  return fullScreen;
+  return snapshot.fullScreen;
 }
