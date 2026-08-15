@@ -3,7 +3,6 @@ import type { ModelManager } from "@llm-space/runtime/models";
 import { ContainerModule, type ResolutionContext } from "inversify";
 
 import { DesktopPlaygroundApplicationImpl } from "../application/playground-application";
-import type { DesktopWindowScope } from "../di/process-container";
 import {
   RpcContribution,
   type RpcContribution as RpcContributionApi,
@@ -72,15 +71,13 @@ class PlaygroundContribution implements RpcContributionApi {
 }
 
 /** Bind Main-only Playground transport adapters in the window scope. */
-export function playgroundContributionsModule(
-  scope: DesktopWindowScope
-): ContainerModule {
+export function playgroundContributionsModule(): ContainerModule {
   return new ContainerModule(({ bind }) => {
     bind(PlaygroundContribution)
       .toDynamicValue(
-        () =>
+        (context) =>
           new PlaygroundContribution(
-            scope.get(PROCESS_TOKENS.playgroundApplication)
+            context.get(PROCESS_TOKENS.playgroundApplication)
           )
       )
       .inSingletonScope();

@@ -7,7 +7,6 @@ import {
   type SearchRequests,
   type SearchRpc,
 } from "../../shared/search-rpc";
-import type { DesktopWindowScope } from "../di/process-container";
 import {
   RpcContribution,
   type RpcContribution as RpcContributionApi,
@@ -38,13 +37,13 @@ class SearchRpcContribution implements RpcContributionApi {
 }
 
 /** Bind search settings RPC as one window contribution. */
-export function searchRpcModule(scope: DesktopWindowScope): ContainerModule {
+export function searchRpcModule(): ContainerModule {
   return new ContainerModule(({ bind }) => {
     bind(SearchRpcContribution)
       .toDynamicValue(
-        () =>
+        (context) =>
           new SearchRpcContribution(
-            scope.get<SearchSettingsManager>(PROCESS_TOKENS.searchSettings)
+            context.get<SearchSettingsManager>(PROCESS_TOKENS.searchSettings)
           )
       )
       .inSingletonScope();

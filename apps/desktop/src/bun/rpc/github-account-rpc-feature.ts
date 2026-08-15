@@ -14,7 +14,6 @@ import {
   type CommandContribution as CommandContributionApi,
 } from "../di/command-contribution";
 import type { CommandRegistry } from "../di/command-registry";
-import type { DesktopWindowScope } from "../di/process-container";
 import {
   RpcContribution,
   type RpcContribution as RpcContributionApi,
@@ -51,14 +50,14 @@ class GithubAccountContribution
 }
 
 /** Bind GitHub account commands and RPC as one shared contribution instance. */
-export function githubAccountRpcModule(
-  scope: DesktopWindowScope
-): ContainerModule {
+export function githubAccountRpcModule(): ContainerModule {
   return new ContainerModule(({ bind }) => {
     bind(GithubAccountContribution)
       .toDynamicValue(
-        () =>
-          new GithubAccountContribution(scope.get(GITHUB_ACCOUNT_APPLICATION))
+        (context) =>
+          new GithubAccountContribution(
+            context.get(GITHUB_ACCOUNT_APPLICATION)
+          )
       )
       .inSingletonScope();
     bind<CommandContributionApi>(CommandContribution).toService(

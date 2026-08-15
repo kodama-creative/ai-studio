@@ -7,7 +7,6 @@ import {
   type BuiltinToolsRpc,
 } from "../../shared/builtin-tools-rpc";
 import type { RpcServer } from "../../shared/namespaced-rpc";
-import type { DesktopWindowScope } from "../di/process-container";
 import {
   RpcContribution,
   type RpcContribution as RpcContributionApi,
@@ -38,15 +37,14 @@ class BuiltinToolsRpcContribution implements RpcContributionApi {
 }
 
 /** Bind bundled-tool RPC as one window contribution. */
-export function builtinToolsRpcModule(
-  scope: DesktopWindowScope
-): ContainerModule {
+export function builtinToolsRpcModule(): ContainerModule {
   return new ContainerModule(({ bind }) => {
     bind(BuiltinToolsRpcContribution)
       .toDynamicValue(
-        () =>
+        (context) =>
           new BuiltinToolsRpcContribution(
-            scope.get<{ tools: ToolRegistry }>(PROCESS_TOKENS.desktopHost).tools
+            context.get<{ tools: ToolRegistry }>(PROCESS_TOKENS.desktopHost)
+              .tools
           )
       )
       .inSingletonScope();

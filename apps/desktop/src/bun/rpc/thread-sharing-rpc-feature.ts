@@ -9,7 +9,6 @@ import {
   THREAD_SHARING_APPLICATION,
   type ThreadSharingApplication,
 } from "../application/thread-sharing-application";
-import type { DesktopWindowScope } from "../di/process-container";
 import {
   RpcContribution,
   type RpcContribution as RpcContributionApi,
@@ -32,15 +31,13 @@ class ThreadSharingContribution implements RpcContributionApi {
 }
 
 /** Bind thread-sharing transport as one window contribution. */
-export function threadSharingRpcModule(
-  scope: DesktopWindowScope
-): ContainerModule {
+export function threadSharingRpcModule(): ContainerModule {
   return new ContainerModule(({ bind }) => {
     bind(ThreadSharingContribution)
       .toDynamicValue(
-        () =>
+        (context) =>
           new ThreadSharingContribution(
-            scope.get(THREAD_SHARING_APPLICATION)
+            context.get(THREAD_SHARING_APPLICATION)
           )
       )
       .inSingletonScope();

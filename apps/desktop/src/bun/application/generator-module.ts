@@ -1,6 +1,5 @@
 import { ContainerModule, type ResolutionContext } from "inversify";
 
-import type { DesktopWindowScope } from "../di/process-container";
 import {
   RpcContribution,
   type RpcContribution as RpcContributionApi,
@@ -48,13 +47,12 @@ class GeneratorContribution implements RpcContributionApi {
 }
 
 /** Bind one generator contribution inside the owning window scope. */
-export function generatorContributionsModule(
-  scope: DesktopWindowScope
-): ContainerModule {
+export function generatorContributionsModule(): ContainerModule {
   return new ContainerModule(({ bind }) => {
     bind(GeneratorContribution)
       .toDynamicValue(
-        () => new GeneratorContribution(scope.get(GENERATOR_APPLICATION))
+        (context) =>
+          new GeneratorContribution(context.get(GENERATOR_APPLICATION))
       )
       .inSingletonScope();
     bind<RpcContributionApi>(RpcContribution).toService(GeneratorContribution);

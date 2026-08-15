@@ -7,7 +7,6 @@ import {
   type McpRpc,
 } from "../../shared/mcp-rpc";
 import type { RpcServer } from "../../shared/namespaced-rpc";
-import type { DesktopWindowScope } from "../di/process-container";
 import {
   RpcContribution,
   type RpcContribution as RpcContributionApi,
@@ -44,13 +43,13 @@ class McpRpcContribution implements RpcContributionApi {
 }
 
 /** Bind MCP configuration and tool RPC as one window contribution. */
-export function mcpRpcModule(scope: DesktopWindowScope): ContainerModule {
+export function mcpRpcModule(): ContainerModule {
   return new ContainerModule(({ bind }) => {
     bind(McpRpcContribution)
       .toDynamicValue(
-        () =>
+        (context) =>
           new McpRpcContribution(
-            scope.get<McpManager>(PROCESS_TOKENS.mcpManager)
+            context.get<McpManager>(PROCESS_TOKENS.mcpManager)
           )
       )
       .inSingletonScope();

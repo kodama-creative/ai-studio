@@ -5,7 +5,6 @@ import {
   type CommandContribution as CommandContributionApi,
 } from "../di/command-contribution";
 import type { CommandRegistry } from "../di/command-registry";
-import type { DesktopWindowScope } from "../di/process-container";
 import {
   RpcContribution,
   type RpcContribution as RpcContributionApi,
@@ -61,15 +60,14 @@ class AgentProjectsRpcContribution implements RpcContributionApi {
 
 /** Bind window-owned Agent Project adapters without exposing the DI scope. */
 export function agentProjectsContributionsModule(
-  scope: DesktopWindowScope,
   includeRpc: boolean
 ): ContainerModule {
   return new ContainerModule(({ bind }) => {
     bind(AgentProjectsCommandContribution)
       .toDynamicValue(
-        () =>
+        (context) =>
           new AgentProjectsCommandContribution(
-            scope.get(AGENT_PROJECTS_APPLICATION)
+            context.get(AGENT_PROJECTS_APPLICATION)
           )
       )
       .inSingletonScope();
@@ -79,9 +77,9 @@ export function agentProjectsContributionsModule(
     if (includeRpc) {
       bind(AgentProjectsRpcContribution)
         .toDynamicValue(
-          () =>
+          (context) =>
             new AgentProjectsRpcContribution(
-              scope.get(AGENT_PROJECTS_APPLICATION)
+              context.get(AGENT_PROJECTS_APPLICATION)
             )
         )
         .inSingletonScope();

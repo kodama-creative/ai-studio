@@ -4,7 +4,6 @@ import { createStudio, type Studio } from "@llm-space/studio/server";
 import { ContainerModule, type ResolutionContext } from "inversify";
 
 import type { AgentProjectView } from "../../shared/agent-project";
-import type { DesktopWindowScope } from "../di/process-container";
 import {
   RpcContribution,
   type RpcContribution as RpcContributionApi,
@@ -100,16 +99,14 @@ class ProjectContribution implements RpcContributionApi {
 }
 
 /** Bind Project-only Studio transport adapters in the window scope. */
-export function projectContributionsModule(
-  scope: DesktopWindowScope
-): ContainerModule {
+export function projectContributionsModule(): ContainerModule {
   return new ContainerModule(({ bind }) => {
     bind(ProjectContribution)
       .toDynamicValue(
-        () =>
+        (context) =>
           new ProjectContribution(
-            scope.get(PROJECT_WINDOW_TOKENS.studio),
-            scope.get<AgentProjectView>(PROJECT_WINDOW_TOKENS.project).id
+            context.get(PROJECT_WINDOW_TOKENS.studio),
+            context.get<AgentProjectView>(PROJECT_WINDOW_TOKENS.project).id
           )
       )
       .inSingletonScope();

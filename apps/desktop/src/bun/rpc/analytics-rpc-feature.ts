@@ -9,7 +9,6 @@ import {
   ANALYTICS_APPLICATION,
   type AnalyticsApplication,
 } from "../application/analytics-application";
-import type { DesktopWindowScope } from "../di/process-container";
 import {
   RpcContribution,
   type RpcContribution as RpcContributionApi,
@@ -32,13 +31,12 @@ class AnalyticsContribution implements RpcContributionApi {
 }
 
 /** Bind analytics RPC as one window contribution. */
-export function analyticsRpcModule(
-  scope: DesktopWindowScope
-): ContainerModule {
+export function analyticsRpcModule(): ContainerModule {
   return new ContainerModule(({ bind }) => {
     bind(AnalyticsContribution)
       .toDynamicValue(
-        () => new AnalyticsContribution(scope.get(ANALYTICS_APPLICATION))
+        (context) =>
+          new AnalyticsContribution(context.get(ANALYTICS_APPLICATION))
       )
       .inSingletonScope();
     bind<RpcContributionApi>(RpcContribution).toService(AnalyticsContribution);

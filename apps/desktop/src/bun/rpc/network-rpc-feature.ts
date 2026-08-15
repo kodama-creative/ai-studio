@@ -7,7 +7,6 @@ import {
   type NetworkRequests,
   type NetworkRpc,
 } from "../../shared/network-rpc";
-import type { DesktopWindowScope } from "../di/process-container";
 import {
   RpcContribution,
   type RpcContribution as RpcContributionApi,
@@ -39,13 +38,13 @@ class NetworkRpcContribution implements RpcContributionApi {
 }
 
 /** Bind network settings RPC as one window contribution. */
-export function networkRpcModule(scope: DesktopWindowScope): ContainerModule {
+export function networkRpcModule(): ContainerModule {
   return new ContainerModule(({ bind }) => {
     bind(NetworkRpcContribution)
       .toDynamicValue(
-        () =>
+        (context) =>
           new NetworkRpcContribution(
-            scope.get<NetworkSettingsManager>(PROCESS_TOKENS.networkSettings)
+            context.get<NetworkSettingsManager>(PROCESS_TOKENS.networkSettings)
           )
       )
       .inSingletonScope();

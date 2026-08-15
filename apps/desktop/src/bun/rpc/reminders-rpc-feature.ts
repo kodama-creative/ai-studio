@@ -9,7 +9,6 @@ import {
   REMINDERS_APPLICATION,
   type RemindersApplication,
 } from "../application/reminders-application";
-import type { DesktopWindowScope } from "../di/process-container";
 import {
   RpcContribution,
   type RpcContribution as RpcContributionApi,
@@ -32,13 +31,12 @@ class RemindersContribution implements RpcContributionApi {
 }
 
 /** Bind reminder RPC as one window contribution. */
-export function remindersRpcModule(
-  scope: DesktopWindowScope
-): ContainerModule {
+export function remindersRpcModule(): ContainerModule {
   return new ContainerModule(({ bind }) => {
     bind(RemindersContribution)
       .toDynamicValue(
-        () => new RemindersContribution(scope.get(REMINDERS_APPLICATION))
+        (context) =>
+          new RemindersContribution(context.get(REMINDERS_APPLICATION))
       )
       .inSingletonScope();
     bind<RpcContributionApi>(RpcContribution).toService(RemindersContribution);

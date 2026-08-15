@@ -117,33 +117,33 @@ export class DesktopWindowRuntime {
   }
 
   private _loadFeatureModules(commandSink: CommandSink): void {
-    this._scope.load(threadSharingRpcModule(this._scope));
-    this._scope.load(githubAccountRpcModule(this._scope));
-    this._scope.load(updatesRpcModule(this._scope));
-    this._scope.load(remindersRpcModule(this._scope));
-    this._scope.load(analyticsRpcModule(this._scope));
+    this._scope.load(threadSharingRpcModule());
+    this._scope.load(githubAccountRpcModule());
+    this._scope.load(updatesRpcModule());
+    this._scope.load(remindersRpcModule());
+    this._scope.load(analyticsRpcModule());
     this._scope.load(
-      agentProjectsContributionsModule(this._scope, this._kind === "main")
+      agentProjectsContributionsModule(this._kind === "main")
     );
-    this._scope.load(generatorContributionsModule(this._scope));
+    this._scope.load(generatorContributionsModule());
     this._scope.load(
       nativeContributionsModule(this._scope, {
         getWindow: () => this._requireWindow(),
         commandSink,
       })
     );
-    this._scope.load(auxiliaryGenerationRpcModule(this._scope));
-    this._scope.load(modelsRpcModule(this._scope));
+    this._scope.load(auxiliaryGenerationRpcModule());
+    this._scope.load(modelsRpcModule());
     this._scope.load(promptFilesRpcModule());
-    this._scope.load(mcpRpcModule(this._scope));
-    this._scope.load(builtinToolsRpcModule(this._scope));
-    this._scope.load(searchRpcModule(this._scope));
-    this._scope.load(networkRpcModule(this._scope));
-    this._scope.load(skillsRpcModule(this._scope));
+    this._scope.load(mcpRpcModule());
+    this._scope.load(builtinToolsRpcModule());
+    this._scope.load(searchRpcModule());
+    this._scope.load(networkRpcModule());
+    this._scope.load(skillsRpcModule());
     this._scope.load(
       this._kind === "main"
-        ? playgroundContributionsModule(this._scope)
-        : projectContributionsModule(this._scope)
+        ? playgroundContributionsModule()
+        : projectContributionsModule()
     );
   }
 

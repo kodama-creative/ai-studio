@@ -7,7 +7,6 @@ import {
 import type { RpcServer } from "../../shared/namespaced-rpc";
 import type { AuxiliaryGenerationApplication } from "../application/auxiliary-generation-application";
 import { AUXILIARY_GENERATION_APPLICATION } from "../application/auxiliary-generation-module";
-import type { DesktopWindowScope } from "../di/process-container";
 import {
   RpcContribution,
   type RpcContribution as RpcContributionApi,
@@ -36,15 +35,13 @@ class AuxiliaryGenerationRpcContribution implements RpcContributionApi {
 }
 
 /** Bind auxiliary model generation as one window RPC contribution. */
-export function auxiliaryGenerationRpcModule(
-  scope: DesktopWindowScope
-): ContainerModule {
+export function auxiliaryGenerationRpcModule(): ContainerModule {
   return new ContainerModule(({ bind }) => {
     bind(AuxiliaryGenerationRpcContribution)
       .toDynamicValue(
-        () =>
+        (context) =>
           new AuxiliaryGenerationRpcContribution(
-            scope.get(AUXILIARY_GENERATION_APPLICATION)
+            context.get(AUXILIARY_GENERATION_APPLICATION)
           )
       )
       .inSingletonScope();

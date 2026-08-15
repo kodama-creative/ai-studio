@@ -11,7 +11,6 @@ import {
   type CommandContribution as CommandContributionApi,
 } from "../di/command-contribution";
 import type { CommandRegistry } from "../di/command-registry";
-import type { DesktopWindowScope } from "../di/process-container";
 import {
   RpcContribution,
   type RpcContribution as RpcContributionApi,
@@ -48,11 +47,12 @@ class UpdatesContribution
 }
 
 /** Bind update commands and RPC as one shared contribution instance. */
-export function updatesRpcModule(scope: DesktopWindowScope): ContainerModule {
+export function updatesRpcModule(): ContainerModule {
   return new ContainerModule(({ bind }) => {
     bind(UpdatesContribution)
       .toDynamicValue(
-        () => new UpdatesContribution(scope.get(UPDATES_APPLICATION))
+        (context) =>
+          new UpdatesContribution(context.get(UPDATES_APPLICATION))
       )
       .inSingletonScope();
     bind<CommandContributionApi>(CommandContribution).toService(

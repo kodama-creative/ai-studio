@@ -181,22 +181,24 @@ export function nativeContributionsModule(
   return new ContainerModule(({ bind }) => {
     bind<WindowApplication>(NATIVE_APPLICATION_TOKENS.window)
       .toDynamicValue(
-        () =>
-          new WindowApplication(
-            input.getWindow,
-            scope.get<DesktopWindowContext>(WINDOW_TOKENS.context)
+        (context) =>
+          scope.own(
+            new WindowApplication(
+              input.getWindow,
+              context.get<DesktopWindowContext>(WINDOW_TOKENS.context)
+            )
           )
       )
       .inSingletonScope();
     bind(NativeContribution)
       .toDynamicValue(
-        () =>
+        (context) =>
           new NativeContribution(
-            scope.get(NATIVE_APPLICATION_TOKENS.dialogs),
-            scope.get(NATIVE_APPLICATION_TOKENS.files),
-            scope.get(NATIVE_APPLICATION_TOKENS.appDirectories),
-            scope.get(NATIVE_APPLICATION_TOKENS.window),
-            scope.get(PROCESS_TOKENS.windowStates),
+            context.get(NATIVE_APPLICATION_TOKENS.dialogs),
+            context.get(NATIVE_APPLICATION_TOKENS.files),
+            context.get(NATIVE_APPLICATION_TOKENS.appDirectories),
+            context.get(NATIVE_APPLICATION_TOKENS.window),
+            context.get(PROCESS_TOKENS.windowStates),
             input.getWindow,
             input.commandSink
           )

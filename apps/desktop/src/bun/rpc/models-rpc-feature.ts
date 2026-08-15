@@ -5,7 +5,6 @@ import { MODELS_RPC } from "../../shared/models-rpc";
 import type { RpcServer } from "../../shared/namespaced-rpc";
 import type { ModelsApplication } from "../application/models-application";
 import { MODELS_APPLICATION } from "../application/models-module";
-import type { DesktopWindowScope } from "../di/process-container";
 import {
   RpcContribution,
   type RpcContribution as RpcContributionApi,
@@ -32,11 +31,12 @@ class ModelsRpcContribution implements RpcContributionApi {
 }
 
 /** Bind Models use cases as one window RPC contribution. */
-export function modelsRpcModule(scope: DesktopWindowScope): ContainerModule {
+export function modelsRpcModule(): ContainerModule {
   return new ContainerModule(({ bind }) => {
     bind(ModelsRpcContribution)
       .toDynamicValue(
-        () => new ModelsRpcContribution(scope.get(MODELS_APPLICATION))
+        (context) =>
+          new ModelsRpcContribution(context.get(MODELS_APPLICATION))
       )
       .inSingletonScope();
     bind<RpcContributionApi>(RpcContribution).toService(ModelsRpcContribution);

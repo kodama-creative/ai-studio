@@ -7,7 +7,6 @@ import {
   type SkillsRequests,
   type SkillsRpc,
 } from "../../shared/skills-rpc";
-import type { DesktopWindowScope } from "../di/process-container";
 import {
   RpcContribution,
   type RpcContribution as RpcContributionApi,
@@ -46,13 +45,13 @@ class SkillsRpcContribution implements RpcContributionApi {
 }
 
 /** Bind Skill discovery and settings RPC as one window contribution. */
-export function skillsRpcModule(scope: DesktopWindowScope): ContainerModule {
+export function skillsRpcModule(): ContainerModule {
   return new ContainerModule(({ bind }) => {
     bind(SkillsRpcContribution)
       .toDynamicValue(
-        () =>
+        (context) =>
           new SkillsRpcContribution(
-            scope.get<SkillsManager>(PROCESS_TOKENS.skillsManager)
+            context.get<SkillsManager>(PROCESS_TOKENS.skillsManager)
           )
       )
       .inSingletonScope();
