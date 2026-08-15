@@ -1,6 +1,7 @@
 const ALLOWED_EXTERNAL_URL_PROTOCOLS = new Set(["http:", "https:"]);
 const EXTERNAL_URL_REJECTION_MESSAGE = "External URL is not allowed.";
 
+/** Validate a renderer-provided URL before handing it to the native shell. */
 export function parseExternalUrl(value: string): URL {
   let url: URL;
 

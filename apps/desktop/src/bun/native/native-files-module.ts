@@ -50,7 +50,7 @@ class NativeFilesContribution implements RpcContributionApi {
   }
 }
 
-/** Bind the process-owned native file application. */
+/** Bind the process-owned native filesystem application. */
 export function nativeFilesApplicationModule(): ContainerModule {
   return new ContainerModule(({ bind }) => {
     bind<NativeFilesApplication>(NATIVE_FILES_APPLICATION)

@@ -17,10 +17,11 @@ import {
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
 import { desktopToken } from "../di/tokens";
+
 import {
   importFilesWithNativePicker,
   importTextFromClipboard,
-} from "../import-files";
+} from "./import-files";
 
 export interface NativeDialogsApplication {
   pickFile(): Promise<string | null>;

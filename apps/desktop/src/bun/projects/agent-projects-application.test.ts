@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import type { AgentProject } from "../projects/agent-project";
-
+import type { AgentProject } from "./agent-project";
 import { AgentProjectsApplication } from "./agent-projects-application";
 
 const PROJECT: AgentProject = {

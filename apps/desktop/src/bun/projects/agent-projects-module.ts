@@ -16,12 +16,12 @@ import {
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
 import { desktopToken, PROCESS_TOKENS } from "../di/tokens";
+import { NATIVE_DIALOGS_APPLICATION } from "../native/native-dialogs-module";
 
 import {
   AgentProjectsApplication,
   type DirectoryPicker,
 } from "./agent-projects-application";
-import { NATIVE_DIALOGS_APPLICATION } from "./native-dialogs-module";
 
 export const AGENT_PROJECTS_APPLICATION =
   desktopToken<AgentProjectsApplication>("agent-projects", "application");

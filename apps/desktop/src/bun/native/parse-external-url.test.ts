@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { parseExternalUrl } from "./parse-external-url";
 
-describe("parseExternalUrl", () => {
+describe("native shell URL validation", () => {
   test.each(["http://example.com/path", "https://example.com/path"])(
     "allows %s",
     (value) => {

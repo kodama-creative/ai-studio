@@ -1,7 +1,7 @@
 import { expect, mock, test } from "bun:test";
 import path from "node:path";
 
-import { GeneratorProjectWorkspace } from "./generator-project";
+import { GeneratorProjectWorkspace } from "./generator-project-workspace";
 
 test("generated project terminal launch is unsupported outside macOS", async () => {
   const runAppleScript = mock<

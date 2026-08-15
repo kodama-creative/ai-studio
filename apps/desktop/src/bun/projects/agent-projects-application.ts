@@ -4,7 +4,8 @@ import type {
 } from "../../shared/agent-project-rpc";
 import type { Disposable } from "../../shared/disposable";
 import { EventHub } from "../../shared/event-hub";
-import type { ProjectWindowManager } from "../projects/project-window-manager";
+
+import type { ProjectWindowManager } from "./project-window-manager";
 
 export interface DirectoryPicker {
   pickDirectory(): Promise<string | null>;

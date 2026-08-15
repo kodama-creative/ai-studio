@@ -127,7 +127,7 @@ class WindowContribution implements CommandContributionApi, RpcContributionApi {
   }
 }
 
-/** Bind Window application, RPC, and commands for one native window. */
+/** Bind the Window application, RPC, and commands for one native window. */
 export function nativeWindowContributionsModule(
   scope: DesktopWindowScope,
   getWindow: () => BrowserWindow

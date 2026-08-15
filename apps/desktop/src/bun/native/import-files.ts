@@ -2,7 +2,7 @@ import { basename } from "node:path";
 
 import { Utils } from "electrobun/bun";
 
-import type { Command, ImportFilePayload } from "../shared/commands";
+import type { Command, ImportFilePayload } from "../../shared/commands";
 
 type SendCommand = (command: Command) => void;
 

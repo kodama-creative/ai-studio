@@ -15,19 +15,14 @@ import Electrobun, { app, type ElectrobunEvent, Utils } from "electrobun/bun";
 
 import { resolveDeepLinkScheme } from "../../shared/deep-link-scheme";
 import { Analytics } from "../analytics";
-import { agentProjectsModule } from "../application/agent-projects-module";
 import { analyticsApplicationModule } from "../application/analytics-application";
-import { appDirectoriesApplicationModule } from "../application/app-directories-module";
 import { auxiliaryGenerationModule } from "../application/auxiliary-generation-module";
-import { generatorModule } from "../application/generator-module";
 import {
   GITHUB_ACCOUNT_APPLICATION,
   GithubAccountApplication,
   githubAccountApplicationModule,
 } from "../application/github-account-application";
 import { modelsModule } from "../application/models-module";
-import { nativeDialogsApplicationModule } from "../application/native-dialogs-module";
-import { nativeFilesApplicationModule } from "../application/native-files-module";
 import { remindersApplicationModule } from "../application/reminders-application";
 import { threadSharingApplicationModule } from "../application/thread-sharing-application";
 import {
@@ -46,8 +41,13 @@ import {
 import { processServicesModule } from "../di/process-module";
 import { PROCESS_TOKENS } from "../di/tokens";
 import { openPath, revealInFileManager } from "../fs";
+import { generatorModule } from "../generator/generator-module";
 import { DesktopHost } from "../host/desktop-host";
+import { appDirectoriesApplicationModule } from "../native/app-directories-module";
+import { nativeDialogsApplicationModule } from "../native/native-dialogs-module";
+import { nativeFilesApplicationModule } from "../native/native-files-module";
 import { playgroundModule } from "../playgrounds/playground-module";
+import { agentProjectsModule } from "../projects/agent-projects-module";
 import { ProjectWindowManager } from "../projects/project-window-manager";
 import {
   FileAgentProjectCatalogStore,

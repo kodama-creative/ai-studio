@@ -43,7 +43,7 @@ class AppDirectoriesContribution implements RpcContributionApi {
   }
 }
 
-/** Bind the process-owned app directory application. */
+/** Bind the process-owned application-directory module. */
 export function appDirectoriesApplicationModule(): ContainerModule {
   return new ContainerModule(({ bind }) => {
     bind<AppDirectoriesApplication>(APP_DIRECTORIES_APPLICATION)

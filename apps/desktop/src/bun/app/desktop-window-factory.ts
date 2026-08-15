@@ -3,15 +3,15 @@ import type { BrowserWindow } from "electrobun/bun";
 
 import type { AgentProjectView } from "../../shared/agent-project";
 import type { Command } from "../../shared/commands";
-import {
-  WINDOW_APPLICATION,
-  type WindowApplication,
-} from "../application/native-window-module";
 import type {
   DesktopProcessContainer,
   DesktopWindowScope,
 } from "../di/process-container";
 import { PROJECT_WINDOW_TOKENS } from "../di/tokens";
+import {
+  WINDOW_APPLICATION,
+  type WindowApplication,
+} from "../native/native-window-module";
 import { playgroundWindowModule } from "../playgrounds/playground-module";
 import type { AgentProject } from "../projects/agent-project";
 import {

@@ -1,21 +1,45 @@
-import { checkUv, GeneratorProjectWorkspace } from "../fs";
+import type { ModelsApplication } from "../application/models-application";
+import type { NativeDialogsApplication } from "../native/native-dialogs-module";
 
-import type { ModelsApplication } from "./models-application";
-import type { NativeDialogsApplication } from "./native-dialogs-module";
+
+import {
+  checkUv,
+  GeneratorProjectWorkspace,
+} from "./generator-project-workspace";
 
 export interface ProjectGeneratorApplicationApi {
   pickDirectory(): ReturnType<NativeDialogsApplication["pickDirectory"]>;
-  prepareDirectory(parentDir: string, projectName: string): ReturnType<GeneratorProjectWorkspace["prepare"]>;
+  prepareDirectory(
+    parentDir: string,
+    projectName: string
+  ): ReturnType<GeneratorProjectWorkspace["prepare"]>;
   checkUv(): ReturnType<typeof checkUv>;
-  runUv(rootDir: string, args: string[], options?: { timeoutMs?: number }): ReturnType<GeneratorProjectWorkspace["runUv"]>;
-  writeFile(rootDir: string, relativePath: string, contents: string): ReturnType<GeneratorProjectWorkspace["writeFile"]>;
-  removeFile(rootDir: string, relativePath: string): ReturnType<GeneratorProjectWorkspace["removeFile"]>;
-  openDevTerminal(rootDir: string): ReturnType<GeneratorProjectWorkspace["openDevTerminal"]>;
-  resolveEnv(input: Parameters<ModelsApplication["resolveGeneratorEnv"]>[0]): ReturnType<ModelsApplication["resolveGeneratorEnv"]>;
+  runUv(
+    rootDir: string,
+    args: string[],
+    options?: { timeoutMs?: number }
+  ): ReturnType<GeneratorProjectWorkspace["runUv"]>;
+  writeFile(
+    rootDir: string,
+    relativePath: string,
+    contents: string
+  ): ReturnType<GeneratorProjectWorkspace["writeFile"]>;
+  removeFile(
+    rootDir: string,
+    relativePath: string
+  ): ReturnType<GeneratorProjectWorkspace["removeFile"]>;
+  openDevTerminal(
+    rootDir: string
+  ): ReturnType<GeneratorProjectWorkspace["openDevTerminal"]>;
+  resolveEnv(
+    input: Parameters<ModelsApplication["resolveGeneratorEnv"]>[0]
+  ): ReturnType<ModelsApplication["resolveGeneratorEnv"]>;
 }
 
 /** Coordinates native selection, guarded project writes, and model secrets. */
-export class ProjectGeneratorApplication implements ProjectGeneratorApplicationApi {
+export class ProjectGeneratorApplication
+  implements ProjectGeneratorApplicationApi
+{
   constructor(
     private readonly _dialogs: Pick<NativeDialogsApplication, "pickDirectory">,
     private readonly _models: Pick<ModelsApplication, "resolveGeneratorEnv">,

@@ -1,19 +1,20 @@
 import { ContainerModule, type ResolutionContext } from "inversify";
 
+import { GENERATOR_RPC, type GeneratorRpc } from "../../shared/generator-rpc";
+import type { RpcServer } from "../../shared/namespaced-rpc";
+import type { ModelsApplication } from "../application/models-application";
+import { MODELS_APPLICATION } from "../application/models-module";
 import {
   RpcContribution,
   type RpcContribution as RpcContributionApi,
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
 import { desktopToken } from "../di/tokens";
-import { GeneratorRpcServer } from "../rpc/generator-rpc-server";
-
-import type { ModelsApplication } from "./models-application";
-import { MODELS_APPLICATION } from "./models-module";
 import {
   NATIVE_DIALOGS_APPLICATION,
   type NativeDialogsApplication,
-} from "./native-dialogs-module";
+} from "../native/native-dialogs-module";
+
 import {
   ProjectGeneratorApplication,
   type ProjectGeneratorApplicationApi,
@@ -21,6 +22,13 @@ import {
 
 export const GENERATOR_APPLICATION =
   desktopToken<ProjectGeneratorApplicationApi>("generator", "application");
+
+class GeneratorRpcServer implements RpcServer<GeneratorRpc> {
+  readonly namespace = GENERATOR_RPC;
+  readonly streams = {};
+
+  constructor(readonly requests: ProjectGeneratorApplicationApi) {}
+}
 
 /** Register the process-scoped Generator application and its RPC adapter. */
 export function generatorModule(): ContainerModule {

@@ -5,8 +5,7 @@ import path from "node:path";
 import { expandHomePath } from "@llm-space/core/server";
 
 /**
- * Filesystem/exec backing for the code Generator, deliberately kept OUTSIDE the
- * root-confined generator filesystem: a generated project is written into a
+ * Filesystem/exec implementation owned by the code Generator. A generated project is written into a
  * user-picked directory anywhere on disk. Two guards keep this narrow:
  *
  * 1. Only directories the user explicitly picked via the native dialog

@@ -7,7 +7,8 @@ import {
   type CommandContribution as CommandContributionApi,
 } from "../di/command-contribution";
 import type { CommandRegistry } from "../di/command-registry";
-import { parseExternalUrl } from "../parse-external-url";
+
+import { parseExternalUrl } from "./parse-external-url";
 
 const DOCS_URL =
   "https://github.com/deer-flow/llm-space/blob/main/docs/index.md";
