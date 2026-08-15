@@ -110,6 +110,10 @@ contribution classes with `toService(...)`; one class may implement both
 loads the installed feature modules, freezes and starts both Registries, owns
 the Electrobun bridge, attaches the eventual native window, and disposes
 transports before closing the window. Callers must not reproduce that sequence.
+`DesktopWindowFactory` owns Main/Project native creation around that runtime,
+including Studio resolution, immutable Project identity, window-state binding,
+command routing, and failed-scope cleanup; window managers consume the factory
+instead of reconstructing those steps.
 The named generic `ContributionProvider<T>` keeps both Registries independent
 from Inversify. Registries start once before the Electrobun bridge and native
 window are created, reject late registration, then dispose registrations before

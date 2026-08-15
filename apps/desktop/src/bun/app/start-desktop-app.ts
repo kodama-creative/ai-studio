@@ -11,16 +11,8 @@ import { NetworkSettingsManager } from "@llm-space/runtime/network";
 import { SearchSettingsManager } from "@llm-space/runtime/search";
 import { SkillsManager } from "@llm-space/runtime/skills";
 import { createBuiltInToolsModule } from "@llm-space/runtime/tools/built-in";
-import type { Studio } from "@llm-space/studio/server";
-import Electrobun, {
-  app,
-  type BrowserWindow,
-  type ElectrobunEvent,
-  Utils,
-} from "electrobun/bun";
+import Electrobun, { app, type ElectrobunEvent, Utils } from "electrobun/bun";
 
-import type { AgentProjectView } from "../../shared/agent-project";
-import type { Command } from "../../shared/commands";
 import { resolveDeepLinkScheme } from "../../shared/deep-link-scheme";
 import { Analytics } from "../analytics";
 import { agentProjectsModule } from "../application/agent-projects-module";
@@ -33,11 +25,7 @@ import {
   githubAccountApplicationModule,
 } from "../application/github-account-application";
 import { modelsModule } from "../application/models-module";
-import type { WindowApplication } from "../application/native-applications";
-import {
-  nativeApplicationsModule,
-  NATIVE_APPLICATION_TOKENS,
-} from "../application/native-module";
+import { nativeApplicationsModule } from "../application/native-module";
 import { remindersApplicationModule } from "../application/reminders-application";
 import { threadSharingApplicationModule } from "../application/thread-sharing-application";
 import {
@@ -51,42 +39,29 @@ import { activateWindowForDeepLink } from "../deep-link/activate-window";
 import { getPendingDeepLinks, setDeepLinkHandler } from "../deep-link/launch";
 import { createDesktopProcessContainer } from "../di/process-container";
 import { processServicesModule } from "../di/process-module";
-import { PROCESS_TOKENS, PROJECT_WINDOW_TOKENS } from "../di/tokens";
+import { PROCESS_TOKENS } from "../di/tokens";
 import { openPath, revealInFileManager } from "../fs";
 import { DesktopHost } from "../host/desktop-host";
-import {
-  playgroundModule,
-  playgroundWindowModule,
-} from "../playgrounds/playground-module";
-import {
-  projectWindowIdentityModule,
-  projectWindowModule,
-} from "../projects/project-module";
+import { playgroundModule } from "../playgrounds/playground-module";
 import { ProjectWindowManager } from "../projects/project-window-manager";
 import {
   FileAgentProjectCatalogStore,
   FileProjectWindowStateStore,
-  ProjectWindowStateFile,
 } from "../projects/project-window-state";
-import type { MainWindowRPC } from "../rpc";
 import { getManagedSkillsDir } from "../skills/seed";
 import { UpdaterService } from "../updates";
 
-import { DesktopWindowRuntime } from "./desktop-window-runtime";
+import {
+  DesktopWindowFactory,
+  type DesktopMainWindowHandle,
+} from "./desktop-window-factory";
 import { MainWindowManager } from "./main-window-manager";
 import { registerMenuActions } from "./menu";
 import { createShutdownCoordinator } from "./shutdown-coordinator";
-import { createAgentProjectWindow, createMainWindow } from "./window";
 import { WindowStateManager } from "./window-state";
 
 export interface DesktopAppRuntime {
   stop(): Promise<void>;
-}
-
-interface DesktopMainWindowHandle {
-  readonly window: BrowserWindow;
-  readonly rpc: MainWindowRPC;
-  activate(): void;
 }
 
 /** Build and start the production Bun object graph. */
@@ -143,79 +118,15 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
   ) => void = () => undefined;
   const updater = new UpdaterService((message) => notifyUpdateChanged(message));
   const windowStates = new WindowStateManager();
-  const windowRuntimes = new Map<number, DesktopWindowRuntime>();
-  const executeCommand = (
-    command: Command,
-    window: BrowserWindow
-  ): void => {
-    const runtime = windowRuntimes.get(window.id);
-    if (runtime === undefined) {
-      throw new Error(
-        `DesktopWindowRuntime is unavailable for window ${window.id}.`
-      );
-    }
-    runtime.execute(command);
-  };
+  const windowFactory = new DesktopWindowFactory(
+    processContainer,
+    homePath,
+    windowStates
+  );
   const projectWindows = new ProjectWindowManager({
     state: new FileProjectWindowStateStore(homePath),
     catalog: new FileAgentProjectCatalogStore(homePath),
-    windows: {
-      async create(project) {
-        const scope = processContainer.createWindowScope(
-          `project:${project.id}`
-        );
-        try {
-          scope.load(projectWindowModule({ source: project }));
-          const projectStudio = scope.own(
-            await scope.getAsync<Studio>(PROJECT_WINDOW_TOKENS.studio)
-          );
-          const projectView: AgentProjectView = {
-            id: project.id,
-            name: project.name,
-            rootPath: project.rootPath,
-            agentRoot: project.agentRoot,
-            agentId: projectStudio.agent.agentSpecId,
-            generationId: projectStudio.agent.sourceRevision,
-          };
-          scope.load(projectWindowIdentityModule(projectView));
-          const closed = new Set<() => void>();
-          scope.onDisposed(() => closed.forEach((listener) => listener()));
-          const runtime = new DesktopWindowRuntime(scope, "project");
-          const stateStore = await ProjectWindowStateFile.load(
-            homePath,
-            project.id
-          );
-          const projectWindow = await createAgentProjectWindow({
-            rpc: runtime.rpc,
-            project: scope.get(PROJECT_WINDOW_TOKENS.project),
-            stateStore,
-            windowStates,
-            onFullScreenChange: (fullScreen) =>
-              scope
-                .get<WindowApplication>(NATIVE_APPLICATION_TOKENS.window)
-                .notifyFullScreenChanged(fullScreen),
-          });
-          runtime.attach(projectWindow);
-          windowRuntimes.set(projectWindow.id, runtime);
-          scope.onDisposed(() => windowRuntimes.delete(projectWindow.id));
-          return {
-            activate: () => projectWindow.activate(),
-            close: () => scope.dispose(),
-            onClosed: (listener) => closed.add(listener),
-          };
-        } catch (error) {
-          try {
-            await scope.dispose();
-          } catch (cleanupError) {
-            console.error(
-              "Failed to dispose Agent Project scope after creation failed:",
-              cleanupError
-            );
-          }
-          throw error;
-        }
-      },
-    },
+    windows: windowFactory,
   });
   // DI resolution remains confined to this composition root; feature classes
   // still receive ordinary constructor arguments instead of the Container.
@@ -285,27 +196,13 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
   };
 
   try {
-    mainWindows = new MainWindowManager(processContainer, async (scope) => {
-      scope.load(playgroundWindowModule());
-      const runtime = new DesktopWindowRuntime(scope, "main");
-      const window = await createMainWindow({
-        rpc: runtime.rpc,
-        windowStates,
-        onFullScreenChange: (fullScreen) =>
-          scope
-            .get<WindowApplication>(NATIVE_APPLICATION_TOKENS.window)
-            .notifyFullScreenChanged(fullScreen),
-      });
-      runtime.attach(window);
-      windowRuntimes.set(window.id, runtime);
-      scope.onDisposed(() => windowRuntimes.delete(window.id));
-      return {
-        window,
-        rpc: runtime.rpc,
-        activate: () => window.activate(),
-      };
-    });
-    registerMenuActions(() => mainWindows?.current()?.window, executeCommand);
+    mainWindows = new MainWindowManager(processContainer, (scope) =>
+      windowFactory.createMain(scope)
+    );
+    registerMenuActions(
+      () => mainWindows?.current()?.window,
+      (command, window) => windowFactory.executeCommand(command, window)
+    );
 
     const deepLinkScheme = resolveDeepLinkScheme(
       process.env.LLM_SPACE_DEEP_LINK_SCHEME
