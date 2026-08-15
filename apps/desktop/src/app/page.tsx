@@ -1,5 +1,3 @@
-import { parsePortableThreadSnapshot, type Thread } from "@llm-space/core";
-import type { AgentSpec } from "@llm-space/studio";
 import { FirecrawlLimitDialog } from "@llm-space/ui/components/firecrawl-limit-dialog";
 import {
   useModels,
@@ -7,7 +5,6 @@ import {
 } from "@llm-space/ui/components/model-provider";
 import {
   getPromptExample,
-  resolveSeed,
 } from "@llm-space/ui/components/thread-playground/examples/prompts";
 import { useHostServices } from "@llm-space/ui/host";
 import {
@@ -56,6 +53,11 @@ import { Welcome } from "@/components/welcome";
 import { track } from "@/lib/analytics";
 import { useFullScreen } from "@/lib/use-full-screen";
 import type { SettingsTab } from "@/shared/commands";
+
+import {
+  PlaygroundWorkspaceController,
+  type SnapshotDocument,
+} from "./playground/playground-workspace-controller";
 
 // Overlay surfaces that aren't part of the first paint — settings, the command
 // palette, onboarding, and examples. Loaded lazily so their code (and heavy
@@ -122,12 +124,6 @@ function hasFiles(e: React.DragEvent): boolean {
 // restarts. Collapsing sets the panel to 0 — we never store that, so reopening
 // restores the last dragged width.
 const DEFAULT_SIDEBAR_SIZE = "16.7%";
-
-const BLANK_AGENT_SPEC: AgentSpec = {
-  schemaVersion: 1,
-  instructions: [],
-  tools: [],
-};
 
 function readSidebarSize(): number | string {
   const raw = readLocalStorage(LOCAL_STORAGE_KEYS.sidebarSize);
@@ -254,37 +250,30 @@ function PageWorkspace() {
   const [onboardOpen, setOnboardOpen] = useState(false);
   const [examplesOpen, setExamplesOpen] = useState(false);
   const [sharePath, setSharePath] = useState<string | null>(null);
-  // Create and open a durable Playground, optionally seeded from an example.
-  const createLocalPlayground = useCallback(
-    async (input?: {
-      readonly title?: string;
-      readonly agentSpec?: AgentSpec;
-      readonly messages?: NonNullable<Thread["context"]>["messages"];
-    }) => {
-      try {
-        const playground = await playgroundClient.create({
-          title: input?.title,
-          agentSpec: input?.agentSpec ?? BLANK_AGENT_SPEC,
-          conversation: {
-            messages: input?.messages ?? [
-              {
-                id: crypto.randomUUID(),
-                role: "user",
-                content: [{ type: "text", text: "" }],
-              },
-            ],
-            state: {},
-          },
-        });
-        await queryClient.invalidateQueries({ queryKey: ["playgrounds"] });
-        openPlayground(playground.id, playground.title);
-      } catch (cause) {
-        toast.error("Unable to create Playground", {
-          description: cause instanceof Error ? cause.message : String(cause),
-        });
-      }
-    },
-    [openPlayground, playgroundClient, queryClient]
+  const playgroundWorkspace = useMemo(
+    () =>
+      new PlaygroundWorkspaceController({
+        client: playgroundClient,
+        importSnapshot: importThreadSnapshot,
+        seedHost,
+        refreshCatalog: () =>
+          queryClient.invalidateQueries({ queryKey: ["playgrounds"] }),
+        openPlayground: (playground) =>
+          openPlayground(playground.id, playground.title),
+        notifySuccess: (message) => toast.success(message),
+        notifyError: (title, error) =>
+          toast.error(title, {
+            ...(error === undefined
+              ? {}
+              : {
+                  description:
+                    error instanceof Error
+                      ? error.message
+                      : "Please try again.",
+                }),
+          }),
+      }),
+    [openPlayground, playgroundClient, queryClient, seedHost]
   );
 
   // Snapshot import: a hidden picker opened by the import command plus
@@ -293,65 +282,19 @@ function PageWorkspace() {
   const dragDepthRef = useRef(0);
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const handleImportFiles = useCallback(
-    async (files: FileList | (File | { name: string; text: string })[]) => {
-      const list = [...files];
-      if (list.length === 0) return;
-      let imported = 0;
-      for (const file of list) {
-        try {
-          const text = file instanceof File ? await file.text() : file.text;
-          const snapshot = parsePortableThreadSnapshot(JSON.parse(text));
-          const playground = await importThreadSnapshot(snapshot);
-          openPlayground(playground.id, playground.title);
-          imported += 1;
-        } catch {
-          // Invalid snapshots are counted below and do not affect valid files.
-        }
-      }
-      await queryClient.invalidateQueries({ queryKey: ["playgrounds"] });
-      if (imported === 0) {
-        toast.error("No valid LLM Space Thread Snapshots were selected.");
-      } else {
-        toast.success(
-          `Imported ${imported} Playground${imported === 1 ? "" : "s"}`
-        );
-      }
+    (files: FileList | readonly SnapshotDocument[]) => {
+      void playgroundWorkspace.importDocuments([...files]);
     },
-    [openPlayground, queryClient]
+    [playgroundWorkspace]
   );
   // Register command handlers backed by page-level state (Playgrounds, tabs,
   // sidebar, and settings).
   useRegisterCommands({
-    "playground.create": () => void createLocalPlayground(),
+    "playground.create": () => void playgroundWorkspace.createBlank(),
     "playground.createFromExample": ({ exampleId }) => {
       const example = getPromptExample(exampleId);
       if (example === undefined) return;
-      void (async () => {
-        const [instructions, tools, messages, textVariables] =
-          await Promise.all([
-            resolveSeed(example.content, seedHost),
-            resolveSeed(example.tools, seedHost),
-            resolveSeed(example.messages, seedHost),
-            resolveSeed(example.textVariables, seedHost),
-          ]);
-        await createLocalPlayground({
-          title: example.label,
-          agentSpec: {
-            schemaVersion: 1,
-            instructions: instructions ? [instructions] : [],
-            tools: tools ?? [],
-            ...(textVariables === undefined
-              ? {}
-              : {
-                  variableVariants: {
-                    active: "default",
-                    variants: { default: textVariables },
-                  },
-                }),
-          },
-          messages,
-        });
-      })();
+      void playgroundWorkspace.createFromExample(example);
     },
     "tabs.close": ({ id }) => {
       const target = id ?? activeTabIdRef.current;
@@ -492,8 +435,8 @@ function PageWorkspace() {
     []
   );
   const handleNewPlayground = useCallback(() => {
-    void createLocalPlayground();
-  }, [createLocalPlayground]);
+    void playgroundWorkspace.createBlank();
+  }, [playgroundWorkspace]);
   const handleToggleSidebar = useCallback(
     () => executeCommand({ type: "layout.toggleSidebar", args: {} }),
     [executeCommand]
@@ -565,7 +508,7 @@ function PageWorkspace() {
               onOpen={(playground) =>
                 openPlayground(playground.id, playground.title)
               }
-              onCreate={() => void createLocalPlayground()}
+              onCreate={() => void playgroundWorkspace.createBlank()}
             />
             <AccountStatus />
           </ResizablePanel>
@@ -577,7 +520,7 @@ function PageWorkspace() {
               emptyState={
                 <Welcome
                   onNewStarter={() => setExamplesOpen(true)}
-                  onNewPlayground={() => void createLocalPlayground()}
+                  onNewPlayground={() => void playgroundWorkspace.createBlank()}
                   onModels={() =>
                     executeCommand({
                       type: "app.openSettings",
@@ -631,32 +574,7 @@ function PageWorkspace() {
           open={examplesOpen}
           onOpenChange={setExamplesOpen}
           onSelectExample={(example) => {
-            void (async () => {
-              const [instructions, tools, messages, textVariables] =
-                await Promise.all([
-                  resolveSeed(example.content, seedHost),
-                  resolveSeed(example.tools, seedHost),
-                  resolveSeed(example.messages, seedHost),
-                  resolveSeed(example.textVariables, seedHost),
-                ]);
-              await createLocalPlayground({
-                title: example.label,
-                agentSpec: {
-                  schemaVersion: 1,
-                  instructions: instructions ? [instructions] : [],
-                  tools: tools ?? [],
-                  ...(textVariables === undefined
-                    ? {}
-                    : {
-                        variableVariants: {
-                          active: "default",
-                          variants: { default: textVariables },
-                        },
-                      }),
-                },
-                messages,
-              });
-            })();
+            void playgroundWorkspace.createFromExample(example);
           }}
         />
       </LazyMount>
