@@ -21,7 +21,7 @@ import type { ExternalThreadExecutionRuntime } from "@llm-space/ui/components/th
 import type { ProjectStudioTransport } from "@/shared/project-studio";
 import type { ThreadClient, ThreadTarget } from "@/shared/thread-rpc";
 
-import { createThreadExecutionRuntime } from "./thread-execution-runtime";
+import { createThreadExecutionRuntime } from "../thread-execution-runtime";
 
 /** Projects a Pi-backed Experiment and its operation metadata to the editor. */
 export function studioThreadToPlaygroundThread(
