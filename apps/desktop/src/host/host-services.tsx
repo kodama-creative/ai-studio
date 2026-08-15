@@ -7,37 +7,27 @@ import {
 } from "@llm-space/ui/host";
 import { useMemo, type ReactNode } from "react";
 
+import { createAppDirectoriesClient } from "@/client/app-directories";
 import { createAuxiliaryGenerationClient } from "@/client/auxiliary-generation-client";
-import { fsReveal, listBuiltInTools } from "@/client/built-in-tools";
-import {
-  checkUv,
-  openGeneratorDevTerminal,
-  pickGeneratorDirectory,
-  prepareGeneratorDirectory,
-  removeProjectFile,
-  resolveGeneratorEnv,
-  runUv,
-  writeProjectFile,
-} from "@/client/generator";
+import { createBuiltinToolsClient } from "@/client/built-in-tools";
+import { createGeneratorClient } from "@/client/generator";
 import { createMcpClient } from "@/client/mcp";
-import { modelsClient } from "@/client/models";
-import {
-  directoryExists,
-  ensureRootDir,
-  pickDirectory,
-  pickFile,
-  readTextFile,
-  textFileExists,
-} from "@/client/paths";
+import { createModelsClient } from "@/client/models";
+import { createNativeDialogsClient } from "@/client/native-dialogs";
+import { createNativeFilesClient } from "@/client/native-files";
+import { createPromptFilesClient } from "@/client/prompt-files";
 import { createSearchClient } from "@/client/search";
 import { createSkillsClient } from "@/client/skills";
 import { createToolExecutor } from "@/client/tool-execution";
 import { useCommands } from "@/commands";
 import type { SettingsTab } from "@/shared/commands";
+import type { ModelsRequests } from "@/shared/models-rpc";
 
 import { createDesktopShareThreadAction } from "./share-thread-action";
 /** The desktop {@link ModelClient}, backed by Electrobun RPC. */
-export function createElectrobunModelClient(): ModelClient {
+export function createElectrobunModelClient(
+  modelsClient: ModelsRequests = createModelsClient()
+): ModelClient {
   return {
     availableModels: () => modelsClient.list(),
     builtinProviders: () => modelsClient.listBuiltin(),
@@ -87,10 +77,19 @@ export function DesktopHostProvider({ children }: { children: ReactNode }) {
     () => createAuxiliaryGenerationClient(),
     []
   );
+  const appDirectories = useMemo(() => createAppDirectoriesClient(), []);
+  const builtinTools = useMemo(() => createBuiltinToolsClient(), []);
+  const dialogs = useMemo(() => createNativeDialogsClient(), []);
+  const generator = useMemo(() => createGeneratorClient(), []);
   const mcp = useMemo(() => createMcpClient(), []);
+  const nativeFiles = useMemo(() => createNativeFilesClient(), []);
+  const promptFiles = useMemo(() => createPromptFilesClient(), []);
   const search = useMemo(() => createSearchClient(), []);
   const skills = useMemo(() => createSkillsClient(), []);
-  const executeTool = useMemo(() => createToolExecutor(mcp), [mcp]);
+  const executeTool = useMemo(
+    () => createToolExecutor(mcp, builtinTools),
+    [builtinTools, mcp]
+  );
 
   const value = useMemo<HostServices>(
     () => ({
@@ -107,31 +106,40 @@ export function DesktopHostProvider({ children }: { children: ReactNode }) {
         listTools: (serverId) => mcp.listTools(serverId),
       },
       builtinTools: {
-        list: () => listBuiltInTools(),
-        fsReveal,
+        list: () => builtinTools.list(),
+        fsReveal: (path) => nativeFiles.reveal(path),
       },
-      paths: { ensureRootDir },
+      paths: { ensureRootDir: (path) => appDirectories.ensure(path) },
       files: {
-        readText: (path) => readTextFile(path),
-        exists: (path) => textFileExists(path),
-        directoryExists,
-        pickFile,
-        pickDirectory,
+        readText: (path) => promptFiles.readText(path),
+        exists: (path) => promptFiles.exists(path),
+        directoryExists: (path) => nativeFiles.directoryExists(path),
+        pickFile: () => dialogs.pickFile(),
+        pickDirectory: () => dialogs.pickDirectory(),
       },
       generator: {
-        pickDirectory: pickGeneratorDirectory,
-        prepareDirectory: prepareGeneratorDirectory,
-        checkUv,
-        runUv,
-        writeFile: writeProjectFile,
-        removeFile: removeProjectFile,
-        openDevTerminal: openGeneratorDevTerminal,
+        pickDirectory: async () => ({ path: await generator.pickDirectory() }),
+        prepareDirectory: (parentDir, projectName) =>
+          generator.prepareDirectory(parentDir, projectName),
+        checkUv: () => generator.checkUv(),
+        runUv: (rootDir, args, options) =>
+          generator.runUv(rootDir, args, options),
+        writeFile: (rootDir, relativePath, contents) =>
+          generator.writeFile(rootDir, relativePath, contents),
+        removeFile: (rootDir, relativePath) =>
+          generator.removeFile(rootDir, relativePath),
+        openDevTerminal: (rootDir) => generator.openDevTerminal(rootDir),
         getSearchSettings: () => search.get(),
         resolveEnv: (
           providerId: string,
           envNames: string[],
           options?: { profileId?: string }
-        ) => resolveGeneratorEnv(providerId, envNames, options?.profileId),
+        ) =>
+          generator.resolveEnv({
+            providerId,
+            profileId: options?.profileId,
+            envNames,
+          }),
       },
       actions: {
         openSettings: (tab) =>
@@ -156,10 +164,16 @@ export function DesktopHostProvider({ children }: { children: ReactNode }) {
       },
     }),
     [
+      appDirectories,
       auxiliaryGeneration,
+      builtinTools,
+      dialogs,
       executeCommand,
       executeTool,
+      generator,
       mcp,
+      nativeFiles,
+      promptFiles,
       registerCommandHandlers,
       search,
       skills,

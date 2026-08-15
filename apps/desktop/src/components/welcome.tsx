@@ -18,7 +18,6 @@ import {
 } from "lucide-react";
 import { useCallback, type MouseEvent } from "react";
 
-import { windowClient } from "@/client/native-files";
 import { useCommands } from "@/commands";
 
 interface WelcomeProps {
@@ -37,8 +36,8 @@ export function Welcome({
   const { executeCommand } = useCommands();
 
   const handleHeaderDoubleClick = useCallback(() => {
-    void windowClient.toggleMaximized();
-  }, []);
+    executeCommand({ type: "window.toggleMaximized", args: {} });
+  }, [executeCommand]);
 
   const handleLearnMore = useCallback(
     (event: MouseEvent<HTMLAnchorElement>) => {

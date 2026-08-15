@@ -27,7 +27,7 @@ import {
   type ReactNode,
 } from "react";
 
-import { windowClient } from "@/client/native-files";
+import { useCommands } from "@/commands";
 
 import { PaneHost } from "./pane-host";
 import type { PaneLifecycleHost } from "./pane-lifecycle-host";
@@ -97,6 +97,7 @@ export function ThreadTabs({
   toolbarSlot,
 }: ThreadTabsProps) {
   const { resolvedTheme } = useTheme();
+  const { executeCommand } = useCommands();
   // The chrome-tabs lib renders tab DOM imperatively and exposes no tooltip prop,
   // but it stamps each tab's full path onto `data-tab-id`. Mirror that into the
   // native `title` attribute so hovering a tab reveals its relative path. The
@@ -132,9 +133,9 @@ export function ThreadTabs({
       e.target instanceof HTMLElement &&
       e.target.classList.contains("chrome-tabs")
     ) {
-      void windowClient.toggleMaximized();
+      executeCommand({ type: "window.toggleMaximized", args: {} });
     }
-  }, []);
+  }, [executeCommand]);
 
   useLayoutEffect(() => {
     const root = containerRef.current;

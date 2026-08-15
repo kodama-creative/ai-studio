@@ -10,7 +10,6 @@ import { revealResource } from "../fs/reveal-resource";
 
 export interface WindowApplicationApi {
   getContext(): Promise<DesktopWindowContext>;
-  toggleMaximized(): Promise<{ maximized: boolean }>;
   getFullscreenState(): Promise<{ fullScreen: boolean }>;
 }
 export interface NativeDialogsApplication {
@@ -41,7 +40,6 @@ export class WindowApplication implements WindowApplicationApi, Disposable {
     const window = this._window();
     if (window.isMaximized()) window.unmaximize();
     else window.maximize();
-    return Promise.resolve({ maximized: window.isMaximized() });
   }
   getFullscreenState() {
     return Promise.resolve({ fullScreen: this._window().isFullScreen() });

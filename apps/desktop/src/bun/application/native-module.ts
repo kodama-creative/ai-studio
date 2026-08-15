@@ -22,12 +22,10 @@ import {
   importTextFromClipboard,
 } from "../import-files";
 import { parseExternalUrl } from "../parse-external-url";
-import {
-  AppDirectoriesRpcServer,
-  NativeDialogsRpcServer,
-  NativeFilesRpcServer,
-  WindowRpcServer,
-} from "../rpc/native-rpc-servers";
+import { AppDirectoriesRpcServer } from "../rpc/app-directories-rpc-server";
+import { NativeDialogsRpcServer } from "../rpc/native-dialogs-rpc-server";
+import { NativeFilesRpcServer } from "../rpc/native-files-rpc-server";
+import { WindowRpcServer } from "../rpc/window-rpc-server";
 
 import {
   AppDirectoriesApplication,
@@ -85,31 +83,18 @@ export function nativeApplicationsModule(): ContainerModule {
   });
 }
 
-class NativeContribution implements CommandContributionApi, RpcContributionApi {
+class NativeImportContribution
+  implements CommandContributionApi, RpcContributionApi
+{
   constructor(
     private readonly _dialogs: NativeDialogsApplication,
-    private readonly _files: NativeFilesApplication,
-    private readonly _appDirectories: AppDirectoriesApplicationApi,
-    private readonly _windowApplication: WindowApplication,
-    private readonly _windowStates: WindowStateManager,
-    private readonly _getWindow: () => BrowserWindow,
     private readonly _commandSink: CommandSink
   ) {}
 
-  /** Register native dialogs, files, directories, and window RPC namespaces. */
   registerRpc(rpc: RpcRegistry): void {
     rpc.registerServer(new NativeDialogsRpcServer(this._dialogs));
-    rpc.registerServer(new NativeFilesRpcServer(this._files));
-    rpc.registerServer(new AppDirectoriesRpcServer(this._appDirectories));
-    rpc.registerServer(
-      new WindowRpcServer(
-        this._windowApplication,
-        this._windowApplication.events
-      )
-    );
   }
 
-  /** Register native import, window, link, and filesystem commands. */
   registerCommands(commands: CommandRegistry): void {
     commands.registerCommand("playground.importFiles", {
       execute: () => {
@@ -124,6 +109,47 @@ class NativeContribution implements CommandContributionApi, RpcContributionApi {
           (next) => this._commandSink.sendToWebview(next)
         ),
     });
+  }
+}
+
+class NativeFilesContribution implements RpcContributionApi {
+  constructor(private readonly _files: NativeFilesApplication) {}
+
+  registerRpc(rpc: RpcRegistry): void {
+    rpc.registerServer(new NativeFilesRpcServer(this._files));
+  }
+}
+
+class AppDirectoriesContribution implements RpcContributionApi {
+  constructor(
+    private readonly _appDirectories: AppDirectoriesApplicationApi
+  ) {}
+
+  registerRpc(rpc: RpcRegistry): void {
+    rpc.registerServer(new AppDirectoriesRpcServer(this._appDirectories));
+  }
+}
+
+class WindowContribution implements CommandContributionApi, RpcContributionApi {
+  constructor(
+    private readonly _windowApplication: WindowApplication,
+    private readonly _windowStates: WindowStateManager,
+    private readonly _getWindow: () => BrowserWindow
+  ) {}
+
+  registerRpc(rpc: RpcRegistry): void {
+    rpc.registerServer(
+      new WindowRpcServer(
+        this._windowApplication,
+        this._windowApplication.events
+      )
+    );
+  }
+
+  registerCommands(commands: CommandRegistry): void {
+    commands.registerCommand("window.toggleMaximized", {
+      execute: () => this._windowApplication.toggleMaximized(),
+    });
     commands.registerCommand("window.zoomIn", {
       execute: () => this._changeZoom(ZOOM_STEP),
     });
@@ -137,6 +163,23 @@ class NativeContribution implements CommandContributionApi, RpcContributionApi {
       execute: () =>
         this._getWindow().webview?.executeJavascript("location.reload()"),
     });
+  }
+
+  /** Apply a relative zoom step to the owning native window. */
+  private _changeZoom(delta: number): void {
+    this._setZoom(_clampZoom(this._getWindow().getPageZoom() + delta));
+  }
+
+  /** Persist the same absolute zoom applied to the native renderer. */
+  private _setZoom(zoom: number): void {
+    const window = this._getWindow();
+    window.setPageZoom(zoom);
+    this._windowStates.saveZoom(window, zoom);
+  }
+}
+
+class ShellContribution implements CommandContributionApi {
+  registerCommands(commands: CommandRegistry): void {
     commands.registerCommand("shell.openLink", {
       execute: (command) => {
         try {
@@ -153,18 +196,6 @@ class NativeContribution implements CommandContributionApi, RpcContributionApi {
     commands.registerCommand("shell.reportBugs", {
       execute: () => Utils.openExternal(ISSUES_URL),
     });
-  }
-
-  /** Apply a relative zoom step to the owning native window. */
-  private _changeZoom(delta: number): void {
-    this._setZoom(_clampZoom(this._getWindow().getPageZoom() + delta));
-  }
-
-  /** Persist the same absolute zoom applied to the native renderer. */
-  private _setZoom(zoom: number): void {
-    const window = this._getWindow();
-    window.setPageZoom(zoom);
-    this._windowStates.saveZoom(window, zoom);
   }
 }
 
@@ -190,23 +221,60 @@ export function nativeContributionsModule(
           )
       )
       .inSingletonScope();
-    bind(NativeContribution)
+    bind(NativeImportContribution)
       .toDynamicValue(
         (context) =>
-          new NativeContribution(
+          new NativeImportContribution(
             context.get(NATIVE_APPLICATION_TOKENS.dialogs),
-            context.get(NATIVE_APPLICATION_TOKENS.files),
-            context.get(NATIVE_APPLICATION_TOKENS.appDirectories),
-            context.get(NATIVE_APPLICATION_TOKENS.window),
-            context.get(PROCESS_TOKENS.windowStates),
-            input.getWindow,
             input.commandSink
           )
       )
       .inSingletonScope();
+    bind(NativeFilesContribution)
+      .toDynamicValue(
+        (context) =>
+          new NativeFilesContribution(
+            context.get(NATIVE_APPLICATION_TOKENS.files)
+          )
+      )
+      .inSingletonScope();
+    bind(AppDirectoriesContribution)
+      .toDynamicValue(
+        (context) =>
+          new AppDirectoriesContribution(
+            context.get(NATIVE_APPLICATION_TOKENS.appDirectories)
+          )
+      )
+      .inSingletonScope();
+    bind(WindowContribution)
+      .toDynamicValue(
+        (context) =>
+          new WindowContribution(
+            context.get(NATIVE_APPLICATION_TOKENS.window),
+            context.get(PROCESS_TOKENS.windowStates),
+            input.getWindow
+          )
+      )
+      .inSingletonScope();
+    bind(ShellContribution).toSelf().inSingletonScope();
     bind<CommandContributionApi>(CommandContribution).toService(
-      NativeContribution
+      NativeImportContribution
     );
-    bind<RpcContributionApi>(RpcContribution).toService(NativeContribution);
+    bind<RpcContributionApi>(RpcContribution).toService(
+      NativeImportContribution
+    );
+    bind<RpcContributionApi>(RpcContribution).toService(
+      NativeFilesContribution
+    );
+    bind<RpcContributionApi>(RpcContribution).toService(
+      AppDirectoriesContribution
+    );
+    bind<CommandContributionApi>(CommandContribution).toService(
+      WindowContribution
+    );
+    bind<RpcContributionApi>(RpcContribution).toService(WindowContribution);
+    bind<CommandContributionApi>(CommandContribution).toService(
+      ShellContribution
+    );
   });
 }

@@ -80,6 +80,11 @@ class ControllableRpc {
         isError: true,
       };
     }
+    if (input.namespace === "builtinTools" && input.method === "call") {
+      return {
+        content: [{ type: "text", text: "built-in result" }],
+      };
+    }
     return [];
   }
 }
@@ -209,6 +214,38 @@ describe("Desktop local host services", () => {
     expect(result).toEqual({
       content: [{ type: "text", text: "tool result" }],
       isError: true,
+    });
+  });
+
+  test("injects its Built-in Tools namespace client into tool execution", async () => {
+    const executeTool = _captureHost().executeTool;
+    if (executeTool === null) throw new Error("Tool execution is unavailable");
+    const result = await executeTool(
+      {
+        type: "builtin",
+        name: "read",
+        description: "Read a file",
+        parameters: { type: "object" },
+      },
+      { path: "/tmp/example.txt" },
+      { thread: {}, variables: {} }
+    );
+
+    expect(RPC.requests).toEqual([
+      {
+        namespace: "builtinTools",
+        method: "call",
+        args: [
+          {
+            name: "read",
+            arguments: { path: "/tmp/example.txt" },
+          },
+        ],
+      },
+    ]);
+    expect(result).toEqual({
+      content: [{ type: "text", text: "built-in result" }],
+      isError: false,
     });
   });
 });

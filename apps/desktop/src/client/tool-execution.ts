@@ -5,8 +5,8 @@ import type {
 } from "@llm-space/core";
 import type { ExecuteToolOptions } from "@llm-space/ui/host";
 
-import { callBuiltInTool } from "@/client/built-in-tools";
 import type { McpClient } from "@/client/mcp";
+import type { BuiltinToolsRequests } from "@/shared/builtin-tools-rpc";
 
 /**
  * A tool call's result, normalized across MCP and built-in backends.
@@ -22,7 +22,8 @@ export interface ToolCallResult extends BuiltinToolCallResponse {
  * {@link isExecutableTool} so `function` tools never reach here.
  */
 export function createToolExecutor(
-  mcp: Pick<McpClient, "callTool">
+  mcp: Pick<McpClient, "callTool">,
+  builtinTools: Pick<BuiltinToolsRequests, "call">
 ): (
   tool: McpTool | BuiltinTool,
   args: Record<string, unknown>,
@@ -40,7 +41,7 @@ export function createToolExecutor(
         isError: result.isError ?? false,
       };
     }
-    const result = await callBuiltInTool({
+    const result = await builtinTools.call({
       name: tool.name,
       arguments: args,
       config: tool.config,

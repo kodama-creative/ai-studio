@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import { windowClient } from "@/client/native-files";
+import { createWindowClient } from "@/client/window";
 import type { DesktopWindowContext } from "@/shared/agent-project";
 
 import { DesktopWindowProviders } from "./desktop-window-providers";
@@ -9,6 +9,7 @@ import { MainWindowPage } from "./page";
 import { ProjectPage } from "./project-page";
 
 export function App() {
+  const windowClient = useMemo(() => createWindowClient(), []);
   const [context, setContext] = useState<DesktopWindowContext>();
   const [error, setError] = useState<string>();
 
@@ -16,7 +17,7 @@ export function App() {
     void windowClient.getContext().then(setContext, (cause) => {
       setError(cause instanceof Error ? cause.message : String(cause));
     });
-  }, []);
+  }, [windowClient]);
 
   return (
     <Layout>

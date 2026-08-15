@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import { windowClient } from "@/client/native-files";
+import { createWindowClient } from "@/client/window";
 
 /**
  * Track the window's OS-level (Electrobun) fullscreen state. Seeds the initial
@@ -8,6 +8,7 @@ import { windowClient } from "@/client/native-files";
  * `fullScreenChanged` messages.
  */
 export function useFullScreen(): boolean {
+  const windowClient = useMemo(() => createWindowClient(), []);
   const [fullScreen, setFullScreen] = useState(false);
 
   useEffect(() => {
@@ -29,7 +30,7 @@ export function useFullScreen(): boolean {
       cancelled = true;
       void subscription.dispose();
     };
-  }, []);
+  }, [windowClient]);
 
   return fullScreen;
 }

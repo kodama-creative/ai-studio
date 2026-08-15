@@ -161,6 +161,8 @@ export interface OpenVariablesCommand extends GenericCommand<
 
 // --- Window (bun-side) -----------------------------------------------------
 
+/** Toggle the owning native window between maximized and restored. */
+export interface ToggleMaximizedCommand extends GenericCommand<"window.toggleMaximized"> {}
 /** Zoom the page in one step. */
 export interface ZoomInCommand extends GenericCommand<"window.zoomIn"> {}
 /** Zoom the page out one step. */
@@ -238,6 +240,7 @@ export type Command =
   | ForkProjectThreadCommand
   | ShareThreadCommand
   | OpenVariablesCommand
+  | ToggleMaximizedCommand
   | ZoomInCommand
   | ZoomOutCommand
   | ResetZoomCommand
@@ -303,6 +306,7 @@ export const COMMAND_META: Record<
   "project.forkThread": { label: "Fork Thread", target: "webview" },
   "thread.share": { label: "Share...", target: "webview" },
   "thread.openVariables": { label: "Variables", target: "webview" },
+  "window.toggleMaximized": { label: "Toggle Maximized", target: "bun" },
   "window.zoomIn": { label: "Zoom In", target: "bun" },
   "window.zoomOut": { label: "Zoom Out", target: "bun" },
   "window.resetZoom": { label: "Reset Zoom", target: "bun" },

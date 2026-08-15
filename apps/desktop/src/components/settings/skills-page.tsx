@@ -28,11 +28,9 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
 
 import { SkillsSettingsController } from "@/app/settings/skills-settings-controller";
-import { fsReveal } from "@/client/built-in-tools";
-import {
-  browseForSkillsPath,
-  createSkillsClient,
-} from "@/client/skills";
+import { createNativeDialogsClient } from "@/client/native-dialogs";
+import { createNativeFilesClient } from "@/client/native-files";
+import { createSkillsClient } from "@/client/skills";
 
 import { SettingsPage } from "./settings-page";
 
@@ -47,12 +45,14 @@ const REVEAL_LABEL = _isWindows ? "Reveal in Explorer" : "Reveal in Finder";
 
 export function SkillsPage() {
   const client = useMemo(() => createSkillsClient(), []);
+  const dialogs = useMemo(() => createNativeDialogsClient(), []);
+  const nativeFiles = useMemo(() => createNativeFilesClient(), []);
   const controller = useMemo(
     () =>
       new SkillsSettingsController({
         client,
-        browseForPath: browseForSkillsPath,
-        revealPath: fsReveal,
+        browseForPath: () => dialogs.pickDirectory(),
+        revealPath: (path) => nativeFiles.reveal(path),
         notifyError: (title, error) => {
           toast.error(title, {
             description:
@@ -60,7 +60,7 @@ export function SkillsPage() {
           });
         },
       }),
-    [client]
+    [client, dialogs, nativeFiles]
   );
   const snapshot = useSyncExternalStore(
     controller.subscribe,
