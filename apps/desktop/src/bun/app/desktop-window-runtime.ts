@@ -5,14 +5,18 @@ import { auxiliaryGenerationRpcModule } from "../auxiliary-generation/auxiliary-
 import { CommandRegistry, type CommandSink } from "../di/command-registry";
 import type { DesktopWindowScope } from "../di/process-container";
 import { RpcRegistry, type RpcEventSink } from "../di/rpc-registry";
-import { windowModule } from "../di/window-module";
 import { windowRegistryModule } from "../di/window-registry-module";
 import { generatorContributionsModule } from "../generator/generator-module";
 import { modelsRpcModule } from "../models/models-rpc-feature";
 import { appDirectoriesRpcModule } from "../native/app-directories-module";
 import { nativeDialogsContributionsModule } from "../native/native-dialogs-module";
 import { nativeFilesRpcModule } from "../native/native-files-module";
-import { nativeWindowContributionsModule } from "../native/native-window-module";
+import {
+  nativeWindowModule,
+  type NativeWindowStateBinding,
+  WINDOW_APPLICATION,
+  type WindowApplication,
+} from "../native/native-window-module";
 import { shellCommandsModule } from "../native/shell-module";
 import { playgroundContributionsModule } from "../playgrounds/playground-module";
 import { agentProjectsContributionsModule } from "../projects/agent-projects-module";
@@ -44,6 +48,7 @@ export class DesktopWindowRuntime {
   private readonly _commands: CommandRegistry;
   private readonly _rpcRegistry: RpcRegistry;
   private readonly _controller: MainWindowRPCController;
+  private readonly _windowApplication: WindowApplication;
   private _window: BrowserWindow | undefined;
   private _nativeClosed = false;
   private _disposePromise: Promise<void> | undefined;
@@ -72,6 +77,7 @@ export class DesktopWindowRuntime {
 
     this._loadFeatureModules(commandSink);
     _scope.load(windowRegistryModule(_scope, { commandSink, rpcEventSink }));
+    this._windowApplication = _scope.get(WINDOW_APPLICATION);
     this._commands = _scope.get(CommandRegistry);
     this._rpcRegistry = _scope.get(RpcRegistry);
     this._commands.onStart();
@@ -90,14 +96,12 @@ export class DesktopWindowRuntime {
   }
 
   /** Finish window binding after the native factory returns its BrowserWindow. */
-  attach(window: BrowserWindow): void {
+  attach(window: BrowserWindow, state: NativeWindowStateBinding): void {
     if (this._window !== undefined) {
       throw new Error(`Desktop ${this._kind} window runtime is already attached.`);
     }
+    this._windowApplication.attach(window, state);
     this._window = window;
-    this._scope.load(
-      windowModule({ window, rpcController: this._controller })
-    );
     window.on("close", () => {
       this._nativeClosed = true;
       void this._scope.dispose().catch((error) => {
@@ -133,11 +137,7 @@ export class DesktopWindowRuntime {
     this._scope.load(nativeDialogsContributionsModule(commandSink));
     this._scope.load(nativeFilesRpcModule());
     this._scope.load(appDirectoriesRpcModule());
-    this._scope.load(
-      nativeWindowContributionsModule(this._scope, () =>
-        this._requireWindow()
-      )
-    );
+    this._scope.load(nativeWindowModule());
     this._scope.load(shellCommandsModule());
     this._scope.load(auxiliaryGenerationRpcModule());
     this._scope.load(modelsRpcModule());
@@ -152,13 +152,6 @@ export class DesktopWindowRuntime {
         ? playgroundContributionsModule()
         : projectContributionsModule()
     );
-  }
-
-  private _requireWindow(): BrowserWindow {
-    if (this._window === undefined) {
-      throw new Error(`Desktop ${this._kind} window is not attached.`);
-    }
-    return this._window;
   }
 
   private async _dispose(): Promise<void> {

@@ -132,8 +132,7 @@ async function _startDesktopApp(
   processLifecycle.defer("window state", () => windowStates.flush());
   const windowFactory = new DesktopWindowFactory(
     processContainer,
-    homePath,
-    windowStates
+    homePath
   );
   const projectWindows = new ProjectWindowManager({
     state: new FileProjectWindowStateStore(homePath),

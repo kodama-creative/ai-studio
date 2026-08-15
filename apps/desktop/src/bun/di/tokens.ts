@@ -8,7 +8,6 @@ import type { NetworkSettingsManager } from "@llm-space/runtime/network";
 import type { SearchSettingsManager } from "@llm-space/runtime/search";
 import type { SkillsManager } from "@llm-space/runtime/skills";
 import type { Studio } from "@llm-space/studio/server";
-import type { BrowserWindow } from "electrobun/bun";
 
 import type {
   AgentProjectView,
@@ -21,7 +20,6 @@ import type { DesktopHost } from "../host/desktop-host";
 import type { DesktopPlaygroundApplication } from "../playgrounds/playground-application";
 import type { AgentProject } from "../projects/agent-project";
 import type { ProjectWindowManager } from "../projects/project-window-manager";
-import type { MainWindowRPC } from "../rpc";
 import type { UpdaterService } from "../updates";
 
 export type DesktopToken<T> = symbol & { readonly __service?: T };
@@ -70,9 +68,7 @@ export const PROCESS_TOKENS = {
 
 /** Services owned by exactly one native window. */
 export const WINDOW_TOKENS = {
-  browserWindow: desktopToken<BrowserWindow>("window", "browser-window"),
   context: desktopToken<DesktopWindowContext>("window", "context"),
-  rpc: desktopToken<MainWindowRPC>("window", "rpc"),
 } as const;
 
 /** Services which exist only inside one Agent Project Studio window. */

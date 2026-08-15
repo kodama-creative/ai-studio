@@ -11,13 +11,15 @@ import {
   type WindowRequests,
   type WindowRpc,
 } from "../../shared/window-rpc";
-import type { WindowStateManager } from "../app/window-state";
+import type {
+  WindowStateManager,
+  WindowStatePersistenceStore,
+} from "../app/window-state";
 import {
   CommandContribution,
   type CommandContribution as CommandContributionApi,
 } from "../di/command-contribution";
 import type { CommandRegistry } from "../di/command-registry";
-import type { DesktopWindowScope } from "../di/process-container";
 import {
   RpcContribution,
   type RpcContribution as RpcContributionApi,
@@ -34,26 +36,63 @@ function _clampZoom(zoom: number): number {
 export const WINDOW_APPLICATION =
   desktopToken<WindowApplication>("window", "application");
 
+export interface NativeWindowStateBinding {
+  readonly store: WindowStatePersistenceStore;
+  readonly isMaximized?: boolean;
+  readonly isFullScreen?: boolean;
+  readonly zoom?: number;
+}
+
 export class WindowApplication implements WindowRequests, Disposable {
   readonly events = new EventHub<WindowEvents>();
+  private _window: BrowserWindow | undefined;
 
   constructor(
-    private readonly _window: () => BrowserWindow,
-    private readonly _context: DesktopWindowContext
+    private readonly _context: DesktopWindowContext,
+    private readonly _windowStates: WindowStateManager
   ) {}
+
+  /** Attach the single native window owned by this application instance. */
+  attach(window: BrowserWindow, state: NativeWindowStateBinding): void {
+    if (this._window !== undefined) {
+      throw new Error("Native window is already attached.");
+    }
+    this._window = window;
+    this._windowStates.attach(window, {
+      ...state,
+      onFullScreenChange: (fullScreen) =>
+        this.notifyFullScreenChanged(fullScreen),
+    });
+  }
 
   getContext() {
     return Promise.resolve(this._context);
   }
 
   toggleMaximized() {
-    const window = this._window();
+    const window = this._requireWindow();
     if (window.isMaximized()) window.unmaximize();
     else window.maximize();
   }
 
+  zoomIn(): void {
+    this._changeZoom(ZOOM_STEP);
+  }
+
+  zoomOut(): void {
+    this._changeZoom(-ZOOM_STEP);
+  }
+
+  resetZoom(): void {
+    this._setZoom(1);
+  }
+
+  reload(): void {
+    this._requireWindow().webview?.executeJavascript("location.reload()");
+  }
+
   getFullscreenState() {
-    return Promise.resolve({ fullScreen: this._window().isFullScreen() });
+    return Promise.resolve({ fullScreen: this._requireWindow().isFullScreen() });
   }
 
   /** Publish a native fullscreen transition to the owning renderer. */
@@ -64,6 +103,23 @@ export class WindowApplication implements WindowRequests, Disposable {
   /** Release listeners owned by this native window. */
   dispose(): void {
     this.events.dispose();
+  }
+
+  private _changeZoom(delta: number): void {
+    this._setZoom(_clampZoom(this._requireWindow().getPageZoom() + delta));
+  }
+
+  private _setZoom(zoom: number): void {
+    const window = this._requireWindow();
+    window.setPageZoom(zoom);
+    this._windowStates.saveZoom(window, zoom);
+  }
+
+  private _requireWindow(): BrowserWindow {
+    if (this._window === undefined) {
+      throw new Error("Native window is not attached.");
+    }
+    return this._window;
   }
 }
 
@@ -78,11 +134,7 @@ class WindowRpcServer implements RpcServer<WindowRpc> {
 }
 
 class WindowContribution implements CommandContributionApi, RpcContributionApi {
-  constructor(
-    private readonly _application: WindowApplication,
-    private readonly _windowStates: WindowStateManager,
-    private readonly _getWindow: () => BrowserWindow
-  ) {}
+  constructor(private readonly _application: WindowApplication) {}
 
   registerRpc(rpc: RpcRegistry): void {
     rpc.registerServer(
@@ -95,45 +147,29 @@ class WindowContribution implements CommandContributionApi, RpcContributionApi {
       execute: () => this._application.toggleMaximized(),
     });
     commands.registerCommand("window.zoomIn", {
-      execute: () => this._changeZoom(ZOOM_STEP),
+      execute: () => this._application.zoomIn(),
     });
     commands.registerCommand("window.zoomOut", {
-      execute: () => this._changeZoom(-ZOOM_STEP),
+      execute: () => this._application.zoomOut(),
     });
     commands.registerCommand("window.resetZoom", {
-      execute: () => this._setZoom(1),
+      execute: () => this._application.resetZoom(),
     });
     commands.registerCommand("window.reload", {
-      execute: () =>
-        this._getWindow().webview?.executeJavascript("location.reload()"),
+      execute: () => this._application.reload(),
     });
-  }
-
-  private _changeZoom(delta: number): void {
-    this._setZoom(_clampZoom(this._getWindow().getPageZoom() + delta));
-  }
-
-  private _setZoom(zoom: number): void {
-    const window = this._getWindow();
-    window.setPageZoom(zoom);
-    this._windowStates.saveZoom(window, zoom);
   }
 }
 
 /** Bind the Window application, RPC, and commands for one native window. */
-export function nativeWindowContributionsModule(
-  scope: DesktopWindowScope,
-  getWindow: () => BrowserWindow
-): ContainerModule {
+export function nativeWindowModule(): ContainerModule {
   return new ContainerModule(({ bind }) => {
     bind<WindowApplication>(WINDOW_APPLICATION)
       .toDynamicValue(
         (context) =>
-          scope.own(
-            new WindowApplication(
-              getWindow,
-              context.get(WINDOW_TOKENS.context)
-            )
+          new WindowApplication(
+            context.get(WINDOW_TOKENS.context),
+            context.get(PROCESS_TOKENS.windowStates)
           )
       )
       .inSingletonScope();
@@ -141,9 +177,7 @@ export function nativeWindowContributionsModule(
       .toDynamicValue(
         (context) =>
           new WindowContribution(
-            context.get(WINDOW_APPLICATION),
-            context.get(PROCESS_TOKENS.windowStates),
-            getWindow
+            context.get(WINDOW_APPLICATION)
           )
       )
       .inSingletonScope();

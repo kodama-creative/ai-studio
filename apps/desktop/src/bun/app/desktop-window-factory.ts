@@ -8,10 +8,7 @@ import type {
   DesktopWindowScope,
 } from "../di/process-container";
 import { PROJECT_WINDOW_TOKENS } from "../di/tokens";
-import {
-  WINDOW_APPLICATION,
-  type WindowApplication,
-} from "../native/native-window-module";
+import type { NativeWindowStateBinding } from "../native/native-window-module";
 import { playgroundWindowModule } from "../playgrounds/playground-module";
 import type { AgentProject } from "../projects/agent-project";
 import {
@@ -27,7 +24,6 @@ import type { MainWindowRPC } from "../rpc";
 
 import { DesktopWindowRuntime } from "./desktop-window-runtime";
 import { createAgentProjectWindow, createMainWindow } from "./window";
-import type { WindowStateManager } from "./window-state";
 
 export interface DesktopMainWindowHandle {
   readonly window: BrowserWindow;
@@ -41,8 +37,7 @@ export class DesktopWindowFactory implements ProjectWindowAdapter {
 
   constructor(
     private readonly _process: DesktopProcessContainer,
-    private readonly _homePath: string,
-    private readonly _windowStates: WindowStateManager
+    private readonly _homePath: string
   ) {}
 
   /** Create the Main window inside the scope allocated by MainWindowManager. */
@@ -53,13 +48,9 @@ export class DesktopWindowFactory implements ProjectWindowAdapter {
     const runtime = new DesktopWindowRuntime(scope, "main");
     const window = await createMainWindow({
       rpc: runtime.rpc,
-      windowStates: this._windowStates,
-      onFullScreenChange: (fullScreen) =>
-        scope
-          .get<WindowApplication>(WINDOW_APPLICATION)
-          .notifyFullScreenChanged(fullScreen),
+      onCreated: (created, state) =>
+        this._attach(scope, created, state, runtime),
     });
-    this._attach(scope, window, runtime);
     return {
       window,
       rpc: runtime.rpc,
@@ -95,13 +86,9 @@ export class DesktopWindowFactory implements ProjectWindowAdapter {
         rpc: runtime.rpc,
         project: projectView,
         stateStore,
-        windowStates: this._windowStates,
-        onFullScreenChange: (fullScreen) =>
-          scope
-            .get<WindowApplication>(WINDOW_APPLICATION)
-            .notifyFullScreenChanged(fullScreen),
+        onCreated: (created, state) =>
+          this._attach(scope, created, state, runtime),
       });
-      this._attach(scope, window, runtime);
       return {
         activate: () => window.activate(),
         close: () => scope.dispose(),
@@ -134,9 +121,10 @@ export class DesktopWindowFactory implements ProjectWindowAdapter {
   private _attach(
     scope: DesktopWindowScope,
     window: BrowserWindow,
+    state: NativeWindowStateBinding,
     runtime: DesktopWindowRuntime
   ): void {
-    runtime.attach(window);
+    runtime.attach(window, state);
     this._runtimes.set(window.id, runtime);
     scope.onDisposed(() => this._runtimes.delete(window.id));
   }

@@ -9,12 +9,10 @@ import {
 import { BrowserWindow, Updater } from "electrobun/bun";
 
 import type { AgentProjectView } from "../../shared/agent-project";
+import type { NativeWindowStateBinding } from "../native/native-window-module";
 import type { MainWindowRPC } from "../rpc";
 
-import type {
-  WindowStateManager,
-  WindowStatePersistenceStore,
-} from "./window-state";
+import type { WindowStatePersistenceStore } from "./window-state";
 
 const DEV_SERVER_PORT = Number(
   process.env.LLM_SPACE_DESKTOP_DEV_SERVER_PORT ?? 5173
@@ -40,12 +38,13 @@ async function _getMainViewUrl(): Promise<string> {
 
 export async function createMainWindow({
   rpc,
-  windowStates,
-  onFullScreenChange,
+  onCreated,
 }: {
   rpc: MainWindowRPC;
-  windowStates: WindowStateManager;
-  onFullScreenChange?: (fullScreen: boolean) => void;
+  onCreated: (
+    window: BrowserWindow,
+    state: NativeWindowStateBinding
+  ) => void;
 }): Promise<BrowserWindow> {
   const url = await _getMainViewUrl();
   const windowStateStore = await WindowStateStore.load();
@@ -64,15 +63,11 @@ export async function createMainWindow({
     },
     frame: savedFrame,
   });
-
-  windowStates.attach(window, {
+  onCreated(window, {
     store: windowStateStore,
     isMaximized: getWindowMaximized(windowState),
     isFullScreen: getWindowFullScreen(windowState),
     zoom: savedZoom,
-    onFullScreenChange: (fullScreen) => {
-      onFullScreenChange?.(fullScreen);
-    },
   });
   return window;
 }
@@ -81,14 +76,15 @@ export async function createAgentProjectWindow({
   rpc,
   project,
   stateStore,
-  windowStates,
-  onFullScreenChange,
+  onCreated,
 }: {
   rpc: MainWindowRPC;
   project: AgentProjectView;
   stateStore: WindowStatePersistenceStore;
-  windowStates: WindowStateManager;
-  onFullScreenChange?: (fullScreen: boolean) => void;
+  onCreated: (
+    window: BrowserWindow,
+    state: NativeWindowStateBinding
+  ) => void;
 }): Promise<BrowserWindow> {
   const state = stateStore.state;
   const baseUrl = await _getMainViewUrl();
@@ -105,14 +101,11 @@ export async function createAgentProjectWindow({
       y: DEFAULT_WINDOW_FRAME.y + 32,
     },
   });
-  windowStates.attach(window, {
+  onCreated(window, {
     store: stateStore,
     isMaximized: getWindowMaximized(state),
     isFullScreen: getWindowFullScreen(state),
     zoom: getWindowZoom(state) ?? 1,
-    onFullScreenChange: (fullScreen) => {
-      onFullScreenChange?.(fullScreen);
-    },
   });
   return window;
 }

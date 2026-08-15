@@ -87,6 +87,13 @@ Bun-workspace monorepo. Workspaces are `packages/*`, `apps/*`, and the runnable
 
 Native shell capabilities follow the same ownership rule under `bun/native/`: Window, Native Dialogs/import, Native Files, App Directories, and Shell each have a feature module; RPC features have separate shared contracts, server classes, renderer client factories, and `RpcContribution` owners. Do not recreate the previous `native-applications`, `native-module`, `native-rpc`, `native-rpc-servers`, `native-files` client aggregation, or a catch-all native contribution/module.
 
+The window-scoped `WindowApplication` is constructed before its native
+`BrowserWindow`, attached exactly once immediately after native construction,
+and owns maximize/fullscreen/zoom/reload behavior plus Window events. Its
+contribution only maps Commands/RPC onto that interface. Do not pass delayed
+`getWindow()` callbacks through DI, resolve applications from native event
+callbacks, or bind raw BrowserWindow/RPC values without an actual consumer.
+
 Every native window owns one `RpcRegistry`. Window-scoped feature classes implement the same-name `RpcContribution` symbol + interface and register their server classes during `RpcRegistry.onStart()`. A named `ContributionProvider<RpcContribution>` takes one frozen snapshot after all window modules are bound; duplicate namespaces and late registration fail. The Registry owns request dispatch, stream abort, event subscriptions, and reverse-order registration cleanup. `createMainWindowRPC()` only forwards the Electrobun envelope to that Registry and never constructs business services.
 
 ### Bun composition and bundled modules
