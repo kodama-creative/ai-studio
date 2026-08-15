@@ -58,7 +58,6 @@ export function ProjectThreadPane({
           publishThread(saved);
         },
         {
-          canWrite: () => threadRef.current.operationId === undefined,
           onWriteError: (error) => {
             toast.error("Unable to save Studio Thread; retrying", {
               description: _errorMessage(error),

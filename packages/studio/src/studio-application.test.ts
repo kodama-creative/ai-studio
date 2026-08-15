@@ -125,6 +125,80 @@ describe.each(["memory", "sqlite"] as const)(
   }
 );
 
+test("saves a future Studio Draft while a Pi operation is active", async () => {
+  const fixture = await _fixture("memory");
+  try {
+    const created = await fixture.app.createThread({
+      title: "Active Studio Thread",
+      agent: AGENT,
+      conversation: {
+        messages: [
+          {
+            id: "user-active",
+            role: "user",
+            content: [{ type: "text", text: "run this version" }],
+          },
+        ],
+        state: {},
+      },
+    });
+    const receipt = await fixture.app.run(created.id, {
+      fromMessageId: "user-active",
+      commandId: "active-run",
+    });
+    const active = await fixture.app.inspectRun(created.id, receipt.operationId);
+    if (active.nextAction === undefined) {
+      throw new Error("Expected an active Studio model action.");
+    }
+
+    const saved = await fixture.app.saveDocument(created.id, {
+      ...created.document,
+      title: "Edited while active",
+      conversation: {
+        messages: [
+          {
+            id: "user-active",
+            role: "user",
+            content: [{ type: "text", text: "run the next version" }],
+          },
+        ],
+        state: { next: true },
+      },
+    });
+    expect(saved).toMatchObject({
+      operationId: receipt.operationId,
+      document: {
+        title: "Edited while active",
+        conversation: { state: { next: true } },
+      },
+    });
+
+    await fixture.app.stepRun(created.id, receipt.operationId, {
+      commandId: "finish-active-run",
+      expectedActionId: active.nextAction.id,
+      kind: active.nextAction.kind,
+    });
+    const loaded = await fixture.app.loadThread(created.id);
+    expect(loaded).toMatchObject({
+      document: {
+        title: "Edited while active",
+        conversation: {
+          messages: [
+            {
+              role: "user",
+              content: [{ type: "text", text: "run the next version" }],
+            },
+          ],
+          state: { next: true },
+        },
+      },
+    });
+    expect(loaded).not.toHaveProperty("operationId");
+  } finally {
+    await fixture.close();
+  }
+});
+
 test("forks a Pi branch and marks inherited operation references", async () => {
   const fixture = await _fixture("memory");
   try {

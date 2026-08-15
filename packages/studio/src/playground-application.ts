@@ -181,9 +181,6 @@ class PlaygroundApplicationImpl implements PlaygroundApplication {
       sessionId: record.sessionId,
       lane: record.lane,
     });
-    if (hasActiveOperation(snapshot)) {
-      throw new Error(`Playground "${playgroundId}" has an active operation.`);
-    }
     const next: PlaygroundRecord = {
       ...record,
       title: input.title.trim() || record.title,

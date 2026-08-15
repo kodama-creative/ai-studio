@@ -139,6 +139,83 @@ describe.each(["memory", "sqlite"] as const)(
   }
 );
 
+test("saves a future Playground Draft while a Pi operation is active", async () => {
+  const fixture = await _fixture("memory");
+  try {
+    const created = await fixture.app.createPlayground({
+      title: "Active Playground",
+      agentSpec: {
+        schemaVersion: 1,
+        model: { provider: "test", id: "local" },
+        instructions: [],
+        tools: [],
+      },
+      conversation: {
+        messages: [
+          {
+            id: "user-active",
+            role: "user",
+            content: [{ type: "text", text: "run this version" }],
+          },
+        ],
+        state: {},
+      },
+    });
+    const receipt = await fixture.app.run(created.id, {
+      fromMessageId: "user-active",
+      commandId: "active-run",
+    });
+    const active = await fixture.runtime.open({ sessionId: receipt.sessionId });
+    if (active.nextAction === undefined) {
+      throw new Error("Expected an active Playground model action.");
+    }
+
+    const saved = await fixture.app.savePlayground(created.id, {
+      title: "Edited while active",
+      agentSpec: created.agentSpec,
+      conversation: {
+        messages: [
+          {
+            id: "user-active",
+            role: "user",
+            content: [{ type: "text", text: "run the next version" }],
+          },
+        ],
+        state: { next: true },
+      },
+    });
+    expect(saved).toMatchObject({
+      operationId: receipt.operationId,
+      title: "Edited while active",
+      dirty: true,
+      conversation: { state: { next: true } },
+    });
+
+    await fixture.app.stepRun(created.id, receipt.operationId, {
+      commandId: "finish-active-run",
+      expectedActionId: active.nextAction.id,
+      kind: active.nextAction.kind,
+    });
+    const loaded = await fixture.app.loadPlayground(created.id);
+    expect(loaded).toMatchObject({
+      title: "Edited while active",
+      dirty: true,
+      conversation: {
+        messages: [
+          {
+            role: "user",
+            content: [{ type: "text", text: "run the next version" }],
+          },
+        ],
+        state: { next: true },
+      },
+    });
+    expect(loaded).not.toHaveProperty("operationId");
+  } finally {
+    await fixture.close();
+  }
+});
+
 test("rejects Playground tool kinds without a Pi runtime execution path", async () => {
   const fixture = await _fixture("memory");
   try {

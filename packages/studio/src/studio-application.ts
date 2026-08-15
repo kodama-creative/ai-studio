@@ -394,9 +394,6 @@ class StudioApplicationImpl implements StudioApplication {
       sessionId: experiment.sessionId,
       lane: experiment.lane,
     });
-    if (hasActiveOperation(snapshot)) {
-      throw new Error(`Studio Thread "${threadId}" has an active operation.`);
-    }
     const next: StudioExperimentRecord = {
       ...experiment,
       title: document.title.trim() || experiment.title,

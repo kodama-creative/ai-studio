@@ -143,7 +143,6 @@ function _PlaygroundTabPane({
           onTitleChange?.(playgroundId, saved.title);
         },
         {
-          canWrite: () => playgroundRef.current?.operationId === undefined,
           onBusyChange: (busy) =>
             lifecycleHost.onPersistenceChange(paneId, persistenceOwner, busy),
           onWriteError: (writeError) => {
