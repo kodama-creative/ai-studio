@@ -8,7 +8,6 @@ import {
   type Session,
   type SessionMetadata,
   type SessionRepo,
-  type SessionTree,
 } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, Usage } from "@earendil-works/pi-ai";
 import type {
@@ -26,6 +25,8 @@ import {
 } from "../bindings/bun-sqlite-runtime-binding-store";
 const DEFAULT_LANE = "main";
 const BINDING_EXTENSION = "llm-space";
+const TOOL_APPROVAL_REQUEST = "llm-space.tool-approval.request";
+const TOOL_APPROVAL_DECISION = "llm-space.tool-approval.decision";
 
 export interface AssistantExecutor {
   /** Checks the frozen model identity without starting a provider request. */
@@ -53,6 +54,11 @@ export interface RuntimeTool {
   readonly implementationId: string;
   readonly isErrorResult?: (output: unknown) => boolean;
 }
+
+/** Resolves operation-scoped dynamic configuration before it is frozen. */
+export type RuntimeBindingSource =
+  | RuntimeBinding
+  | (() => RuntimeBinding | Promise<RuntimeBinding>);
 
 /** Erases authored tool generics at the validated dynamic-registry boundary. */
 export function runtimeTool<TInput, TOutput>(
@@ -129,6 +135,12 @@ export type SemanticAction =
       readonly toolName: string;
     };
 
+export interface ToolApprovalSnapshot {
+  readonly toolCallId: string;
+  readonly toolName: string;
+  readonly status: "pending";
+}
+
 export interface PiSessionSnapshot {
   /** Latest committed Pi log sequence observed while reducing this snapshot. */
   readonly cursor: number;
@@ -149,9 +161,11 @@ export interface PiSessionSnapshot {
       | "binding_format_mismatch"
       | "missing_model_identity"
       | "missing_tool_identity"
-      | "tool_identity_mismatch";
+      | "tool_identity_mismatch"
+      | "tool_approval_required";
     readonly message: string;
   };
+  readonly approval?: ToolApprovalSnapshot;
 }
 
 export interface PiCommittedChange {
@@ -223,7 +237,7 @@ interface ActiveLaneEffect {
  * Open is read-only. Start only admits durable intent. Step releases exactly
  * one semantic model/tool effect boundary.
  */
-export class StudioPiSessionRuntime {
+export class DurablePiRuntime {
   private readonly _repository: SessionRepo;
   private readonly _bindings: BunSqliteRuntimeBindingStore;
   private readonly _assistantExecutor: AssistantExecutor;
@@ -375,15 +389,11 @@ export class StudioPiSessionRuntime {
     readonly sessionId: string;
     readonly lane?: string;
     readonly messages: AgentMessage[];
-    readonly binding: RuntimeBinding;
+    readonly binding: RuntimeBindingSource;
   }): Promise<PiSessionSnapshot> {
     this._requireOpen();
     const lane = input.lane ?? DEFAULT_LANE;
     const session = await this._session(input.sessionId);
-    const binding = this._bindings.put({
-      id: `binding:${input.operationId}`,
-      binding: input.binding,
-    });
     const existing = await session.findRecords({
       type: "operation_started",
       runId: input.operationId,
@@ -391,6 +401,14 @@ export class StudioPiSessionRuntime {
     });
     let operation = existing[0];
     if (operation === undefined) {
+      const resolvedBinding =
+        typeof input.binding === "function"
+          ? await input.binding()
+          : input.binding;
+      const binding = this._bindings.put({
+        id: `binding:${input.operationId}`,
+        binding: resolvedBinding,
+      });
       const open = await session.findOpenOperations(lane, { limit: 1 });
       if (open.length > 0) {
         throw new Error(`Lane "${lane}" already has an open operation.`);
@@ -419,7 +437,17 @@ export class StudioPiSessionRuntime {
         },
       });
     } else {
-      _assertSameBinding(operation, binding);
+      if (typeof input.binding !== "function") {
+        const binding = this._bindings.put({
+          id: `binding:${input.operationId}`,
+          binding: input.binding,
+        });
+        _assertSameBinding(operation, binding);
+      } else {
+        // Resolution happened before the operation was admitted. Recovery must
+        // use that immutable result without calling dynamic source again.
+        this._bindings.resolve(_bindingReference(operation));
+      }
       _assertSameRunIntent(operation, input.messages);
     }
     if (operation === undefined) {
@@ -550,19 +578,49 @@ export class StudioPiSessionRuntime {
     return this._snapshot(session, lane);
   }
 
-  /** Returns the exact durable manual-drive subset, not a partial `AgentLane`. */
-  harness(input: {
+  /** Commits the user's decision for the currently pending durable tool approval. */
+  async resolveToolApproval(input: {
     readonly sessionId: string;
     readonly lane?: string;
-    readonly binding?: RuntimeBinding;
-  }): DurablePiAgentHarness {
+    readonly toolCallId: string;
+    readonly approved: boolean;
+  }): Promise<PiSessionSnapshot> {
     this._requireOpen();
-    return new DurablePiAgentHarness(
-      this,
-      input.sessionId,
-      input.lane ?? DEFAULT_LANE,
-      input.binding
+    const lane = input.lane ?? DEFAULT_LANE;
+    const session = await this._session(input.sessionId);
+    const entries = await session
+      .view(lane)
+      .findEntriesOnBranch({ order: "oldestFirst" });
+    const state = _approvalStateForToolCall(entries, input.toolCallId);
+    if (state?.request === undefined) {
+      throw new Error(
+        `Tool call "${input.toolCallId}" does not have a pending approval.`
+      );
+    }
+    const decision = input.approved ? "approved" : "denied";
+    if (state.decision !== undefined) {
+      if (state.decision !== decision) {
+        throw new Error(
+          `Tool call "${input.toolCallId}" already has another approval decision.`
+        );
+      }
+      return this._snapshot(session, lane);
+    }
+    await session.appendEntry(
+      {
+        type: "custom",
+        id: `${state.request.id}:decision`,
+        customType: TOOL_APPROVAL_DECISION,
+        data: {
+          schemaVersion: 1,
+          requestId: state.request.id,
+          toolCallId: input.toolCallId,
+          decision,
+        },
+      },
+      lane
     );
+    return this._snapshot(session, lane);
   }
 
   /** Subscribes only to non-durable deltas; Pi Session remains durable truth. */
@@ -924,53 +982,66 @@ export class StudioPiSessionRuntime {
       await this._appendInterruptedToolResult(session, lane, started);
       return;
     }
-    if (prepared.definition.approval !== undefined) {
-      if (started !== undefined) {
-        await this._appendInterruptedToolResult(session, lane, started);
-        return;
-      }
-      await this._appendDirectToolError(
-        session,
-        lane,
-        operationId,
-        action,
-        `Tool "${action.toolName}" requires approval, which this runtime does not support.`
-      );
-      return;
-    }
-
     let effectiveArgs: Record<string, unknown>;
     let resultEntryId: string;
     let replay: "never" | "safe";
     if (started === undefined) {
-      try {
-        const validated = await validateSchemaValue(
-          prepared.definition.inputSchema,
-          _toolCallArguments(snapshot.messages, action.toolCallId),
-          { direction: "input", label: `Input for tool "${action.toolName}"` }
-        );
-        if (
-          typeof validated !== "object" ||
-          validated === null ||
-          Array.isArray(validated)
-        ) {
-          throw new Error("validated arguments must be an object");
-        }
-        effectiveArgs = structuredClone(validated as Record<string, unknown>);
-      } catch (error) {
-        signal.throwIfAborted();
+      const branchEntries = await session
+        .view(lane)
+        .findEntriesOnBranch({ order: "oldestFirst" });
+      const approval = _approvalStateForAction(branchEntries, action);
+      if (approval?.decision === "denied") {
         await this._appendDirectToolError(
           session,
           lane,
           operationId,
           action,
-          error instanceof Error ? error.message : String(error)
+          `Tool "${action.toolName}" was denied by the user.`
         );
         return;
       }
+      if (approval?.request !== undefined && approval.decision === undefined) {
+        return;
+      }
+      if (approval?.decision === "approved") {
+        effectiveArgs = structuredClone(approval.request.effectiveArgs);
+      } else {
+        try {
+          const validated = await validateSchemaValue(
+            prepared.definition.inputSchema,
+            _toolCallArguments(snapshot.messages, action.toolCallId),
+            {
+              direction: "input",
+              label: `Input for tool "${action.toolName}"`,
+            }
+          );
+          if (
+            typeof validated !== "object" ||
+            validated === null ||
+            Array.isArray(validated)
+          ) {
+            throw new Error("validated arguments must be an object");
+          }
+          effectiveArgs = structuredClone(
+            validated as Record<string, unknown>
+          );
+        } catch (error) {
+          signal.throwIfAborted();
+          await this._appendDirectToolError(
+            session,
+            lane,
+            operationId,
+            action,
+            error instanceof Error ? error.message : String(error)
+          );
+          return;
+        }
+      }
       resultEntryId = `${action.assistantEntryId}:tool:${action.toolIndex}:result`;
       try {
-        if (this._toolPolicies.before !== undefined) {
+        if (approval?.decision === "approved") {
+          signal.throwIfAborted();
+        } else if (this._toolPolicies.before !== undefined) {
           const policy = await this._toolPolicies.before({
             binding,
             tool: prepared,
@@ -1020,6 +1091,53 @@ export class StudioPiSessionRuntime {
           error instanceof Error ? error.message : String(error)
         );
         return;
+      }
+      if (
+        approval === undefined &&
+        prepared.definition.approval !== undefined
+      ) {
+        const status = _approvalStatus(
+          await prepared.definition.approval({
+            approvedTools: _approvedToolNames(branchEntries),
+            toolInput: structuredClone(effectiveArgs),
+            execution: {
+              threadId: snapshot.sessionId,
+              runId: operationId,
+            },
+            callId: action.toolCallId,
+            toolName: action.toolName,
+          })
+        );
+        if (status === "denied") {
+          await this._appendDirectToolError(
+            session,
+            lane,
+            operationId,
+            action,
+            `Tool "${action.toolName}" was denied by its approval policy.`
+          );
+          return;
+        }
+        if (status === "user-approval") {
+          await session.appendEntry(
+            {
+              type: "custom",
+              id: _approvalRequestId(action),
+              customType: TOOL_APPROVAL_REQUEST,
+              data: {
+                schemaVersion: 1,
+                operationId,
+                assistantEntryId: action.assistantEntryId,
+                toolIndex: action.toolIndex,
+                toolCallId: action.toolCallId,
+                toolName: action.toolName,
+                effectiveArgs: structuredClone(effectiveArgs),
+              },
+            },
+            lane
+          );
+          return;
+        }
       }
       signal.throwIfAborted();
       // The immutable binding is authoritative. Current source may weaken a
@@ -1386,6 +1504,30 @@ export class StudioPiSessionRuntime {
       }
     }
     const nextAction = _nextAction(operation, entries, records);
+    if (nextAction?.kind === "tool") {
+      const approval = _approvalStateForAction(entries, nextAction);
+      if (approval?.request !== undefined && approval.decision === undefined) {
+        return {
+          cursor,
+          sessionId: (await session.getMetadata()).id,
+          lane,
+          operationId: operation.id,
+          status: "suspended",
+          messageEntries,
+          messages,
+          leafId: await view.getLeafId(),
+          suspension: {
+            code: "tool_approval_required",
+            message: `Tool "${approval.request.toolName}" requires user approval.`,
+          },
+          approval: {
+            toolCallId: approval.request.toolCallId,
+            toolName: approval.request.toolName,
+            status: "pending",
+          },
+        };
+      }
+    }
     if (
       nextAction?.kind === "model" &&
       this._assistantExecutor.checkAvailability !== undefined
@@ -1464,38 +1606,6 @@ export class StudioPiSessionRuntime {
     const effect = { controller, settled, settle };
     this._activeEffects.set(key, effect);
     return effect;
-  }
-
-  /** Waits until the lane has no provider/tool effect in flight. */
-  async waitForIdle(
-    sessionId: string,
-    lane: string = DEFAULT_LANE
-  ): Promise<void> {
-    this._requireOpen();
-    await this._activeEffects.get(_laneKey(sessionId, lane))?.settled;
-  }
-
-  /** Runs host work only after the current lane effect has durably settled. */
-  async runWhenIdle(
-    sessionId: string,
-    lane: string,
-    callback: () => void | Promise<void>
-  ): Promise<void> {
-    this._requireOpen();
-    await this.waitForIdle(sessionId, lane);
-    await callback();
-  }
-
-  /** Returns the Pi tree view for the already-open durable Session. */
-  sessionTree(sessionId: string, lane: string = DEFAULT_LANE): SessionTree {
-    this._requireOpen();
-    const session = this._sessions.get(sessionId);
-    if (session === undefined) {
-      throw new Error(
-        `Session "${sessionId}" must be opened before creating its Harness.`
-      );
-    }
-    return session.view(lane);
   }
 
   /** Resolves the single open operation or rejects invalid lane state. */
@@ -1670,99 +1780,128 @@ export class StudioPiSessionRuntime {
   }
 }
 
-/** Manual-drive Harness bound to one durable Pi Session lane. */
-export class DurablePiAgentHarness {
-  readonly name: string;
-  readonly session: SessionTree;
+interface DurableToolApprovalRequest {
+  readonly id: string;
+  readonly operationId: string;
+  readonly assistantEntryId: string;
+  readonly toolIndex: number;
+  readonly toolCallId: string;
+  readonly toolName: string;
+  readonly effectiveArgs: Record<string, unknown>;
+}
 
-  constructor(
-    private readonly _runtime: StudioPiSessionRuntime,
-    readonly sessionId: string,
-    lane: string = DEFAULT_LANE,
-    private readonly _binding?: RuntimeBinding
-  ) {
-    this.name = lane;
-    this.session = _runtime.sessionTree(sessionId, lane);
-  }
+interface DurableToolApprovalState {
+  readonly request: DurableToolApprovalRequest;
+  readonly decision?: "approved" | "denied";
+}
 
-  /** Returns the current durable lane leaf without causing recovery work. */
-  async getLeafId(): Promise<string | null> {
-    return (
-      await this._runtime.open({ sessionId: this.sessionId, lane: this.name })
-    ).leafId;
-  }
+function _approvalRequestId(
+  action: Extract<SemanticAction, { kind: "tool" }>
+): string {
+  return `${action.assistantEntryId}:tool:${action.toolIndex}:approval`;
+}
 
-  /** Returns the stable next semantic action without releasing it. */
-  async peekAction(): Promise<SemanticAction | undefined> {
-    return (
-      await this._runtime.open({ sessionId: this.sessionId, lane: this.name })
-    ).nextAction;
-  }
+function _approvalStateForAction(
+  entries: readonly Entry[],
+  action: Extract<SemanticAction, { kind: "tool" }>
+): DurableToolApprovalState | undefined {
+  return _approvalStateForToolCall(entries, action.toolCallId);
+}
 
-  /** Admits and automatically drives one prompt using the Harness binding. */
-  async prompt(
-    input: string | AgentMessage | AgentMessage[]
-  ): Promise<PiSessionSnapshot> {
-    if (this._binding === undefined) {
-      throw new Error("Harness prompt requires a frozen runtime binding.");
+function _approvalStateForToolCall(
+  entries: readonly Entry[],
+  toolCallId: string
+): DurableToolApprovalState | undefined {
+  let request: DurableToolApprovalRequest | undefined;
+  for (const entry of entries) {
+    if (entry.type !== "custom" || entry.customType !== TOOL_APPROVAL_REQUEST) {
+      continue;
     }
-    const messages = Array.isArray(input)
-      ? input
-      : typeof input === "string"
-        ? [{ role: "user" as const, content: input, timestamp: Date.now() }]
-        : [input];
-    await this._runtime.start({
-      operationId: `run:${crypto.randomUUID()}`,
-      sessionId: this.sessionId,
-      lane: this.name,
-      messages,
-      binding: this._binding,
-    });
-    return this.runToCompletion();
+    const data = _record(entry.data);
+    if (
+      data.toolCallId !== toolCallId ||
+      typeof data.operationId !== "string" ||
+      typeof data.assistantEntryId !== "string" ||
+      typeof data.toolIndex !== "number" ||
+      typeof data.toolName !== "string" ||
+      !_isRecord(data.effectiveArgs)
+    ) {
+      continue;
+    }
+    request = {
+      id: entry.id,
+      operationId: data.operationId,
+      assistantEntryId: data.assistantEntryId,
+      toolIndex: data.toolIndex,
+      toolCallId: data.toolCallId,
+      toolName: data.toolName,
+      effectiveArgs: structuredClone(
+        data.effectiveArgs
+      ),
+    };
   }
+  if (request === undefined) return undefined;
+  for (const entry of entries) {
+    if (
+      entry.type !== "custom" ||
+      entry.customType !== TOOL_APPROVAL_DECISION
+    ) {
+      continue;
+    }
+    const data = _record(entry.data);
+    if (
+      data.requestId === request.id &&
+      (data.decision === "approved" || data.decision === "denied")
+    ) {
+      return { request, decision: data.decision };
+    }
+  }
+  return { request };
+}
 
-  /** Resumes the durable action exposed by recovery for this lane. */
-  resume(): Promise<PiSessionSnapshot> {
-    return this.runToCompletion();
+function _approvedToolNames(entries: readonly Entry[]): ReadonlySet<string> {
+  const approved = new Set<string>();
+  for (const entry of entries) {
+    if (entry.type !== "custom" || entry.customType !== TOOL_APPROVAL_REQUEST) {
+      continue;
+    }
+    const data = _record(entry.data);
+    if (typeof data.toolCallId !== "string" || typeof data.toolName !== "string") {
+      continue;
+    }
+    if (_approvalStateForToolCall(entries, data.toolCallId)?.decision === "approved") {
+      approved.add(data.toolName);
+    }
   }
+  return approved;
+}
 
-  /** Resolves after the current provider/tool effect and its commits settle. */
-  waitForIdle(): Promise<void> {
-    return this._runtime.waitForIdle(this.sessionId, this.name);
+function _approvalStatus(
+  value: unknown
+): "approved" | "denied" | "not-applicable" | "user-approval" {
+  if (value === true || value === "approved" || _record(value).type === "approved") {
+    return "approved";
   }
+  if (value === false || value === "denied" || _record(value).type === "denied") {
+    return "denied";
+  }
+  if (
+    value === "user-approval" ||
+    _record(value).type === "user-approval"
+  ) {
+    return "user-approval";
+  }
+  return "not-applicable";
+}
 
-  /** Runs a callback after the lane becomes idle. */
-  runWhenIdle(callback: () => void | Promise<void>): Promise<void> {
-    return this._runtime.runWhenIdle(this.sessionId, this.name, callback);
-  }
+function _record(value: unknown): Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Readonly<Record<string, unknown>>)
+    : {};
+}
 
-  /** Releases exactly the action observed at the start of this call. */
-  async executeAction(): Promise<PiSessionSnapshot> {
-    const snapshot = await this._runtime.open({
-      sessionId: this.sessionId,
-      lane: this.name,
-    });
-    if (snapshot.nextAction === undefined) return snapshot;
-    return this._runtime.step({
-      sessionId: this.sessionId,
-      lane: this.name,
-      expectedActionId: snapshot.nextAction.id,
-      kind: snapshot.nextAction.kind,
-    });
-  }
-
-  /** Runs the same semantic actions without parking between boundaries. */
-  runToCompletion(): Promise<PiSessionSnapshot> {
-    return this._runtime.continue({
-      sessionId: this.sessionId,
-      lane: this.name,
-    });
-  }
-
-  /** Persists a durable abort request and terminal outcome. */
-  abort(): Promise<PiSessionSnapshot> {
-    return this._runtime.abort({ sessionId: this.sessionId, lane: this.name });
-  }
+function _isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /** Resolves after the polling interval or immediately when observation stops. */

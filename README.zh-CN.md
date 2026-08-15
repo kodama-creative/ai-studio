@@ -60,11 +60,15 @@ LLM Space 是一个 Bun monorepo：
 
 ```text
 packages/
-  core/       # 共享逻辑：类型、agent loop、thread storage
+  agent/      # 兼容 Eve 的 code-first Agent 定义和加载器
+  pi-runtime/ # 持久化 Pi Session 执行内核
+  studio/     # Playground 和 Agent Project 应用层
+  ui/         # 共享 React UI 和 Thread 投影
+  core/       # 共享类型和浏览器安全的 Thread 语义
 apps/
   desktop/    # 桌面应用：Electrobun shell + React UI
 examples/
-  atlas-plugin/ # 覆盖全部 Extension 类型的完整 Plugin 示例
+  basic-agent/ # code-first Agent tracer bullet
 ```
 
 ## 下载
@@ -109,10 +113,7 @@ mise run build:canary
 - [快速开始](./docs/get-started.zh-CN.md)
 - [用户手册](./docs/index.zh-CN.md)
 - [核心概念](./docs/core-concepts.zh-CN.md)
-- [Plugin 开发指南](./docs/plugins.zh-CN.md)
-- [完整 Atlas Plugin 示例](./examples/atlas-plugin/README.zh-CN.md) —— 包含两套
-  Skills、MCP servers、Model providers、Plugin Tools、Commands 和 Thread
-  Storages，以及包含多项字段的 Settings Schema。
+- [Code-first Agent 示例](./examples/basic-agent/README.md)
 
 ## 参与贡献
 

@@ -1,56 +1,30 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 
-import type { Thread } from "@llm-space/core";
+import type { PortableThreadSnapshot } from "@llm-space/core";
 
 import type { NamespacedRpcRequest } from "@/shared/namespaced-rpc";
 
-const READS: { runtimeId?: string; path: string }[] = [];
-const SHARES: {
-  runtimeId?: string;
-  path: string;
-  title?: string;
-  description?: string;
-}[] = [];
+const REQUESTS: NamespacedRpcRequest[] = [];
+const SNAPSHOT: PortableThreadSnapshot = {
+  kind: "llm-space.thread-snapshot",
+  schemaVersion: 1,
+  source: {
+    product: "playground",
+    productId: "playground-1",
+    sessionId: "session-1",
+    lane: "main",
+    leafId: "leaf-1",
+  },
+  thread: { title: "Local title", context: { messages: [] } },
+};
 
 const RPC = {
   request: {
     rpcNamespaceRequest: (request: NamespacedRpcRequest) => {
-      const [runtimeId, path, meta] = request.args as [
-        string | undefined,
-        string,
-        { title?: string; description?: string } | undefined,
-      ];
-      if (request.namespace !== "threadSharing") {
-        throw new Error(`Unexpected namespace: ${request.namespace}`);
-      }
+      REQUESTS.push(request);
       if (request.method === "read") {
-        const input = { runtimeId, path };
-      READS.push(input);
-      if (input.runtimeId === "remote:alpha") {
-          return Promise.resolve({
-            ok: true as const,
-            value: {
-              title: "Remote title",
-              context: { systemPrompt: "REMOTE CONTENT" },
-            } satisfies Thread,
-          });
+        return Promise.resolve({ ok: true as const, value: SNAPSHOT });
       }
-      if (input.path === "remote-only.json") {
-        return Promise.reject(new Error("File not found: remote-only.json"));
-      }
-      return Promise.resolve({
-          ok: true as const,
-          value: {
-            title: "Local title",
-            context: { systemPrompt: "LOCAL CONTENT" },
-          } satisfies Thread,
-        });
-      }
-      if (request.method !== "publish") {
-        throw new Error(`Unexpected method: ${request.method}`);
-      }
-      const input = { runtimeId, path, ...meta };
-      SHARES.push(input);
       return Promise.resolve({
         ok: true as const,
         value: {
@@ -62,58 +36,39 @@ const RPC = {
   },
 };
 
-await mock.module("@/lib/electrobun", () => ({
-  electrobun: { rpc: RPC },
-}));
+await mock.module("@/lib/electrobun", () => ({ electrobun: { rpc: RPC } }));
 
 const { readShareThread, shareThread } = await import("./share");
 
-describe("share client runtime scope", () => {
+describe("Playground snapshot sharing client", () => {
   beforeEach(() => {
-    READS.length = 0;
-    SHARES.length = 0;
+    REQUESTS.length = 0;
   });
 
-  test("reads the selected remote thread for title prefill at a colliding path", async () => {
-    const remote = await readShareThread("remote:alpha", "threads/same.json");
-
-    expect(remote).toMatchObject({
-      title: "Remote title",
-      context: { systemPrompt: "REMOTE CONTENT" },
-    });
-    expect(READS).toEqual([
-      { runtimeId: "remote:alpha", path: "threads/same.json" },
-    ]);
-  });
-
-  test("reads a remote-only path without a local fallback", async () => {
-    const remote = await readShareThread("remote:alpha", "remote-only.json");
-
-    expect(remote.title).toBe("Remote title");
-    expect(READS).toEqual([
-      { runtimeId: "remote:alpha", path: "remote-only.json" },
-    ]);
-  });
-
-  test("preserves explicit local title reads", async () => {
-    const local = await readShareThread("local", "threads/same.json");
-
-    expect(local.title).toBe("Local title");
-    expect(READS).toEqual([{ runtimeId: "local", path: "threads/same.json" }]);
-  });
-
-  test("sends runtime ownership in the final share RPC request", async () => {
-    await shareThread("remote:alpha", "threads/same.json", {
-      title: "Shared remote title",
-      description: "Remote description",
-    });
-
-    expect(SHARES).toEqual([
+  test("reads the selected Playground lane/leaf snapshot", async () => {
+    expect(await readShareThread("playground-1")).toEqual(SNAPSHOT);
+    expect(REQUESTS).toEqual([
       {
-        runtimeId: "remote:alpha",
-        path: "threads/same.json",
-        title: "Shared remote title",
-        description: "Remote description",
+        namespace: "threadSharing",
+        method: "read",
+        args: ["playground-1"],
+      },
+    ]);
+  });
+
+  test("publishes the Playground by product identity", async () => {
+    await shareThread("playground-1", {
+      title: "Shared title",
+      description: "Description",
+    });
+    expect(REQUESTS).toEqual([
+      {
+        namespace: "threadSharing",
+        method: "publish",
+        args: [
+          "playground-1",
+          { title: "Shared title", description: "Description" },
+        ],
       },
     ]);
   });

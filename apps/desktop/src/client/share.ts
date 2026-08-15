@@ -1,6 +1,5 @@
-import type { Thread } from "@llm-space/core";
-
-import type { RuntimeId } from "@/shared/runtime";
+import type { PortableThreadSnapshot } from "@llm-space/core";
+import type { Playground } from "@llm-space/studio";
 
 import { threadSharingClient } from "./application-rpc-clients";
 
@@ -18,10 +17,9 @@ export interface ShareThreadMeta {
 
 /** Read the thread selected for sharing from its owning runtime. */
 export function readShareThread(
-  runtimeId: RuntimeId,
-  path: string
-): Promise<Thread> {
-  return threadSharingClient.read(runtimeId, path);
+  playgroundId: string
+): Promise<PortableThreadSnapshot> {
+  return threadSharingClient.read(playgroundId);
 }
 
 /**
@@ -31,9 +29,18 @@ export function readShareThread(
  * viewer metadata.
  */
 export async function shareThread(
-  runtimeId: RuntimeId,
-  path: string,
+  playgroundId: string,
   meta?: ShareThreadMeta
 ): Promise<ShareThreadResult> {
-  return threadSharingClient.publish(runtimeId, path, meta);
+  return threadSharingClient.publish(playgroundId, meta);
+}
+
+export function importThreadSnapshot(
+  snapshot: PortableThreadSnapshot
+): Promise<Playground> {
+  return threadSharingClient.importSnapshot(snapshot);
+}
+
+export function importGistThread(gistId: string): Promise<Playground> {
+  return threadSharingClient.importGist(gistId);
 }

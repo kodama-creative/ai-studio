@@ -10,6 +10,10 @@ import {
 interface FixtureRpc {
   readonly requests: {
     read(id: string): Promise<{ readonly id: string }>;
+    readOptional(
+      id: string,
+      options?: { readonly fresh?: boolean }
+    ): Promise<{ readonly id: string }>;
   };
   readonly streams: {
     changes(input?: {
@@ -27,12 +31,12 @@ const FIXTURE_RPC = defineRpcNamespace<FixtureRpc>("fixture", {
   events: ["changed"],
 });
 
-test("typed RPC proxy routes requests and strips local stream signals", async () => {
+test("typed RPC proxy serializes requests and strips local stream signals", async () => {
   const calls: unknown[] = [];
   const controller = new AbortController();
   const transport: RpcClientTransport = {
     request(input) {
-      calls.push(input);
+      calls.push(JSON.parse(JSON.stringify(input)));
       return Promise.resolve({ ok: true, value: { id: input.args[0] } });
     },
     async *stream(input) {
@@ -60,6 +64,7 @@ test("typed RPC proxy routes requests and strips local stream signals", async ()
     Promise<{ readonly id: string }>
   >();
   expect(await client.read("a")).toEqual({ id: "a" });
+  expect(await client.readOptional("b", undefined)).toEqual({ id: "b" });
   const changes = [];
   for await (const value of client.changes({
     after: 1,
@@ -75,6 +80,7 @@ test("typed RPC proxy routes requests and strips local stream signals", async ()
   expect(eventValues).toEqual([{ id: "event-a" }]);
   expect(calls).toEqual([
     { namespace: "fixture", method: "read", args: ["a"] },
+    { namespace: "fixture", method: "readOptional", args: ["b"] },
     {
       namespace: "fixture",
       method: "changes",

@@ -36,7 +36,4 @@ export interface ModelProviderGroup {
    * provider. Absent ⇒ the icon is auto-resolved from the provider id/name.
    */
   icon?: string;
-  source?: "user" | "plugin";
-  readOnly?: boolean;
-  pluginId?: string;
 }

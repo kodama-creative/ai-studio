@@ -92,6 +92,7 @@ test("resolves and executes only the MCP tools frozen into a Playground Run", as
 
     const receipt = await host.run(playground.id, {
       fromMessageId: "user-weather",
+      commandId: "initial-step-weather",
       mode: "step",
     });
     await _waitForRunStatus(host, receipt.operationId, "paused");
@@ -100,7 +101,9 @@ test("resolves and executes only the MCP tools frozen into a Playground Run", as
     // Resolver inputs come from the SQLite Run snapshot after restart, not the
     // mutable renderer document or an in-memory tool registry cache.
     host = createHost();
-    await host.continueRun(receipt.operationId);
+    await host.continueRun(playground.id, receipt.operationId, {
+      commandId: "continue-weather-after-restart",
+    });
     await _waitForTerminalRun(host, receipt.operationId);
     const loaded = await host.loadPlayground(playground.id);
     const assistant = loaded?.conversation.messages.find(
@@ -133,64 +136,7 @@ test("resolves and executes only the MCP tools frozen into a Playground Run", as
   }
 });
 
-test("rejects ACP prompt content that differs from the saved Playground Draft", async () => {
-  const homePath = await mkdtemp(
-    path.join(tmpdir(), "llm-space-playground-prompt-")
-  );
-  const faux = fauxProvider({ tokensPerSecond: 0 });
-  const model = faux.getModel();
-  const models = createModels();
-  models.setProvider(faux.provider);
-  const host = createPlaygroundHost({
-    homePath,
-    models,
-    runtime: _emptyRuntime(),
-  });
-  try {
-    const playground = await host.createPlayground({
-      agentSpec: {
-        schemaVersion: 1,
-        model: { provider: model.provider, id: model.id },
-        instructions: [],
-        tools: [],
-      },
-      conversation: {
-        messages: [
-          {
-            id: "user-saved",
-            role: "user",
-            content: [{ type: "text", text: "Saved prompt" }],
-          },
-        ],
-        state: {},
-      },
-    });
-
-    expect(
-      host.acpBackend.prompt({
-        sessionId: playground.sessionId,
-        messages: [
-          { role: "user", content: "Different prompt", timestamp: 1 },
-        ],
-        meta: {
-          "llm-space.dev": {
-            fromMessageId: "user-saved",
-            mode: "continue",
-          },
-        },
-        signal: new AbortController().signal,
-      })
-    ).rejects.toThrow(
-      'ACP prompt content does not match Studio user Message "user-saved".'
-    );
-    expect((await host.loadPlayground(playground.id))?.dirty).toBeTrue();
-  } finally {
-    await host.close();
-    await rm(homePath, { recursive: true, force: true });
-  }
-});
-
-test("reconstructs a durable ACP Step receipt after Playground host restart", async () => {
+test("reconstructs a durable Step receipt after Playground host restart", async () => {
   const homePath = await mkdtemp(
     path.join(tmpdir(), "llm-space-playground-receipt-")
   );
@@ -225,31 +171,40 @@ test("reconstructs a durable ACP Step receipt after Playground host restart", as
         state: {},
       },
     });
-    await host.run(playground.id, { fromMessageId: "user-receipt" });
-    const admitted = await host.acpBackend.inspect({
-      sessionId: playground.sessionId,
+    const run = await host.run(playground.id, {
+      fromMessageId: "user-receipt",
     });
-    const action = admitted.snapshot.nextAction;
+    const admitted = await host.inspectRun(playground.id, run.operationId);
+    const action = admitted.nextAction;
     expect(action?.kind).toBe("model");
     const command = {
-      sessionId: playground.sessionId,
       commandId: "step-after-restart",
       expectedActionId: action!.id,
       kind: "model" as const,
     };
-    const committed = await host.acpBackend.step(command);
-    expect(committed.status).toBe("completed");
+    const committed = await host.stepRun(playground.id, run.operationId, command);
+    expect(committed).toEqual(run);
+    expect((await host.inspectRun(playground.id, run.operationId)).status).toBe(
+      "completed"
+    );
     await host.close();
 
     host = createHost();
-    const reconstructed = await host.acpBackend.step(command);
-    expect(reconstructed).toMatchObject({
+    const reconstructed = await host.stepRun(
+      playground.id,
+      run.operationId,
+      command
+    );
+    expect(reconstructed).toEqual(run);
+    expect(await host.inspectRun(playground.id, run.operationId)).toMatchObject({
       status: "completed",
-      leafId: committed.leafId,
-      messageEntries: [{ message: { role: "user" } }, { message: { role: "assistant" } }],
+      messageEntries: [
+        { message: { role: "user" } },
+        { message: { role: "assistant" } },
+      ],
     });
     expect(
-      host.acpBackend.step({
+      host.stepRun(playground.id, run.operationId, {
         ...command,
         expectedActionId: "other-action",
       })

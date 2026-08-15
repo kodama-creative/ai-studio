@@ -74,7 +74,7 @@ test("createAgent persists only Pi Session truth and reloads current source", as
   expect(await second.listOperations(session.sessionId)).toMatchObject([
     { operationId: "operation-1", status: "completed" },
   ]);
-  await second.acpBackend.closeSession({ sessionId: session.sessionId });
+  await second.abort(session.sessionId);
 });
 
 test("createAgent rejects source reload when the Agent identity changes", async () => {
@@ -145,34 +145,6 @@ test("createAgent rejects durable Sessions owned by a previous Agent identity", 
   expect(String(error)).toContain(
     `belongs to Agent "${originalAgentId}", not "${replacement.agentId}"`
   );
-});
-
-test("App ACP backend scopes create and list to its Project cwd", async () => {
-  const projectRoot = await _project();
-  const dataRoot = await _temp("llm-space-agent-acp-cwd-");
-  const models = createModels();
-  await writeFile(
-    join(projectRoot, "agent", "agent.ts"),
-    'export default { model: "test/local" };\n'
-  );
-  const agent = await _agent({ projectRoot, dataRoot, models, runtimeServices: {} });
-
-  const createError = await _captureError(() =>
-    agent.acpBackend.create({ cwd: "/tmp/not-this-project" })
-  );
-  expect(createError).toBeInstanceOf(Error);
-  expect(await agent.acpBackend.list({ cwd: "/tmp/not-this-project" })).toEqual({
-    sessions: [],
-  });
-  const cursorError = await _captureError(() =>
-    agent.acpBackend.list({ cursor: "unsupported-cursor" })
-  );
-  expect(cursorError).toBeInstanceOf(Error);
-
-  const created = await agent.acpBackend.create({ cwd: projectRoot });
-  expect(
-    (await agent.acpBackend.list({ cwd: projectRoot })).sessions
-  ).toMatchObject([{ sessionId: created.sessionId, cwd: projectRoot }]);
 });
 
 async function _agent(options: Parameters<typeof createAgent>[0]) {

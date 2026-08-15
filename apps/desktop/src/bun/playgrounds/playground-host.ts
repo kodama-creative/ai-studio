@@ -1,18 +1,13 @@
 import path from "node:path";
 
 import type { Models, Tool as PiTool } from "@earendil-works/pi-ai";
-import type {
-  PiAcpSessionBackend,
-  PiAcpStepRequest,
-  PiAcpContinueRequest,
-} from "@llm-space/acp";
 import type { ToolContext, ToolDefinition } from "@llm-space/agent/tools";
 import type { BuiltinTool, McpTool, ToolCallOutput } from "@llm-space/core";
 import {
   BunSqliteRuntimeBindingStore,
   BunSqliteSessionRepository,
   PiAssistantExecutor,
-  StudioPiSessionRuntime,
+  DurablePiRuntime,
   runtimeTool,
   type PiProviderConnection,
   type RuntimeBinding,
@@ -20,11 +15,9 @@ import {
 } from "@llm-space/pi-runtime";
 import type { RuntimeClient } from "@llm-space/runtime/runtime";
 import {
-  assertPiPromptMatchesCoreUserMessage,
   createPlaygroundApplication,
   type PlaygroundApplication,
 } from "@llm-space/studio";
-import type { StudioStore } from "@llm-space/studio/storage";
 import { createSqliteStudioStore } from "@llm-space/studio/storage/sqlite";
 
 export interface CreatePlaygroundHostOptions {
@@ -39,7 +32,6 @@ export interface CreatePlaygroundHostOptions {
 }
 
 export interface PlaygroundHost extends PlaygroundApplication {
-  readonly acpBackend: PiAcpSessionBackend;
   dispose(): Promise<void>;
 }
 
@@ -64,7 +56,7 @@ export function createPlaygroundHost(
     resolveConnection: options.resolveConnection,
     resolveTools: (binding) => _modelTools(binding),
   });
-  const runtime = new StudioPiSessionRuntime({
+  const runtime = new DurablePiRuntime({
     repository,
     bindings,
     assistantExecutor,
@@ -85,7 +77,6 @@ export function createPlaygroundHost(
     runtime,
     store: studioStore,
   });
-  const acpBackend = _acpBackend(application, runtime, studioStore, options);
   const closeApplication = application.close.bind(application);
   let closePromise: Promise<void> | undefined;
   const close = () => {
@@ -95,154 +86,7 @@ export function createPlaygroundHost(
     });
     return closePromise;
   };
-  return Object.assign(application, { acpBackend, close, dispose: close });
-}
-
-/** Adapts product-owned Playground metadata to the transport-neutral ACP edge. */
-function _acpBackend(
-  application: PlaygroundApplication,
-  runtime: StudioPiSessionRuntime,
-  store: StudioStore,
-  options: CreatePlaygroundHostOptions
-): PiAcpSessionBackend {
-  return {
-    create: () => runtime.createSession(),
-    async list() {
-      const playgrounds = await application.listPlaygrounds();
-      return {
-        sessions: playgrounds.map((playground) => ({
-          sessionId: playground.sessionId,
-          cwd: path.resolve(options.homePath),
-          title: playground.title,
-          updatedAt: new Date(playground.updatedAt).toISOString(),
-          _meta: { "llm-space.dev": { playgroundId: playground.id } },
-        })),
-      };
-    },
-    inspect: (request) => runtime.readCommitted(request),
-    async prompt(input) {
-      input.signal.throwIfAborted();
-      const playground = (await application.listPlaygrounds()).find(
-        (candidate) => candidate.sessionId === input.sessionId
-      );
-      if (playground === undefined) {
-        throw new Error(
-          `Pi Session "${input.sessionId}" is not owned by a Playground.`
-        );
-      }
-      const metadata = _promptMetadata(input.meta);
-      const message = playground.conversation.messages.find(
-        (candidate) => candidate.id === metadata.fromMessageId
-      );
-      if (message?.role !== "user") {
-        throw new Error(
-          `Playground operation input "${metadata.fromMessageId}" must be a user Message.`
-        );
-      }
-      assertPiPromptMatchesCoreUserMessage(input.messages, message);
-      await application.run(playground.id, metadata);
-      return runtime.open({
-        sessionId: input.sessionId,
-        lane: playground.lane,
-      });
-    },
-    step: (input) =>
-      _debugCommand(store, runtime, "step", input, async () => {
-        const snapshot = await runtime.open(input);
-        if (snapshot.operationId === undefined) {
-          throw new Error(`Pi Session "${input.sessionId}" has no operation.`);
-        }
-        await application.stepRun(snapshot.operationId, {
-          commandId: input.commandId,
-          expectedActionId: input.expectedActionId,
-          kind: input.kind,
-        });
-        return runtime.open(input);
-      }),
-    continue: (input) =>
-      _debugCommand(store, runtime, "continue", input, async () => {
-        const snapshot = await runtime.open(input);
-        if (snapshot.operationId === undefined) {
-          throw new Error(`Pi Session "${input.sessionId}" has no operation.`);
-        }
-        await application.continueRun(snapshot.operationId);
-        return runtime.open(input);
-      }),
-    async abort(input) {
-      const snapshot = await runtime.open(input);
-      if (snapshot.operationId === undefined) return snapshot;
-      await application.cancelRun(snapshot.operationId);
-      return runtime.open(input);
-    },
-    async closeSession(input) {
-      const snapshot = await runtime.open(input);
-      if (
-        snapshot.nextAction !== undefined ||
-        snapshot.status === "suspended"
-      ) {
-        await runtime.abort(input);
-      }
-    },
-  };
-}
-
-/** Durably receipts debugger commands without storing ACP payloads or responses. */
-async function _debugCommand(
-  store: StudioStore,
-  runtime: StudioPiSessionRuntime,
-  method: "step" | "continue",
-  input: PiAcpStepRequest | PiAcpContinueRequest,
-  execute: () => ReturnType<StudioPiSessionRuntime["step"]>
-) {
-  const fingerprint = JSON.stringify({ method, input });
-  const existing = store.transaction((tx) =>
-    tx.getCommandReceipt(input.sessionId, input.commandId)
-  );
-  if (existing !== undefined) {
-    if (existing.fingerprint !== fingerprint || existing.method !== method) {
-      throw new Error(
-        `Command "${input.commandId}" was already used with other input.`
-      );
-    }
-    return runtime.open({
-      sessionId: input.sessionId,
-      ...(input.lane === undefined ? {} : { lane: input.lane }),
-    });
-  }
-  const snapshot = await execute();
-  store.transaction((tx) =>
-    tx.insertCommandReceipt({
-      sessionId: input.sessionId,
-      commandId: input.commandId,
-      method,
-      fingerprint,
-      ...(snapshot.operationId === undefined
-        ? {}
-        : { operationId: snapshot.operationId }),
-      ...(snapshot.leafId === null ? {} : { leafId: snapshot.leafId }),
-      createdAt: Date.now(),
-    })
-  );
-  return snapshot;
-}
-
-/** Reads LLM Space prompt controls from ACP's reserved implementation metadata. */
-function _promptMetadata(meta: Readonly<Record<string, unknown>> | undefined): {
-  readonly fromMessageId: string;
-  readonly mode: "step" | "continue";
-} {
-  const value = meta?.["llm-space.dev"];
-  if (!_isRecord(value) || typeof value.fromMessageId !== "string") {
-    throw new Error(
-      "ACP Playground prompt requires llm-space.dev.fromMessageId."
-    );
-  }
-  if (value.mode !== "step" && value.mode !== "continue") {
-    throw new Error(
-      "ACP Playground prompt requires a valid llm-space.dev.mode."
-    );
-  }
-  return { fromMessageId: value.fromMessageId, mode: value.mode };
+  return Object.assign(application, { close, dispose: close });
 }
 
 /** Restores only the tools frozen in the operation's immutable binding. */

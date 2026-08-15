@@ -39,23 +39,6 @@ export async function setSkillHidden(
   return skillsClient.setHidden(runtimeId, { path, skillName, hidden });
 }
 
-export async function setPluginSkillHidden(
-  pluginId: string,
-  skillName: string,
-  hidden: boolean,
-  runtimeId?: RuntimeId
-): Promise<SkillsSettings> {
-  return skillsClient.setPluginHidden(runtimeId, { pluginId, skillName, hidden });
-}
-
-export async function setAllPluginSkillsHidden(
-  pluginId: string,
-  hidden: boolean,
-  runtimeId?: RuntimeId
-): Promise<SkillsSettings> {
-  return skillsClient.setAllPluginHidden(runtimeId, pluginId, hidden);
-}
-
 export async function setAllSkillsHidden(
   path: string,
   hidden: boolean,
@@ -75,12 +58,6 @@ export async function listAvailableSkills(
   runtimeId?: RuntimeId
 ): Promise<SkillInfo[]> {
   return skillsClient.listAvailable(runtimeId);
-}
-
-export async function listPluginSkills(
-  runtimeId?: RuntimeId
-): Promise<SkillInfo[]> {
-  return skillsClient.listPlugin(runtimeId);
 }
 
 export async function readSkill(

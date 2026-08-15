@@ -110,7 +110,10 @@ export function ShareThreadDialog({
     setDescription("");
     setTitle(threadTitleFromPath(path));
     void flow.prefillTitle(
-      (target) => readShareThread(target.runtimeId, target.path),
+      (target) =>
+        readShareThread(_playgroundId(target.path)).then(
+          (snapshot) => snapshot.thread
+        ),
       setTitle
     );
   }, [flow, open, path, targetCommit]);
@@ -129,7 +132,7 @@ export function ShareThreadDialog({
       void flow.publish(
         transaction,
         (snapshot) =>
-          shareThread(snapshot.runtimeId, snapshot.path, {
+          shareThread(_playgroundId(snapshot.path), {
             title: snapshot.title,
             description: snapshot.description,
           }),
@@ -352,6 +355,14 @@ export function ShareThreadDialog({
       />
     </>
   );
+}
+
+function _playgroundId(path: string): string {
+  const prefix = "playgrounds/";
+  if (!path.startsWith(prefix) || path.length === prefix.length) {
+    throw new Error("Only durable Playgrounds can be shared.");
+  }
+  return path.slice(prefix.length);
 }
 
 /** Theme-aware HTML illustration of the read-only page the link opens. */

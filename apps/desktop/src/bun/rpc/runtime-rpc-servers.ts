@@ -1,6 +1,5 @@
 import type { RpcServer } from "../../shared/namespaced-rpc";
 import {
-  AGENT_EXECUTION_RPC,
   BUILTIN_TOOLS_RPC,
   MCP_RPC,
   MODELS_RPC,
@@ -10,8 +9,6 @@ import {
   SEARCH_RPC,
   SKILLS_RPC,
   WORKSPACE_RPC,
-  type AgentExecutionRpc,
-  type AgentExecutionStreams,
   type BuiltinToolsRequests,
   type BuiltinToolsRpc,
   type McpRequests,
@@ -32,7 +29,6 @@ import {
   type WorkspaceRpc,
 } from "../../shared/runtime-rpc";
 import type {
-  AgentExecutionApplication,
   BuiltinToolsApplication,
   McpApplication,
   ModelsApplication,
@@ -114,12 +110,4 @@ export class SkillsRpcServer implements RpcServer<SkillsRpc> {
   readonly requests: SkillsRequests;
   readonly streams = {};
   constructor(application: SkillsApplication) { this.requests = application; }
-}
-
-/** Transitional typed stream adapter for legacy Thread execution. */
-export class AgentExecutionRpcServer implements RpcServer<AgentExecutionRpc> {
-  readonly namespace = AGENT_EXECUTION_RPC;
-  readonly requests = {};
-  readonly streams: AgentExecutionStreams;
-  constructor(application: AgentExecutionApplication) { this.streams = application; }
 }

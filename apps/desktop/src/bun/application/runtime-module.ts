@@ -1,3 +1,4 @@
+import type { ModelManager } from "@llm-space/runtime/models";
 import type { RuntimeRouter } from "@llm-space/runtime/runtime";
 import { ContainerModule, type ResolutionContext } from "inversify";
 
@@ -8,8 +9,8 @@ import {
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
 import { desktopToken, PROCESS_TOKENS } from "../di/tokens";
+import { AuxiliaryGenerationRpcServer } from "../rpc/auxiliary-generation-rpc-server";
 import {
-  AgentExecutionRpcServer,
   BuiltinToolsRpcServer,
   McpRpcServer,
   ModelsRpcServer,
@@ -21,9 +22,8 @@ import {
   WorkspaceRpcServer,
 } from "../rpc/runtime-rpc-servers";
 
+import { AuxiliaryGenerationApplication } from "./auxiliary-generation-application";
 import {
-  AgentExecutionApplicationImpl,
-  type AgentExecutionApplication,
   BuiltinToolsApplicationImpl,
   type BuiltinToolsApplication,
   McpApplicationImpl,
@@ -45,6 +45,10 @@ import {
 } from "./runtime-applications";
 
 export const RUNTIME_APPLICATION_TOKENS = {
+  auxiliaryGeneration: desktopToken<AuxiliaryGenerationApplication>(
+    "runtime",
+    "auxiliary-generation-application"
+  ),
   runtimes: desktopToken<RuntimesApplication>(
     "runtime",
     "runtimes-application"
@@ -66,15 +70,25 @@ export const RUNTIME_APPLICATION_TOKENS = {
   search: desktopToken<SearchApplication>("runtime", "search-application"),
   network: desktopToken<NetworkApplication>("runtime", "network-application"),
   skills: desktopToken<SkillsApplication>("runtime", "skills-application"),
-  agentExecution: desktopToken<AgentExecutionApplication>(
-    "runtime",
-    "agent-execution-application"
-  ),
 } as const;
 
 /** Register Runtime capability applications and their main-window RPC adapters. */
 export function runtimeApplicationsModule(): ContainerModule {
   return new ContainerModule(({ bind }) => {
+    bind<AuxiliaryGenerationApplication>(
+      RUNTIME_APPLICATION_TOKENS.auxiliaryGeneration
+    )
+      .toDynamicValue((context) => {
+        const modelManager = context.get<ModelManager>(
+          PROCESS_TOKENS.modelManager
+        );
+        return new AuxiliaryGenerationApplication({
+          models: () => modelManager.getAvailableModels(),
+          resolveConnection: ({ providerId, profileId }) =>
+            modelManager.resolveConnection({ providerId, profileId }),
+        });
+      })
+      .inSingletonScope();
     const router = (context: ResolutionContext) =>
       context.get<RuntimeRouter>(PROCESS_TOKENS.runtimeRouter);
     bind<RuntimesApplication>(RUNTIME_APPLICATION_TOKENS.runtimes)
@@ -116,16 +130,12 @@ export function runtimeApplicationsModule(): ContainerModule {
     bind<SkillsApplication>(RUNTIME_APPLICATION_TOKENS.skills)
       .toDynamicValue((context) => new SkillsApplicationImpl(router(context)))
       .inSingletonScope();
-    bind<AgentExecutionApplication>(RUNTIME_APPLICATION_TOKENS.agentExecution)
-      .toDynamicValue(
-        (context) => new AgentExecutionApplicationImpl(router(context))
-      )
-      .inSingletonScope();
   });
 }
 
 class RuntimeContribution implements RpcContributionApi {
   constructor(
+    private readonly _auxiliaryGeneration: AuxiliaryGenerationApplication,
     private readonly _runtimes: RuntimesApplication,
     private readonly _models: ModelsApplication,
     private readonly _workspace: WorkspaceApplication,
@@ -134,12 +144,14 @@ class RuntimeContribution implements RpcContributionApi {
     private readonly _builtinTools: BuiltinToolsApplication,
     private readonly _search: SearchApplication,
     private readonly _network: NetworkApplication,
-    private readonly _skills: SkillsApplication,
-    private readonly _agentExecution: AgentExecutionApplication
+    private readonly _skills: SkillsApplication
   ) {}
 
   /** Register the Runtime-owned request and stream namespaces. */
   registerRpc(rpc: RpcRegistry): void {
+    rpc.registerServer(
+      new AuxiliaryGenerationRpcServer(this._auxiliaryGeneration)
+    );
     rpc.registerServer(new RuntimesRpcServer(this._runtimes));
     rpc.registerServer(new ModelsRpcServer(this._models));
     rpc.registerServer(new WorkspaceRpcServer(this._workspace));
@@ -149,7 +161,6 @@ class RuntimeContribution implements RpcContributionApi {
     rpc.registerServer(new SearchRpcServer(this._search));
     rpc.registerServer(new NetworkRpcServer(this._network));
     rpc.registerServer(new SkillsRpcServer(this._skills));
-    rpc.registerServer(new AgentExecutionRpcServer(this._agentExecution));
   }
 }
 
@@ -162,6 +173,7 @@ export function runtimeContributionsModule(
       .toDynamicValue(
         () =>
           new RuntimeContribution(
+            scope.get(RUNTIME_APPLICATION_TOKENS.auxiliaryGeneration),
             scope.get(RUNTIME_APPLICATION_TOKENS.runtimes),
             scope.get(RUNTIME_APPLICATION_TOKENS.models),
             scope.get(RUNTIME_APPLICATION_TOKENS.workspace),
@@ -170,8 +182,7 @@ export function runtimeContributionsModule(
             scope.get(RUNTIME_APPLICATION_TOKENS.builtinTools),
             scope.get(RUNTIME_APPLICATION_TOKENS.search),
             scope.get(RUNTIME_APPLICATION_TOKENS.network),
-            scope.get(RUNTIME_APPLICATION_TOKENS.skills),
-            scope.get(RUNTIME_APPLICATION_TOKENS.agentExecution)
+            scope.get(RUNTIME_APPLICATION_TOKENS.skills)
           )
       )
       .inSingletonScope();

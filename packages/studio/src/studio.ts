@@ -1,23 +1,21 @@
 import { join } from "node:path";
 
 import type { Models, Tool as PiTool } from "@earendil-works/pi-ai";
-import type {
-  PiAcpContinueRequest,
-  PiAcpSessionBackend,
-  PiAcpStepRequest,
-} from "@llm-space/acp";
 import { loadAgent } from "@llm-space/agent/loader";
 import {
   closeRuntimeServices,
   createRuntimeToolContext,
   resolveAgentGeneration,
+  resolveAgentOperation,
+  resolveAgentPreview,
   type RuntimeServices,
 } from "@llm-space/agent/runtime";
+import type { SkillHandle } from "@llm-space/agent/skills";
 import {
   BunSqliteRuntimeBindingStore,
   BunSqliteSessionRepository,
   PiAssistantExecutor,
-  StudioPiSessionRuntime,
+  DurablePiRuntime,
   runtimeTool,
   type PiProviderConnection,
   type PiProviderConnectionInput,
@@ -27,13 +25,11 @@ import {
 
 import { GitSourceRevision } from "./git-source-revision";
 import type { StudioAgentSnapshot, StudioExecutableAgent } from "./pi-domain";
-import { assertPiPromptMatchesCoreUserMessage } from "./pi-message-projection";
 import {
   ProjectSource,
   type ProjectSourceNode,
   type ProjectSourceSnapshot,
 } from "./project-source";
-import type { StudioStore } from "./storage";
 import { createSqliteStudioStore } from "./storage/sqlite";
 import {
   createStudioApplication,
@@ -55,7 +51,6 @@ export interface CreateStudioOptions {
 /** Project-level Studio facade with source browsing and Pi Experiment execution. */
 export interface Studio extends StudioApplication {
   readonly agent: StudioAgentSnapshot;
-  readonly acpBackend: PiAcpSessionBackend;
   getSourceRevision(): Promise<string>;
   listSourceFiles(): Promise<readonly ProjectSourceNode[]>;
   readSourceFile(path: string): Promise<string>;
@@ -73,6 +68,7 @@ export async function createStudio(
 ): Promise<Studio> {
   const revision = new GitSourceRevision(options.projectRoot);
   const first = await _loadExecutable(options.projectRoot);
+  let currentExecutable = first;
   const databasePath = join(options.dataRoot, "studio.sqlite");
   const repository = new BunSqliteSessionRepository({ path: databasePath });
   let bindings: BunSqliteRuntimeBindingStore;
@@ -82,7 +78,15 @@ export async function createStudio(
     await repository.close();
     throw error;
   }
-  const resolveCurrentAgent = () => _loadExecutable(options.projectRoot);
+  const resolveCurrentAgent = async (input?: {
+    readonly sessionId: string;
+    readonly operationId: string;
+    readonly messages: readonly unknown[];
+  }) => {
+    const loaded = await _loadExecutable(options.projectRoot, input);
+    if (input !== undefined) currentExecutable = loaded;
+    return loaded;
+  };
   const resolveTools = async (): Promise<ReadonlyMap<string, RuntimeTool>> =>
     (await resolveCurrentAgent()).tools;
   const assistantExecutor = new PiAssistantExecutor({
@@ -92,17 +96,20 @@ export async function createStudio(
       : { resolveConnection: options.resolveConnection }),
     resolveTools: _modelTools,
   });
-  const runtime = new StudioPiSessionRuntime({
+  const runtime = new DurablePiRuntime({
     repository,
     bindings,
     assistantExecutor,
     resolveTools,
     createToolContext: ({ execution, signal }) =>
-      createRuntimeToolContext(options.runtimeServices, {
+      createRuntimeToolContext(
+        _withMountedSkills(options.runtimeServices, () => currentExecutable.skills),
+        {
         agentId: first.snapshot.agentSpecId,
         execution,
         signal,
-      }),
+        }
+      ),
   });
   let studioStore: ReturnType<typeof createSqliteStudioStore>;
   try {
@@ -122,11 +129,9 @@ export async function createStudio(
       ? {}
       : { generateId: options.generateId }),
   });
-  const acpBackend = _acpBackend(application, runtime, studioStore, options);
   return new StudioImpl(
     options,
     first.snapshot,
-    acpBackend,
     application,
     bindings,
     repository,
@@ -141,7 +146,6 @@ class StudioImpl implements Studio {
   constructor(
     private readonly _options: CreateStudioOptions,
     readonly agent: StudioAgentSnapshot,
-    readonly acpBackend: PiAcpSessionBackend,
     private readonly _application: StudioApplication,
     private readonly _bindings: BunSqliteRuntimeBindingStore,
     private readonly _repository: BunSqliteSessionRepository,
@@ -220,16 +224,31 @@ class StudioImpl implements Studio {
     return this._application.run(threadId, input);
   }
   stepRun(
+    threadId: string,
     operationId: string,
-    input: Parameters<StudioApplication["stepRun"]>[1]
+    input: Parameters<StudioApplication["stepRun"]>[2]
   ) {
-    return this._application.stepRun(operationId, input);
+    return this._application.stepRun(threadId, operationId, input);
   }
-  continueRun(operationId: string) {
-    return this._application.continueRun(operationId);
+  continueRun(
+    threadId: string,
+    operationId: string,
+    input: Parameters<StudioApplication["continueRun"]>[2]
+  ) {
+    return this._application.continueRun(threadId, operationId, input);
   }
-  cancelRun(operationId: string) {
-    return this._application.cancelRun(operationId);
+  resolveToolApproval(
+    threadId: string,
+    operationId: string,
+    input: Parameters<StudioApplication["resolveToolApproval"]>[2]
+  ) {
+    return this._application.resolveToolApproval(threadId, operationId, input);
+  }
+  cancelRun(threadId: string, operationId: string) {
+    return this._application.cancelRun(threadId, operationId);
+  }
+  inspectRun(threadId: string, operationId: string) {
+    return this._application.inspectRun(threadId, operationId);
   }
   events(
     threadId: string,
@@ -258,174 +277,22 @@ class StudioImpl implements Studio {
   }
 }
 
-/** Adapts Project Experiment metadata to the transport-neutral ACP edge. */
-function _acpBackend(
-  application: StudioApplication,
-  runtime: StudioPiSessionRuntime,
-  store: StudioStore,
-  options: CreateStudioOptions
-): PiAcpSessionBackend {
-  return {
-    create: () => runtime.createSession(),
-    async list() {
-      const threads = await application.listThreads();
-      return {
-        sessions: threads.map((thread) => ({
-          sessionId: thread.sessionId,
-          cwd: options.projectRoot,
-          title: thread.document.title,
-          updatedAt: new Date(thread.updatedAt).toISOString(),
-          _meta: { "llm-space.dev": { experimentId: thread.id } },
-        })),
-      };
-    },
-    inspect: (request) => runtime.readCommitted(request),
-    async prompt(input) {
-      input.signal.throwIfAborted();
-      const thread = (await application.listThreads()).find(
-        (candidate) => candidate.sessionId === input.sessionId
-      );
-      if (thread === undefined) {
-        throw new Error(
-          `Pi Session "${input.sessionId}" is not owned by an Experiment.`
-        );
-      }
-      const metadata = _promptMetadata(input.meta);
-      const message = thread.document.conversation.messages.find(
-        (candidate) => candidate.id === metadata.fromMessageId
-      );
-      if (message?.role !== "user") {
-        throw new Error(
-          `Studio operation input "${metadata.fromMessageId}" must be a user Message.`
-        );
-      }
-      assertPiPromptMatchesCoreUserMessage(input.messages, message);
-      await application.run(thread.id, metadata);
-      return runtime.open({ sessionId: input.sessionId, lane: thread.lane });
-    },
-    step: (input) =>
-      _debugCommand(store, runtime, "step", input, async () => {
-        const snapshot = await runtime.open(input);
-        if (snapshot.operationId === undefined) {
-          throw new Error(`Pi Session "${input.sessionId}" has no operation.`);
-        }
-        await application.stepRun(snapshot.operationId, {
-          commandId: input.commandId,
-          expectedActionId: input.expectedActionId,
-          kind: input.kind,
-        });
-        return runtime.open(input);
-      }),
-    continue: (input) =>
-      _debugCommand(store, runtime, "continue", input, async () => {
-        const snapshot = await runtime.open(input);
-        if (snapshot.operationId === undefined) {
-          throw new Error(`Pi Session "${input.sessionId}" has no operation.`);
-        }
-        await application.continueRun(snapshot.operationId);
-        return runtime.open(input);
-      }),
-    async abort(input) {
-      const snapshot = await runtime.open(input);
-      if (snapshot.operationId === undefined) return snapshot;
-      await application.cancelRun(snapshot.operationId);
-      return runtime.open(input);
-    },
-    async closeSession(input) {
-      const snapshot = await runtime.open(input);
-      if (
-        snapshot.nextAction !== undefined ||
-        snapshot.status === "suspended"
-      ) {
-        await runtime.abort(input);
-      }
-    },
-  };
-}
-
-/** Reads Experiment controls from ACP implementation metadata. */
-function _promptMetadata(meta: Readonly<Record<string, unknown>> | undefined): {
-  readonly fromMessageId: string;
-  readonly mode: "step" | "continue";
-  readonly modelOverride?: string;
-} {
-  const value = meta?.["llm-space.dev"];
-  if (!_isRecord(value) || typeof value.fromMessageId !== "string") {
-    throw new Error(
-      "ACP Experiment prompt requires llm-space.dev.fromMessageId."
-    );
-  }
-  if (value.mode !== "step" && value.mode !== "continue") {
-    throw new Error(
-      "ACP Experiment prompt requires a valid llm-space.dev.mode."
-    );
-  }
-  return {
-    fromMessageId: value.fromMessageId,
-    mode: value.mode,
-    ...(typeof value.modelOverride === "string"
-      ? { modelOverride: value.modelOverride }
-      : {}),
-  };
-}
-
-/** Receipts a debugger command without persisting ACP payload or response data. */
-async function _debugCommand(
-  store: StudioStore,
-  runtime: StudioPiSessionRuntime,
-  method: "step" | "continue",
-  input: PiAcpStepRequest | PiAcpContinueRequest,
-  execute: () => ReturnType<StudioPiSessionRuntime["step"]>
-) {
-  const fingerprint = JSON.stringify({ method, input });
-  const existing = store.transaction((tx) =>
-    tx.getCommandReceipt(input.sessionId, input.commandId)
-  );
-  if (existing !== undefined) {
-    if (existing.method !== method || existing.fingerprint !== fingerprint) {
-      throw new Error(
-        `Command "${input.commandId}" was already used with other input.`
-      );
-    }
-    return runtime.open({
-      sessionId: input.sessionId,
-      ...(input.lane === undefined ? {} : { lane: input.lane }),
-    });
-  }
-  const snapshot = await execute();
-  store.transaction((tx) =>
-    tx.insertCommandReceipt({
-      sessionId: input.sessionId,
-      commandId: input.commandId,
-      method,
-      fingerprint,
-      ...(snapshot.operationId === undefined
-        ? {}
-        : { operationId: snapshot.operationId }),
-      ...(snapshot.leafId === null ? {} : { leafId: snapshot.leafId }),
-      createdAt: Date.now(),
-    })
-  );
-  return snapshot;
-}
-
-/** Narrows ACP implementation metadata to a plain object. */
-function _isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 /** Loads current source into a Pi runtime snapshot and executable tool map. */
 async function _loadExecutable(
-  projectRoot: string
+  projectRoot: string,
+  operation?: {
+    readonly sessionId: string;
+    readonly operationId: string;
+    readonly messages: readonly unknown[];
+  }
 ): Promise<StudioExecutableAgent> {
   const definition = await resolveAgentGeneration(
     await loadAgent({ startPath: projectRoot })
   );
-  if (typeof definition.model !== "string") {
-    throw new Error(
-      `Agent "${definition.agentId}" requires a static provider/model string.`
-    );
-  }
+  const resolved =
+    operation === undefined
+      ? await resolveAgentPreview(definition)
+      : await resolveAgentOperation(definition, operation);
   const tools = new Map<string, RuntimeTool>();
   const snapshots = [...definition.tools.entries()].map(([name, tool]) => {
     const implementationId = `source:${definition.generationId}:${name}`;
@@ -456,11 +323,31 @@ async function _loadExecutable(
     snapshot: {
       agentSpecId: definition.agentId,
       sourceRevision: definition.generationId,
-      model: definition.model,
-      instructions: definition.instructions,
+      model: resolved.model,
+      instructions: resolved.instructions,
       tools: snapshots,
     },
+    skills: resolved.skills,
     tools,
+  };
+}
+
+function _withMountedSkills(
+  services: RuntimeServices,
+  current: () => ReadonlyMap<string, SkillHandle>
+): RuntimeServices {
+  return {
+    ...services,
+    skills: {
+      resolve(input) {
+        const mounted = current().get(input.identifier);
+        if (mounted !== undefined) return mounted;
+        if (services.skills !== undefined) return services.skills.resolve(input);
+        throw new Error(
+          `Agent "${input.agentId}" does not mount Skill "${input.identifier}".`
+        );
+      },
+    },
   };
 }
 

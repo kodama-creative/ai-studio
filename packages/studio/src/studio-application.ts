@@ -2,9 +2,13 @@ import type {
   PiOperationSnapshot,
   PiSessionSnapshot,
   RuntimeBinding,
-  StudioPiSessionRuntime,
+  DurablePiRuntime,
 } from "@llm-space/pi-runtime";
 
+import {
+  executeDebugCommand,
+  readDebugCommandReceipt,
+} from "./debug-command";
 import type {
   StudioEventCursor,
   StudioExperimentRecord,
@@ -27,9 +31,11 @@ import {
   STUDIO_PI_LANE,
   STUDIO_PI_RUNTIME_FORMAT_VERSION,
   type StudioAgentSnapshot,
+  type StudioContinueInput,
   type StudioConversation,
   type StudioExecutableAgent,
   type StudioOperationReference,
+  type StudioToolApprovalInput,
 } from "./pi-domain";
 import {
   coreMessagesToPi,
@@ -38,10 +44,14 @@ import {
 import type { StudioStore } from "./storage";
 
 export interface CreateStudioApplicationOptions {
-  readonly runtime: StudioPiSessionRuntime;
+  readonly runtime: DurablePiRuntime;
   readonly store: StudioStore;
   /** Loads current project source for every newly admitted operation. */
-  readonly resolveCurrentAgent: () => Promise<StudioExecutableAgent>;
+  readonly resolveCurrentAgent: (input?: {
+    readonly sessionId: string;
+    readonly operationId: string;
+    readonly messages: readonly unknown[];
+  }) => Promise<StudioExecutableAgent>;
   readonly clock?: () => number;
   readonly generateId?: (prefix: string) => string;
 }
@@ -77,11 +87,22 @@ export interface StudioApplication {
   ): Promise<StudioThread>;
   run(threadId: string, input: StudioRunInput): Promise<StudioRunReceipt>;
   stepRun(
+    threadId: string,
     operationId: string,
     input: StudioStepRunInput
   ): Promise<StudioRunReceipt>;
-  continueRun(operationId: string): Promise<StudioRunReceipt>;
-  cancelRun(operationId: string): Promise<void>;
+  continueRun(
+    threadId: string,
+    operationId: string,
+    input: StudioContinueInput
+  ): Promise<StudioRunReceipt>;
+  resolveToolApproval(
+    threadId: string,
+    operationId: string,
+    input: StudioToolApprovalInput
+  ): Promise<StudioRunReceipt>;
+  cancelRun(threadId: string, operationId: string): Promise<void>;
+  inspectRun(threadId: string, operationId: string): Promise<PiSessionSnapshot>;
   events(
     threadId: string,
     cursor?: StudioEventCursor
@@ -389,17 +410,22 @@ class StudioApplicationImpl implements StudioApplication {
   ): Promise<StudioRunReceipt> {
     this._requireOpen();
     let experiment = this._requireExperiment(threadId);
+    if (input.mode !== undefined) {
+      const operationId = readDebugCommandReceipt({
+        store: this._options.store,
+        sessionId: experiment.sessionId,
+        commandId: input.commandId,
+        method: input.mode,
+        input,
+      });
+      if (operationId !== undefined) {
+        return { sessionId: experiment.sessionId, operationId };
+      }
+    }
     const view = await this._composeThread(experiment);
     if (view.operationId !== undefined) {
       throw new Error(`Studio Thread "${threadId}" has an active operation.`);
     }
-    const currentAgent = await this._options.resolveCurrentAgent();
-    const effectiveAgent: StudioAgentSnapshot = {
-      ...structuredClone(currentAgent.snapshot),
-      ...(input.modelOverride === undefined
-        ? {}
-        : { model: input.modelOverride }),
-    };
     const messages = view.document.conversation.messages;
     const inputIndex = messages.findIndex(
       (message) => message.id === input.fromMessageId
@@ -416,18 +442,37 @@ class StudioApplicationImpl implements StudioApplication {
     });
     experiment = prepared.experiment;
     const operationId = this._generateId("operation");
-    const binding = _runtimeBinding(effectiveAgent);
+    const operationMessages = coreMessagesToPi(
+      [...prepared.baseMessages, inputMessage],
+      _runtimeBinding(view.document.agent).model,
+      this._clock()
+    );
+    let effectiveAgent: StudioAgentSnapshot | undefined;
     let snapshot = await this._options.runtime.start({
       operationId,
       sessionId: experiment.sessionId,
       lane: experiment.lane,
-      messages: coreMessagesToPi(
-        [...prepared.baseMessages, inputMessage],
-        binding.model,
-        this._clock()
-      ),
-      binding,
+      messages: operationMessages,
+      binding: async () => {
+        const currentAgent = await this._options.resolveCurrentAgent({
+          sessionId: experiment.sessionId,
+          operationId,
+          messages: operationMessages,
+        });
+        effectiveAgent = {
+          ...structuredClone(currentAgent.snapshot),
+          ...(input.modelOverride === undefined
+            ? {}
+            : { model: input.modelOverride }),
+        };
+        return _runtimeBinding(effectiveAgent);
+      },
     });
+    if (effectiveAgent === undefined) {
+      throw new Error(
+        `Studio operation "${operationId}" did not resolve its Agent binding.`
+      );
+    }
     const { draft: _consumedDraft, ...committedExperiment } = experiment;
     void _consumedDraft;
     const next: StudioExperimentRecord = {
@@ -457,17 +502,48 @@ class StudioApplicationImpl implements StudioApplication {
       sessionId: experiment.sessionId,
     });
     if (input.mode === "continue") {
-      snapshot = await this._options.runtime.continue({
-        sessionId: experiment.sessionId,
-        lane: experiment.lane,
-      });
+      snapshot =
+        (await executeDebugCommand({
+          store: this._options.store,
+          sessionId: experiment.sessionId,
+          operationId,
+          commandId: input.commandId,
+          method: "continue",
+          input,
+          clock: this._clock,
+          execute: () =>
+            this._options.runtime.continue({
+              sessionId: experiment.sessionId,
+              lane: experiment.lane,
+            }),
+        })) ??
+        (await this._options.runtime.open({
+          sessionId: experiment.sessionId,
+          lane: experiment.lane,
+        }));
     } else if (input.mode === "step" && snapshot.nextAction !== undefined) {
-      snapshot = await this._options.runtime.step({
-        sessionId: experiment.sessionId,
-        lane: experiment.lane,
-        expectedActionId: snapshot.nextAction.id,
-        kind: snapshot.nextAction.kind,
-      });
+      const action = snapshot.nextAction;
+      snapshot =
+        (await executeDebugCommand({
+          store: this._options.store,
+          sessionId: experiment.sessionId,
+          operationId,
+          commandId: input.commandId,
+          method: "step",
+          input,
+          clock: this._clock,
+          execute: () =>
+            this._options.runtime.step({
+              sessionId: experiment.sessionId,
+              lane: experiment.lane,
+              expectedActionId: action.id,
+              kind: action.kind,
+            }),
+        })) ??
+        (await this._options.runtime.open({
+          sessionId: experiment.sessionId,
+          lane: experiment.lane,
+        }));
     }
     await this._recordSnapshot(threadId, snapshot);
     return { sessionId: experiment.sessionId, operationId };
@@ -475,37 +551,84 @@ class StudioApplicationImpl implements StudioApplication {
 
   /** Releases exactly one stable semantic action for an owned Pi operation. */
   async stepRun(
+    threadId: string,
     operationId: string,
     input: StudioStepRunInput
   ): Promise<StudioRunReceipt> {
     this._requireOpen();
-    const owner = this._requireOperation(operationId);
-    const snapshot = await this._options.runtime.step({
+    const owner = this._requireOperation(threadId, operationId);
+    const snapshot = await executeDebugCommand({
+      store: this._options.store,
       sessionId: owner.reference.sessionId,
-      lane: owner.reference.lane,
-      expectedActionId: input.expectedActionId,
-      kind: input.kind,
+      operationId,
+      commandId: input.commandId,
+      method: "step",
+      input,
+      clock: this._clock,
+      execute: () =>
+        this._options.runtime.step({
+          sessionId: owner.reference.sessionId,
+          lane: owner.reference.lane,
+          expectedActionId: input.expectedActionId,
+          kind: input.kind,
+        }),
     });
-    await this._recordSnapshot(owner.threadId, snapshot);
+    if (snapshot !== undefined) {
+      await this._recordSnapshot(owner.threadId, snapshot);
+    }
     return { sessionId: owner.reference.sessionId, operationId };
   }
 
   /** Drives the same owned Pi operation to its next durable stop state. */
-  async continueRun(operationId: string): Promise<StudioRunReceipt> {
+  async continueRun(
+    threadId: string,
+    operationId: string,
+    input: StudioContinueInput
+  ): Promise<StudioRunReceipt> {
     this._requireOpen();
-    const owner = this._requireOperation(operationId);
-    const snapshot = await this._options.runtime.continue({
+    const owner = this._requireOperation(threadId, operationId);
+    const snapshot = await executeDebugCommand({
+      store: this._options.store,
+      sessionId: owner.reference.sessionId,
+      operationId,
+      commandId: input.commandId,
+      method: "continue",
+      input,
+      clock: this._clock,
+      execute: () =>
+        this._options.runtime.continue({
+          sessionId: owner.reference.sessionId,
+          lane: owner.reference.lane,
+        }),
+    });
+    if (snapshot !== undefined) {
+      await this._recordSnapshot(owner.threadId, snapshot);
+    }
+    return { sessionId: owner.reference.sessionId, operationId };
+  }
+
+  /** Commits a user decision for the owned operation's pending tool approval. */
+  async resolveToolApproval(
+    threadId: string,
+    operationId: string,
+    input: StudioToolApprovalInput
+  ): Promise<StudioRunReceipt> {
+    this._requireOpen();
+    const owner = this._requireOperation(threadId, operationId);
+    const snapshot = await this._options.runtime.resolveToolApproval({
       sessionId: owner.reference.sessionId,
       lane: owner.reference.lane,
+      toolCallId: input.toolCallId,
+      approved: input.approved,
     });
     await this._recordSnapshot(owner.threadId, snapshot);
     return { sessionId: owner.reference.sessionId, operationId };
   }
 
   /** Persists cancellation for the owning Pi Session and emits its projection. */
-  async cancelRun(operationId: string): Promise<void> {
+  async cancelRun(threadId: string, operationId: string): Promise<void> {
     this._requireOpen();
-    const owner = this._requireOperation(operationId);
+    const owner = this._requireOperation(threadId, operationId);
     const snapshot = await this._options.runtime.abort({
       sessionId: owner.reference.sessionId,
       lane: owner.reference.lane,
@@ -513,7 +636,20 @@ class StudioApplicationImpl implements StudioApplication {
     await this._recordSnapshot(owner.threadId, snapshot);
   }
 
-  /** Replays Studio product events; execution detail itself travels over ACP. */
+  /** Reads the current durable debugger state for an owned operation. */
+  async inspectRun(
+    threadId: string,
+    operationId: string
+  ): Promise<PiSessionSnapshot> {
+    this._requireOpen();
+    const owner = this._requireOperation(threadId, operationId);
+    return this._options.runtime.open({
+      sessionId: owner.reference.sessionId,
+      lane: owner.reference.lane,
+    });
+  }
+
+  /** Replays Studio product events after committed Pi execution changes. */
   async *events(
     threadId: string,
     cursor: StudioEventCursor = {}
@@ -728,24 +864,21 @@ class StudioApplicationImpl implements StudioApplication {
   }
 
   /** Finds the Experiment and reference that own one Pi operation identity. */
-  private _requireOperation(operationId: string): {
+  private _requireOperation(threadId: string, operationId: string): {
     readonly threadId: string;
     readonly reference: StudioOperationReference;
   } {
-    for (const experiment of this._options.store.transaction((tx) =>
-      tx.listExperiments()
-    )) {
-      const reference = this._options.store.transaction((tx) =>
-        tx
-          .listOperationReferences(experiment.id)
-          .find((candidate) => candidate.operationId === operationId)
-      );
-      if (reference !== undefined) {
-        return { threadId: experiment.id, reference };
-      }
+    this._requireExperiment(threadId);
+    const reference = this._options.store.transaction((tx) =>
+      tx
+        .listOperationReferences(threadId)
+        .find((candidate) => candidate.operationId === operationId)
+    );
+    if (reference !== undefined) {
+      return { threadId, reference };
     }
     throw new Error(
-      `Operation "${operationId}" does not belong to a Studio Thread.`
+      `Operation "${operationId}" does not belong to Studio Thread "${threadId}".`
     );
   }
 

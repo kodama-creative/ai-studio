@@ -27,7 +27,11 @@ export {
   playgroundToThread,
   threadToPlaygroundDocument,
 } from "./playground-adapter";
-export { assertPiPromptMatchesCoreUserMessage } from "./pi-message-projection";
+export type {
+  StudioContinueInput,
+  StudioToolApprovalInput,
+} from "./pi-domain";
+export { coreMessagesToPi } from "./pi-message-projection";
 export {
   createPlaygroundApplication,
   type CreatePlaygroundApplicationOptions,

@@ -533,6 +533,7 @@ export function ProjectPage({ project }: { project: AgentProjectView }) {
         ) : (
           <_ProjectThreadPlaygroundPane
             client={client}
+            projectId={project.id}
             history={runHistory.get(visibleThread.id) ?? []}
             evaluationMetadata={
               evaluationMetadata.get(visibleThread.id) ?? {
@@ -552,6 +553,7 @@ export function ProjectPage({ project }: { project: AgentProjectView }) {
 
 function _ProjectThreadPlaygroundPane({
   client,
+  projectId,
   history,
   evaluationMetadata,
   thread,
@@ -559,6 +561,7 @@ function _ProjectThreadPlaygroundPane({
   onSettled,
 }: {
   readonly client: ProjectStudioTransport;
+  readonly projectId: string;
   readonly history: readonly StudioRunHistoryEntry[];
   readonly evaluationMetadata: StudioEvaluationMetadata;
   readonly thread: StudioThread;
@@ -622,13 +625,14 @@ function _ProjectThreadPlaygroundPane({
     () =>
       createProjectThreadExecutionRuntime({
         client,
+        projectId,
         threadId: thread.id,
         getThread: () => threadRef.current,
         onThread: publishThread,
         beforeExecute: () => saveChain.current,
         onSettled,
       }),
-    [client, onSettled, publishThread, thread.id]
+    [client, onSettled, projectId, publishThread, thread.id]
   );
   return (
     <ThreadPlayground

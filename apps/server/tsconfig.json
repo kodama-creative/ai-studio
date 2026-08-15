@@ -1,9 +1,0 @@
-{
-  "extends": "../../tsconfig.base.json",
-  "compilerOptions": {
-    "types": ["bun"],
-    "lib": ["ESNext", "DOM"],
-    "noUncheckedIndexedAccess": false
-  },
-  "include": ["src", "scripts"]
-}

@@ -1,12 +1,8 @@
 import {
-  reduceMessages,
-  streamThread,
   uuid,
-  type AssistantMessage,
   type Message,
   type ModelConfig,
   type ReasoningLevel,
-  type ReducedMessageContent,
 } from "@llm-space/core";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -16,7 +12,6 @@ import { createFrameThrottle } from "@llm-space/ui/lib/frame-throttle";
 import { useDefaultTextGenerationModel } from "../model-provider";
 
 import { useGetProviderProfileId } from "./model/provider-profile-selection-provider";
-import { useThreadStore } from "./stores/thread-store";
 import { PREVIEW_THROTTLE_MS } from "./streaming-preview";
 
 const MAX_TOKENS = 10240;
@@ -70,10 +65,8 @@ export function useStreamText({
   const [error, setError] = useState<string | null>(null);
   const [streaming, setStreaming] = useState(false);
 
-  const { createTransport } = useHostServices();
-  const runtimeId = useThreadStore((state) => state.runtimeId);
-  const createTransportRef = useRef(createTransport);
-  const runtimeIdRef = useRef(runtimeId);
+  const { auxiliaryGeneration } = useHostServices();
+  const auxiliaryGenerationRef = useRef(auxiliaryGeneration);
 
   const defaultModel = useDefaultTextGenerationModel();
   const getProfileId = useGetProviderProfileId();
@@ -94,8 +87,7 @@ export function useStreamText({
   useEffect(() => {
     argsRef.current = { systemPrompt, messages, userPrompt, reasoning, model };
     defaultModelRef.current = defaultModel;
-    createTransportRef.current = createTransport;
-    runtimeIdRef.current = runtimeId;
+    auxiliaryGenerationRef.current = auxiliaryGeneration;
   });
 
   const controllerRef = useRef<AbortController | null>(null);
@@ -126,18 +118,13 @@ export function useStreamText({
       setError(null);
       setStreaming(true);
 
-      let streamingMessage: AssistantMessage | null = null;
-      let content: ReducedMessageContent[] = [];
-      const lastText = () => {
-        const parts = streamingMessage?.content;
-        return parts?.[parts.length - 1]?.text ?? "";
-      };
+      let generatedText = "";
 
       // Throttle text updates (frame-aligned, at most one per
       // PREVIEW_THROTTLE_MS) — see createFrameThrottle.
       const preview = createFrameThrottle(() => {
         if (controllerRef.current === controller) {
-          setText(lastText());
+          setText(generatedText);
         }
       }, PREVIEW_THROTTLE_MS);
 
@@ -165,11 +152,8 @@ export function useStreamText({
         },
       };
 
-      const owningRuntimeId = runtimeIdRef.current;
-      const transport = owningRuntimeId
-        ? createTransportRef.current(owningRuntimeId)
-        : null;
-      if (!transport) {
+      const generation = auxiliaryGenerationRef.current;
+      if (!generation) {
         setError("Text generation is not available here.");
         setStreaming(false);
         controllerRef.current = null;
@@ -177,25 +161,20 @@ export function useStreamText({
       }
       const profileId = getProfileId(runModel.provider);
       try {
-        const response = streamThread(
-          { context, model: runModel },
-          {
-            signal: controller.signal,
-            transport,
-            connection: {
-              providerId: runModel.provider,
-              ...(profileId ? { profileId } : {}),
-            },
+        for await (const event of generation.generate({
+          systemPrompt: context.systemPrompt,
+          messages: context.messages,
+          model: runModel,
+          ...(profileId ? { profileId } : {}),
+          signal: controller.signal,
+        })) {
+          if (event.type === "text.delta") {
+            generatedText += event.delta;
+            preview.schedule();
+          } else {
+            generatedText = event.text;
+            preview.schedule();
           }
-        );
-        for await (const chunk of response) {
-          const reduced = reduceMessages(chunk, { streamingMessage, content });
-          if (!reduced) {
-            continue;
-          }
-          streamingMessage = reduced.message;
-          content = reduced.content;
-          preview.schedule();
         }
       } catch (e) {
         if (!controller.signal.aborted) {
@@ -208,7 +187,7 @@ export function useStreamText({
         preview.cancel();
         if (controllerRef.current === controller) {
           // Emit the final text directly so a dropped frame can't leave it stale.
-          setText(lastText());
+          setText(generatedText);
           setStreaming(false);
           controllerRef.current = null;
         }

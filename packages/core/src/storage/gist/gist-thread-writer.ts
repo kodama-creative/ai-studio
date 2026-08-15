@@ -3,6 +3,7 @@ import type {
   WritableThreadStorage,
 } from "../../types/storage/thread-storage";
 import { normalizeThread, type Thread } from "../../types/threads/thread";
+import type { PortableThreadSnapshot } from "../../types/threads/thread-snapshot";
 
 import {
   GITHUB_API_BASE,
@@ -86,6 +87,29 @@ export class GistThreadWriter implements WritableThreadStorage {
     return id
       ? this._update(id, content, description, token)
       : this._create(normalized, content, description, token);
+  }
+
+  /** Publish one versioned Pi lane/leaf projection without flattening its identity. */
+  async writeSnapshot(
+    snapshot: PortableThreadSnapshot,
+    options: { description?: string } = {}
+  ): Promise<ThreadLocator> {
+    const token = await this._getToken();
+    if (!token) {
+      throw new Error("GitHub sign-in required to save to a gist.");
+    }
+    const thread = normalizeThread(snapshot.thread);
+    const content = JSON.stringify(
+      { ...snapshot, thread: { ...thread, runHistory: [] } },
+      null,
+      2
+    );
+    return this._create(
+      thread,
+      content,
+      options.description ?? thread.title ?? "",
+      token
+    );
   }
 
   private async _create(

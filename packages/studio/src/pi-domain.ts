@@ -1,3 +1,4 @@
+import type { SkillHandle } from "@llm-space/agent/skills";
 import type { JsonValue, Message } from "@llm-space/core";
 import type { PiSessionSnapshot, RuntimeTool } from "@llm-space/pi-runtime";
 
@@ -32,6 +33,7 @@ export interface StudioAgentSnapshot {
 /** Current source-backed Agent plus host executors resolved by Studio. */
 export interface StudioExecutableAgent {
   readonly snapshot: StudioAgentSnapshot;
+  readonly skills: ReadonlyMap<string, SkillHandle>;
   readonly tools: ReadonlyMap<string, RuntimeTool>;
 }
 
@@ -57,6 +59,11 @@ export interface StudioStepInput {
 
 export interface StudioContinueInput {
   readonly commandId: string;
+}
+
+export interface StudioToolApprovalInput {
+  readonly toolCallId: string;
+  readonly approved: boolean;
 }
 
 /** Stable Studio ordering/evaluation target over one Pi operation. */

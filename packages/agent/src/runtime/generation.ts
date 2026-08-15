@@ -3,6 +3,11 @@ import type {
   AgentManifestSource,
   LoadAgentResult,
 } from "../loader";
+import type {
+  DynamicResolveContext,
+  DynamicSentinel,
+} from "../shared/types";
+import type { SkillHandle } from "../skills";
 import type { ToolDefinition } from "../tools";
 
 export type AgentGeneration = Pick<
@@ -23,9 +28,31 @@ export interface PreparedTool {
 export interface PreparedAgentDefinition {
   readonly agentId: string;
   readonly generationId: string;
-  readonly instructions: readonly string[];
+  readonly instructions: readonly PreparedInstructionsDefinition[];
   readonly model: AgentModelDefinition;
+  readonly skills: ReadonlyMap<string, PreparedSkillDefinition>;
   readonly tools: ReadonlyMap<string, PreparedTool>;
+}
+
+export type PreparedInstructionsDefinition =
+  | string
+  | DynamicSentinel<unknown, unknown>;
+
+export type PreparedSkillDefinition =
+  | SkillHandle
+  | DynamicSentinel<unknown, unknown>;
+
+export interface AgentOperationResolutionInput {
+  readonly sessionId: string;
+  readonly operationId: string;
+  readonly messages: readonly unknown[];
+  readonly channel?: DynamicResolveContext["channel"];
+}
+
+export interface ResolvedAgentOperationDefinition {
+  readonly model: string;
+  readonly instructions: readonly string[];
+  readonly skills: ReadonlyMap<string, SkillHandle>;
 }
 
 export class AgentGenerationResolutionError extends Error {
@@ -61,21 +88,11 @@ export async function resolveAgentGeneration(
       `Agent "${generation.manifest.agentId}" does not define a model.`
     );
   }
-  if (_asRecordOrEmpty(agent.model).kind === "llm-space:dynamic") {
-    throw new AgentGenerationResolutionError(
-      "Dynamic model selection is not supported by the Pi runtime."
-    );
-  }
-
   const instructions = await Promise.all(
     generation.manifest.instructions.map(async (definition) => {
       if (definition.markdown !== undefined) return definition.markdown;
-      if (definition.dynamic === true) {
-        throw new AgentGenerationResolutionError(
-          `Dynamic instructions from "${definition.logicalPath}" are not supported yet.`
-        );
-      }
       const value = await _loadDefinition(generation, definition);
+      if (_isDynamic(value)) return value;
       const markdown = _asRecordOrEmpty(value).markdown;
       if (typeof markdown !== "string") {
         throw new AgentGenerationResolutionError(
@@ -92,11 +109,6 @@ export async function resolveAgentGeneration(
     if (!_isToolDefinition(value)) {
       throw new AgentGenerationResolutionError(
         `Tool "${source.name}" from "${source.logicalPath}" is not executable.`
-      );
-    }
-    if (value.approval !== undefined) {
-      throw new AgentGenerationResolutionError(
-        `Tool approval for "${source.name}" is not supported by the Pi runtime.`
       );
     }
     if (tools.has(source.name)) {
@@ -117,13 +129,102 @@ export async function resolveAgentGeneration(
     });
   }
 
+  const skills = new Map<string, PreparedSkillDefinition>();
+  for (const source of generation.manifest.skills) {
+    const value =
+      source.markdown === undefined
+        ? await _loadDefinition(generation, source)
+        : {
+            name: source.name,
+            description: source.description,
+            markdown: source.markdown,
+          };
+    const prepared = _isDynamic(value)
+      ? value
+      : _skillHandle(source.name, value, source.description);
+    if (skills.has(source.name)) {
+      throw new AgentGenerationResolutionError(
+        `Agent "${generation.manifest.agentId}" defines multiple skills named "${source.name}".`
+      );
+    }
+    skills.set(source.name, prepared);
+  }
+
   return {
     agentId: generation.manifest.agentId,
     generationId: generation.sourceFingerprint,
     instructions,
     model: agent.model,
+    skills,
     tools,
   };
+}
+
+/** Resolves Eve-compatible dynamic model/instructions for one operation only. */
+export async function resolveAgentOperation(
+  definition: PreparedAgentDefinition,
+  input: AgentOperationResolutionInput
+): Promise<ResolvedAgentOperationDefinition> {
+  const context: DynamicResolveContext = {
+    session: { id: input.sessionId },
+    channel: input.channel ?? {},
+    messages: input.messages,
+  };
+  const event = {
+    type: "turn.started" as const,
+    operationId: input.operationId,
+  };
+  return _resolvePreparedAgent(
+    definition,
+    (value) => _resolveDynamic(value, event, context),
+    input.operationId
+  );
+}
+
+/** Resolves static values and dynamic fallbacks without running event handlers. */
+export function resolveAgentPreview(
+  definition: PreparedAgentDefinition
+): Promise<ResolvedAgentOperationDefinition> {
+  return _resolvePreparedAgent(
+    definition,
+    (value) => Promise.resolve(_isDynamic(value) ? value.fallback : value),
+    "preview"
+  );
+}
+
+async function _resolvePreparedAgent(
+  definition: PreparedAgentDefinition,
+  resolve: (value: unknown) => Promise<unknown>,
+  operationId: string
+): Promise<ResolvedAgentOperationDefinition> {
+  const modelValue = await resolve(definition.model);
+  const selectedModel = _asRecordOrEmpty(modelValue).model ?? modelValue;
+  if (typeof selectedModel !== "string") {
+    throw new AgentGenerationResolutionError(
+      `Agent "${definition.agentId}" did not resolve a provider/model string for operation "${operationId}".`
+    );
+  }
+
+  const instructions = await Promise.all(
+    definition.instructions.map(async (prepared) => {
+      const value = await resolve(prepared);
+      const markdown =
+        typeof value === "string"
+          ? value
+          : _asRecordOrEmpty(value).markdown;
+      if (typeof markdown !== "string") {
+        throw new AgentGenerationResolutionError(
+          `Agent "${definition.agentId}" did not resolve instructions for operation "${operationId}".`
+        );
+      }
+      return markdown;
+    })
+  );
+  const skills = new Map<string, SkillHandle>();
+  for (const [name, prepared] of definition.skills) {
+    skills.set(name, _skillHandle(name, await resolve(prepared)));
+  }
+  return { model: selectedModel, instructions, skills };
 }
 
 function _assertSupportedManifestFeatures(generation: AgentGeneration): void {
@@ -131,7 +232,6 @@ function _assertSupportedManifestFeatures(generation: AgentGeneration): void {
   const unsupported = [
     ["connections", manifest.connections.length],
     ["hooks", manifest.hooks.length],
-    ["skills", manifest.skills.length],
     ["subagents", manifest.subagents.length],
     ["sandbox workspace", manifest.sandboxWorkspace.length],
     ["sandbox", manifest.sandbox === undefined ? 0 : 1],
@@ -145,6 +245,22 @@ function _assertSupportedManifestFeatures(generation: AgentGeneration): void {
       `Pi runtime does not yet support: ${active.join(", ")}.`
     );
   }
+}
+
+function _skillHandle(
+  name: string,
+  value: unknown,
+  fallbackDescription?: string
+): SkillHandle {
+  const record = _asRecordOrEmpty(value);
+  const description = record.description ?? fallbackDescription;
+  const markdown = record.markdown ?? record.instructions;
+  if (typeof description !== "string" || typeof markdown !== "string") {
+    throw new AgentGenerationResolutionError(
+      `Skill "${name}" must resolve a description and markdown.`
+    );
+  }
+  return { name, description, markdown };
 }
 
 async function _loadDefinition(
@@ -195,6 +311,24 @@ function _isToolDefinition(value: unknown): value is ToolDefinition {
     typeof record.inputSchema === "object" &&
     record.inputSchema !== null
   );
+}
+
+function _isDynamic(value: unknown): value is DynamicSentinel<unknown, unknown> {
+  return _asRecordOrEmpty(value).kind === "llm-space:dynamic";
+}
+
+async function _resolveDynamic(
+  value: unknown,
+  event: { readonly type: "turn.started"; readonly operationId: string },
+  context: DynamicResolveContext
+): Promise<unknown> {
+  if (!_isDynamic(value)) return value;
+  const handler = value.events["turn.started"];
+  const resolved =
+    handler === undefined ? undefined : await handler(event, context);
+  return resolved === undefined || resolved === null
+    ? value.fallback
+    : resolved;
 }
 
 function _asRecordOrEmpty(value: unknown): Readonly<Record<string, unknown>> {

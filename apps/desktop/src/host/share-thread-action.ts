@@ -8,12 +8,7 @@ interface HostShareThreadInput {
 }
 
 function _isRuntimeId(value: unknown): value is RuntimeId {
-  return (
-    value === "local" ||
-    (typeof value === "string" &&
-      value.startsWith("remote:") &&
-      value.length > "remote:".length)
-  );
+  return value === "local";
 }
 
 function _isHostShareThreadInput(

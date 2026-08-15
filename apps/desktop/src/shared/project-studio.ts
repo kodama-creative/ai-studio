@@ -62,7 +62,7 @@ export type ProjectStudioTransport = ProjectStudioRequests &
   ProjectStudioStreams;
 
 export const PROJECT_STUDIO_RPC = defineRpcNamespace<ProjectStudioRpc>(
-  "project",
+  "studio",
   { streams: ["watchSourceFiles", "events"], events: [] }
 );
 

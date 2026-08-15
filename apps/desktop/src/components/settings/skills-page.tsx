@@ -22,24 +22,19 @@ import {
   Loader2,
   MoreHorizontal,
   Plus,
-  Puzzle,
   Trash2,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { fsReveal } from "@/client/built-in-tools";
-import { subscribePluginsChanged } from "@/client/plugins";
 import {
   addSkillsPath,
   browseForSkillsPath,
   getSkillsSettings,
-  listPluginSkills,
   listSkills,
   removeSkillsPath,
   setAllSkillsHidden,
-  setAllPluginSkillsHidden,
-  setPluginSkillHidden,
   setSkillHidden,
 } from "@/client/skills";
 import type { RuntimeId } from "@/shared/runtime";
@@ -81,25 +76,16 @@ export function SkillsPage({ runtimeId }: { runtimeId: RuntimeId }) {
   const [settings, setSettings] = useState<SkillsSettings>({
     discoveryPaths: [],
   });
-  const [pluginSkills, setPluginSkills] = useState<SkillInfo[]>([]);
   const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null);
   // Bumped after a bulk enable/disable so the skills pane refetches.
   const [reloadToken, setReloadToken] = useState(0);
 
   const loadSources = useCallback(() => {
     let cancelled = false;
-    void Promise.all([
-      getSkillsSettings(runtimeId),
-      listPluginSkills(runtimeId),
-    ])
-      .then(([loadedSettings, availableSkills]) => {
+    void getSkillsSettings(runtimeId)
+      .then((loadedSettings) => {
         if (!cancelled) {
           setSettings(loadedSettings);
-          setPluginSkills(
-            availableSkills.filter(
-              (skill) => skill.source === "plugin" && skill.pluginId
-            )
-          );
         }
       })
       .catch(() => {
@@ -112,33 +98,13 @@ export function SkillsPage({ runtimeId }: { runtimeId: RuntimeId }) {
 
   useEffect(() => loadSources(), [loadSources]);
 
-  useEffect(() => {
-    if (runtimeId !== "local") return;
-    return subscribePluginsChanged(loadSources);
-  }, [loadSources, runtimeId]);
-
   const paths = settings.discoveryPaths;
-  const pluginGroups = useMemo(() => {
-    const groups = new Map<string, SkillInfo[]>();
-    for (const skill of pluginSkills) {
-      if (!skill.pluginId) continue;
-      const group = groups.get(skill.pluginId) ?? [];
-      group.push(skill);
-      groups.set(skill.pluginId, group);
-    }
-    return [...groups.entries()]
-      .map(([pluginId, skills]) => ({ pluginId, skills }))
-      .sort((a, b) => a.pluginId.localeCompare(b.pluginId));
-  }, [pluginSkills]);
   const sourceIds = useMemo(
-    () => [
-      ...paths.map((entry) => `folder:${entry.path}`),
-      ...pluginGroups.map((group) => `plugin:${group.pluginId}`),
-    ],
-    [paths, pluginGroups]
+    () => paths.map((entry) => `folder:${entry.path}`),
+    [paths]
   );
 
-  // Keep a valid selection as folders are added/removed or plugins change.
+  // Keep a valid selection as folders are added or removed.
   useEffect(() => {
     if (!selectedSourceId || !sourceIds.includes(selectedSourceId)) {
       setSelectedSourceId(sourceIds[0] ?? null);
@@ -147,11 +113,6 @@ export function SkillsPage({ runtimeId }: { runtimeId: RuntimeId }) {
 
   const selectedPath = selectedSourceId?.startsWith("folder:")
     ? selectedSourceId.slice("folder:".length)
-    : null;
-  const selectedPlugin = selectedSourceId?.startsWith("plugin:")
-    ? (pluginGroups.find(
-        (group) => group.pluginId === selectedSourceId.slice("plugin:".length)
-      ) ?? null)
     : null;
 
   const handleAdd = useCallback(async () => {
@@ -204,28 +165,6 @@ export function SkillsPage({ runtimeId }: { runtimeId: RuntimeId }) {
     [runtimeId]
   );
 
-  const handleSetAllPlugin = useCallback(
-    async (pluginId: string, hidden: boolean) => {
-      try {
-        await setAllPluginSkillsHidden(pluginId, hidden, runtimeId);
-        setPluginSkills((current) =>
-          current.map((skill) =>
-            skill.pluginId === pluginId ? { ...skill, enabled: !hidden } : skill
-          )
-        );
-      } catch (error) {
-        toast.error(
-          hidden ? "Failed to disable skills" : "Failed to enable skills",
-          {
-            description:
-              error instanceof Error ? error.message : "Please try again.",
-          }
-        );
-      }
-    },
-    [runtimeId]
-  );
-
   return (
     <SettingsPage
       className="flex size-full min-h-0"
@@ -238,24 +177,16 @@ export function SkillsPage({ runtimeId }: { runtimeId: RuntimeId }) {
     >
       <PathList
         paths={paths}
-        pluginGroups={pluginGroups}
         selectedSourceId={selectedSourceId}
         onSelect={setSelectedSourceId}
         onAdd={() => void handleAdd()}
         onRemove={(path) => void handleRemove(path)}
         onEnableAll={(path) => void handleSetAll(path, false)}
         onDisableAll={(path) => void handleSetAll(path, true)}
-        onEnableAllPlugin={(pluginId) =>
-          void handleSetAllPlugin(pluginId, false)
-        }
-        onDisableAllPlugin={(pluginId) =>
-          void handleSetAllPlugin(pluginId, true)
-        }
       />
       <PathSkills
         key={`${runtimeId}:${selectedSourceId}:${reloadToken}`}
         path={selectedPath}
-        plugin={selectedPlugin}
         runtimeId={runtimeId}
       />
     </SettingsPage>
@@ -264,26 +195,20 @@ export function SkillsPage({ runtimeId }: { runtimeId: RuntimeId }) {
 
 function PathList({
   paths,
-  pluginGroups,
   selectedSourceId,
   onSelect,
   onAdd,
   onRemove,
   onEnableAll,
   onDisableAll,
-  onEnableAllPlugin,
-  onDisableAllPlugin,
 }: {
   paths: SkillsSettings["discoveryPaths"];
-  pluginGroups: { pluginId: string; skills: SkillInfo[] }[];
   selectedSourceId: string | null;
   onSelect: (sourceId: string) => void;
   onAdd: () => void;
   onRemove: (path: string) => void;
   onEnableAll: (path: string) => void;
   onDisableAll: (path: string) => void;
-  onEnableAllPlugin: (pluginId: string) => void;
-  onDisableAllPlugin: (pluginId: string) => void;
 }) {
   const [listRef] = useAutoAnimation<HTMLDivElement>();
 
@@ -294,7 +219,7 @@ function PathList({
       </span>
 
       <ScrollArea className="min-h-0 grow">
-        {paths.length === 0 && pluginGroups.length === 0 ? (
+        {paths.length === 0 ? (
           <div className="text-muted-foreground px-2 py-6 text-center text-xs text-balance">
             No folders yet. Click the &quot;Add folder&quot; button below to get
             started.
@@ -312,18 +237,6 @@ function PathList({
                 onDisableAll={() => onDisableAll(entry.path)}
               />
             ))}
-            {pluginGroups.map((group) => (
-              <PluginSourceListItem
-                key={group.pluginId}
-                pluginId={group.pluginId}
-                skillCount={group.skills.length}
-                sourcePath={_parentPath(group.skills[0]?.path)}
-                selected={`plugin:${group.pluginId}` === selectedSourceId}
-                onSelect={() => onSelect(`plugin:${group.pluginId}`)}
-                onEnableAll={() => onEnableAllPlugin(group.pluginId)}
-                onDisableAll={() => onDisableAllPlugin(group.pluginId)}
-              />
-            ))}
           </div>
         )}
       </ScrollArea>
@@ -334,108 +247,6 @@ function PathList({
       </Button>
     </div>
   );
-}
-
-function PluginSourceListItem({
-  pluginId,
-  skillCount,
-  sourcePath,
-  selected,
-  onSelect,
-  onEnableAll,
-  onDisableAll,
-}: {
-  pluginId: string;
-  skillCount: number;
-  sourcePath: string | null;
-  selected: boolean;
-  onSelect: () => void;
-  onEnableAll: () => void;
-  onDisableAll: () => void;
-}) {
-  const [menuOpen, setMenuOpen] = useState(false);
-
-  return (
-    <div
-      role="button"
-      tabIndex={0}
-      aria-label={`Select skills from plugin ${pluginId}`}
-      onClick={onSelect}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          onSelect();
-        }
-      }}
-      className={cn(
-        "group flex w-full cursor-pointer items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs transition-colors",
-        selected ? "bg-muted font-medium" : "hover:bg-muted/50"
-      )}
-    >
-      <Puzzle className="text-muted-foreground size-4 shrink-0" />
-      <span className="min-w-0 grow">
-        <span className="block truncate" title={pluginId}>
-          Plugin · {pluginId}
-        </span>
-        <span className="text-muted-foreground block truncate text-[11px] font-normal">
-          {skillCount} {skillCount === 1 ? "skill" : "skills"}
-        </span>
-      </span>
-
-      <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
-        <DropdownMenuTrigger asChild>
-          <span
-            role="button"
-            tabIndex={0}
-            aria-label={`${pluginId} plugin skill actions`}
-            title={`${pluginId} plugin skill actions`}
-            className={cn(
-              "text-muted-foreground hover:bg-accent hover:text-foreground inline-flex size-5 shrink-0 items-center justify-center rounded",
-              menuOpen
-                ? "opacity-100"
-                : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-            )}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <MoreHorizontal className="size-4" />
-          </span>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent
-          align="end"
-          onClick={(event) => event.stopPropagation()}
-        >
-          {sourcePath && (
-            <>
-              <DropdownMenuItem
-                onSelect={() => void revealDiscoveryPath(sourcePath)}
-              >
-                <FolderOpen />
-                {REVEAL_LABEL}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-            </>
-          )}
-          <DropdownMenuItem onSelect={onEnableAll}>
-            <CheckCheck />
-            Enable all skills
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={onDisableAll}>
-            <Ban />
-            Disable all skills
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </div>
-  );
-}
-
-function _parentPath(inputPath: string | undefined): string | null {
-  if (!inputPath) return null;
-  const separator = Math.max(
-    inputPath.lastIndexOf("/"),
-    inputPath.lastIndexOf("\\")
-  );
-  return separator > 0 ? inputPath.slice(0, separator) : null;
 }
 
 function PathListItem({
@@ -539,21 +350,15 @@ function PathListItem({
 
 function PathSkills({
   path,
-  plugin,
   runtimeId,
 }: {
   path: string | null;
-  plugin: { pluginId: string; skills: SkillInfo[] } | null;
   runtimeId: RuntimeId;
 }) {
   const [skills, setSkills] = useState<SkillInfo[] | null>(null);
   const [listRef] = useAutoAnimation<HTMLDivElement>();
 
   useEffect(() => {
-    if (plugin) {
-      setSkills(plugin.skills);
-      return;
-    }
     if (!path) {
       setSkills([]);
       return;
@@ -574,11 +379,11 @@ function PathSkills({
     return () => {
       cancelled = true;
     };
-  }, [path, plugin, runtimeId]);
+  }, [path, runtimeId]);
 
   const handleToggle = useCallback(
     async (name: string, enabled: boolean) => {
-      if (!path && !plugin) {
+      if (!path) {
         return;
       }
       // Optimistically reflect the toggle.
@@ -586,14 +391,7 @@ function PathSkills({
         prev ? prev.map((s) => (s.name === name ? { ...s, enabled } : s)) : prev
       );
       try {
-        if (plugin) {
-          await setPluginSkillHidden(
-            plugin.pluginId,
-            name,
-            !enabled,
-            runtimeId
-          );
-        } else if (path) {
+        if (path) {
           await setSkillHidden(path, name, !enabled, runtimeId);
         }
       } catch (error) {
@@ -611,11 +409,11 @@ function PathSkills({
         });
       }
     },
-    [path, plugin, runtimeId]
+    [path, runtimeId]
   );
 
   const content = useMemo(() => {
-    if (!path && !plugin) {
+    if (!path) {
       return (
         <div className="text-muted-foreground flex size-full items-center justify-center text-sm">
           Select or add a source from the left sidebar
@@ -653,18 +451,12 @@ function PathSkills({
         ))}
       </div>
     );
-  }, [handleToggle, listRef, path, plugin, skills]);
+  }, [handleToggle, listRef, path, skills]);
 
   return (
     <div className="flex min-w-0 grow flex-col">
       <ScrollArea className="min-h-0 grow">
         <div className="flex flex-col gap-2 pr-4 pl-6">
-          {plugin && (
-            <div className="text-muted-foreground pb-1 text-xs">
-              Managed by the{" "}
-              <span className="text-foreground">{plugin.pluginId}</span> plugin.
-            </div>
-          )}
           {content}
         </div>
       </ScrollArea>

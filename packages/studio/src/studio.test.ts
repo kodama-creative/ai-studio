@@ -109,6 +109,7 @@ test("a new Run reloads dirty current source instead of requiring a clean commit
 
   const receipt = await studio.run(saved.id, {
     fromMessageId: "user-current-source",
+    commandId: "continue-current-source",
     mode: "continue",
   });
   expect(await _terminalEvent(studio, saved.id, receipt.operationId)).toBe(
@@ -175,6 +176,7 @@ test("a source-defined Agent tool executes inside one continued Studio Run", asy
 
   const receipt = await studio.run(saved.id, {
     fromMessageId: "user-tool",
+    commandId: "continue-tool-loop",
     mode: "continue",
   });
   expect(await _terminalEvent(studio, saved.id, receipt.operationId)).toBe(

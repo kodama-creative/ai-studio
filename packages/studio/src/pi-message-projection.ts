@@ -5,29 +5,7 @@ import type {
   Message,
   ModelUsage,
   ToolCallOutput,
-  UserMessage,
 } from "@llm-space/core";
-
-/**
- * Verifies that an ACP prompt names the same user content already saved in the
- * Studio Draft. ACP is a transport boundary; Studio remains responsible for
- * selecting which editable message is admitted into the Pi Session.
- */
-export function assertPiPromptMatchesCoreUserMessage(
-  prompt: readonly AgentMessage[],
-  message: UserMessage
-): void {
-  const actual = prompt.length === 1 ? prompt[0] : undefined;
-  if (
-    actual?.role !== "user" ||
-    JSON.stringify(_promptContent(actual.content)) !==
-      JSON.stringify(_corePromptContent(message))
-  ) {
-    throw new Error(
-      `ACP prompt content does not match Studio user Message "${message.id}".`
-    );
-  }
-}
 
 /** Projects stable Pi message-entry identities into the editor-only Thread model. */
 export function piEntriesToCoreMessages(
@@ -135,32 +113,6 @@ export function coreMessagesToPi(
       ),
     ];
   });
-}
-
-/** Normalizes Pi's equivalent string/part-list user content forms. */
-function _promptContent(
-  content: Extract<AgentMessage, { role: "user" }>["content"]
-): string | readonly unknown[] {
-  if (typeof content === "string") return content;
-  return content.map((item) =>
-    item.type === "text"
-      ? { type: "text", text: item.text }
-      : { type: "image", data: item.data, mimeType: item.mimeType }
-  );
-}
-
-/** Mirrors the official ACP adapter's all-text compaction semantics. */
-function _corePromptContent(message: UserMessage): string | readonly unknown[] {
-  if (message.content.every((item) => item.type === "text")) {
-    return message.content
-      .map((item) => (item.type === "text" ? item.text : ""))
-      .join("\n");
-  }
-  return message.content.map((item) =>
-    item.type === "text"
-      ? { type: "text", text: item.text }
-      : { type: "image", data: item.data, mimeType: item.mimeType }
-  );
 }
 
 /** Converts one Pi assistant entry without inventing a second message identity. */

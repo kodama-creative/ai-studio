@@ -1,6 +1,4 @@
 import type {
-  AgentEvent,
-  AgentStreamRequest,
   ArkImageGenerationConfig,
   BuiltinTool,
   BuiltinToolCallResponse,
@@ -279,22 +277,12 @@ export interface SkillsRequests {
     runtimeId: RuntimeId | undefined,
     input: { path: string; skillName: string; hidden: boolean }
   ): Promise<SkillsSettings>;
-  setPluginHidden(
-    runtimeId: RuntimeId | undefined,
-    input: { pluginId: string; skillName: string; hidden: boolean }
-  ): Promise<SkillsSettings>;
-  setAllPluginHidden(
-    runtimeId: RuntimeId | undefined,
-    pluginId: string,
-    hidden: boolean
-  ): Promise<SkillsSettings>;
   setAllHidden(
     runtimeId: RuntimeId | undefined,
     path: string,
     hidden: boolean
   ): Promise<SkillsSettings>;
   listAvailable(runtimeId?: RuntimeId): Promise<SkillInfo[]>;
-  listPlugin(runtimeId?: RuntimeId): Promise<SkillInfo[]>;
   list(runtimeId: RuntimeId | undefined, path: string): Promise<SkillInfo[]>;
   read(runtimeId: RuntimeId | undefined, path: string): Promise<SkillContent>;
 }
@@ -303,19 +291,3 @@ export const SKILLS_RPC = defineRpcNamespace<SkillsRpc>("skills", {
   streams: [],
   events: [],
 });
-
-export interface AgentExecutionStreams {
-  stream(
-    runtimeId: RuntimeId | undefined,
-    request: AgentStreamRequest,
-    options?: { connection?: ProviderConnectionRef; signal?: AbortSignal }
-  ): AsyncIterable<AgentEvent>;
-}
-export type AgentExecutionRpc = RpcShape<
-  Record<never, never>,
-  AgentExecutionStreams
->;
-export const AGENT_EXECUTION_RPC = defineRpcNamespace<AgentExecutionRpc>(
-  "agentExecution",
-  { streams: ["stream"], events: [] }
-);

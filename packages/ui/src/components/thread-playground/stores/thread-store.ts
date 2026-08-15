@@ -16,7 +16,6 @@ import {
   type AgentEvent,
   type BuiltinTool,
   type McpTool,
-  type PluginTool,
   type MessageContent,
   type ModelConfig,
   type ModelConfigParams,
@@ -108,6 +107,12 @@ export type ExternalThreadRunEvent =
   | { readonly type: "tool.started"; readonly toolCallId: string }
   | { readonly type: "tool.completed"; readonly toolCallId: string }
   | {
+      readonly type: "tool.approval.required";
+      readonly toolCallId: string;
+      readonly toolName: string;
+      readonly resumeMode: "step" | "continue";
+    }
+  | {
       readonly type: "message.delta";
       readonly message: AssistantMessage;
     };
@@ -126,6 +131,19 @@ export interface ExternalThreadExecutionRuntime {
     readonly toolCallId: string;
     readonly signal: AbortSignal;
   }): AsyncIterable<ExternalThreadRunEvent>;
+  resolveToolApproval?(input: {
+    readonly thread: Thread;
+    readonly toolCallId: string;
+    readonly approved: boolean;
+    readonly resumeMode: "step" | "continue";
+    readonly signal: AbortSignal;
+  }): AsyncIterable<ExternalThreadRunEvent>;
+}
+
+export interface PendingToolApproval {
+  readonly toolCallId: string;
+  readonly toolName: string;
+  readonly resumeMode: "step" | "continue";
 }
 
 export interface ThreadRunMetadata {
@@ -143,6 +161,8 @@ export interface ThreadState {
   activeRunId: string | null;
   /** Auto-executing tool calls for in-flight UI feedback; never persisted. */
   executingToolCallIds: string[];
+  /** Durable Runtime suspension currently awaiting a user decision. */
+  pendingToolApproval: PendingToolApproval | null;
   /** Runtime-owned tool outputs are durable and cannot be edited locally. */
   toolCallOutputsReadonly: boolean;
   /** The host can execute function-tool calls that are only stubs in the UI model. */
@@ -167,6 +187,8 @@ export interface ThreadState {
   run(fromMessageId?: string): Promise<void>;
   /** Execute one host-owned durable Tool Step when using an external runtime. */
   runExternalToolCall(messageId: string, toolCallId: string): Promise<boolean>;
+  /** Approve/deny the current Runtime-owned suspension and resume execution. */
+  resolveToolApproval(approved: boolean): Promise<boolean>;
   resolveRunValidationIssue(): void;
   undo(): void;
   redo(): void;
@@ -269,7 +291,7 @@ export function createThreadStore(
      * layer.
      */
     executeTool?: (
-      tool: McpTool | BuiltinTool | PluginTool,
+      tool: McpTool | BuiltinTool,
       args: Record<string, unknown>,
       context: {
         thread: Thread;
@@ -591,7 +613,7 @@ export function createThreadStore(
         // we bail and let the user fill it in.
         const executable: {
           toolCall: ToolCall;
-          tool: McpTool | BuiltinTool | PluginTool;
+          tool: McpTool | BuiltinTool;
         }[] = [];
         for (const toolCall of toolCalls) {
           const tool = toolsByName.get(toolCall.input.name);
@@ -622,14 +644,7 @@ export function createThreadStore(
           return null;
         }
         const owningThread = structuredClone(get().thread);
-        const variables = executable.some(({ tool }) => tool.type === "plugin")
-          ? await resolveThreadPromptVariableValues({
-              context: owningThread.context,
-              loadSkills: options.loadSkills ?? _noSkills,
-              loadFile: options.loadFile ?? _noFile,
-              fileExists: options.fileExists ?? _noFileExists,
-            })
-          : {};
+        const variables = {};
         const invocationContext = { thread: owningThread, variables };
         if (signal.aborted || get().activeRunId !== runId) {
           return null;
@@ -701,6 +716,7 @@ export function createThreadStore(
         abortController: null,
         activeRunId: null,
         executingToolCallIds: [],
+        pendingToolApproval: null,
         toolCallOutputsReadonly: options.executionRuntime !== undefined,
         externalToolExecutionAvailable:
           options.executionRuntime?.executeToolCall !== undefined,
@@ -1101,6 +1117,7 @@ export function createThreadStore(
               abortController,
               streamingMessage: null,
               executingToolCallIds: [],
+              pendingToolApproval: null,
             });
             stopActiveRun = () => abortController.abort();
             try {
@@ -1142,6 +1159,14 @@ export function createThreadStore(
                       (id) => id !== event.toolCallId
                     ),
                   }));
+                } else if (event.type === "tool.approval.required") {
+                  set({
+                    pendingToolApproval: {
+                      toolCallId: event.toolCallId,
+                      toolName: event.toolName,
+                      resumeMode: event.resumeMode,
+                    },
+                  });
                 } else {
                   const thread = normalizeThread(event.thread);
                   const runHistory = normalizeRunHistory(thread.runHistory);
@@ -1599,6 +1624,84 @@ export function createThreadStore(
             stopActiveRun = null;
           }
         },
+        async resolveToolApproval(approved: boolean) {
+          const approval = get().pendingToolApproval;
+          const resolve = options.executionRuntime?.resolveToolApproval;
+          if (approval === null || resolve === undefined || get().status !== "idle") {
+            return false;
+          }
+          const runId = uuid();
+          const abortController = new AbortController();
+          set({
+            status: "running",
+            activeRunId: runId,
+            abortController,
+            streamingMessage: null,
+            executingToolCallIds: [approval.toolCallId],
+            pendingToolApproval: null,
+          });
+          stopActiveRun = () => abortController.abort();
+          try {
+            for await (const event of resolve({
+              thread: get().thread,
+              toolCallId: approval.toolCallId,
+              approved,
+              resumeMode: approval.resumeMode,
+              signal: abortController.signal,
+            })) {
+              if (get().activeRunId !== runId) return false;
+              if (event.type === "message.delta") {
+                set({ streamingMessage: event.message });
+              } else if (event.type === "tool.started") {
+                set({ executingToolCallIds: [event.toolCallId] });
+              } else if (event.type === "tool.completed") {
+                set({ executingToolCallIds: [] });
+              } else if (event.type === "tool.approval.required") {
+                set({
+                  pendingToolApproval: {
+                    toolCallId: event.toolCallId,
+                    toolName: event.toolName,
+                    resumeMode: event.resumeMode,
+                  },
+                });
+              } else {
+                const thread = normalizeThread(event.thread);
+                const runHistory = normalizeRunHistory(thread.runHistory);
+                const evaluations = normalizeEvaluations(
+                  thread.evaluations,
+                  runHistory
+                );
+                set({
+                  thread,
+                  runHistory,
+                  evaluations,
+                  streamingMessage: null,
+                });
+              }
+            }
+            return true;
+          } catch (error) {
+            if (!abortController.signal.aborted) {
+              set({ pendingToolApproval: approval });
+              toast.error("Unable to resolve Tool approval", {
+                description:
+                  error instanceof Error ? error.message : "Please try again.",
+              });
+            }
+            return false;
+          } finally {
+            if (get().activeRunId === runId) {
+              set({
+                status: "idle",
+                activeRunId: null,
+                abortController: null,
+                streamingMessage: null,
+                executingToolCallIds: [],
+              });
+            }
+            stopActiveRun = null;
+          }
+        },
         undo() {
           if (get().status !== "idle") {
             return;
@@ -1888,6 +1991,7 @@ export function useThreadStore<T>(selector: (s: ThreadState) => T): T {
 const selectActions = (s: ThreadState) => ({
   run: s.run,
   runExternalToolCall: s.runExternalToolCall,
+  resolveToolApproval: s.resolveToolApproval,
   resolveRunValidationIssue: s.resolveRunValidationIssue,
   abort: s.abort,
   undo: s.undo,

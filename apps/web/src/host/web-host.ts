@@ -13,7 +13,7 @@ function unavailable(): never {
  */
 export const webHost: HostServices = {
   presentational: true,
-  createTransport: () => null,
+  auxiliaryGeneration: null,
   executeTool: null,
   skills: {
     getSettings: () => Promise.resolve({ discoveryPaths: [] }),
@@ -27,9 +27,6 @@ export const webHost: HostServices = {
   builtinTools: {
     list: () => Promise.resolve([]),
     fsReveal: () => unavailable(),
-  },
-  pluginTools: {
-    list: () => Promise.resolve([]),
   },
   paths: {
     ensureRootDir: (relativePath) => Promise.resolve(relativePath),

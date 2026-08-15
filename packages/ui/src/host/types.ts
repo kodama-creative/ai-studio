@@ -6,7 +6,6 @@
  */
 
 import type {
-  AgentTransport,
   ArkImageGenerationConfig,
   BuiltinTool,
   BuiltinToolCallResponse,
@@ -14,8 +13,8 @@ import type {
   McpServerToolsResponse,
   McpServerView,
   McpTool,
-  PluginTool,
   JsonValue,
+  Message,
   ModelConfig,
   ModelProviderGroup,
   ProviderConnectionRef,
@@ -25,6 +24,23 @@ import type {
   SkillsSettings,
   Thread,
 } from "@llm-space/core";
+
+export interface AuxiliaryGenerateInput {
+  systemPrompt: string;
+  messages: readonly Message[];
+  model: ModelConfig;
+  profileId?: string;
+  signal?: AbortSignal;
+}
+
+export type AuxiliaryGenerateEvent =
+  | { type: "text.delta"; delta: string }
+  | { type: "text.completed"; text: string };
+
+/** Stateless model generation that never creates or mutates a product Session. */
+export interface AuxiliaryGenerationHost {
+  generate(input: AuxiliaryGenerateInput): AsyncIterable<AuxiliaryGenerateEvent>;
+}
 
 /** A tool call's result, normalized across the built-in and MCP backends. */
 export interface ToolCallResult extends BuiltinToolCallResponse {
@@ -55,9 +71,9 @@ export interface ExecuteToolOptions extends RuntimeScopedHostOptions {
   variables: Record<string, JsonValue>;
 }
 
-/** Invoke an executable tool (built-in, MCP, or Plugin). */
+/** Invoke an executable tool (built-in or MCP). */
 export type ExecuteTool = (
-  tool: McpTool | BuiltinTool | PluginTool,
+  tool: McpTool | BuiltinTool,
   args: Record<string, unknown>,
   options: ExecuteToolOptions
 ) => Promise<ToolCallResult>;
@@ -86,11 +102,6 @@ export interface BuiltinToolsHost {
   list(options?: RuntimeScopedHostOptions): Promise<BuiltinTool[]>;
   /** Open a directory itself, or reveal a file selected in its parent folder. */
   fsReveal(path: string): Promise<void>;
-}
-
-/** Locally installed Plugin Tools available for importing into a Thread. */
-export interface PluginToolsHost {
-  list(options?: RuntimeScopedHostOptions): Promise<PluginTool[]>;
 }
 
 /** Workspace path resolution (used to seed example threads). */
@@ -208,23 +219,19 @@ export interface HostActions {
 }
 
 /**
- * The full set of host capabilities. `createTransport` returns `null` and
- * `executeTool` is `null` in a display-only (`presentational`) host; the
+ * The full set of host capabilities. `auxiliaryGeneration` and `executeTool`
+ * are `null` in a display-only (`presentational`) host; the
  * playground gates edit/run chrome on `presentational`.
  */
 export interface HostServices {
   /** Display-only: hide all action chrome and non-Preview dialogs. */
   presentational: boolean;
-  /**
-   * Create an immutable transport bound to the runtime that owns a generation.
-   * Call once when a run starts so later workspace switches cannot reroute it.
-   */
-  createTransport: (runtimeId: string) => AgentTransport | null;
+  /** Stateless text generation for prompt/tool/code-generation helpers. */
+  auxiliaryGeneration: AuxiliaryGenerationHost | null;
   executeTool: ExecuteTool | null;
   skills: SkillsHost;
   mcp: McpHost;
   builtinTools: BuiltinToolsHost;
-  pluginTools: PluginToolsHost;
   paths: PathsHost;
   files: FilesHost;
   /** Code-generator backing; `null` on hosts without it (the web viewer). */

@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 
-import { acquireFileMutationForTabs } from "./pane-file-mutation";
 import {
   closeAllTabsIfAllowed,
   closeOtherTabsIfAllowed,
@@ -12,18 +11,20 @@ import type { AppTab } from "./use-thread-tabs";
 
 const TABS: AppTab[] = [
   {
-    id: "thread:local:folder/a.json",
+    id: "playground:a",
     paneId: "pane-a",
-    path: "folder/a.json",
+    playgroundId: "a",
+    title: "A",
     runtimeId: "local",
-    type: "thread",
+    type: "playground",
   },
   {
-    id: "thread:local:folder/b.json",
+    id: "playground:b",
     paneId: "pane-b",
-    path: "folder/b.json",
+    playgroundId: "b",
+    title: "B",
     runtimeId: "local",
-    type: "thread",
+    type: "playground",
   },
 ];
 
@@ -54,7 +55,6 @@ describe("pane mutation production actions", () => {
         tracker,
         tabs: TABS,
         keepId: TABS[0].id,
-        runtimeId: "local",
         onBlocked,
         closeOthers: () => {
           mutations += 1;
@@ -65,7 +65,6 @@ describe("pane mutation production actions", () => {
       closeAllTabsIfAllowed({
         tracker,
         tabs: TABS,
-        runtimeId: "local",
         onBlocked,
         closeAll: () => {
           mutations += 1;
@@ -84,35 +83,6 @@ describe("pane mutation production actions", () => {
       })
     ).toBeNull();
     expect({ blocked, mutations }).toEqual({ blocked: 4, mutations: 0 });
-  });
-
-  test("delete and overwrite path guards include open descendants", () => {
-    const tracker = new RuntimeRunTracker();
-    tracker.beginRun("pane-a", "local", "run-a");
-    let blocked = 0;
-
-    const deleteRelease = acquireFileMutationForTabs({
-      tracker,
-      tabs: TABS,
-      paths: ["folder"],
-      runtimeId: "local",
-      onBlocked: () => {
-        blocked += 1;
-      },
-    });
-    const overwriteRelease = acquireFileMutationForTabs({
-      tracker,
-      tabs: TABS,
-      paths: ["elsewhere/source.json", "folder/a.json"],
-      runtimeId: "local",
-      onBlocked: () => {
-        blocked += 1;
-      },
-    });
-
-    expect(deleteRelease).toBeNull();
-    expect(overwriteRelease).toBeNull();
-    expect(blocked).toBe(2);
   });
 
   test("refresh keeps its pane reserved until the remount acknowledges it", () => {
@@ -137,44 +107,5 @@ describe("pane mutation production actions", () => {
     if (!reservation || typeof reservation !== "object") return;
     reservation.release();
     expect(tracker.beginRun("pane-a", "local", "after-remount")).toBe(true);
-  });
-
-  test("file mutation reserves the runtime against newly opened panes", () => {
-    const tracker = new RuntimeRunTracker();
-    const release = acquireFileMutationForTabs({
-      tracker,
-      tabs: [],
-      paths: ["folder/a.json"],
-      runtimeId: "local",
-      onBlocked: () => undefined,
-    });
-
-    expect(release).not.toBeNull();
-    expect(
-      tracker.beginRun(
-        "new-pane",
-        "local",
-        "during-move",
-        "folder/a.json"
-      )
-    ).toBe(false);
-    expect(
-      acquireFileMutationForTabs({
-        tracker,
-        tabs: [],
-        paths: ["folder/a.json"],
-        runtimeId: "local",
-        onBlocked: () => undefined,
-      })
-    ).toBeNull();
-    release?.();
-    expect(
-      tracker.beginRun(
-        "new-pane",
-        "local",
-        "after-move",
-        "folder/a.json"
-      )
-    ).toBe(true);
   });
 });

@@ -28,22 +28,11 @@ import {
 } from "react";
 
 import { windowClient } from "@/client/native-files";
-import type { RuntimeId } from "@/shared/runtime";
 
 import type { PaneLifecycleHost } from "./pane-lifecycle-host";
 import { PlaygroundTabPane } from "./playground-tab-pane";
 import { RuntimePaneHost } from "./runtime-pane-host";
-import { ShareThreadMenuItem } from "./share-thread-menu-item";
-import { ThreadTabPane } from "./thread-tab-pane";
 import { tabLabel, type AppTab } from "./use-thread-tabs";
-
-const _isWindows =
-  typeof navigator !== "undefined" && /Win/i.test(navigator.userAgent);
-
-const REVEAL_LABEL = _isWindows ? "Reveal in Explorer" : "Reveal in Finder";
-const MOVE_TO_TRASH_LABEL = _isWindows
-  ? "Move to Recycle Bin"
-  : "Move to Trash";
 
 function _getPaneKey(tab: AppTab): string {
   return tab.paneId;
@@ -72,18 +61,12 @@ interface ThreadTabsProps {
   fullScreen?: boolean;
   activate: (id: string) => void;
   refresh: (id: string) => void;
-  consumeDiscardedPane: (paneId: string) => boolean;
   close: (id: string) => void;
   closeOthers: (id: string) => void;
   closeAll: () => void;
-  reveal: (path: string, runtimeId: RuntimeId) => void;
-  moveToTrash: (path: string, runtimeId: RuntimeId) => void;
-  share: (path: string, runtimeId: RuntimeId) => void;
-  copyFile: (path: string, runtimeId: RuntimeId) => void;
   reorder: (from: number, to: number) => void;
-  /** Create a new thread at the workspace root (auto-named, opened, selected). */
+  /** Create and open a new durable Playground. */
   onNewFile?: () => void;
-  onMove?: (from: string, to: string, runtimeId: RuntimeId) => void;
   onPlaygroundTitleChange?: (playgroundId: string, title: string) => void;
   onToggleSidebar?: () => void;
   lifecycleHost: PaneLifecycleHost;
@@ -103,17 +86,11 @@ export function ThreadTabs({
   fullScreen = false,
   activate,
   refresh,
-  consumeDiscardedPane,
   close,
   closeOthers,
   closeAll,
-  reveal,
-  moveToTrash,
-  share,
-  copyFile,
   reorder,
   onNewFile,
-  onMove,
   onPlaygroundTitleChange,
   onToggleSidebar,
   lifecycleHost,
@@ -129,7 +106,6 @@ export function ThreadTabs({
   // updates; we re-apply whenever the tab set changes (covers adds/reorders).
   const containerRef = useRef<HTMLDivElement>(null);
   const [contextMenuId, setContextMenuId] = useState<string | null>(null);
-  const contextMenuTab = tabs.find((tab) => tab.id === contextMenuId) ?? null;
   useEffect(() => {
     const root = containerRef.current;
     if (!root) return;
@@ -239,42 +215,24 @@ export function ThreadTabs({
   );
 
   const renderPane = useCallback(
-    (tab: AppTab, active: boolean) =>
-      tab.type === "playground" ? (
-        <PlaygroundTabPane
-          tabId={tab.id}
-          paneId={tab.paneId}
-          playgroundId={tab.playgroundId}
-          active={active}
-          lifecycleHost={lifecycleHost}
-          mutationRevision={mutationRevision}
-          refreshNonce={tab.refreshNonce ?? 0}
-          onClose={close}
-          onTitleChange={onPlaygroundTitleChange}
-          onThreadStateChange={onThreadStateChange}
-        />
-      ) : (
-        <ThreadTabPane
-          tabId={tab.id}
-          paneId={tab.paneId}
-          path={tab.path}
-          runtimeId={tab.runtimeId}
-          active={active}
-          lifecycleHost={lifecycleHost}
-          mutationRevision={mutationRevision}
-          refreshNonce={tab.refreshNonce ?? 0}
-          onMove={onMove}
-          onClose={close}
-          consumeDiscardedPane={consumeDiscardedPane}
-          onThreadStateChange={onThreadStateChange}
-        />
-      ),
+    (tab: AppTab, active: boolean) => (
+      <PlaygroundTabPane
+        tabId={tab.id}
+        paneId={tab.paneId}
+        playgroundId={tab.playgroundId}
+        active={active}
+        lifecycleHost={lifecycleHost}
+        mutationRevision={mutationRevision}
+        refreshNonce={tab.refreshNonce ?? 0}
+        onClose={close}
+        onTitleChange={onPlaygroundTitleChange}
+        onThreadStateChange={onThreadStateChange}
+      />
+    ),
     [
       close,
-      consumeDiscardedPane,
       lifecycleHost,
       mutationRevision,
-      onMove,
       onPlaygroundTitleChange,
       onThreadStateChange,
     ]
@@ -337,12 +295,12 @@ export function ThreadTabs({
               pinnedRight={
                 <div className="flex h-full items-center gap-0.5 pt-0.5 pl-1.5">
                   {toolbarSlot}
-                  <Tooltip content="New blank thread">
+                  <Tooltip content="New Playground">
                     <Button
                       className="hover:bg-primary! rounded-full"
                       size="icon-sm"
                       variant="ghost"
-                      aria-label="New blank thread"
+                      aria-label="New Playground"
                       onMouseDown={_preventFocusSteal}
                       onClick={onNewFile}
                     >
@@ -377,43 +335,6 @@ export function ThreadTabs({
               </ContextMenuItem>
               <ContextMenuItem onSelect={closeAll}>Close All</ContextMenuItem>
             </ContextMenuGroup>
-            {contextMenuTab?.type === "thread" && (
-              <>
-                <ContextMenuSeparator />
-                <ContextMenuItem
-                  onSelect={() =>
-                    copyFile(contextMenuTab.path, contextMenuTab.runtimeId)
-                  }
-                >
-                  Copy file
-                </ContextMenuItem>
-                <ContextMenuGroup>
-                  <ShareThreadMenuItem
-                    path={contextMenuTab.path}
-                    runtimeId={contextMenuTab.runtimeId}
-                    onShare={share}
-                  />
-                </ContextMenuGroup>
-                <ContextMenuSeparator />
-                <ContextMenuGroup>
-                  <ContextMenuItem
-                    onSelect={() =>
-                      reveal(contextMenuTab.path, contextMenuTab.runtimeId)
-                    }
-                  >
-                    {REVEAL_LABEL}
-                  </ContextMenuItem>
-                  <ContextMenuItem
-                    variant="destructive"
-                    onSelect={() =>
-                      moveToTrash(contextMenuTab.path, contextMenuTab.runtimeId)
-                    }
-                  >
-                    {MOVE_TO_TRASH_LABEL}
-                  </ContextMenuItem>
-                </ContextMenuGroup>
-              </>
-            )}
           </ContextMenuContent>
         ) : null}
       </ContextMenu>

@@ -1,19 +1,20 @@
-import type { Thread } from "@llm-space/core";
+import type { PortableThreadSnapshot } from "@llm-space/core";
+import type { Playground } from "@llm-space/studio";
 
 import type { AnalyticsEvent, AnalyticsStatus } from "./analytics";
 import type { GithubAuthState } from "./auth";
 import type { FeatureReminder } from "./feature-reminders";
 import { defineRpcNamespace } from "./namespaced-rpc";
-import type { RuntimeId } from "./runtime";
 import type { UpdateMode, UpdateStatusChangedPayload } from "./updates";
 
 export interface ThreadSharingRequests {
-  read(runtimeId: RuntimeId, path: string): Promise<Thread>;
+  read(playgroundId: string): Promise<PortableThreadSnapshot>;
   publish(
-    runtimeId: RuntimeId,
-    path: string,
+    playgroundId: string,
     meta?: { title?: string; description?: string }
   ): Promise<{ shareUrl: string; gistId: string }>;
+  importSnapshot(snapshot: PortableThreadSnapshot): Promise<Playground>;
+  importGist(gistId: string): Promise<Playground>;
 }
 export interface ThreadSharingRpc {
   readonly requests: ThreadSharingRequests;

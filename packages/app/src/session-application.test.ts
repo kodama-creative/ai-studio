@@ -7,7 +7,7 @@ import type { AssistantMessage } from "@earendil-works/pi-ai";
 import {
   BunSqliteRuntimeBindingStore,
   BunSqliteSessionRepository,
-  StudioPiSessionRuntime,
+  DurablePiRuntime,
   type AssistantExecutor,
   type RuntimeBinding,
 } from "@llm-space/pi-runtime";
@@ -325,7 +325,7 @@ async function _fixture(
   const assistantExecutor: AssistantExecutor = {
     execute: () => Promise.resolve(structuredClone(ASSISTANT)),
   };
-  const runtime = new StudioPiSessionRuntime({
+  const runtime = new DurablePiRuntime({
     repository,
     bindings,
     assistantExecutor,

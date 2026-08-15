@@ -3,7 +3,11 @@ export type {
   AppCommandReceipt,
   AppSessionRecord,
   Session,
+  SessionContinueInput,
   SessionEntry,
+  SessionInspectInput,
+  SessionMutationInput,
+  SessionStepInput,
   Task,
 } from "./domain";
 export {

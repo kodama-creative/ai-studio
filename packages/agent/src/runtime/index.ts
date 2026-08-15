@@ -1,9 +1,15 @@
 export {
   AgentGenerationResolutionError,
   resolveAgentGeneration,
+  resolveAgentOperation,
+  resolveAgentPreview,
   type AgentGeneration,
+  type AgentOperationResolutionInput,
   type PreparedAgentDefinition,
+  type PreparedInstructionsDefinition,
+  type PreparedSkillDefinition,
   type PreparedTool,
+  type ResolvedAgentOperationDefinition,
 } from "./generation";
 export {
   closeRuntimeServices,

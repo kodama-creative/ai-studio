@@ -1,15 +1,11 @@
 import { expect, test } from "bun:test";
 
-import {
-  LLM_SPACE_ACP_METHODS,
-  methods,
-  type ClientConnection,
-  type PiAcpDebugResponse,
-} from "@llm-space/acp";
 import type { Thread } from "@llm-space/core";
+import type { PiSessionSnapshot } from "@llm-space/pi-runtime";
 import type { StudioRunHistoryEntry, StudioThread } from "@llm-space/studio";
 
 import type { ProjectStudioTransport } from "@/shared/project-studio";
+import type { ThreadClient } from "@/shared/thread-rpc";
 
 import {
   createProjectThreadExecutionRuntime,
@@ -88,7 +84,7 @@ test("projects Pi operation history and evaluation ids to editor run vocabulary"
   });
 });
 
-test("Project execution saves metadata then uses ACP prompt and Step", async () => {
+test("Project execution saves metadata then uses Thread RPC run and Step", async () => {
   let thread = _thread();
   const calls: string[] = [];
   let nextKind: "tool" | "model" = "tool";
@@ -102,36 +98,34 @@ test("Project execution saves metadata then uses ACP prompt and Step", async () 
   });
   const runtime = createProjectThreadExecutionRuntime({
     client,
+    projectId: "project-1",
     threadId: thread.id,
     getThread: () => thread,
     onThread: (next) => {
       thread = next;
     },
-    openAcpConnection: ({ onSessionUpdate }) =>
-      Promise.resolve(
-        _connection((method) => {
-          calls.push(method);
-          if (method === methods.agent.session.prompt) {
-            thread = { ...thread, operationId: "operation-1" };
-            onSessionUpdate?.({
-              sessionId: thread.sessionId,
-              update: {
-                sessionUpdate: "state_update",
-                state: "requires_action",
-              },
-            });
-            return {};
-          }
-          if (method === LLM_SPACE_ACP_METHODS.snapshot) {
-            return _debug(nextKind);
-          }
-          if (method === LLM_SPACE_ACP_METHODS.step) {
-            nextKind = "model";
-            return _debug(nextKind);
-          }
-          throw new Error(`Unexpected ACP method: ${method}`);
-        })
-      ),
+    threadClient: _threadClient({
+      run: () => {
+        calls.push("thread.run");
+        thread = { ...thread, operationId: "operation-1" };
+        return Promise.resolve({
+          sessionId: thread.sessionId,
+          operationId: "operation-1",
+        });
+      },
+      inspect: () => {
+        calls.push("thread.inspect");
+        return Promise.resolve(_snapshot(nextKind));
+      },
+      step: () => {
+        calls.push("thread.step");
+        nextKind = "model";
+        return Promise.resolve({
+          sessionId: thread.sessionId,
+          operationId: "operation-1",
+        });
+      },
+    }),
   });
 
   const updates: Thread[] = [];
@@ -147,10 +141,11 @@ test("Project execution saves metadata then uses ACP prompt and Step", async () 
 
   expect(calls).toEqual([
     "metadata.save",
-    methods.agent.session.prompt,
-    LLM_SPACE_ACP_METHODS.snapshot,
-    LLM_SPACE_ACP_METHODS.step,
-    LLM_SPACE_ACP_METHODS.snapshot,
+    "thread.run",
+    "thread.inspect",
+    "thread.step",
+    "thread.inspect",
+    "thread.inspect",
   ]);
   expect(updates).toHaveLength(1);
 });
@@ -227,23 +222,6 @@ function _client(
   };
 }
 
-/** Creates a structural ACP connection controlled by the unit test. */
-function _connection(
-  request: (method: string, params: unknown) => unknown
-): ClientConnection {
-  const controller = new AbortController();
-  return {
-    signal: controller.signal,
-    closed: Promise.resolve(),
-    close: () => controller.abort(),
-    agent: {
-      request: (method: string, params: unknown) =>
-        Promise.resolve(request(method, params)),
-      notify: () => Promise.resolve(),
-    },
-  } as unknown as ClientConnection;
-}
-
 /** Supplies a completed async stream without manufacturing test events. */
 function _emptyAsyncIterable<T>(): AsyncIterable<T> {
   return {
@@ -257,31 +235,41 @@ function _emptyAsyncIterable<T>(): AsyncIterable<T> {
 }
 
 /** Returns one debugger snapshot with the requested next action kind. */
-function _debug(kind: "model" | "tool"): PiAcpDebugResponse {
+function _snapshot(kind: "model" | "tool"): PiSessionSnapshot {
   return {
-    fromCursor: 0,
     cursor: 1,
-    updates: [],
-    snapshot: {
-      cursor: 1,
-      sessionId: "session-1",
-      lane: "main",
-      operationId: "operation-1",
-      status: "paused",
-      messageEntries: [],
-      messages: [],
-      leafId: "leaf-1",
-      nextAction:
-        kind === "model"
-          ? { id: "operation-1:model:2:1", kind: "model", attempt: 1 }
-          : {
-              id: "operation-1:tool:assistant-1:0",
-              kind: "tool",
-              assistantEntryId: "assistant-1",
-              toolIndex: 0,
-              toolCallId: "call-1",
-              toolName: "lookup",
-            },
-    },
+    sessionId: "session-1",
+    lane: "main",
+    operationId: "operation-1",
+    status: "paused",
+    messageEntries: [],
+    messages: [],
+    leafId: "leaf-1",
+    nextAction:
+      kind === "model"
+        ? { id: "operation-1:model:2:1", kind: "model", attempt: 1 }
+        : {
+            id: "operation-1:tool:assistant-1:0",
+            kind: "tool",
+            assistantEntryId: "assistant-1",
+            toolIndex: 0,
+            toolCallId: "call-1",
+            toolName: "lookup",
+          },
+  };
+}
+
+function _threadClient(
+  overrides: Partial<ThreadClient> = {}
+): ThreadClient {
+  return {
+    run: () => Promise.reject(new Error("Unexpected run.")),
+    inspect: () => Promise.reject(new Error("Unexpected inspect.")),
+    step: () => Promise.reject(new Error("Unexpected step.")),
+    continue: () => Promise.reject(new Error("Unexpected continue.")),
+    resolveToolApproval: () =>
+      Promise.reject(new Error("Unexpected tool approval.")),
+    cancel: () => Promise.resolve(),
+    ...overrides,
   };
 }

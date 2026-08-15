@@ -1,5 +1,3 @@
-import type { RuntimeId } from "@/shared/runtime";
-
 import type { RuntimeRunTracker } from "./runtime-run-tracker";
 import type { AppTab } from "./use-thread-tabs";
 
@@ -22,8 +20,7 @@ function _runIfIdle({
     tabs.some((tab) =>
       tracker.isMutationReserved(
         paneIdForTab(tab),
-        tab.runtimeId,
-        tab.type === "thread" ? tab.path : undefined
+        tab.runtimeId
       )
     )
   ) {
@@ -70,46 +67,40 @@ export function closeOtherTabsIfAllowed({
   tracker,
   tabs,
   keepId,
-  runtimeId,
   onBlocked,
   closeOthers,
 }: {
   tracker: RuntimeRunTracker;
   tabs: AppTab[];
   keepId: string;
-  runtimeId: RuntimeId;
   onBlocked: () => void;
-  closeOthers: (id: string, runtimeId: RuntimeId) => void;
+  closeOthers: (id: string) => void;
 }): boolean {
-  const removed = tabs.filter(
-    (tab) => tab.runtimeId === runtimeId && tab.id !== keepId
-  );
+  const removed = tabs.filter((tab) => tab.id !== keepId);
   return _runIfIdle({
     tracker,
     tabs: removed,
     onBlocked,
-    action: () => closeOthers(keepId, runtimeId),
+    action: () => closeOthers(keepId),
   });
 }
 
 export function closeAllTabsIfAllowed({
   tracker,
   tabs,
-  runtimeId,
   onBlocked,
   closeAll,
 }: {
   tracker: RuntimeRunTracker;
   tabs: AppTab[];
-  runtimeId: RuntimeId;
   onBlocked: () => void;
-  closeAll: (runtimeId: RuntimeId) => void;
+  closeAll: () => void;
 }): boolean {
   return _runIfIdle({
     tracker,
-    tabs: tabs.filter((tab) => tab.runtimeId === runtimeId),
+    tabs,
     onBlocked,
-    action: () => closeAll(runtimeId),
+    action: closeAll,
   });
 }
 
@@ -136,8 +127,7 @@ export function refreshTabIfAllowed({
   if (
     tracker.isMutationReserved(
       paneIdForTab(target),
-      target.runtimeId,
-      target.type === "thread" ? target.path : undefined
+      target.runtimeId
     )
   ) {
     onBlocked();

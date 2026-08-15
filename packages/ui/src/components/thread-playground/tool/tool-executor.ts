@@ -2,7 +2,6 @@ import type {
   BuiltinTool,
   JsonValue,
   McpTool,
-  PluginTool,
   Thread,
 } from "@llm-space/core";
 
@@ -14,7 +13,7 @@ export type GetProviderProfileId = (
 ) => string | undefined;
 
 export type ToolExecutor = (
-  tool: McpTool | BuiltinTool | PluginTool,
+  tool: McpTool | BuiltinTool,
   args: Record<string, unknown>,
   context: { thread: Thread; variables: Record<string, JsonValue> }
 ) => Promise<ToolCallResult>;
@@ -29,7 +28,7 @@ export function toolProfileSelectionScope(toolName: string): string {
 }
 
 export function getToolConnectionProviderId(
-  tool: McpTool | BuiltinTool | PluginTool
+  tool: McpTool | BuiltinTool
 ): string | undefined {
   if (tool.type !== "builtin") {
     return undefined;

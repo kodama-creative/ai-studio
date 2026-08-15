@@ -7,6 +7,7 @@ import {
 } from "@llm-space/ui/host";
 import { useMemo, type ReactNode } from "react";
 
+import { createAuxiliaryGenerationClient } from "@/client/auxiliary-generation-client";
 import { fsReveal, listBuiltInTools } from "@/client/built-in-tools";
 import {
   checkUv,
@@ -27,8 +28,6 @@ import {
   readTextFile,
   textFileExists,
 } from "@/client/paths";
-import { listPluginTools } from "@/client/plugins";
-import { createRpcTransport } from "@/client/rpc-transport";
 import { modelsClient } from "@/client/runtime-rpc-clients";
 import { getSearchSettings } from "@/client/search";
 import {
@@ -95,12 +94,15 @@ export function createElectrobunModelClient(
  */
 export function DesktopHostProvider({ children }: { children: ReactNode }) {
   const { executeCommand, registerCommandHandlers } = useCommands();
+  const auxiliaryGeneration = useMemo(
+    () => createAuxiliaryGenerationClient(),
+    []
+  );
 
   const value = useMemo<HostServices>(
     () => ({
       presentational: false,
-      createTransport: (runtimeId: string) =>
-        createRpcTransport(runtimeId as RuntimeId),
+      auxiliaryGeneration,
       executeTool,
       skills: {
         getSettings: (options) =>
@@ -120,12 +122,6 @@ export function DesktopHostProvider({ children }: { children: ReactNode }) {
         list: (options) =>
           listBuiltInTools(options?.runtimeId as RuntimeId | undefined),
         fsReveal,
-      },
-      pluginTools: {
-        list: ({ runtimeId } = {}) =>
-          runtimeId && runtimeId !== "local"
-            ? Promise.resolve([])
-            : listPluginTools(),
       },
       paths: { ensureRootDir },
       files: {
@@ -178,7 +174,7 @@ export function DesktopHostProvider({ children }: { children: ReactNode }) {
           registerCommandHandlers({ "thread.run": () => run() }),
       },
     }),
-    [executeCommand, registerCommandHandlers]
+    [auxiliaryGeneration, executeCommand, registerCommandHandlers]
   );
 
   return <HostServicesProvider value={value}>{children}</HostServicesProvider>;

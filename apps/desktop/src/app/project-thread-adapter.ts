@@ -1,15 +1,4 @@
-import {
-  LLM_SPACE_ACP_METHODS,
-  methods,
-  type ClientConnection,
-  type ContentBlock,
-  type PiAcpContinueRequest,
-  type PiAcpDebugResponse,
-  type PiAcpSnapshotRequest,
-  type PiAcpStepRequest,
-  type UpdateSessionNotification,
-} from "@llm-space/acp";
-import type { Message, ModelConfig, Thread, Tool } from "@llm-space/core";
+import type { ModelConfig, Thread, Tool } from "@llm-space/core";
 import type {
   EvaluationRecord,
   EvaluationRubricRecord,
@@ -29,8 +18,8 @@ import type {
 } from "@llm-space/studio/evaluation";
 import type { ExternalThreadExecutionRuntime } from "@llm-space/ui/components/thread-playground";
 
-import type { OpenDesktopAcpConnectionOptions } from "@/client/acp-client";
 import type { ProjectStudioTransport } from "@/shared/project-studio";
+import type { ThreadClient, ThreadTarget } from "@/shared/thread-rpc";
 
 /** Projects a Pi-backed Experiment and its operation metadata to the editor. */
 export function studioThreadToPlaygroundThread(
@@ -116,25 +105,26 @@ export function shouldPersistProjectThread(
   );
 }
 
-/** Adapts Project editor controls to the same official ACP path as Playgrounds. */
+/** Adapts Project editor controls directly to product-owned Thread RPC. */
 export function createProjectThreadExecutionRuntime(input: {
   readonly client: ProjectStudioTransport;
+  readonly threadClient?: ThreadClient;
+  readonly projectId: string;
   readonly threadId: string;
   readonly getThread: () => StudioThread;
   readonly onThread: (thread: StudioThread) => void;
   readonly beforeExecute?: () => void | Promise<void>;
   readonly onSettled?: () => void | Promise<void>;
-  readonly openAcpConnection?: (
-    options: OpenDesktopAcpConnectionOptions
-  ) => Promise<ClientConnection>;
 }): ExternalThreadExecutionRuntime {
+  const target: ThreadTarget = {
+    kind: "experiment",
+    projectId: input.projectId,
+    experimentId: input.threadId,
+  };
   return {
     async *execute(request) {
       await input.beforeExecute?.();
-      const updates = new SessionUpdateWaiter();
-      const connection = await (
-        input.openAcpConnection ?? _openDesktopAcpConnection
-      )({ onSessionUpdate: (update) => updates.accept(update) });
+      const client = await _threadClient(input);
       let studioThread = input.getThread();
       try {
         if (studioThread.operationId === undefined) {
@@ -159,71 +149,68 @@ export function createProjectThreadExecutionRuntime(input: {
               `Studio operation input "${fromMessageId}" must be a user Message.`
             );
           }
-          const stopped = updates.waitForStop(studioThread.sessionId);
-          await connection.agent.request(methods.agent.session.prompt, {
-            sessionId: studioThread.sessionId,
-            prompt: _promptContent(message),
-            _meta: {
-              "llm-space.dev": {
-                fromMessageId,
-                mode: request.reactLoop ? "continue" : "step",
-                ...(_modelDefinition(request.thread.model) === undefined
-                  ? {}
-                  : { modelOverride: _modelDefinition(request.thread.model) }),
-              },
-            },
+          const modelOverride = _modelDefinition(request.thread.model);
+          await client.run(target, {
+            fromMessageId,
+            commandId: crypto.randomUUID(),
+            mode: request.reactLoop ? "continue" : "step",
+            ...(modelOverride === undefined ? {} : { modelOverride }),
           });
-          await stopped;
         } else if (request.reactLoop) {
-          const snapshot = await _snapshot(connection, studioThread.sessionId);
-          await connection.agent.request<
-            PiAcpDebugResponse,
-            PiAcpContinueRequest
-          >(LLM_SPACE_ACP_METHODS.continue, {
-            sessionId: studioThread.sessionId,
-            afterSeq: snapshot.cursor,
+          await client.continue(target, studioThread.operationId, {
             commandId: crypto.randomUUID(),
           });
         } else {
-          await _stepCurrent(connection, studioThread.sessionId);
+          await _stepCurrent(client, target, studioThread.operationId);
         }
 
         if (!request.reactLoop && request.autoRunTools) {
-          while (true) {
-            const snapshot = await _snapshot(
-              connection,
-              studioThread.sessionId
+          studioThread = await _requireThread(input);
+          while (studioThread.operationId !== undefined) {
+            const snapshot = await client.inspect(
+              target,
+              studioThread.operationId
             );
-            if (snapshot.snapshot.nextAction?.kind !== "tool") break;
-            await _stepCurrent(connection, studioThread.sessionId, snapshot);
+            if (snapshot.nextAction?.kind !== "tool") break;
+            await _stepCurrent(
+              client,
+              target,
+              studioThread.operationId,
+              snapshot
+            );
+            studioThread = await _requireThread(input);
           }
         }
-        yield* _refresh(input, request.thread.model);
+        yield* _refresh(
+          input,
+          request.thread.model,
+          client,
+          target,
+          request.reactLoop ? "continue" : "step"
+        );
       } finally {
-        if (request.signal.aborted) {
-          await connection.agent.notify(methods.agent.session.cancel, {
-            sessionId: studioThread.sessionId,
-          });
+        if (request.signal.aborted && studioThread.operationId !== undefined) {
+          await client.cancel(target, studioThread.operationId);
         }
-        connection.close();
         await input.onSettled?.();
       }
     },
 
     async *executeToolCall(request) {
       await input.beforeExecute?.();
+      const client = await _threadClient(input);
       const studioThread = input.getThread();
       if (studioThread.operationId === undefined) {
         throw new Error(
           "The tool call does not belong to an active operation."
         );
       }
-      const connection = await (
-        input.openAcpConnection ?? _openDesktopAcpConnection
-      )({});
       try {
-        const snapshot = await _snapshot(connection, studioThread.sessionId);
-        const action = snapshot.snapshot.nextAction;
+        const snapshot = await client.inspect(
+          target,
+          studioThread.operationId
+        );
+        const action = snapshot.nextAction;
         if (
           action?.kind !== "tool" ||
           action.toolCallId !== request.toolCallId
@@ -233,16 +220,58 @@ export function createProjectThreadExecutionRuntime(input: {
           );
         }
         yield { type: "tool.started", toolCallId: request.toolCallId };
-        await _stepCurrent(connection, studioThread.sessionId, snapshot);
+        await _stepCurrent(
+          client,
+          target,
+          studioThread.operationId,
+          snapshot
+        );
         yield { type: "tool.completed", toolCallId: request.toolCallId };
-        yield* _refresh(input, request.thread.model);
+        yield* _refresh(
+          input,
+          request.thread.model,
+          client,
+          target,
+          "step"
+        );
       } finally {
         if (request.signal.aborted) {
-          await connection.agent.notify(methods.agent.session.cancel, {
-            sessionId: studioThread.sessionId,
-          });
+          await client.cancel(target, studioThread.operationId);
         }
-        connection.close();
+        await input.onSettled?.();
+      }
+    },
+
+    async *resolveToolApproval(request) {
+      await input.beforeExecute?.();
+      const client = await _threadClient(input);
+      const studioThread = input.getThread();
+      if (studioThread.operationId === undefined) {
+        throw new Error("The Tool approval does not belong to an active operation.");
+      }
+      try {
+        await client.resolveToolApproval(target, studioThread.operationId, {
+          toolCallId: request.toolCallId,
+          approved: request.approved,
+        });
+        if (request.resumeMode === "continue") {
+          await client.continue(target, studioThread.operationId, {
+            commandId: crypto.randomUUID(),
+          });
+        } else {
+          await _stepCurrent(client, target, studioThread.operationId);
+        }
+        yield* _refresh(
+          input,
+          request.thread.model,
+          client,
+          target,
+          request.resumeMode
+        );
+      } finally {
+        if (request.signal.aborted) {
+          await client.cancel(target, studioThread.operationId);
+        }
         await input.onSettled?.();
       }
     },
@@ -252,7 +281,10 @@ export function createProjectThreadExecutionRuntime(input: {
 /** Loads latest Experiment, operation history, and evaluation metadata together. */
 async function* _refresh(
   input: Parameters<typeof createProjectThreadExecutionRuntime>[0],
-  selectedModel: ModelConfig | undefined
+  selectedModel: ModelConfig | undefined,
+  client: ThreadClient,
+  target: ThreadTarget,
+  resumeMode: "step" | "continue"
 ) {
   const [thread, history, evaluations] = await Promise.all([
     input.client.loadThread(input.threadId),
@@ -275,53 +307,45 @@ async function* _refresh(
         ? projected
         : { ...projected, model: structuredClone(selectedModel) },
   };
-}
-
-/** Reads one committed ACP debugger snapshot. */
-function _snapshot(
-  connection: ClientConnection,
-  sessionId: string
-): Promise<PiAcpDebugResponse> {
-  return connection.agent.request<PiAcpDebugResponse, PiAcpSnapshotRequest>(
-    LLM_SPACE_ACP_METHODS.snapshot,
-    { sessionId }
-  );
+  if (thread.operationId === undefined) return;
+  const snapshot = await client.inspect(target, thread.operationId);
+  if (snapshot.approval?.status !== "pending") return;
+  yield {
+    type: "tool.approval.required" as const,
+    toolCallId: snapshot.approval.toolCallId,
+    toolName: snapshot.approval.toolName,
+    resumeMode,
+  };
 }
 
 /** Releases exactly the action identified by the current Pi snapshot. */
 async function _stepCurrent(
-  connection: ClientConnection,
-  sessionId: string,
-  known?: PiAcpDebugResponse
-): Promise<PiAcpDebugResponse> {
-  const snapshot = known ?? (await _snapshot(connection, sessionId));
-  const action = snapshot.snapshot.nextAction;
+  client: ThreadClient,
+  target: ThreadTarget,
+  operationId: string,
+  known?: Awaited<ReturnType<ThreadClient["inspect"]>>
+) {
+  const snapshot = known ?? (await client.inspect(target, operationId));
+  const action = snapshot.nextAction;
   if (action === undefined) {
-    throw new Error(`Pi Session "${sessionId}" has no action to Step.`);
+    throw new Error(`Pi operation "${operationId}" has no action to Step.`);
   }
-  return connection.agent.request<PiAcpDebugResponse, PiAcpStepRequest>(
-    LLM_SPACE_ACP_METHODS.step,
-    {
-      sessionId,
-      afterSeq: snapshot.cursor,
-      commandId: crypto.randomUUID(),
-      expectedActionId: action.id,
-      kind: action.kind,
-    }
-  );
+  return client.step(target, operationId, {
+    commandId: crypto.randomUUID(),
+    expectedActionId: action.id,
+    kind: action.kind,
+  });
 }
 
-/** Converts an editor user message to standard ACP text content. */
-function _promptContent(
-  message: Extract<Message, { role: "user" }>
-): ContentBlock[] {
-  const content = message.content.flatMap((item) =>
-    item.type === "text" ? [{ type: "text" as const, text: item.text }] : []
-  );
-  if (content.length === 0) {
-    throw new Error("ACP Studio prompts currently require text content.");
+async function _requireThread(
+  input: Parameters<typeof createProjectThreadExecutionRuntime>[0]
+): Promise<StudioThread> {
+  const thread = await input.client.loadThread(input.threadId);
+  if (thread === undefined) {
+    throw new Error(`Studio Thread "${input.threadId}" was not found.`);
   }
-  return content;
+  input.onThread(thread);
+  return thread;
 }
 
 /** Maps Studio operation ids to the editor's generic run-history vocabulary. */
@@ -423,51 +447,12 @@ function _sameJson(left: unknown, right: unknown): boolean {
   );
 }
 
-/** Resolves an accepted ACP prompt after its final state update. */
-class SessionUpdateWaiter {
-  private readonly _waiters = new Map<
-    string,
-    { resolve(): void; reject(error: Error): void }
-  >();
-
-  waitForStop(sessionId: string): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
-      this._waiters.set(sessionId, { resolve, reject });
-    });
-  }
-
-  accept(notification: UpdateSessionNotification): void {
-    const waiter = this._waiters.get(notification.sessionId);
-    const update = notification.update;
-    if (
-      waiter === undefined ||
-      update.sessionUpdate !== "state_update" ||
-      update.state === "running"
-    ) {
-      return;
-    }
-    this._waiters.delete(notification.sessionId);
-    const metadata = _isRecord(update._meta)
-      ? update._meta["llm-space.dev"]
-      : undefined;
-    if (
-      _isRecord(metadata) &&
-      metadata.status === "failed" &&
-      typeof metadata.error === "string"
-    ) {
-      waiter.reject(new Error(metadata.error));
-    } else {
-      waiter.resolve();
-    }
-  }
-}
-
-/** Loads the Electrobun ACP transport only in production execution. */
-async function _openDesktopAcpConnection(
-  options: OpenDesktopAcpConnectionOptions
-): Promise<ClientConnection> {
-  const { openDesktopAcpConnection } = await import("@/client/acp-client");
-  return openDesktopAcpConnection(options);
+async function _threadClient(
+  input: Parameters<typeof createProjectThreadExecutionRuntime>[0]
+): Promise<ThreadClient> {
+  if (input.threadClient !== undefined) return input.threadClient;
+  const { createThreadClient } = await import("@/client/thread-client");
+  return createThreadClient();
 }
 
 /** Narrows arbitrary JSON-like values to plain records. */

@@ -9,7 +9,6 @@ import {
   CableIcon,
   CloudIcon,
   FunctionSquareIcon,
-  PackageCheckIcon,
   XIcon,
 } from "lucide-react";
 import React, { memo, useCallback, useMemo } from "react";
@@ -62,9 +61,7 @@ function _ToolListItem({
       ? CableIcon
       : tool.type === "builtin"
         ? getBuiltInToolIcon(tool)
-        : tool.type === "plugin"
-          ? PackageCheckIcon
-          : FunctionSquareIcon;
+        : FunctionSquareIcon;
   const editDisabled = readonly;
 
   return (
@@ -115,7 +112,7 @@ function _ToolListItem({
             aria-label={
               tool.type === "function"
                 ? `Edit ${displayName} tool`
-                : `Manage ${displayName} ${tool.type === "mcp" ? "MCP" : tool.type === "builtin" ? "built-in" : tool.type === "plugin" ? "Plugin" : "provider-hosted"} tool`
+                : `Manage ${displayName} ${tool.type === "mcp" ? "MCP" : tool.type === "builtin" ? "built-in" : "provider-hosted"} tool`
             }
             disabled={editDisabled}
             onClick={() => onEdit(tool)}

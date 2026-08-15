@@ -140,10 +140,6 @@ export interface ResolvedProviderConnection {
 export class ModelManager {
   private readonly _settingsDir: string;
   private readonly _config: ModelsConfig;
-  private _pluginProviders: {
-    pluginId: string;
-    provider: ProviderConfig;
-  }[] = [];
   private _models: Models | null = null;
 
   /** Load model settings from the normal app directory or an isolated test root. */
@@ -169,34 +165,6 @@ export class ModelManager {
   /** The `Models` registry of configured providers. Built once, then cached. */
   async getAvailableModels(): Promise<Models> {
     return (this._models ??= await Promise.resolve(this._buildModels()));
-  }
-
-  setPluginProviders(
-    entries: { pluginId: string; provider: ProviderConfig }[]
-  ): void {
-    const userIds = new Set(this._config.providers.map((entry) => entry.id));
-    const counts = new Map<string, number>();
-    for (const entry of entries) {
-      counts.set(entry.provider.id, (counts.get(entry.provider.id) ?? 0) + 1);
-    }
-    this._pluginProviders = entries.filter(
-      (entry) =>
-        !userIds.has(entry.provider.id) && counts.get(entry.provider.id) === 1
-    );
-    this._models = null;
-  }
-
-  getProviderSource(providerId: string): {
-    source: "user" | "plugin";
-    readOnly: boolean;
-    pluginId?: string;
-  } {
-    const plugin = this._pluginProviders.find(
-      (entry) => entry.provider.id === providerId
-    );
-    return plugin
-      ? { source: "plugin", readOnly: true, pluginId: plugin.pluginId }
-      : { source: "user", readOnly: false };
   }
 
   /**
@@ -777,10 +745,7 @@ export class ModelManager {
   }
 
   private _effectiveProviders(): ProviderConfig[] {
-    return [
-      ...this._config.providers,
-      ...this._pluginProviders.map((entry) => entry.provider),
-    ];
+    return this._config.providers;
   }
 
   /**

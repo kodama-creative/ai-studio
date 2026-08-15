@@ -328,23 +328,27 @@ function _migrate(database: Database): void {
     );
   }
   if (current === SCHEMA_VERSION) return;
+  if (current !== 0) {
+    throw new Error(
+      `Studio database schema ${current} requires an explicit migration to ${SCHEMA_VERSION}.`
+    );
+  }
+  const existingTables = database
+    .query<{ name: string }, []>(
+      `SELECT name FROM sqlite_master
+       WHERE type = 'table'
+         AND name LIKE 'studio_%'
+         AND name <> 'studio_schema_migrations'
+       ORDER BY name`
+    )
+    .all()
+    .map((row) => row.name);
+  if (existingTables.length > 0) {
+    throw new Error(
+      `Studio database has unversioned tables and requires an explicit migration: ${existingTables.join(", ")}.`
+    );
+  }
   database.transaction(() => {
-    // Studio v1 data is intentionally disposable in this phase. Rebuild only
-    // Studio-owned tables; Engine tables may share this physical database and
-    // must never be touched here.
-    for (const table of [
-      "studio_events",
-      "studio_evaluations",
-      "studio_rubrics",
-      "studio_run_references",
-      "studio_operation_references",
-      "studio_playgrounds",
-      "studio_experiments",
-      "studio_command_receipts",
-    ]) {
-      database.run(`DROP TABLE IF EXISTS ${table}`);
-    }
-    database.run("DELETE FROM studio_schema_migrations");
     database.run(`
       CREATE TABLE studio_experiments (
         id TEXT PRIMARY KEY,

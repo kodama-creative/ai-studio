@@ -27,7 +27,6 @@
     "@formkit/auto-animate": "^0.9.0",
     "@hello-pangea/dnd": "^18.0.1",
     "@llm-space/agent": "workspace:*",
-    "@llm-space/acp": "workspace:*",
     "@llm-space/core": "workspace:*",
     "@llm-space/pi-runtime": "workspace:*",
     "@llm-space/runtime": "workspace:*",

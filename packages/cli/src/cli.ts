@@ -12,6 +12,7 @@ import { ModelManager } from "@llm-space/runtime/models";
 import cliPackage from "../package.json";
 
 import { serveAcpStdio } from "./acp-stdio";
+import { createAgentAcpBackend } from "./agent-acp-backend";
 
 interface DevCommand {
   readonly command: "dev";
@@ -103,7 +104,7 @@ async function _serveAcp(command: AcpCommand): Promise<void> {
   try {
     await serveAcpStdio(
       createPiAcpAgent({
-        backend: agent.acpBackend,
+        backend: createAgentAcpBackend(agent, command.projectRoot),
         version: cliPackage.version,
         name: "llm-space-cli",
         title: "LLM Space CLI",

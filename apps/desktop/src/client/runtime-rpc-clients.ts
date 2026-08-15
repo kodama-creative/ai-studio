@@ -1,6 +1,5 @@
 import { createRpcClientProxy } from "../shared/namespaced-rpc";
 import {
-  AGENT_EXECUTION_RPC,
   BUILTIN_TOOLS_RPC,
   MCP_RPC,
   MODELS_RPC,
@@ -24,4 +23,3 @@ export const builtinToolsClient = createRpcClientProxy(BUILTIN_TOOLS_RPC, transp
 export const searchClient = createRpcClientProxy(SEARCH_RPC, transport);
 export const networkClient = createRpcClientProxy(NETWORK_RPC, transport);
 export const skillsClient = createRpcClientProxy(SKILLS_RPC, transport);
-export const agentExecutionClient = createRpcClientProxy(AGENT_EXECUTION_RPC, transport);

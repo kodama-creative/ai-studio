@@ -42,10 +42,6 @@ run = "bun run dev:cef"
 description = "Run the static web app (landing page + shared-thread viewer) on :5175"
 run = "bun run dev:web"
 
-[tasks."dev:server"]
-description = "Run the headless LLM Space runtime server"
-run = "bun run dev:server"
-
 [tasks."dev:agent"]
 description = "Run the local code-first basic agent example"
 run = "bun run dev:agent"
@@ -114,10 +110,6 @@ description = "Developer-ID signed canary build, no notarization (set ELECTROBUN
 dir = "apps/desktop"
 env = { LLM_SPACE_SKIP_NOTARIZE = "1" }
 run = "bun run build:canary"
-
-[tasks."pack:server"]
-description = "Build the headless remote runtime server tarball"
-run = "bun run pack:server"
 
 # --- Local auto-update loop: `feed:serve` in one terminal, then `pack:feed`
 # --- once per version; launch the app from a copy outside build/ ------------

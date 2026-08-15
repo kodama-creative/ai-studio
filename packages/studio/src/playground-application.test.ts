@@ -7,7 +7,7 @@ import type { AssistantMessage } from "@earendil-works/pi-ai";
 import {
   BunSqliteRuntimeBindingStore,
   BunSqliteSessionRepository,
-  StudioPiSessionRuntime,
+  DurablePiRuntime,
   type AssistantExecutor,
 } from "@llm-space/pi-runtime";
 
@@ -86,7 +86,7 @@ describe.each(["memory", "sqlite"] as const)(
           sessionId: receipt.sessionId,
         });
         expect(paused.nextAction?.kind).toBe("model");
-        await fixture.app.stepRun(receipt.operationId, {
+        await fixture.app.stepRun(created.id, receipt.operationId, {
           commandId: "step-1",
           expectedActionId: paused.nextAction!.id,
           kind: "model",
@@ -148,14 +148,6 @@ test("rejects Playground tool kinds without a Pi runtime execution path", async 
         instructions: [],
         tools: [
           { type: "provider-hosted", config: { type: "web_search" } },
-          {
-            type: "plugin",
-            pluginId: "plugin-search",
-            toolId: "search",
-            name: "plugin_search",
-            description: "Search through a Plugin",
-            parameters: { type: "object" },
-          },
         ],
       },
       conversation: {
@@ -173,7 +165,7 @@ test("rejects Playground tool kinds without a Pi runtime execution path", async 
     expect(
       fixture.app.run(created.id, { fromMessageId: "user-native" })
     ).rejects.toThrow(
-      `Playground "${created.id}" uses tools that the Pi runtime cannot execute: web_search, plugin_search.`
+      `Playground "${created.id}" uses tools that the Pi runtime cannot execute: web_search.`
     );
   } finally {
     await fixture.close();
@@ -229,7 +221,7 @@ async function _fixture(storageKind: "memory" | "sqlite") {
   const assistantExecutor: AssistantExecutor = {
     execute: () => Promise.resolve(structuredClone(ASSISTANT)),
   };
-  const runtime = new StudioPiSessionRuntime({
+  const runtime = new DurablePiRuntime({
     repository,
     bindings,
     assistantExecutor,

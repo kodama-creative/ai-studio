@@ -92,22 +92,7 @@ const BuiltinTool = Type.Intersect([
 ]);
 export type BuiltinTool = Static<typeof BuiltinTool>;
 
-/**
- * A function tool implemented by a locally installed Plugin. Its model-facing
- * shape is the same as every other PI tool; the source ids are retained only
- * so LLM Space can route persisted calls back to the owning Plugin.
- */
-const PluginTool = Type.Intersect([
-  ToolBase,
-  Type.Object({
-    type: Type.Literal("plugin"),
-    pluginId: Type.String(),
-    toolId: Type.String(),
-  }),
-]);
-export type PluginTool = Static<typeof PluginTool>;
-
-/** Result returned by a built-in runtime tool across local or remote RPC. */
+/** Result returned by a built-in runtime tool through host RPC. */
 export interface BuiltinToolCallResponse {
   /** Structured content persisted in the thread and forwarded to the model. */
   content: ToolCallOutput["content"];
@@ -166,14 +151,12 @@ export const Tool = Type.Union([
   FunctionTool,
   McpTool,
   BuiltinTool,
-  PluginTool,
   ProviderHostedTool,
 ]);
 export type Tool =
   | FunctionTool
   | McpTool
   | BuiltinTool
-  | PluginTool
   | ProviderHostedTool;
 
 export type LegacyTool = Omit<FunctionTool, "type"> & {
@@ -200,9 +183,6 @@ export function normalizeTool(
     return tool;
   }
   if (tool.type === "mcp") {
-    return tool;
-  }
-  if (tool.type === "plugin") {
     return tool;
   }
   const legacySource = _getLegacyMcpSource(tool);
@@ -246,8 +226,8 @@ export function normalizeTools(
  */
 export function isExecutableTool(
   tool: Tool
-): tool is McpTool | BuiltinTool | PluginTool {
-  if (tool.type === "mcp" || tool.type === "plugin") {
+): tool is McpTool | BuiltinTool {
+  if (tool.type === "mcp") {
     return true;
   }
   return (
@@ -266,9 +246,6 @@ export function isProviderHostedTool(
 export function getToolKey(tool: Tool): string {
   if (isProviderHostedTool(tool)) {
     return `provider-hosted:${tool.config.type}`;
-  }
-  if (tool.type === "plugin") {
-    return tool.toolId;
   }
   return tool.name;
 }

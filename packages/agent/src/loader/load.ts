@@ -383,6 +383,7 @@ async function _loadNode(
       ...(typeof definition.markdown === "string"
         ? { markdown: definition.markdown.trim() }
         : {}),
+      ...(_isDynamicDefinition(definition) ? { dynamic: true } : {}),
     });
   }
 

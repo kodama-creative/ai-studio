@@ -1,8 +1,5 @@
 import type {
-  AgentEvent,
-  AgentStreamRequest,
   ModelConfig,
-  ProviderConnectionRef,
 } from "@llm-space/core";
 import type {
   RuntimeClient,
@@ -87,18 +84,12 @@ export interface SkillsApplication {
   addPath(id: RuntimeId | undefined, path: string): Promise<Awaited<ReturnType<RuntimeClient["skillsAddPath"]>>>;
   removePath(id: RuntimeId | undefined, path: string): Promise<Awaited<ReturnType<RuntimeClient["skillsRemovePath"]>>>;
   setHidden(id: RuntimeId | undefined, input: Parameters<RuntimeClient["skillsSetSkillHidden"]>[0]): Promise<Awaited<ReturnType<RuntimeClient["skillsSetSkillHidden"]>>>;
-  setPluginHidden(id: RuntimeId | undefined, input: Parameters<RuntimeClient["skillsSetPluginSkillHidden"]>[0]): Promise<Awaited<ReturnType<RuntimeClient["skillsSetPluginSkillHidden"]>>>;
-  setAllPluginHidden(id: RuntimeId | undefined, pluginId: string, hidden: boolean): Promise<Awaited<ReturnType<RuntimeClient["skillsSetAllPluginSkillsHidden"]>>>;
   setAllHidden(id: RuntimeId | undefined, path: string, hidden: boolean): Promise<Awaited<ReturnType<RuntimeClient["skillsSetAllSkillsHidden"]>>>;
   listAvailable(id?: RuntimeId): Promise<Awaited<ReturnType<RuntimeClient["skillsListAvailable"]>>>;
-  listPlugin(id?: RuntimeId): Promise<Awaited<ReturnType<RuntimeClient["skillsListPluginSkills"]>>>;
   list(id: RuntimeId | undefined, path: string): Promise<Awaited<ReturnType<RuntimeClient["skillsListSkills"]>>>;
   read(id: RuntimeId | undefined, path: string): Promise<Awaited<ReturnType<RuntimeClient["skillsReadSkill"]>>>;
 }
 
-export interface AgentExecutionApplication {
-  stream(runtimeId: RuntimeId | undefined, request: AgentStreamRequest, options?: { connection?: ProviderConnectionRef; signal?: AbortSignal }): AsyncIterable<AgentEvent>;
-}
 
 /** Runtime selection is an application concern shared by capability modules. */
 abstract class RuntimeApplication {
@@ -401,22 +392,6 @@ export class SkillsApplicationImpl
   ) {
     return this._runtime(id, "skills").skillsSetSkillHidden(input);
   }
-  async setPluginHidden(
-    id: RuntimeId | undefined,
-    input: Parameters<RuntimeClient["skillsSetPluginSkillHidden"]>[0]
-  ) {
-    return this._runtime(id, "skills").skillsSetPluginSkillHidden(input);
-  }
-  async setAllPluginHidden(
-    id: RuntimeId | undefined,
-    pluginId: string,
-    hidden: boolean
-  ) {
-    return this._runtime(id, "skills").skillsSetAllPluginSkillsHidden({
-      pluginId,
-      hidden,
-    });
-  }
   async setAllHidden(id: RuntimeId | undefined, path: string, hidden: boolean) {
     return this._runtime(id, "skills").skillsSetAllSkillsHidden({
       path,
@@ -426,89 +401,10 @@ export class SkillsApplicationImpl
   async listAvailable(id?: RuntimeId) {
     return this._runtime(id, "skills").skillsListAvailable();
   }
-  async listPlugin(id?: RuntimeId) {
-    return this._runtime(id, "skills").skillsListPluginSkills();
-  }
   async list(id: RuntimeId | undefined, path: string) {
     return this._runtime(id, "skills").skillsListSkills(path);
   }
   async read(id: RuntimeId | undefined, path: string) {
     return this._runtime(id, "skills").skillsReadSkill(path);
   }
-}
-
-export class AgentExecutionApplicationImpl
-  extends RuntimeApplication
-  implements AgentExecutionApplication
-{
-  async *stream(
-    runtimeId: RuntimeId | undefined,
-    request: AgentStreamRequest,
-    options: { connection?: ProviderConnectionRef; signal?: AbortSignal } = {}
-  ): AsyncIterable<AgentEvent> {
-    const runtime = this._runtime(runtimeId, "streamThread");
-    const streamId = crypto.randomUUID();
-    const signal = options.signal;
-    if (signal?.aborted) throw _abortError();
-    let queue: AgentEvent[] = [];
-    let queueHead = 0;
-    let wake: (() => void) | undefined;
-    let done = false;
-    let aborted = false;
-    let failure: Error | undefined;
-    const finish = () => {
-      done = true;
-      wake?.();
-      wake = undefined;
-    };
-    const onAbort = () => {
-      aborted = true;
-      runtime.abortStream({ runtimeId, streamId });
-      finish();
-    };
-    signal?.addEventListener("abort", onAbort, { once: true });
-    void runtime
-      .streamThread(
-        { runtimeId, streamId, request, connection: options.connection },
-        (message) => {
-          if (message.type === "event") queue.push(message.event);
-          else if (message.type === "error")
-            failure = new Error(message.message);
-          if (message.type !== "event") done = true;
-          wake?.();
-          wake = undefined;
-        }
-      )
-      .catch((error) => {
-        failure = error instanceof Error ? error : new Error(String(error));
-        finish();
-      });
-    try {
-      while (!done || queueHead < queue.length) {
-        const event = queue[queueHead];
-        if (event) {
-          queueHead += 1;
-          yield event;
-          // Avoid O(n²) Array.shift() while bounding retained burst entries.
-          if (queueHead >= 1024 && queueHead * 2 >= queue.length) {
-            queue = queue.slice(queueHead);
-            queueHead = 0;
-          }
-          continue;
-        }
-        await new Promise<void>((resolve) => {
-          wake = resolve;
-        });
-      }
-      if (aborted) throw _abortError();
-      if (failure) throw failure;
-    } finally {
-      signal?.removeEventListener("abort", onAbort);
-      if (!done) runtime.abortStream({ runtimeId, streamId });
-    }
-  }
-}
-
-function _abortError(): DOMException {
-  return new DOMException("The operation was aborted.", "AbortError");
 }

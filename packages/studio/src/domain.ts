@@ -68,12 +68,17 @@ export interface StudioRunHistoryEntry {
 
 export type StudioRunReceipt = StudioOperationReceipt;
 
-export interface StudioRunInput {
+export type StudioRunInput = {
   readonly fromMessageId: string;
   /** Studio-only Pi model override frozen into this operation binding. */
   readonly modelOverride?: string;
-  readonly mode?: "step" | "continue";
-}
+} & (
+  | { readonly mode?: undefined; readonly commandId?: undefined }
+  | {
+      readonly mode: "step" | "continue";
+      readonly commandId: string;
+    }
+);
 
 export type StudioStepRunInput = StudioStepInput;
 

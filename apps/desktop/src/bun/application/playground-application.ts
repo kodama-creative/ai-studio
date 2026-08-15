@@ -1,6 +1,7 @@
 import type {
   CreatePlaygroundInput,
   Playground,
+  PlaygroundApplication,
   SavePlaygroundInput,
 } from "@llm-space/studio";
 
@@ -15,6 +16,12 @@ export interface DesktopPlaygroundApplication {
     playgroundId: string,
     document: SavePlaygroundInput
   ): Promise<Playground>;
+  run: PlaygroundApplication["run"];
+  inspectRun: PlaygroundApplication["inspectRun"];
+  stepRun: PlaygroundApplication["stepRun"];
+  continueRun: PlaygroundApplication["continueRun"];
+  resolveToolApproval: PlaygroundApplication["resolveToolApproval"];
+  cancelRun: PlaygroundApplication["cancelRun"];
 }
 
 /** Keep RPC naming and follow policy out of the Studio Playground host. */
@@ -31,5 +38,38 @@ export class DesktopPlaygroundApplicationImpl implements DesktopPlaygroundApplic
   }
   save(playgroundId: string, document: SavePlaygroundInput) {
     return this._host.savePlayground(playgroundId, document);
+  }
+  run(
+    playgroundId: string,
+    input: Parameters<PlaygroundApplication["run"]>[1]
+  ) {
+    return this._host.run(playgroundId, input);
+  }
+  inspectRun(playgroundId: string, operationId: string) {
+    return this._host.inspectRun(playgroundId, operationId);
+  }
+  stepRun(
+    playgroundId: string,
+    operationId: string,
+    input: Parameters<PlaygroundApplication["stepRun"]>[2]
+  ) {
+    return this._host.stepRun(playgroundId, operationId, input);
+  }
+  continueRun(
+    playgroundId: string,
+    operationId: string,
+    input: Parameters<PlaygroundApplication["continueRun"]>[2]
+  ) {
+    return this._host.continueRun(playgroundId, operationId, input);
+  }
+  resolveToolApproval(
+    playgroundId: string,
+    operationId: string,
+    input: Parameters<PlaygroundApplication["resolveToolApproval"]>[2]
+  ) {
+    return this._host.resolveToolApproval(playgroundId, operationId, input);
+  }
+  cancelRun(playgroundId: string, operationId: string) {
+    return this._host.cancelRun(playgroundId, operationId);
   }
 }

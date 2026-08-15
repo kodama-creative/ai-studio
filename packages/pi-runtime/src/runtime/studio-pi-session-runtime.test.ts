@@ -11,7 +11,7 @@ import { PiAssistantExecutor } from "../model/pi-assistant-executor";
 import { BunSqliteSessionRepository } from "../sqlite/bun-sqlite-session-repository";
 
 import {
-  StudioPiSessionRuntime,
+  DurablePiRuntime,
   DurableEffectCrash,
   DurableSessionCorruptionError,
   OperationAdmissionConflictError,
@@ -50,7 +50,7 @@ test("opens without effects and commits exactly one durable model step", async (
       return Promise.resolve(structuredClone(ASSISTANT));
     },
   };
-  const runtime = new StudioPiSessionRuntime({
+  const runtime = new DurablePiRuntime({
     repository,
     bindings,
     assistantExecutor,
@@ -102,6 +102,72 @@ test("opens without effects and commits exactly one durable model step", async (
   }
 });
 
+test("resolves a dynamic operation binding once and reuses the frozen result after restart", async () => {
+  const root = await mkdtemp(join(tmpdir(), "llm-space-pi-dynamic-binding-"));
+  const path = join(root, "studio.sqlite");
+  const repository = new BunSqliteSessionRepository({ path });
+  const bindings = new BunSqliteRuntimeBindingStore({ path });
+  const observedPrompts: string[] = [];
+  const createRuntime = () =>
+    new DurablePiRuntime({
+      repository,
+      bindings,
+      assistantExecutor: {
+        execute({ binding }) {
+          observedPrompts.push(binding.systemPrompt);
+          return Promise.resolve(structuredClone(ASSISTANT));
+        },
+      },
+    });
+  let runtime = createRuntime();
+  let resolutions = 0;
+  try {
+    await runtime.createSession({ id: "dynamic-binding" });
+    const input = {
+      operationId: "run-dynamic-binding",
+      sessionId: "dynamic-binding",
+      messages: [{ role: "user" as const, content: "hello", timestamp: 1 }],
+    };
+    const paused = await runtime.start({
+      ...input,
+      binding: () => {
+        resolutions += 1;
+        return Promise.resolve({
+          formatVersion: 1,
+          agent: { agentSpecId: "assistant", sourceRevision: "revision-1" },
+          model: { provider: "openai", modelId: "gpt-5" },
+          systemPrompt: "Frozen dynamic instructions",
+          tools: [],
+        });
+      },
+    });
+    expect(resolutions).toBe(1);
+    await runtime.close();
+
+    runtime = createRuntime();
+    const recovered = await runtime.start({
+      ...input,
+      binding: () => {
+        resolutions += 1;
+        throw new Error("dynamic binding must not resolve again");
+      },
+    });
+    expect(resolutions).toBe(1);
+    expect(recovered.nextAction).toEqual(paused.nextAction);
+    await runtime.step({
+      sessionId: input.sessionId,
+      expectedActionId: recovered.nextAction!.id,
+      kind: "model",
+    });
+    expect(observedPrompts).toEqual(["Frozen dynamic instructions"]);
+  } finally {
+    await runtime.close();
+    bindings.close();
+    await repository.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("reconstructs a committed step response after process restart", async () => {
   const root = await mkdtemp(join(tmpdir(), "llm-space-pi-step-retry-"));
   const path = join(root, "studio.sqlite");
@@ -109,7 +175,7 @@ test("reconstructs a committed step response after process restart", async () =>
   let bindings = new BunSqliteRuntimeBindingStore({ path });
   let modelCalls = 0;
   const createRuntime = () =>
-    new StudioPiSessionRuntime({
+    new DurablePiRuntime({
       repository,
       bindings,
       assistantExecutor: {
@@ -178,7 +244,7 @@ test("reconnects a committed watcher from the last durable sequence", async () =
   const path = join(root, "studio.sqlite");
   const repository = new BunSqliteSessionRepository({ path });
   const bindings = new BunSqliteRuntimeBindingStore({ path });
-  const runtime = new StudioPiSessionRuntime({
+  const runtime = new DurablePiRuntime({
     repository,
     bindings,
     assistantExecutor: { execute: () => Promise.resolve(ASSISTANT) },
@@ -257,7 +323,7 @@ test("close interrupts live effects without persisting user abort intent", async
   const started = new Promise<void>((resolve) => {
     effectStarted = resolve;
   });
-  const runtime = new StudioPiSessionRuntime({
+  const runtime = new DurablePiRuntime({
     repository,
     bindings,
     assistantExecutor: {
@@ -338,7 +404,7 @@ test("close preserves a started tool prefix for durable recovery", async () => {
     },
   });
   const createRuntime = () =>
-    new StudioPiSessionRuntime({
+    new DurablePiRuntime({
       repository,
       bindings,
       assistantExecutor: {
@@ -442,6 +508,134 @@ test("close preserves a started tool prefix for durable recovery", async () => {
   }
 });
 
+test("recovers a durable user approval before executing a tool exactly once", async () => {
+  const root = await mkdtemp(join(tmpdir(), "llm-space-pi-tool-approval-"));
+  const path = join(root, "studio.sqlite");
+  let repository = new BunSqliteSessionRepository({ path });
+  let bindings = new BunSqliteRuntimeBindingStore({ path });
+  let assistantCalls = 0;
+  let approvalCalls = 0;
+  let toolCalls = 0;
+  const tool = defineTool({
+    description: "Deploy the release",
+    inputSchema: {
+      type: "object",
+      properties: { environment: { type: "string" } },
+      required: ["environment"],
+      additionalProperties: false,
+    },
+    approval() {
+      approvalCalls += 1;
+      return "user-approval";
+    },
+    execute(input) {
+      toolCalls += 1;
+      return `deployed:${String(input.environment)}`;
+    },
+  });
+  const createRuntime = () =>
+    new DurablePiRuntime({
+      repository,
+      bindings,
+      assistantExecutor: {
+        execute() {
+          assistantCalls += 1;
+          return Promise.resolve(
+            assistantCalls === 1
+              ? {
+                  ...ASSISTANT,
+                  content: [
+                    {
+                      type: "toolCall" as const,
+                      id: "deploy-call",
+                      name: "deploy",
+                      arguments: { environment: "production" },
+                    },
+                  ],
+                  stopReason: "toolUse" as const,
+                }
+              : structuredClone(ASSISTANT)
+          );
+        },
+      },
+      resolveTools: () =>
+        new Map([
+          ["deploy", runtimeTool(tool, { implementationId: "deploy@1" })],
+        ]),
+      createToolContext: _unusedToolContext,
+    });
+  let runtime = createRuntime();
+  try {
+    await runtime.createSession({ id: "approval" });
+    let snapshot = await runtime.start({
+      operationId: "run-approval",
+      sessionId: "approval",
+      messages: [{ role: "user", content: "deploy", timestamp: 1 }],
+      binding: {
+        formatVersion: 1,
+        agent: { agentSpecId: "assistant", sourceRevision: "abc123" },
+        model: { provider: "openai", modelId: "gpt-5" },
+        systemPrompt: "Deploy carefully.",
+        tools: [
+          {
+            name: "deploy",
+            description: "Deploy the release",
+            inputSchema: tool.inputSchema as Readonly<Record<string, unknown>>,
+            implementationId: "deploy@1",
+            replay: "never",
+          },
+        ],
+      },
+    });
+    snapshot = await runtime.step({
+      sessionId: "approval",
+      expectedActionId: snapshot.nextAction!.id,
+      kind: "model",
+    });
+    snapshot = await runtime.step({
+      sessionId: "approval",
+      expectedActionId: snapshot.nextAction!.id,
+      kind: "tool",
+    });
+    expect(snapshot).toMatchObject({
+      status: "suspended",
+      approval: {
+        toolCallId: "deploy-call",
+        toolName: "deploy",
+        status: "pending",
+      },
+    });
+    expect(toolCalls).toBe(0);
+    expect(approvalCalls).toBe(1);
+
+    await runtime.close();
+    bindings.close();
+    await repository.close();
+    repository = new BunSqliteSessionRepository({ path });
+    bindings = new BunSqliteRuntimeBindingStore({ path });
+    runtime = createRuntime();
+
+    expect(await runtime.open({ sessionId: "approval" })).toMatchObject({
+      status: "suspended",
+      approval: { toolCallId: "deploy-call", status: "pending" },
+    });
+    await runtime.resolveToolApproval({
+      sessionId: "approval",
+      toolCallId: "deploy-call",
+      approved: true,
+    });
+    const completed = await runtime.continue({ sessionId: "approval" });
+    expect(completed.status).toBe("completed");
+    expect(toolCalls).toBe(1);
+    expect(approvalCalls).toBe(1);
+  } finally {
+    await runtime.close();
+    bindings.close();
+    await repository.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 /** Captures a required rejection so Bun tests await the actual async outcome. */
 async function _rejectionOf(promise: Promise<unknown>): Promise<unknown> {
   try {
@@ -457,7 +651,7 @@ test("suspends a missing frozen model before writing a provider attempt", async 
   const path = join(root, "studio.sqlite");
   const repository = new BunSqliteSessionRepository({ path });
   const bindings = new BunSqliteRuntimeBindingStore({ path });
-  const runtime = new StudioPiSessionRuntime({
+  const runtime = new DurablePiRuntime({
     repository,
     bindings,
     assistantExecutor: new PiAssistantExecutor({ models: createModels() }),
@@ -542,7 +736,7 @@ test("scopes pending tool discovery to the current operation boundary", async ()
   repository = new BunSqliteSessionRepository({ path });
   const bindings = new BunSqliteRuntimeBindingStore({ path });
   let modelCalls = 0;
-  const runtime = new StudioPiSessionRuntime({
+  const runtime = new DurablePiRuntime({
     repository,
     bindings,
     assistantExecutor: {
@@ -583,7 +777,7 @@ test("steps local tools sequentially and exposes Pi execution identity", async (
   const bindings = new BunSqliteRuntimeBindingStore({ path });
   const observed: ToolContext["execution"][] = [];
   let modelTurn = 0;
-  const runtime = new StudioPiSessionRuntime({
+  const runtime = new DurablePiRuntime({
     repository,
     bindings,
     assistantExecutor: {
@@ -709,7 +903,7 @@ test("does not replay a never tool after a crash past tool_started", async () =>
     },
   });
   const createRuntime = () =>
-    new StudioPiSessionRuntime({
+    new DurablePiRuntime({
       repository,
       bindings,
       assistantExecutor: {
@@ -796,7 +990,7 @@ test("retries a provider error inside one durable model step", async () => {
   const repository = new BunSqliteSessionRepository({ path });
   const bindings = new BunSqliteRuntimeBindingStore({ path });
   let attempts = 0;
-  const runtime = new StudioPiSessionRuntime({
+  const runtime = new DurablePiRuntime({
     repository,
     bindings,
     assistantExecutor: {
@@ -862,7 +1056,7 @@ test("replays only an explicitly safe tool with the same idempotency key", async
       return "recovered";
     },
   });
-  const runtime = new StudioPiSessionRuntime({
+  const runtime = new DurablePiRuntime({
     repository,
     bindings,
     assistantExecutor: {
@@ -1029,7 +1223,7 @@ test("reuses committed tool usage after a crash before result append", async () 
     inputSchema: { type: "object", additionalProperties: false },
     execute: () => "recovered",
   });
-  const runtime = new StudioPiSessionRuntime({
+  const runtime = new DurablePiRuntime({
     repository,
     bindings,
     assistantExecutor: { execute: () => Promise.resolve(ASSISTANT) },
@@ -1107,7 +1301,7 @@ test("finishes an already committed terminal assistant without another provider 
     "main"
   );
   let modelCalls = 0;
-  const runtime = new StudioPiSessionRuntime({
+  const runtime = new DurablePiRuntime({
     repository,
     bindings,
     assistantExecutor: {
@@ -1139,7 +1333,7 @@ test("rejects conflicting prompt content for an admitted operation id", async ()
   const path = join(root, "studio.sqlite");
   const repository = new BunSqliteSessionRepository({ path });
   const bindings = new BunSqliteRuntimeBindingStore({ path });
-  const runtime = new StudioPiSessionRuntime({
+  const runtime = new DurablePiRuntime({
     repository,
     bindings,
     assistantExecutor: { execute: () => Promise.resolve(ASSISTANT) },
@@ -1192,7 +1386,7 @@ test("never upgrades a frozen never tool to current safe replay", async () => {
       throw new DurableEffectCrash("simulated process death");
     },
   });
-  const runtime = new StudioPiSessionRuntime({
+  const runtime = new DurablePiRuntime({
     repository,
     bindings,
     assistantExecutor: {
@@ -1272,7 +1466,7 @@ test("suspends a clean tool breakpoint when implementation identity changed", as
       return "wrong";
     },
   });
-  const runtime = new StudioPiSessionRuntime({
+  const runtime = new DurablePiRuntime({
     repository,
     bindings,
     assistantExecutor: {
@@ -1368,7 +1562,7 @@ test("materializes a partially committed prompt before the provider effect", asy
   });
   await session.appendEntry(first, "main");
   let observed: readonly unknown[] = [];
-  const runtime = new StudioPiSessionRuntime({
+  const runtime = new DurablePiRuntime({
     repository,
     bindings,
     assistantExecutor: {
@@ -1408,7 +1602,7 @@ test("signals and settles an active provider effect before abort finishes", asyn
     releaseStarted = resolve;
   });
   let observedAbort = false;
-  const runtime = new StudioPiSessionRuntime({
+  const runtime = new DurablePiRuntime({
     repository,
     bindings,
     assistantExecutor: {
@@ -1485,7 +1679,7 @@ test("runs tool policies around the admitted effect and commits tool usage", asy
       return input.value;
     },
   });
-  const runtime = new StudioPiSessionRuntime({
+  const runtime = new DurablePiRuntime({
     repository,
     bindings,
     assistantExecutor: {
@@ -1640,7 +1834,7 @@ test("faults a provisioned tool result materialized with the wrong entry role", 
     },
     "main"
   );
-  const runtime = new StudioPiSessionRuntime({
+  const runtime = new DurablePiRuntime({
     repository,
     bindings,
     assistantExecutor: { execute: () => Promise.resolve(ASSISTANT) },
@@ -1693,7 +1887,7 @@ test("faults an attempt gap instead of resuming through corrupt records", async 
     attempt: 2,
     resultEntryId: "corrupt-result",
   });
-  const runtime = new StudioPiSessionRuntime({
+  const runtime = new DurablePiRuntime({
     repository,
     bindings,
     assistantExecutor: { execute: () => Promise.resolve(ASSISTANT) },

@@ -5,12 +5,9 @@ export {
   RuntimeNotFoundError,
 } from "./errors";
 export type {
-  RuntimeAbortStreamPayload,
   RuntimeCapability,
   RuntimeClient,
   RuntimeId,
   RuntimeInfo,
   RuntimeScopedParams,
-  RuntimeStreamRequestPayload,
-  RuntimeStreamResponsePayload,
 } from "./types";

@@ -134,19 +134,21 @@ export function createRpcClientProxy<TInterface extends RpcNamespaceInterface>(
         };
       }
       if (namespace.streamNames.has(property)) {
-        return (...args: readonly unknown[]) =>
-          transport.stream({
+        return (...args: readonly unknown[]) => {
+          const serializableArgs = args.map(_withoutSignal);
+          return transport.stream({
             namespace: namespace.name,
             method: property,
-            args: args.map(_withoutSignal),
+            args: _withoutTrailingUndefined(serializableArgs),
             signal: _findSignal(args),
           });
+        };
       }
       return async (...args: readonly unknown[]) => {
         const result = await transport.request({
           namespace: namespace.name,
           method: property,
-          args,
+          args: _withoutTrailingUndefined(args),
         });
         if (!result.ok) {
           throw new RpcClientError(result.error);
@@ -155,6 +157,15 @@ export function createRpcClientProxy<TInterface extends RpcNamespaceInterface>(
       };
     },
   });
+}
+
+/** Preserve omitted optional arguments across JSON transports. */
+function _withoutTrailingUndefined(
+  args: readonly unknown[]
+): readonly unknown[] {
+  let end = args.length;
+  while (end > 0 && args[end - 1] === undefined) end -= 1;
+  return end === args.length ? args : args.slice(0, end);
 }
 
 function _withoutSignal(input: unknown): unknown {

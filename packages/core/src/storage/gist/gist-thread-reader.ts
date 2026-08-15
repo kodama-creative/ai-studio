@@ -8,7 +8,12 @@ import type {
   ThreadLocator,
   VersionedThreadStorage,
 } from "../../types/storage/thread-storage";
-import { normalizeThread, type Thread } from "../../types/threads/thread";
+import { type Thread } from "../../types/threads/thread";
+import {
+  parsePortableThreadSnapshot,
+  threadFromSnapshotDocument,
+  type PortableThreadSnapshot,
+} from "../../types/threads/thread-snapshot";
 import {
   RecoverableThreadZodSchema,
   ThreadZodSchema,
@@ -96,7 +101,21 @@ export class GistThreadReader
       throw new Error(`Gist ${locator.id} has no file "${locator.filename}".`);
     }
 
-    return normalizeThread(await this._readThreadFile(file));
+    return (await this._readDocument(file)).thread;
+  }
+
+  /** Read the latest portable Thread Snapshot from a gist. */
+  async readSnapshot(threadId: string): Promise<PortableThreadSnapshot> {
+    const gist = await gistRequest<GistResponse>(
+      this._fetch,
+      this._baseUrl,
+      `/gists/${threadId}`,
+      { token: await this._token() }
+    );
+    const file = selectThreadFile(gist.files);
+    if (!file) throw new Error(`Gist ${threadId} has no readable file.`);
+    const content = await this._readFileContent(file);
+    return parsePortableThreadSnapshot(JSON.parse(content));
   }
 
   /**
@@ -121,7 +140,7 @@ export class GistThreadReader
       throw new Error(`Gist ${threadId} has no readable file.`);
     }
 
-    const thread = normalizeThread(await this._readThreadFile(file, signal));
+    const { thread } = await this._readDocument(file, signal);
     const meta: SharedThreadMeta = {
       connectorId: GIST_CONNECTOR_ID,
       threadId,
@@ -144,16 +163,14 @@ export class GistThreadReader
     return { thread, meta };
   }
 
-  /** Read a gist file's content, following `raw_url` when truncated (>1 MB). */
-  private async _readThreadFile(
-    file: GistFile,
-    signal?: AbortSignal
-  ): Promise<Thread> {
-    const content =
-      file.truncated && file.raw_url
-        ? await this._fetch(file.raw_url, { signal }).then((r) => r.text())
-        : (file.content ?? "");
-    return _parseThread(content);
+  private async _readDocument(file: GistFile, signal?: AbortSignal) {
+    return _parseThreadDocument(await this._readFileContent(file, signal));
+  }
+
+  private async _readFileContent(file: GistFile, signal?: AbortSignal) {
+    return file.truncated && file.raw_url
+      ? this._fetch(file.raw_url, { signal }).then((response) => response.text())
+      : (file.content ?? "");
   }
 
   private async _token(): Promise<string | null> {
@@ -162,6 +179,11 @@ export class GistThreadReader
 }
 
 function _parseThread(content: string): Thread {
+  try {
+    return threadFromSnapshotDocument(JSON.parse(content));
+  } catch {
+    // Keep best-effort recovery for historical plain Thread documents.
+  }
   const result = parseJsonWithSchema(content, ThreadZodSchema, {
     recovery: "best-effort",
     recoverySchema: RecoverableThreadZodSchema,
@@ -173,4 +195,8 @@ function _parseThread(content: string): Thread {
     return result.value;
   }
   throw new Error("Gist content is not a valid thread file.");
+}
+
+function _parseThreadDocument(content: string): { thread: Thread } {
+  return { thread: _parseThread(content) };
 }

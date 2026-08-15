@@ -179,10 +179,8 @@ export type SettingsTab =
   | "models"
   | "mcp"
   | "network"
-  | "remote"
   | "search"
   | "skills"
-  | "plugins"
   | "experimental";
 
 /** Open the Settings dialog, optionally on a specific `tab`. */

@@ -63,10 +63,7 @@ export function agentSpecSnapshot(
     throw new Error(`Playground "${playgroundId}" does not have a model.`);
   }
   const unsupported = spec.tools.filter(
-    (tool) =>
-      tool.type === "function" ||
-      tool.type === "plugin" ||
-      tool.type === "provider-hosted"
+    (tool) => tool.type === "function" || tool.type === "provider-hosted"
   );
   if (unsupported.length > 0) {
     throw new Error(

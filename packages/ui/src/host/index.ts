@@ -9,7 +9,6 @@ export type {
   McpHost,
   ModelClient,
   PathsHost,
-  PluginToolsHost,
   RuntimeOwnedHostOptions,
   RuntimeScopedHostOptions,
   ShareThreadActionInput,

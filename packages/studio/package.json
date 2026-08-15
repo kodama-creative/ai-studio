@@ -13,8 +13,8 @@
     "./package.json": "./package.json"
   },
   "dependencies": {
+    "@earendil-works/pi-agent-core": "catalog:",
     "@earendil-works/pi-ai": "catalog:",
-    "@llm-space/acp": "workspace:*",
     "@llm-space/agent": "workspace:*",
     "@llm-space/core": "workspace:*",
     "@llm-space/pi-runtime": "workspace:*"

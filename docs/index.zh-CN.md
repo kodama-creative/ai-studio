@@ -15,9 +15,6 @@
 | [变量与模板](./variables-and-templates.zh-CN.md) | 用 `{{变量}}` 复用内容，用模板添加逻辑：`@include`、条件判断和循环。         |
 | [界面布局](./ui-layout.zh-CN.md)                 | 说明主界面各区域的用途。                                                     |
 | [设置](./settings.zh-CN.md)                      | 介绍 Settings 入口，以及 General、Models、MCP、Search、Skills 页面。         |
-| [Plugin 开发指南](./plugins.zh-CN.md)            | 介绍 Plugin 的目录、metadata、Settings、Extensions、运行模型和开发示例。     |
-| [完整 Atlas Plugin](../examples/atlas-plugin/README.zh-CN.md) | 查看每种可重复 Extension 类型均有多个贡献项的完整可运行示例。       |
-| [SSH Remote Runtime](./remote-runtime.zh-CN.md)  | 通过系统 OpenSSH 配置连接 Linux 远端 runtime。                               |
 | [常用快捷键](./shortcut-keys.zh-CN.md)           | 介绍菜单快捷键、命令面板和 Thread 运行快捷键。                               |
 
 # 外部链接

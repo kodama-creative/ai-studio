@@ -50,9 +50,10 @@ export function applicationModule(): ContainerModule {
       .toDynamicValue(
         (context: ResolutionContext) =>
           new ThreadSharingApplication(
-            context.get(RUNTIME_APPLICATION_TOKENS.workspace),
+            context.get(PROCESS_TOKENS.playgroundApplication),
             context.get(RUNTIME_APPLICATION_TOKENS.models),
-            context.get(PROCESS_TOKENS.gistWriter)
+            context.get(PROCESS_TOKENS.gistWriter),
+            context.get(PROCESS_TOKENS.gistReader)
           )
       )
       .inSingletonScope();

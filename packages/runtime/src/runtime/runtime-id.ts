@@ -1,4 +1,4 @@
-export type RuntimeId = "local" | `remote:${string}`;
+export type RuntimeId = "local";
 
 export interface RuntimeScopedParams {
   runtimeId?: RuntimeId;

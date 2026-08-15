@@ -8,17 +8,13 @@
     "./models": "./src/models/index.ts",
     "./mcp": "./src/mcp/index.ts",
     "./network": "./src/network/index.ts",
-    "./plugins": "./src/plugins/index.ts",
     "./runtime": "./src/runtime/index.ts",
     "./search": "./src/search/index.ts",
     "./skills": "./src/skills/index.ts",
     "./storage": "./src/storage/index.ts",
-    "./streaming": "./src/streaming/index.ts",
     "./tools": "./src/tools/index.ts",
     "./tools/built-in": "./src/tools/built-in/index.ts",
     "./package.json": "./package.json",
-    "./remote-package": "./src/remote-package.ts",
-    "./remote-protocol": "./src/remote-protocol.ts",
     "./traces": "./src/traces/index.ts"
   },
   "dependencies": {

@@ -1,20 +1,22 @@
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Models, Tool as PiTool } from "@earendil-works/pi-ai";
-import type { PiAcpSessionBackend } from "@llm-space/acp";
 import { loadAgent } from "@llm-space/agent/loader";
 import {
   closeRuntimeServices,
   createRuntimeToolContext,
   resolveAgentGeneration,
+  resolveAgentOperation,
+  type PreparedAgentDefinition,
   type RuntimeServices,
 } from "@llm-space/agent/runtime";
+import type { SkillHandle } from "@llm-space/agent/skills";
 import {
   BunSqliteRuntimeBindingStore,
   BunSqliteSessionRepository,
   PiAssistantExecutor,
-  StudioPiSessionRuntime,
+  DurablePiRuntime,
   runtimeTool,
   type PiProviderConnection,
   type PiProviderConnectionInput,
@@ -55,10 +57,9 @@ export interface ExecAgentInput {
   readonly signal?: AbortSignal;
 }
 
-/** Project-scoped Pi Session application used by CLI and ACP hosts. */
+/** Project-scoped Pi Session application used by CLI and protocol adapters. */
 export interface Agent {
   readonly agentId: string;
-  readonly acpBackend: PiAcpSessionBackend;
   createSession(input?: {
     readonly sessionId?: string;
     readonly name?: string;
@@ -70,6 +71,15 @@ export interface Agent {
   listOperations(
     sessionId: string
   ): ReturnType<SessionApplication["listOperations"]>;
+  readCommitted(
+    input: Parameters<SessionApplication["readCommitted"]>[0]
+  ): ReturnType<SessionApplication["readCommitted"]>;
+  step(
+    input: Parameters<SessionApplication["step"]>[0]
+  ): ReturnType<SessionApplication["step"]>;
+  continue(
+    input: Parameters<SessionApplication["continue"]>[0]
+  ): ReturnType<SessionApplication["continue"]>;
   createTask(input: {
     readonly sessionId: string;
     readonly title: string;
@@ -92,6 +102,7 @@ export async function createAgent(options: CreateAgentOptions): Promise<Agent> {
     await repository.close();
     throw error;
   }
+  let currentSkills = new Map<string, SkillHandle>();
   const resolveCurrentAgent = async () => {
     const current = await _loadExecutable(options.projectRoot);
     if (current.agentId !== first.agentId) {
@@ -103,7 +114,7 @@ export async function createAgent(options: CreateAgentOptions): Promise<Agent> {
   };
   const resolveTools = async (): Promise<ReadonlyMap<string, RuntimeTool>> =>
     (await resolveCurrentAgent()).tools;
-  const runtime = new StudioPiSessionRuntime({
+  const runtime = new DurablePiRuntime({
     repository,
     bindings,
     assistantExecutor: new PiAssistantExecutor({
@@ -115,11 +126,14 @@ export async function createAgent(options: CreateAgentOptions): Promise<Agent> {
     }),
     resolveTools,
     createToolContext: ({ execution, signal }) =>
-      createRuntimeToolContext(options.runtimeServices, {
+      createRuntimeToolContext(
+        _withMountedSkills(options.runtimeServices, () => currentSkills),
+        {
         agentId: first.agentId,
         execution,
         signal,
-      }),
+        }
+      ),
   });
   let store: ReturnType<typeof createSqliteApplicationStore>;
   try {
@@ -140,17 +154,22 @@ export async function createAgent(options: CreateAgentOptions): Promise<Agent> {
     runtime,
     store,
     agentId: first.agentId,
-    resolveBinding: async () => (await resolveCurrentAgent()).binding,
+    resolveBinding: async (input) => {
+      const resolved = await _operationBinding(
+        await resolveCurrentAgent(),
+        input
+      );
+      currentSkills = new Map(resolved.skills);
+      return resolved.binding;
+    },
     ...(options.clock === undefined ? {} : { clock: options.clock }),
     ...(options.generateId === undefined
       ? {}
       : { generateId: options.generateId }),
   });
-  const backend = _acpBackend(application, runtime, options.projectRoot);
   return new AgentImpl(
     options,
     first.agentId,
-    backend,
     application,
     bindings,
     repository
@@ -163,7 +182,6 @@ class AgentImpl implements Agent {
   constructor(
     private readonly _options: CreateAgentOptions,
     readonly agentId: string,
-    readonly acpBackend: PiAcpSessionBackend,
     private readonly _application: SessionApplication,
     private readonly _bindings: BunSqliteRuntimeBindingStore,
     private readonly _repository: BunSqliteSessionRepository
@@ -195,6 +213,24 @@ class AgentImpl implements Agent {
     sessionId: string
   ): ReturnType<SessionApplication["listOperations"]> {
     return this._application.listOperations(sessionId);
+  }
+
+  readCommitted(
+    input: Parameters<SessionApplication["readCommitted"]>[0]
+  ): ReturnType<SessionApplication["readCommitted"]> {
+    return this._application.readCommitted(input);
+  }
+
+  step(
+    input: Parameters<SessionApplication["step"]>[0]
+  ): ReturnType<SessionApplication["step"]> {
+    return this._application.step(input);
+  }
+
+  continue(
+    input: Parameters<SessionApplication["continue"]>[0]
+  ): ReturnType<SessionApplication["continue"]> {
+    return this._application.continue(input);
   }
 
   createTask(input: {
@@ -240,7 +276,8 @@ class AgentImpl implements Agent {
 
 interface LoadedExecutable {
   readonly agentId: string;
-  readonly binding: RuntimeBinding;
+  readonly definition: PreparedAgentDefinition;
+  readonly bindingTools: RuntimeBinding["tools"];
   readonly tools: ReadonlyMap<string, RuntimeTool>;
 }
 
@@ -249,17 +286,6 @@ async function _loadExecutable(projectRoot: string): Promise<LoadedExecutable> {
   const definition = await resolveAgentGeneration(
     await loadAgent({ startPath: projectRoot })
   );
-  if (typeof definition.model !== "string") {
-    throw new Error(
-      `Agent "${definition.agentId}" requires a static provider/model string.`
-    );
-  }
-  const separator = definition.model.indexOf("/");
-  if (separator <= 0 || separator === definition.model.length - 1) {
-    throw new Error(
-      `Pi model "${definition.model}" must use provider/model format.`
-    );
-  }
   const tools = new Map<string, RuntimeTool>();
   const frozenTools = [...definition.tools.entries()].map(([name, tool]) => {
     const implementationId = `source:${definition.generationId}:${name}`;
@@ -288,20 +314,63 @@ async function _loadExecutable(projectRoot: string): Promise<LoadedExecutable> {
   });
   return {
     agentId: definition.agentId,
-    binding: {
-      formatVersion: APP_PI_RUNTIME_FORMAT_VERSION,
-      agent: {
-        agentSpecId: definition.agentId,
-        sourceRevision: definition.generationId,
-      },
-      model: {
-        provider: definition.model.slice(0, separator),
-        modelId: definition.model.slice(separator + 1),
-      },
-      systemPrompt: definition.instructions.join("\n\n"),
-      tools: frozenTools,
-    },
+    definition,
+    bindingTools: frozenTools,
     tools,
+  };
+}
+
+/** Resolves dynamic Agent configuration once inside DurablePiRuntime.start(). */
+async function _operationBinding(
+  executable: LoadedExecutable,
+  input: {
+    readonly sessionId: string;
+    readonly operationId: string;
+    readonly messages: readonly AgentMessage[];
+  }
+): Promise<{
+  readonly binding: RuntimeBinding;
+  readonly skills: ReadonlyMap<string, SkillHandle>;
+}> {
+  const resolved = await resolveAgentOperation(executable.definition, input);
+  const separator = resolved.model.indexOf("/");
+  if (separator <= 0 || separator === resolved.model.length - 1) {
+    throw new Error(`Pi model "${resolved.model}" must use provider/model format.`);
+  }
+  return {
+    skills: resolved.skills,
+    binding: {
+    formatVersion: APP_PI_RUNTIME_FORMAT_VERSION,
+    agent: {
+      agentSpecId: executable.definition.agentId,
+      sourceRevision: executable.definition.generationId,
+    },
+    model: {
+      provider: resolved.model.slice(0, separator),
+      modelId: resolved.model.slice(separator + 1),
+    },
+    systemPrompt: resolved.instructions.join("\n\n"),
+    tools: executable.bindingTools,
+    },
+  };
+}
+
+function _withMountedSkills(
+  services: RuntimeServices,
+  current: () => ReadonlyMap<string, SkillHandle>
+): RuntimeServices {
+  return {
+    ...services,
+    skills: {
+      resolve(input) {
+        const mounted = current().get(input.identifier);
+        if (mounted !== undefined) return mounted;
+        if (services.skills !== undefined) return services.skills.resolve(input);
+        throw new Error(
+          `Agent "${input.agentId}" does not mount Skill "${input.identifier}".`
+        );
+      },
+    },
   };
 }
 
@@ -319,70 +388,4 @@ function _modelTools(binding: RuntimeBinding): PiTool[] {
       parameters: tool.inputSchema as never,
     };
   });
-}
-
-/** Adapts the App facade to the transport-neutral official ACP edge. */
-function _acpBackend(
-  application: SessionApplication,
-  runtime: StudioPiSessionRuntime,
-  projectRoot: string
-): PiAcpSessionBackend {
-  const cwd = resolve(projectRoot);
-  return {
-    async create(request) {
-      if (resolve(request.cwd) !== cwd) {
-        throw new Error(`ACP Session cwd must be the Agent Project root: ${cwd}`);
-      }
-      const session = await application.createSession();
-      return runtime.open({ sessionId: session.sessionId, lane: session.lane });
-    },
-    async list(request) {
-      if (request.cursor !== undefined && request.cursor !== null) {
-        throw new Error("ACP Session list cursor is invalid for this endpoint.");
-      }
-      if (
-        request.cwd !== undefined &&
-        request.cwd !== null &&
-        resolve(request.cwd) !== cwd
-      ) {
-        return { sessions: [] };
-      }
-      const sessions = await application.listSessions();
-      return {
-        sessions: sessions.map((session) => ({
-          sessionId: session.sessionId,
-          cwd,
-          title: session.name,
-          updatedAt: new Date(session.updatedAt).toISOString(),
-        })),
-      };
-    },
-    inspect: (request) => application.readCommitted(request),
-    async prompt(input) {
-      const controls = input.meta?.["llm-space.dev"];
-      const mode =
-        typeof controls === "object" &&
-        controls !== null &&
-        !Array.isArray(controls) &&
-        (controls as Record<string, unknown>).mode === "step"
-          ? "step"
-          : "continue";
-      const result = await application.execute({
-        sessionId: input.sessionId,
-        messages: input.messages,
-        mode,
-        signal: input.signal,
-      });
-      return result.snapshot;
-    },
-    step: (input) => application.step(input),
-    continue: (input) => application.continue(input),
-    async abort(input) {
-      await application.abort(input.sessionId);
-      return runtime.open(input);
-    },
-    async closeSession(input) {
-      await application.abort(input.sessionId);
-    },
-  };
 }

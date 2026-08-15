@@ -7,7 +7,7 @@ import type { AssistantMessage } from "@earendil-works/pi-ai";
 import {
   BunSqliteRuntimeBindingStore,
   BunSqliteSessionRepository,
-  StudioPiSessionRuntime,
+  DurablePiRuntime,
   type AssistantExecutor,
 } from "@llm-space/pi-runtime";
 import { Database } from "bun:sqlite";
@@ -55,6 +55,7 @@ describe.each(["memory", "sqlite"] as const)(
 
         const receipt = await fixture.app.run(created.id, {
           fromMessageId: "user-1",
+          commandId: "initial-step-1",
           mode: "step",
         });
         const loaded = await fixture.app.loadThread(created.id);
@@ -94,6 +95,29 @@ describe.each(["memory", "sqlite"] as const)(
         expect(
           fixture.store.transaction((tx) => tx.getExperiment(created.id))
         ).not.toHaveProperty("draft");
+        expect(
+          fixture.store.transaction((tx) =>
+            tx.getCommandReceipt(receipt.sessionId, "initial-step-1")
+          )
+        ).toMatchObject({
+          method: "step",
+          operationId: receipt.operationId,
+        });
+        expect(
+          await fixture.app.run(created.id, {
+            fromMessageId: "user-1",
+            commandId: "initial-step-1",
+            mode: "step",
+          })
+        ).toEqual(receipt);
+        expect(await fixture.app.listRunHistory(created.id)).toHaveLength(1);
+
+        const other = await fixture.app.createThread({ agent: AGENT });
+        expect(
+          fixture.app.inspectRun(other.id, receipt.operationId)
+        ).rejects.toThrow(
+          `Operation "${receipt.operationId}" does not belong to Studio Thread "${other.id}".`
+        );
       } finally {
         await fixture.close();
       }
@@ -119,6 +143,7 @@ test("forks a Pi branch and marks inherited operation references", async () => {
     });
     const receipt = await fixture.app.run(created.id, {
       fromMessageId: "user-fork",
+      commandId: "initial-step-fork",
       mode: "step",
     });
     const fork = await fixture.app.forkThread(created.id);
@@ -157,6 +182,7 @@ test("evaluations target Pi operation ids and events use operation vocabulary", 
     });
     const first = await fixture.app.run(created.id, {
       fromMessageId: "user-1",
+      commandId: "initial-step-eval-1",
       mode: "step",
     });
     const afterFirst = (await fixture.app.loadThread(created.id))!;
@@ -176,6 +202,7 @@ test("evaluations target Pi operation ids and events use operation vocabulary", 
     });
     const second = await fixture.app.run(created.id, {
       fromMessageId: "user-2",
+      commandId: "initial-step-eval-2",
       mode: "step",
     });
     const metadata = await fixture.app.saveEvaluationMetadata(created.id, {
@@ -224,6 +251,7 @@ test("shared Studio SQLite writes Pi/runtime-binding/Studio tables and no Engine
     });
     await fixture.app.run(created.id, {
       fromMessageId: "user-schema",
+      commandId: "initial-step-schema",
       mode: "step",
     });
     const database = new Database(fixture.path, { readonly: true });
@@ -259,7 +287,7 @@ async function _fixture(storageKind: "memory" | "sqlite") {
       return Promise.resolve(_assistant(`answer-${answer}`, input.operationId));
     },
   };
-  const runtime = new StudioPiSessionRuntime({
+  const runtime = new DurablePiRuntime({
     repository,
     bindings,
     assistantExecutor,
@@ -272,7 +300,7 @@ async function _fixture(storageKind: "memory" | "sqlite") {
     runtime,
     store,
     resolveCurrentAgent: () =>
-      Promise.resolve({ snapshot: AGENT, tools: new Map() }),
+      Promise.resolve({ snapshot: AGENT, skills: new Map(), tools: new Map() }),
   });
   return {
     app,

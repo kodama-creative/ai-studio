@@ -1,7 +1,5 @@
 import type { RuntimeId } from "@/shared/runtime";
 
-import type { AcquireFileMutation } from "../file-system-tree-view/file-mutation-guard";
-
 import type {
   PanePersistenceChange,
   PaneRunSettled,
@@ -9,7 +7,6 @@ import type {
 } from "./runtime-run-tracker";
 
 export interface PaneLifecycleHost {
-  acquireMutation: AcquireFileMutation;
   isMutationReserved: (
     paneId: string,
     runtimeId: RuntimeId,

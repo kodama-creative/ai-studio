@@ -124,6 +124,68 @@ test("Thread store tracks host-owned Tool lifecycle events", async () => {
   expect(store.getState().executingToolCallIds).toEqual([]);
 });
 
+test("Thread store exposes a durable tool approval and resumes through the host", async () => {
+  const decisions: boolean[] = [];
+  const executionRuntime: ExternalThreadExecutionRuntime = {
+    async *execute(input) {
+      yield {
+        type: "tool.approval.required",
+        toolCallId: "deploy-call",
+        toolName: "deploy",
+        resumeMode: input.reactLoop ? "continue" : "step",
+      };
+    },
+    async *resolveToolApproval(input) {
+      decisions.push(input.approved);
+      yield {
+        type: "thread.updated",
+        thread: {
+          ...input.thread,
+          context: {
+            ...input.thread.context,
+            messages: [
+              ...(input.thread.context?.messages ?? []),
+              {
+                id: "assistant-approved",
+                role: "assistant",
+                content: [{ type: "text", text: "Deployment completed" }],
+              },
+            ],
+          },
+        },
+      };
+    },
+  };
+  const store = createThreadStore(
+    {
+      context: {
+        messages: [
+          {
+            id: "user-1",
+            role: "user",
+            content: [{ type: "text", text: "deploy" }],
+          },
+        ],
+      },
+    },
+    { executionRuntime, getReactLoop: () => true }
+  );
+
+  await store.getState().run("user-1");
+  expect(store.getState().pendingToolApproval).toEqual({
+    toolCallId: "deploy-call",
+    toolName: "deploy",
+    resumeMode: "continue",
+  });
+
+  expect(await store.getState().resolveToolApproval(true)).toBe(true);
+  expect(decisions).toEqual([true]);
+  expect(store.getState().pendingToolApproval).toBeNull();
+  expect(store.getState().thread.context?.messages.at(-1)).toMatchObject({
+    id: "assistant-approved",
+  });
+});
+
 test("Thread store publishes durable metadata edits through the host seam", () => {
   const runThread: Thread = { context: { messages: [] } };
   const initial: Thread = {

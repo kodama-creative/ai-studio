@@ -14,15 +14,11 @@ import {
   CircleUser,
   FlaskConical,
   Network,
-  Puzzle,
-  Server,
   Search,
   SlidersHorizontal,
   Sparkles,
 } from "lucide-react";
-import { useEffect, useState } from "react";
 
-import { getDefaultRuntime } from "@/client/remote-servers";
 import { createElectrobunModelClient } from "@/host/host-services";
 import type { SettingsTab } from "@/shared/commands";
 import type { RuntimeId } from "@/shared/runtime";
@@ -33,8 +29,6 @@ import { GeneralPage } from "./general-page";
 import { McpPage } from "./mcp-page";
 import { ModelsPage } from "./models-page";
 import { NetworkPage } from "./network-page";
-import { PluginsPage } from "./plugins-page";
-import { RemoteServersPage } from "./remote-servers-page";
 import { SearchPage } from "./search-page";
 import { SkillsPage } from "./skills-page";
 
@@ -92,43 +86,6 @@ const PAGES = [
     ),
   },
   {
-    group: "App",
-    value: "plugins",
-    label: "Plugins",
-    icon: Puzzle,
-    Page: () => <PluginsPage />,
-  },
-  {
-    group: "Connections",
-    value: "remote",
-    label: "Remote Servers",
-    icon: Server,
-    Page: ({
-      canConnect,
-      canDisconnect,
-      acquireConnect,
-      acquireDisconnect,
-      onConnected,
-      onDisconnected,
-    }: {
-      canConnect?: () => boolean;
-      canDisconnect?: (runtimeId: RuntimeId) => boolean;
-      acquireConnect?: () => (() => void) | null;
-      acquireDisconnect?: (runtimeId: RuntimeId) => (() => void) | null;
-      onConnected?: (runtimeId: RuntimeId) => void;
-      onDisconnected?: (runtimeId: RuntimeId) => void | Promise<void>;
-    }) => (
-      <RemoteServersPage
-        canConnect={canConnect}
-        canDisconnect={canDisconnect}
-        acquireConnect={acquireConnect}
-        acquireDisconnect={acquireDisconnect}
-        onConnected={onConnected}
-        onDisconnected={onDisconnected}
-      />
-    ),
-  },
-  {
     group: "Connections",
     value: "network",
     label: "Network",
@@ -153,40 +110,13 @@ export function SettingsDialog({
   onOpenChange,
   tab,
   onTabChange,
-  canConnectRemote,
-  canDisconnectRemote,
-  acquireConnectRemote,
-  acquireDisconnectRemote,
-  onRemoteConnected,
-  onRemoteDisconnected,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   tab: SettingsTab;
   onTabChange: (tab: SettingsTab) => void;
-  canConnectRemote?: () => boolean;
-  canDisconnectRemote?: (runtimeId: RuntimeId) => boolean;
-  acquireConnectRemote?: () => (() => void) | null;
-  acquireDisconnectRemote?: (runtimeId: RuntimeId) => (() => void) | null;
-  onRemoteConnected?: (runtimeId: RuntimeId) => void;
-  onRemoteDisconnected?: (runtimeId: RuntimeId) => void | Promise<void>;
 }) {
-  const [runtimeId, setRuntimeId] = useState<RuntimeId>("local");
-
-  useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
-    void getDefaultRuntime()
-      .then((defaultRuntimeId) => {
-        if (!cancelled) setRuntimeId(defaultRuntimeId);
-      })
-      .catch(() => {
-        if (!cancelled) setRuntimeId("local");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [open]);
+  const runtimeId: RuntimeId = "local";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -254,15 +184,7 @@ export function SettingsDialog({
           <div className="min-w-0 grow">
             {PAGES.map(({ value, Page }) => (
               <TabsContent key={value} value={value} className="size-full">
-                <Page
-                  runtimeId={runtimeId}
-                  canConnect={canConnectRemote}
-                  canDisconnect={canDisconnectRemote}
-                  acquireConnect={acquireConnectRemote}
-                  acquireDisconnect={acquireDisconnectRemote}
-                  onConnected={onRemoteConnected}
-                  onDisconnected={onRemoteDisconnected}
-                />
+                <Page runtimeId={runtimeId} />
               </TabsContent>
             ))}
           </div>

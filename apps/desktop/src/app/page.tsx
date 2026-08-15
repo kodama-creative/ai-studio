@@ -1,4 +1,4 @@
-import type { Thread } from "@llm-space/core";
+import { parsePortableThreadSnapshot, type Thread } from "@llm-space/core";
 import type { AgentSpec } from "@llm-space/studio";
 import { FirecrawlLimitDialog } from "@llm-space/ui/components/firecrawl-limit-dialog";
 import {
@@ -29,40 +29,26 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
-  type Dispatch,
-  type MutableRefObject,
-  type SetStateAction,
 } from "react";
-import { flushSync } from "react-dom";
 import { usePanelRef } from "react-resizable-panels";
 import { toast } from "sonner";
 
 import { createAgentProjectClient } from "@/client/agent-project-client";
-import { createFileSystemClient } from "@/client/local-file-system";
 import { createPlaygroundClient } from "@/client/playground-client";
-import type { PluginActiveTab } from "@/client/plugins";
-import { getDefaultRuntime, listRuntimes } from "@/client/remote-servers";
+import { importThreadSnapshot } from "@/client/share";
 import { CommandProvider, useCommands, useRegisterCommands } from "@/commands";
 import { AccountStatus } from "@/components/account-status";
 import { FeatureReminderDialog } from "@/components/feature-reminder-dialog";
-import { FileSystemTreeView } from "@/components/file-system-tree-view/file-system-tree-view";
 import { GithubAuthProvider } from "@/components/github-auth-provider";
 import { GithubDeviceDialog } from "@/components/github-device-dialog";
 import { GithubStarReminder } from "@/components/github-star-reminder";
 import { LazyMount } from "@/components/lazy-mount";
-import { PageShareThreadController } from "@/components/page-share-thread-controller";
 import { PlaygroundSidebar } from "@/components/playground-sidebar";
-import { RemoteStatus } from "@/components/remote-status";
-import type { ShareThreadTarget } from "@/components/share-thread-dialog-flow";
-import { SharedImportProvider } from "@/components/shared-import-provider";
 import {
-  chooseActiveTabForRuntime,
-  filterTabsForRuntime,
   ThreadTabs,
   useThreadTabs,
   type AppTab,
 } from "@/components/thread-tabs";
-import { acquireFileMutationForTabs } from "@/components/thread-tabs/pane-file-mutation";
 import type { PaneLifecycleHost } from "@/components/thread-tabs/pane-lifecycle-host";
 import {
   closeAllTabsIfAllowed,
@@ -72,7 +58,6 @@ import {
   refreshTabIfAllowed,
 } from "@/components/thread-tabs/pane-mutation-actions";
 import { RuntimeRunTracker } from "@/components/thread-tabs/runtime-run-tracker";
-import { switchWorkspaceRuntimeIfAllowed } from "@/components/thread-tabs/runtime-workspace-transition";
 import { UpdateIndicator } from "@/components/update-indicator";
 import { UpdateStatusProvider } from "@/components/update-status-provider";
 import { Welcome } from "@/components/welcome";
@@ -82,17 +67,10 @@ import {
 } from "@/host/host-services";
 import { track } from "@/lib/analytics";
 import { electrobun } from "@/lib/electrobun";
-import {
-  importThreadFileRecords,
-  importThreadFiles,
-  type ThreadImportFile,
-} from "@/lib/import-threads";
 import { useFullScreen } from "@/lib/use-full-screen";
 import type { SettingsTab } from "@/shared/commands";
 import type { RuntimeId } from "@/shared/runtime";
-import { buildShareThreadCommand } from "@/shared/share";
 
-import { invalidateRuntimeSwitchQueries } from "./runtime-switch-queries";
 import { WorkspaceModelScope } from "./workspace-model-scope";
 
 // Overlay surfaces that aren't part of the first paint — settings, the command
@@ -117,11 +95,6 @@ const OnboardDialog = lazy(() =>
 const StartFromExampleDialog = lazy(() =>
   import("@/components/start-from-example-dialog").then((m) => ({
     default: m.StartFromExampleDialog,
-  }))
-);
-const ThreadStorageDialog = lazy(() =>
-  import("@/components/thread-storage-dialog").then((m) => ({
-    default: m.ThreadStorageDialog,
   }))
 );
 
@@ -191,49 +164,19 @@ function writeSidebarSize(sizeInPixels: number): void {
   );
 }
 
-function clearRuntimeQueries(
-  queryClient: ReturnType<typeof useQueryClient>,
-  runtimeId: RuntimeId
-): void {
-  void queryClient.removeQueries({ queryKey: ["thread", runtimeId] });
-  void queryClient.removeQueries({ queryKey: ["fs", runtimeId] });
-}
-
-function threadTabId(path: string, runtimeId: RuntimeId): string {
-  return `thread:${runtimeId}:${path}`;
-}
-
 function PageInner() {
-  const [workspaceRuntimeId, setWorkspaceRuntimeId] =
-    useState<RuntimeId>("local");
-  const workspaceRuntimeIdRef = useRef<RuntimeId>("local");
-  useEffect(() => {
-    workspaceRuntimeIdRef.current = workspaceRuntimeId;
-  }, [workspaceRuntimeId]);
-
   return (
     <WorkspaceModelScope
-      runtimeId={workspaceRuntimeId}
+      runtimeId="local"
       createClient={createElectrobunModelClient}
     >
-      <PageWorkspace
-        workspaceRuntimeId={workspaceRuntimeId}
-        setWorkspaceRuntimeId={setWorkspaceRuntimeId}
-        workspaceRuntimeIdRef={workspaceRuntimeIdRef}
-      />
+      <_PageWorkspace />
     </WorkspaceModelScope>
   );
 }
 
-function PageWorkspace({
-  workspaceRuntimeId,
-  setWorkspaceRuntimeId,
-  workspaceRuntimeIdRef,
-}: {
-  workspaceRuntimeId: RuntimeId;
-  setWorkspaceRuntimeId: Dispatch<SetStateAction<RuntimeId>>;
-  workspaceRuntimeIdRef: MutableRefObject<RuntimeId>;
-}) {
+function _PageWorkspace() {
+  const workspaceRuntimeIdRef = useRef<RuntimeId>("local");
   const runtimeRunTrackerRef = useRef(new RuntimeRunTracker());
   const mutationRevision = useSyncExternalStore(
     runtimeRunTrackerRef.current.subscribe,
@@ -246,8 +189,7 @@ function PageWorkspace({
       !runtimeRunTrackerRef.current.isPaneBusy(paneId) &&
       !runtimeRunTrackerRef.current.isMutationReserved(
         paneId,
-        tab.runtimeId,
-        tab.type === "thread" ? tab.path : undefined
+        tab.runtimeId
       )
     );
   }, []);
@@ -262,52 +204,13 @@ function PageWorkspace({
 
   const {
     close,
-    closeAllInRuntime,
-    discardRuntime,
-    closeOthersInRuntime,
-    handleMove,
-    handleRemove,
+    closeAll,
+    closeOthers,
     reopenClosed,
     openPlayground,
   } = tabs;
-  const visibleTabs = useMemo(
-    () => filterTabsForRuntime(tabs.tabs, workspaceRuntimeId),
-    [tabs.tabs, workspaceRuntimeId]
-  );
-  const visibleActiveId = useMemo(
-    () =>
-      chooseActiveTabForRuntime(tabs.tabs, tabs.activeId, workspaceRuntimeId),
-    [tabs.activeId, tabs.tabs, workspaceRuntimeId]
-  );
-  const threadStateRef = useRef(new Map<string, Thread>());
-  const handleThreadStateChange = useCallback(
-    (tabId: string, thread: Thread | null) => {
-      if (thread) threadStateRef.current.set(tabId, thread);
-      else threadStateRef.current.delete(tabId);
-    },
-    []
-  );
-  const getActivePluginTab = useCallback((): PluginActiveTab | null => {
-    const activeTab = visibleTabs.find((tab) => tab.id === visibleActiveId);
-    if (activeTab?.type !== "thread") return null;
-    const thread = threadStateRef.current.get(activeTab.id);
-    const filename = activeTab.path.split("/").at(-1);
-    return thread && filename
-      ? { ...activeTab, tabId: activeTab.id, filename, thread }
-      : null;
-  }, [visibleActiveId, visibleTabs]);
-  const getActiveEditorThread = useCallback((): Thread | null => {
-    const activeTab = visibleTabs.find((tab) => tab.id === visibleActiveId);
-    return activeTab
-      ? (threadStateRef.current.get(activeTab.id) ?? null)
-      : null;
-  }, [visibleActiveId, visibleTabs]);
-  const getActiveShareThread = useCallback((): ShareThreadTarget | null => {
-    const activeTab = visibleTabs.find((tab) => tab.id === visibleActiveId);
-    return activeTab?.type === "thread"
-      ? { path: activeTab.path, runtimeId: activeTab.runtimeId }
-      : null;
-  }, [visibleActiveId, visibleTabs]);
+  const visibleTabs = tabs.tabs;
+  const visibleActiveId = tabs.activeId;
   // The visible active tab is read through a ref so command handlers never go
   // stale or accidentally target a tab from another runtime.
   const activeTabIdRef = useRef(visibleActiveId);
@@ -326,8 +229,8 @@ function PageWorkspace({
   );
   const reorderVisibleTabs = useCallback(
     (from: number, to: number) =>
-      tabs.reorderInRuntime(from, to, workspaceRuntimeId),
-    [tabs, workspaceRuntimeId]
+      tabs.reorder(from, to),
+    [tabs]
   );
   const activateVisibleSibling = useCallback(
     (offset: 1 | -1) => {
@@ -350,19 +253,6 @@ function PageWorkspace({
       description: `Completed output will be saved before ${action}.`,
     });
   }, []);
-  const canDisconnectRuntime = useCallback(
-    (runtimeId: RuntimeId) => {
-      if (runtimeRunTrackerRef.current.canDisconnect(runtimeId)) return true;
-      showRuntimeRunBlocked("disconnecting this runtime");
-      return false;
-    },
-    [showRuntimeRunBlocked]
-  );
-  const canConnectRemote = useCallback(() => {
-    if (!runtimeRunTrackerRef.current.hasAnyRunning()) return true;
-    showRuntimeRunBlocked("changing remote connections");
-    return false;
-  }, [showRuntimeRunBlocked]);
   const handlePaneRunStart = useCallback(
     (paneId: string, runtimeId: RuntimeId, runId: string, path?: string) =>
       runtimeRunTrackerRef.current.beginRun(paneId, runtimeId, runId, path),
@@ -394,40 +284,6 @@ function PageWorkspace({
       runtimeRunTrackerRef.current.isMutationReserved(paneId, runtimeId, path),
     []
   );
-  const acquireFileMutation = useCallback(
-    (paths: string[], runtimeId: RuntimeId, action: string) =>
-      acquireFileMutationForTabs({
-        tracker: runtimeRunTrackerRef.current,
-        tabs: allTabsRef.current,
-        paths,
-        runtimeId,
-        onBlocked: () => showRuntimeRunBlocked(action),
-      }),
-    [showRuntimeRunBlocked]
-  );
-  const acquireRemoteConnectionMutation = useCallback(() => {
-    const release = runtimeRunTrackerRef.current.reserveAll();
-    if (release) return release;
-    showRuntimeRunBlocked("changing remote connections");
-    return null;
-  }, [showRuntimeRunBlocked]);
-  const acquireRuntimeDisconnectMutation = useCallback(
-    (runtimeId: RuntimeId) => {
-      const release = runtimeRunTrackerRef.current.reserveRuntime(runtimeId);
-      if (release) return release;
-      showRuntimeRunBlocked("disconnecting this runtime");
-      return null;
-    },
-    [showRuntimeRunBlocked]
-  );
-  const discardRuntimeWorkspace = useCallback(
-    (runtimeId: RuntimeId) => {
-      discardRuntime(runtimeId);
-      clearRuntimeQueries(queryClient, runtimeId);
-    },
-    [discardRuntime, queryClient]
-  );
-
   // Collapse / expand the left side panel. The initial width is recovered from
   // localStorage once (lazy ref init) and fed straight into `defaultSize`, so
   // restoring it costs no extra render on startup.
@@ -455,9 +311,6 @@ function PageWorkspace({
     if (settingsOpen) track({ event: "settings_opened", properties: {} });
   }, [settingsOpen]);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
-  const [threadStorageMode, setThreadStorageMode] = useState<
-    "save" | "import" | null
-  >(null);
   const [onboardOpen, setOnboardOpen] = useState(false);
   const [examplesOpen, setExamplesOpen] = useState(false);
   // Which folder a chosen example's thread is created into (default: root).
@@ -494,86 +347,6 @@ function PageWorkspace({
     [openPlayground, playgroundClient, queryClient]
   );
 
-  const switchWorkspaceRuntime = useCallback(
-    (nextRuntimeId: RuntimeId) => {
-      const currentRuntimeId = workspaceRuntimeIdRef.current;
-      return switchWorkspaceRuntimeIfAllowed({
-        tracker: runtimeRunTrackerRef.current,
-        currentRuntimeId,
-        nextRuntimeId,
-        onBlocked: () => showRuntimeRunBlocked("switching runtimes"),
-        onSwitch: () => {
-          workspaceRuntimeIdRef.current = nextRuntimeId;
-          setWorkspaceRuntimeId(nextRuntimeId);
-          void invalidateRuntimeSwitchQueries(queryClient, nextRuntimeId);
-        },
-      });
-    },
-    [
-      queryClient,
-      setWorkspaceRuntimeId,
-      showRuntimeRunBlocked,
-      workspaceRuntimeIdRef,
-    ]
-  );
-
-  const refreshRuntimes = useCallback(
-    async ({ syncDefault }: { syncDefault: boolean }) => {
-      const [next, defaultRuntimeId] = await Promise.all([
-        listRuntimes(),
-        getDefaultRuntime(),
-      ]);
-      const current = workspaceRuntimeIdRef.current;
-      const nextRuntimeId =
-        syncDefault && next.some((runtime) => runtime.id === defaultRuntimeId)
-          ? defaultRuntimeId
-          : next.some((runtime) => runtime.id === current)
-            ? current
-            : "local";
-      if (nextRuntimeId !== current) {
-        switchWorkspaceRuntime(nextRuntimeId);
-      } else {
-        workspaceRuntimeIdRef.current = nextRuntimeId;
-        setWorkspaceRuntimeId(nextRuntimeId);
-      }
-    },
-    [setWorkspaceRuntimeId, switchWorkspaceRuntime, workspaceRuntimeIdRef]
-  );
-
-  const transitionWorkspaceRuntime = useCallback(
-    (nextRuntimeId: RuntimeId) => {
-      if (!switchWorkspaceRuntime(nextRuntimeId)) return;
-      setSettingsOpen(false);
-      void refreshRuntimes({ syncDefault: false });
-    },
-    [refreshRuntimes, switchWorkspaceRuntime]
-  );
-
-  const commitDisconnectedRuntime = useCallback(
-    (runtimeId: RuntimeId) => {
-      // The runtime reservation is released as soon as this callback returns.
-      // Commit tab removal and any active-runtime transition synchronously so
-      // no pane can acquire a fresh run lease against a disconnected runtime
-      // in the React scheduling gap.
-      flushSync(() => {
-        discardRuntimeWorkspace(runtimeId);
-        if (workspaceRuntimeIdRef.current === runtimeId) {
-          transitionWorkspaceRuntime("local");
-        }
-      });
-    },
-    [discardRuntimeWorkspace, transitionWorkspaceRuntime, workspaceRuntimeIdRef]
-  );
-
-  useEffect(() => {
-    void refreshRuntimes({ syncDefault: true }).catch(() => undefined);
-  }, [refreshRuntimes]);
-
-  useEffect(() => {
-    if (settingsOpen) return;
-    void refreshRuntimes({ syncDefault: true }).catch(() => undefined);
-  }, [refreshRuntimes, settingsOpen]);
-
   // File import: a hidden picker (opened by the `importFiles` command), the
   // parent directory it should import into, and page-wide drag-and-drop state.
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -581,144 +354,41 @@ function PageWorkspace({
   const pendingImportRuntimeIdRef = useRef<RuntimeId>("local");
   const dragDepthRef = useRef(0);
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
-  const { open: openTab } = tabs;
   const handleImportFiles = useCallback(
     async (
-      files: FileList | File[] | ThreadImportFile[],
-      parent: string,
-      runtimeId: RuntimeId = workspaceRuntimeIdRef.current
+      files: FileList | (File | { name: string; text: string })[],
+      _parent: string,
+      _runtimeId: RuntimeId = workspaceRuntimeIdRef.current
     ) => {
+      if (_runtimeId !== "local") return;
       const list = [...files];
       if (list.length === 0) return;
-      if (runtimeId === "local") {
-        const records = await Promise.all(
-          list.map(async (item) => ({
-            name: item instanceof File ? item.name : item.name,
-            text: item instanceof File ? await item.text() : item.text,
-          }))
+      let imported = 0;
+      for (const file of list) {
+        try {
+          const text = file instanceof File ? await file.text() : file.text;
+          const snapshot = parsePortableThreadSnapshot(JSON.parse(text));
+          const playground = await importThreadSnapshot(snapshot);
+          openPlayground(playground.id, playground.title);
+          imported += 1;
+        } catch {
+          // Invalid snapshots are counted below and do not affect valid files.
+        }
+      }
+      await queryClient.invalidateQueries({ queryKey: ["playgrounds"] });
+      if (imported === 0) {
+        toast.error("No valid LLM Space Thread Snapshots were selected.");
+      } else {
+        toast.success(
+          `Imported ${imported} Playground${imported === 1 ? "" : "s"}`
         );
-        let imported = 0;
-        for (const record of records) {
-          try {
-            const thread = JSON.parse(record.text) as Thread;
-            await createLocalPlayground({
-              title: thread.title ?? record.name.replace(/\.json$/i, ""),
-              agentSpec: {
-                schemaVersion: 1,
-                ...(thread.model === undefined ? {} : { model: thread.model }),
-                instructions:
-                  thread.context?.systemPrompt === undefined
-                    ? []
-                    : [thread.context.systemPrompt],
-                tools: thread.context?.tools ?? [],
-                ...(thread.context?.variables === undefined
-                  ? {}
-                  : { variables: thread.context.variables }),
-                ...(thread.context?.variableVariants === undefined
-                  ? {}
-                  : { variableVariants: thread.context.variableVariants }),
-              },
-              messages: thread.context?.messages,
-            });
-            imported++;
-          } catch {
-            // Invalid imports are counted below and do not affect valid files.
-          }
-        }
-        if (imported === 0) {
-          toast.error("No Playgrounds could be imported from these files.");
-        } else {
-          toast.success(
-            `Imported ${imported} Playground${imported === 1 ? "" : "s"}`
-          );
-        }
-        return;
       }
-      const { created, total, recovered, warnings } =
-        list[0] instanceof File
-          ? await importThreadFiles(parent, list as File[], models, runtimeId)
-          : await importThreadFileRecords(
-              parent,
-              list as ThreadImportFile[],
-              models,
-              runtimeId
-            );
-      if (created.length === 0) {
-        toast.error("No threads could be imported from the selected files.", {
-          description: warnings[0],
-        });
-        return;
-      }
-      executeCommand({ type: "workspace.refresh", args: { runtimeId } });
-      for (const path of created) openTab(path, runtimeId);
-      const skipped = total - created.length;
-      toast.success(
-        `Imported ${created.length} thread${created.length === 1 ? "" : "s"}`,
-        skipped > 0 || recovered > 0
-          ? {
-              description: [
-                skipped > 0 ? `${skipped} file(s) skipped` : "",
-                recovered > 0
-                  ? `${recovered} recovered from truncated JSON`
-                  : "",
-                warnings[0] ?? "",
-              ]
-                .filter(Boolean)
-                .join(" · "),
-            }
-          : undefined
-      );
     },
     [
-      createLocalPlayground,
-      models,
-      executeCommand,
-      openTab,
-      workspaceRuntimeIdRef,
+      openPlayground,
+      queryClient,
     ]
   );
-  const getActiveThreadForStorage =
-    useCallback(async (): Promise<Thread | null> => {
-      const editorThread = getActiveEditorThread();
-      if (editorThread !== null) return editorThread;
-      const target = getActiveShareThread();
-      if (!target) return null;
-      return createFileSystemClient(target.runtimeId).read(target.path);
-    }, [getActiveEditorThread, getActiveShareThread]);
-  const importFromThreadStorage = useCallback(
-    async (thread: Thread) => {
-      const runtimeId: RuntimeId = "local";
-      if (
-        workspaceRuntimeIdRef.current !== runtimeId &&
-        !switchWorkspaceRuntime(runtimeId)
-      ) {
-        throw new Error(
-          "Finish active remote runs before importing into the local workspace."
-        );
-      }
-      await createLocalPlayground({
-        title: thread.title ?? "Imported Playground",
-        agentSpec: {
-          schemaVersion: 1,
-          ...(thread.model === undefined ? {} : { model: thread.model }),
-          instructions:
-            thread.context?.systemPrompt === undefined
-              ? []
-              : [thread.context.systemPrompt],
-          tools: thread.context?.tools ?? [],
-          ...(thread.context?.variables === undefined
-            ? {}
-            : { variables: thread.context.variables }),
-          ...(thread.context?.variableVariants === undefined
-            ? {}
-            : { variableVariants: thread.context.variableVariants }),
-        },
-        messages: thread.context?.messages,
-      });
-    },
-    [createLocalPlayground, switchWorkspaceRuntime, workspaceRuntimeIdRef]
-  );
-
   // Register the command handlers backed by page-level state (tabs, sidebar,
   // settings). `newFile` / `newFolder` / the tree ops are registered by the
   // file tree, which owns that state.
@@ -760,10 +430,9 @@ function PageWorkspace({
       })();
     },
     "tabs.close": ({ id, path, runtimeId }) => {
-      const targetRuntimeId = runtimeId ?? workspaceRuntimeIdRef.current;
-      const target =
-        id ??
-        (path ? threadTabId(path, targetRuntimeId) : activeTabIdRef.current);
+      void path;
+      void runtimeId;
+      const target = id ?? activeTabIdRef.current;
       if (!target) return;
       closeTabIfAllowed({
         tracker: runtimeRunTrackerRef.current,
@@ -774,28 +443,24 @@ function PageWorkspace({
       });
     },
     "tabs.closeOthers": ({ id, path, runtimeId }) => {
-      const targetRuntimeId = runtimeId ?? workspaceRuntimeIdRef.current;
-      const target =
-        id ??
-        (path ? threadTabId(path, targetRuntimeId) : activeTabIdRef.current);
+      void path;
+      void runtimeId;
+      const target = id ?? activeTabIdRef.current;
       if (!target) return;
       closeOtherTabsIfAllowed({
         tracker: runtimeRunTrackerRef.current,
         tabs: tabs.tabs,
         keepId: target,
-        runtimeId: targetRuntimeId,
         onBlocked: () => showRuntimeRunBlocked("closing other tabs"),
-        closeOthers: closeOthersInRuntime,
+        closeOthers,
       });
     },
     "tabs.closeAll": () => {
-      const runtimeId = workspaceRuntimeIdRef.current;
       closeAllTabsIfAllowed({
         tracker: runtimeRunTrackerRef.current,
         tabs: tabs.tabs,
-        runtimeId,
         onBlocked: () => showRuntimeRunBlocked("closing all tabs"),
-        closeAll: closeAllInRuntime,
+        closeAll,
       });
     },
     "tabs.reopenClosed": () => void reopenClosed(),
@@ -813,7 +478,7 @@ function PageWorkspace({
     "app.openCommandPalette": () => setCommandPaletteOpen(true),
     "app.openOnboard": () => setOnboardOpen(true),
     "workspace.openStartFromExample": ({ parent = "", runtimeId }) => {
-      if (runtimeId && runtimeId !== workspaceRuntimeId) return;
+      if (runtimeId && runtimeId !== "local") return;
       examplesParentRef.current = parent;
       setExamplesOpen(true);
     },
@@ -861,48 +526,6 @@ function PageWorkspace({
     [executeCommand]
   );
   const refreshReservationsRef = useRef(new Map<string, () => void>());
-  const writePluginActiveTabThread = useCallback(
-    async (target: PluginActiveTab, next: Thread): Promise<void> => {
-      const current = getActivePluginTab();
-      if (
-        current?.tabId !== target.tabId ||
-        current?.paneId !== target.paneId ||
-        current?.path !== target.path ||
-        current?.runtimeId !== target.runtimeId
-      ) {
-        throw new Error(
-          "The active thread changed before the Plugin Command completed."
-        );
-      }
-
-      const release = runtimeRunTrackerRef.current.reservePanes([
-        target.paneId,
-      ]);
-      if (!release) {
-        throw new Error(
-          "Finish the active run or save before a Plugin Command writes the thread."
-        );
-      }
-
-      try {
-        const committed: Thread = {
-          ...next,
-          runtimeId: target.runtimeId,
-        };
-        await createFileSystemClient(target.runtimeId).write(
-          target.path,
-          committed
-        );
-        threadStateRef.current.set(target.tabId, committed);
-        refreshReservationsRef.current.set(target.paneId, release);
-        tabs.refresh(target.tabId);
-      } catch (error) {
-        release();
-        throw error;
-      }
-    },
-    [getActivePluginTab, tabs]
-  );
   const handleRefreshTab = useCallback(
     (id: string) => {
       const tab = tabs.tabs.find((candidate) => candidate.id === id);
@@ -931,7 +554,6 @@ function PageWorkspace({
   }, []);
   const paneLifecycleHost = useMemo<PaneLifecycleHost>(
     () => ({
-      acquireMutation: acquireFileMutation,
       isMutationReserved: isPaneMutationReserved,
       onPersistenceChange: handlePanePersistenceChange,
       onRefreshSettled: handlePaneRefreshSettled,
@@ -939,7 +561,6 @@ function PageWorkspace({
       onRunStart: handlePaneRunStart,
     }),
     [
-      acquireFileMutation,
       handlePanePersistenceChange,
       handlePaneRefreshSettled,
       handlePaneRunSettled,
@@ -954,56 +575,9 @@ function PageWorkspace({
     },
     []
   );
-  const reconcileFileRemove = useCallback(
-    (path: string, runtimeId: RuntimeId) => {
-      flushSync(() => handleRemove(path, runtimeId));
-    },
-    [handleRemove]
-  );
-  const reconcileFileMove = useCallback(
-    (from: string, to: string, runtimeId: RuntimeId) => {
-      flushSync(() => handleMove(from, to, runtimeId));
-    },
-    [handleMove]
-  );
-  const handleRevealFile = useCallback(
-    (path: string, runtimeId: RuntimeId) =>
-      executeCommand({ type: "workspace.reveal", args: { path, runtimeId } }),
-    [executeCommand]
-  );
-  const handleMoveToTrash = useCallback(
-    (path: string, runtimeId: RuntimeId) =>
-      executeCommand({ type: "workspace.delete", args: { path, runtimeId } }),
-    [executeCommand]
-  );
-  const handleShareThread = useCallback(
-    (path: string, runtimeId: RuntimeId) =>
-      executeCommand(buildShareThreadCommand(path, runtimeId)),
-    [executeCommand]
-  );
-  // Copy the thread file to the OS clipboard as a file reference. The bun-side
-  // command takes an absolute path, so resolve the tab's path first.
-  const handleCopyFile = useCallback(
-    async (path: string, runtimeId: RuntimeId) => {
-      try {
-        const absolute = await createFileSystemClient(runtimeId).realpath(path);
-        executeCommand({ type: "workspace.copyFile", args: { path: absolute } });
-      } catch (err) {
-        toast.error((err as Error).message);
-      }
-    },
-    [executeCommand]
-  );
   const handleNewFile = useCallback(() => {
-    if (workspaceRuntimeId !== "local") {
-      executeCommand({
-        type: "workspace.newFile",
-        args: { runtimeId: workspaceRuntimeId },
-      });
-      return;
-    }
     void createLocalPlayground();
-  }, [createLocalPlayground, executeCommand, workspaceRuntimeId]);
+  }, [createLocalPlayground]);
   const handleToggleSidebar = useCallback(
     () => executeCommand({ type: "layout.toggleSidebar", args: {} }),
     [executeCommand]
@@ -1042,7 +616,6 @@ function PageWorkspace({
         );
       }}
     >
-      <SharedImportProvider />
       <input
         ref={fileInputRef}
         type="file"
@@ -1078,30 +651,13 @@ function PageWorkspace({
               if (size.inPixels > 0) writeSidebarSize(size.inPixels);
             }}
           >
-            {workspaceRuntimeId === "local" ? (
-              <PlaygroundSidebar
-                client={playgroundClient}
-                projectClient={agentProjectClient}
-                onOpen={(playground) =>
-                  openPlayground(playground.id, playground.title)
-                }
-                onCreate={() => void createLocalPlayground()}
-              />
-            ) : (
-              <FileSystemTreeView
-                runtimeId={workspaceRuntimeId}
-                className="min-h-0 flex-1"
-                onSelectFile={tabs.open}
-                onRemove={reconcileFileRemove}
-                onMove={reconcileFileMove}
-                acquireMutation={acquireFileMutation}
-              />
-            )}
-            <RemoteStatus
-              runtimeId={workspaceRuntimeId}
-              canDisconnect={canDisconnectRuntime}
-              acquireDisconnect={acquireRuntimeDisconnectMutation}
-              onDisconnected={commitDisconnectedRuntime}
+            <PlaygroundSidebar
+              client={playgroundClient}
+              projectClient={agentProjectClient}
+              onOpen={(playground) =>
+                openPlayground(playground.id, playground.title)
+              }
+              onCreate={() => void createLocalPlayground()}
             />
             <AccountStatus />
           </ResizablePanel>
@@ -1114,12 +670,7 @@ function PageWorkspace({
                 <Welcome
                   onNewStarter={() => setExamplesOpen(true)}
                   onNewFile={() =>
-                    workspaceRuntimeId === "local"
-                      ? void createLocalPlayground()
-                      : executeCommand({
-                          type: "workspace.newFile",
-                          args: { runtimeId: workspaceRuntimeId },
-                        })
+                    void createLocalPlayground()
                   }
                   onModels={() =>
                     executeCommand({
@@ -1132,24 +683,17 @@ function PageWorkspace({
               activeId={visibleActiveId}
               activate={activateVisibleTab}
               refresh={handleRefreshTab}
-              consumeDiscardedPane={tabs.consumeDiscardedPane}
               sidebarOpen={sidebarOpen}
               fullScreen={fullScreen}
               close={handleCloseTab}
               closeOthers={handleCloseOtherTabs}
               closeAll={handleCloseAllTabs}
-              reveal={handleRevealFile}
-              moveToTrash={handleMoveToTrash}
-              share={handleShareThread}
-              copyFile={handleCopyFile}
               reorder={reorderVisibleTabs}
               onNewFile={handleNewFile}
-              onMove={reconcileFileMove}
               onPlaygroundTitleChange={tabs.handlePlaygroundTitleChange}
               onToggleSidebar={handleToggleSidebar}
               lifecycleHost={paneLifecycleHost}
               mutationRevision={mutationRevision}
-              onThreadStateChange={handleThreadStateChange}
               toolbarSlot={<UpdateIndicator />}
             />
           </ResizablePanel>
@@ -1159,24 +703,12 @@ function PageWorkspace({
       <GithubDeviceDialog />
       <GithubStarReminder />
       <FeatureReminderDialog />
-      <PageShareThreadController
-        workspaceRuntimeId={workspaceRuntimeId}
-        getActiveThread={getActiveShareThread}
-      />
       <LazyMount open={settingsOpen}>
         <SettingsDialog
           tab={settingsTab}
           open={settingsOpen}
           onOpenChange={handleSettingsOpenChange}
           onTabChange={setSettingsTab}
-          canConnectRemote={canConnectRemote}
-          canDisconnectRemote={canDisconnectRuntime}
-          acquireConnectRemote={acquireRemoteConnectionMutation}
-          acquireDisconnectRemote={acquireRuntimeDisconnectMutation}
-          onRemoteConnected={(runtimeId) => {
-            transitionWorkspaceRuntime(runtimeId);
-          }}
-          onRemoteDisconnected={commitDisconnectedRuntime}
         />
       </LazyMount>
       <LazyMount open={commandPaletteOpen}>
@@ -1184,21 +716,6 @@ function PageWorkspace({
           open={commandPaletteOpen}
           onOpenChange={setCommandPaletteOpen}
           blacklist={COMMAND_PALETTE_BLACKLIST}
-          onSaveTo={() => setThreadStorageMode("save")}
-          onImportFrom={() => setThreadStorageMode("import")}
-          getActiveTab={getActivePluginTab}
-          writeActiveTabThread={writePluginActiveTabThread}
-        />
-      </LazyMount>
-      <LazyMount open={threadStorageMode !== null}>
-        <ThreadStorageDialog
-          mode={threadStorageMode ?? "save"}
-          open={threadStorageMode !== null}
-          onOpenChange={(open) => {
-            if (!open) setThreadStorageMode(null);
-          }}
-          getThread={getActiveThreadForStorage}
-          onImported={importFromThreadStorage}
         />
       </LazyMount>
       <LazyMount open={onboardOpen}>
@@ -1209,17 +726,6 @@ function PageWorkspace({
           open={examplesOpen}
           onOpenChange={setExamplesOpen}
           onSelectExample={(example) => {
-            if (workspaceRuntimeId !== "local") {
-              executeCommand({
-                type: "workspace.newFileFromPromptExample",
-                args: {
-                  exampleId: example.id,
-                  parent: examplesParentRef.current,
-                  runtimeId: workspaceRuntimeId,
-                },
-              });
-              return;
-            }
             void (async () => {
               const [instructions, tools, messages, textVariables] =
                 await Promise.all([

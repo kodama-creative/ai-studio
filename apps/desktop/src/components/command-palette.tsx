@@ -8,11 +8,8 @@ import {
   CommandItem,
   CommandList,
 } from "@llm-space/ui/ui/command";
-import { useEffect, useState } from "react";
-import { toast } from "sonner";
+import { useState } from "react";
 
-import { listPluginCommands, subscribePluginsChanged } from "@/client/plugins";
-import type { PluginActiveTab } from "@/client/plugins";
 import { useCommands } from "@/commands";
 import {
   COMMAND_META,
@@ -20,12 +17,7 @@ import {
   type CommandType,
 } from "@/shared/commands";
 
-import { usePluginCommandExecution } from "./plugin-command-execution-provider";
-import {
-  matchesCommandText,
-  parsePluginCommandInvocation,
-  pluginCommandQualifiedName,
-} from "./plugin-command-input";
+import { matchesCommandText } from "./command-search";
 
 /**
  * The ⌘⇧P command palette. Lists every registered command (from
@@ -37,62 +29,19 @@ export function CommandPalette({
   open,
   onOpenChange,
   blacklist = [],
-  onSaveTo,
-  onImportFrom,
-  getActiveTab,
-  writeActiveTabThread,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   blacklist?: string[];
-  onSaveTo?: () => void;
-  onImportFrom?: () => void;
-  getActiveTab: () => PluginActiveTab | null;
-  writeActiveTabThread: (
-    target: PluginActiveTab,
-    thread: PluginActiveTab["thread"]
-  ) => Promise<void>;
 }) {
   const { executeCommand } = useCommands();
-  const { runPluginCommand } = usePluginCommandExecution();
-  const [pluginCommands, setPluginCommands] = useState<
-    Awaited<ReturnType<typeof listPluginCommands>>
-  >([]);
   const [search, setSearch] = useState("");
-
-  useEffect(() => {
-    if (!open) return;
-    setSearch("");
-    const refresh = () => {
-      void listPluginCommands()
-        .then(setPluginCommands)
-        .catch((error) =>
-          toast.error(error instanceof Error ? error.message : String(error))
-        );
-    };
-    refresh();
-    return subscribePluginsChanged(refresh);
-  }, [open]);
 
   const types = (Object.keys(COMMAND_META) as CommandType[]).filter(
     (type) =>
       !blacklist.includes(type) &&
       matchesCommandText(COMMAND_META[type].label, search)
   );
-  const visiblePluginCommands = pluginCommands.filter((command) => {
-    try {
-      return (
-        parsePluginCommandInvocation(search, command) !== null ||
-        matchesCommandText(
-          `${command.displayName} ${command.description ?? ""} ${pluginCommandQualifiedName(command)}`,
-          search
-        )
-      );
-    } catch {
-      // Keep the targeted command visible while the user finishes a quote.
-      return true;
-    }
-  });
 
   const run = (type: CommandType) => {
     onOpenChange(false);
@@ -114,60 +63,6 @@ export function CommandPalette({
           {types.map((type) => (
             <CommandItem key={type} onSelect={() => run(type)}>
               {COMMAND_META[type].label}
-            </CommandItem>
-          ))}
-          {onSaveTo && matchesCommandText("Save to", search) ? (
-            <CommandItem
-              value="Save to Thread Storage"
-              onSelect={() => {
-                onOpenChange(false);
-                onSaveTo();
-              }}
-            >
-              Save to…
-            </CommandItem>
-          ) : null}
-          {onImportFrom && matchesCommandText("Import from", search) ? (
-            <CommandItem
-              value="Import from Thread Storage"
-              onSelect={() => {
-                onOpenChange(false);
-                onImportFrom();
-              }}
-            >
-              Import from…
-            </CommandItem>
-          ) : null}
-          {visiblePluginCommands.map((command) => (
-            <CommandItem
-              key={command.id}
-              value={`${command.displayName} ${command.description ?? ""} ${pluginCommandQualifiedName(command)}`}
-              onSelect={() => {
-                let args: string[];
-                try {
-                  args = parsePluginCommandInvocation(search, command) ?? [];
-                } catch (error) {
-                  toast.error(
-                    error instanceof Error ? error.message : String(error)
-                  );
-                  return;
-                }
-                onOpenChange(false);
-                const activeTab = getActiveTab();
-                runPluginCommand({
-                  command,
-                  activeTab,
-                  arguments: args,
-                  writeActiveTabThread,
-                });
-              }}
-            >
-              <div className="flex min-w-0 flex-col">
-                <span className="truncate">{command.displayName}</span>
-                <span className="text-muted-foreground truncate text-xs">
-                  {pluginCommandQualifiedName(command)}
-                </span>
-              </div>
             </CommandItem>
           ))}
         </CommandList>

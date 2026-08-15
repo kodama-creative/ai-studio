@@ -1,12 +1,19 @@
-import type { GistThreadWriter } from "@llm-space/core/storage";
+import type { PortableThreadSnapshot } from "@llm-space/core";
+import type {
+  GistThreadReader,
+  GistThreadWriter,
+} from "@llm-space/core/storage";
 import { GIST_CONNECTOR_ID } from "@llm-space/core/storage";
+import {
+  playgroundToThread,
+  threadToPlaygroundDocument,
+} from "@llm-space/studio";
 
 import type { AnalyticsEvent } from "../../shared/analytics";
 import type { GithubAuthState } from "../../shared/auth";
 import type { Disposable } from "../../shared/disposable";
 import { EventHub } from "../../shared/event-hub";
 import type { FeatureReminder } from "../../shared/feature-reminders";
-import type { RuntimeId } from "../../shared/runtime";
 import { buildWebShareUrl } from "../../shared/share";
 import type {
   UpdateMode,
@@ -22,15 +29,15 @@ import {
 } from "../reminders/state";
 import type { UpdaterService } from "../updates";
 
-import type {
-  ModelsApplication,
-  WorkspaceApplication,
-} from "./runtime-applications";
+import type { DesktopPlaygroundApplication } from "./playground-application";
+import type { ModelsApplication } from "./runtime-applications";
 import { buildSharedThread } from "./thread-sharing";
 
 export interface ThreadSharingApplicationApi {
-  read(runtimeId: RuntimeId, path: string): ReturnType<WorkspaceApplication["readThread"]>;
-  publish(runtimeId: RuntimeId, path: string, meta?: { title?: string; description?: string }): Promise<{ shareUrl: string; gistId: string }>;
+  read(playgroundId: string): Promise<PortableThreadSnapshot>;
+  publish(playgroundId: string, meta?: { title?: string; description?: string }): Promise<{ shareUrl: string; gistId: string }>;
+  importSnapshot(snapshot: PortableThreadSnapshot): ReturnType<DesktopPlaygroundApplication["create"]>;
+  importGist(gistId: string): ReturnType<DesktopPlaygroundApplication["create"]>;
 }
 export interface GithubAccountApplicationApi {
   getState(): Promise<GithubAuthState>;
@@ -65,32 +72,63 @@ export interface UpdatesApplicationEvents {
 /** Publishes immutable Thread copies through the configured sharing connector. */
 export class ThreadSharingApplication implements ThreadSharingApplicationApi {
   constructor(
-    private readonly _workspace: WorkspaceApplication,
+    private readonly _playgrounds: DesktopPlaygroundApplication,
     private readonly _models: ModelsApplication,
-    private readonly _writer: Pick<GistThreadWriter, "write">
+    private readonly _writer: Pick<GistThreadWriter, "writeSnapshot">,
+    private readonly _reader: Pick<GistThreadReader, "readSnapshot">
   ) {}
-  read(runtimeId: RuntimeId, path: string) {
-    return this._workspace.readThread(runtimeId, path);
+  async read(playgroundId: string): Promise<PortableThreadSnapshot> {
+    const [playground, providers, defaultModel] = await Promise.all([
+      this._playgrounds.load(playgroundId),
+      this._models.list(),
+      this._models.getDefault(),
+    ]);
+    if (playground === undefined) {
+      throw new Error(`Playground "${playgroundId}" was not found.`);
+    }
+    return {
+      kind: "llm-space.thread-snapshot",
+      schemaVersion: 1,
+      source: {
+        product: "playground",
+        productId: playground.id,
+        sessionId: playground.sessionId,
+        lane: playground.lane,
+        leafId: playground.leafId,
+      },
+      thread: buildSharedThread(
+        playgroundToThread(playground),
+        providers,
+        defaultModel
+      ),
+    };
   }
   async publish(
-    runtimeId: RuntimeId,
-    path: string,
+    playgroundId: string,
     meta: { title?: string; description?: string } = {}
   ) {
-    const [thread, providers, defaultModel] = await Promise.all([
-      this._workspace.readThread(runtimeId, path),
-      this._models.list(runtimeId),
-      this._models.getDefault(runtimeId),
-    ]);
-    const locator = await this._writer.write(
-      buildSharedThread(thread, providers, defaultModel, meta.title),
-      undefined,
+    const snapshot = await this.read(playgroundId);
+    const locator = await this._writer.writeSnapshot(
+      {
+        ...snapshot,
+        thread: {
+          ...snapshot.thread,
+          ...(meta.title === undefined ? {} : { title: meta.title }),
+        },
+      },
       { description: meta.description }
     );
     return {
       gistId: locator.id,
       shareUrl: buildWebShareUrl(GIST_CONNECTOR_ID, locator.id),
     };
+  }
+  importSnapshot(snapshot: PortableThreadSnapshot) {
+    const document = threadToPlaygroundDocument(snapshot.thread, {});
+    return this._playgrounds.create(document);
+  }
+  async importGist(gistId: string) {
+    return this.importSnapshot(await this._reader.readSnapshot(gistId));
   }
 }
 

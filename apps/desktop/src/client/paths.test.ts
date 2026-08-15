@@ -16,13 +16,10 @@ await mock.module("@/lib/electrobun", () => ({
           }
           if (request.method === "readText") {
             REQUESTS.push({ method: "readText", params });
-          return Promise.resolve({
+            return Promise.resolve({
               ok: true as const,
-              value:
-              params.runtimeId === "remote:test"
-                ? "REMOTE CONTENT"
-                : "LOCAL CONTENT",
-          });
+              value: "LOCAL CONTENT",
+            });
           }
           if (request.method !== "exists") {
             throw new Error(`Unexpected method: ${request.method}`);
@@ -30,7 +27,7 @@ await mock.module("@/lib/electrobun", () => ({
           REQUESTS.push({ method: "exists", params });
           return Promise.resolve({
             ok: true as const,
-            value: params.runtimeId === "remote:test",
+            value: true,
           });
         },
       },
@@ -55,16 +52,16 @@ describe("runtime-scoped prompt files", () => {
       runtimeId?: string
     ) => Promise<boolean>;
 
-    expect(await read("/same/path.md", "remote:test")).toBe("REMOTE CONTENT");
-    expect(await exists("/remote-only.md", "remote:test")).toBe(true);
+    expect(await read("/same/path.md", "local")).toBe("LOCAL CONTENT");
+    expect(await exists("/local-only.md", "local")).toBe(true);
     expect(REQUESTS).toEqual([
       {
         method: "readText",
-        params: { path: "/same/path.md", runtimeId: "remote:test" },
+        params: { path: "/same/path.md", runtimeId: "local" },
       },
       {
         method: "exists",
-        params: { path: "/remote-only.md", runtimeId: "remote:test" },
+        params: { path: "/local-only.md", runtimeId: "local" },
       },
     ]);
   });

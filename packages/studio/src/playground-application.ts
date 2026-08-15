@@ -3,15 +3,21 @@ import type {
   PiOperationSnapshot,
   PiSessionSnapshot,
   RuntimeBinding,
-  StudioPiSessionRuntime,
+  DurablePiRuntime,
 } from "@llm-space/pi-runtime";
 
 import {
+  executeDebugCommand,
+  readDebugCommandReceipt,
+} from "./debug-command";
+import {
   STUDIO_PI_LANE,
   STUDIO_PI_RUNTIME_FORMAT_VERSION,
+  type StudioContinueInput,
   type StudioConversation,
   type StudioOperationReceipt,
   type StudioStepInput,
+  type StudioToolApprovalInput,
 } from "./pi-domain";
 import {
   coreMessagesToPi,
@@ -26,7 +32,7 @@ import {
 import type { StudioStore } from "./storage";
 
 export interface CreatePlaygroundApplicationOptions {
-  readonly runtime: StudioPiSessionRuntime;
+  readonly runtime: DurablePiRuntime;
   readonly store: StudioStore;
   readonly clock?: () => number;
   readonly generateId?: (prefix: string) => string;
@@ -44,10 +50,17 @@ export interface SavePlaygroundInput {
   readonly conversation: StudioConversation;
 }
 
-export interface RunPlaygroundInput {
-  readonly fromMessageId: string;
-  readonly mode?: "step" | "continue";
-}
+export type RunPlaygroundInput =
+  | {
+      readonly fromMessageId: string;
+      readonly mode?: undefined;
+      readonly commandId?: undefined;
+    }
+  | {
+      readonly fromMessageId: string;
+      readonly mode: "step" | "continue";
+      readonly commandId: string;
+    };
 
 export interface PlaygroundApplication {
   createPlayground(input: CreatePlaygroundInput): Promise<Playground>;
@@ -62,11 +75,25 @@ export interface PlaygroundApplication {
     input: RunPlaygroundInput
   ): Promise<StudioOperationReceipt>;
   stepRun(
+    playgroundId: string,
     operationId: string,
     input: StudioStepInput
   ): Promise<StudioOperationReceipt>;
-  continueRun(operationId: string): Promise<StudioOperationReceipt>;
-  cancelRun(operationId: string): Promise<void>;
+  continueRun(
+    playgroundId: string,
+    operationId: string,
+    input: StudioContinueInput
+  ): Promise<StudioOperationReceipt>;
+  resolveToolApproval(
+    playgroundId: string,
+    operationId: string,
+    input: StudioToolApprovalInput
+  ): Promise<StudioOperationReceipt>;
+  cancelRun(playgroundId: string, operationId: string): Promise<void>;
+  inspectRun(
+    playgroundId: string,
+    operationId: string
+  ): Promise<PiSessionSnapshot>;
   getRun(operationId: string): Promise<PiOperationSnapshot | undefined>;
   listRuns(playgroundId: string): Promise<readonly PiOperationSnapshot[]>;
   streamRun(
@@ -169,6 +196,18 @@ class PlaygroundApplicationImpl implements PlaygroundApplication {
   ): Promise<StudioOperationReceipt> {
     this._requireOpen();
     let record = this._requireRecord(playgroundId);
+    if (input.mode !== undefined) {
+      const operationId = readDebugCommandReceipt({
+        store: this._options.store,
+        sessionId: record.sessionId,
+        commandId: input.commandId,
+        method: input.mode,
+        input,
+      });
+      if (operationId !== undefined) {
+        return { sessionId: record.sessionId, operationId };
+      }
+    }
     const view = await this._compose(record);
     if (view.operationId !== undefined) {
       throw new Error(`Playground "${playgroundId}" has an active operation.`);
@@ -224,17 +263,48 @@ class PlaygroundApplicationImpl implements PlaygroundApplication {
     // that commit so a host crash cannot leave a second pending-run model.
     this._options.store.transaction((tx) => tx.savePlayground(next));
     if (input.mode === "continue") {
-      snapshot = await this._options.runtime.continue({
-        sessionId: record.sessionId,
-        lane: record.lane,
-      });
+      snapshot =
+        (await executeDebugCommand({
+          store: this._options.store,
+          sessionId: record.sessionId,
+          operationId,
+          commandId: input.commandId,
+          method: "continue",
+          input,
+          clock: this._clock,
+          execute: () =>
+            this._options.runtime.continue({
+              sessionId: record.sessionId,
+              lane: record.lane,
+            }),
+        })) ??
+        (await this._options.runtime.open({
+          sessionId: record.sessionId,
+          lane: record.lane,
+        }));
     } else if (input.mode === "step" && snapshot.nextAction !== undefined) {
-      snapshot = await this._options.runtime.step({
-        sessionId: record.sessionId,
-        lane: record.lane,
-        expectedActionId: snapshot.nextAction.id,
-        kind: snapshot.nextAction.kind,
-      });
+      const action = snapshot.nextAction;
+      snapshot =
+        (await executeDebugCommand({
+          store: this._options.store,
+          sessionId: record.sessionId,
+          operationId,
+          commandId: input.commandId,
+          method: "step",
+          input,
+          clock: this._clock,
+          execute: () =>
+            this._options.runtime.step({
+              sessionId: record.sessionId,
+              lane: record.lane,
+              expectedActionId: action.id,
+              kind: action.kind,
+            }),
+        })) ??
+        (await this._options.runtime.open({
+          sessionId: record.sessionId,
+          lane: record.lane,
+        }));
     }
     this._recordSnapshot(operationId, snapshot);
     return { sessionId: record.sessionId, operationId };
@@ -242,42 +312,98 @@ class PlaygroundApplicationImpl implements PlaygroundApplication {
 
   /** Releases exactly the stable Pi semantic action selected by the caller. */
   async stepRun(
+    playgroundId: string,
     operationId: string,
     input: StudioStepInput
   ): Promise<StudioOperationReceipt> {
     this._requireOpen();
-    const ownership = this._requireOperation(operationId);
-    const snapshot = await this._options.runtime.step({
+    const ownership = this._requireOperation(playgroundId, operationId);
+    const snapshot = await executeDebugCommand({
+      store: this._options.store,
       sessionId: ownership.sessionId,
-      lane: ownership.lane,
-      expectedActionId: input.expectedActionId,
-      kind: input.kind,
+      operationId,
+      commandId: input.commandId,
+      method: "step",
+      input,
+      clock: this._clock,
+      execute: () =>
+        this._options.runtime.step({
+          sessionId: ownership.sessionId,
+          lane: ownership.lane,
+          expectedActionId: input.expectedActionId,
+          kind: input.kind,
+        }),
     });
-    this._recordSnapshot(operationId, snapshot);
+    if (snapshot !== undefined) this._recordSnapshot(operationId, snapshot);
     return { sessionId: ownership.sessionId, operationId };
   }
 
   /** Drives the same Pi operation until it reaches a durable stop state. */
-  async continueRun(operationId: string): Promise<StudioOperationReceipt> {
+  async continueRun(
+    playgroundId: string,
+    operationId: string,
+    input: StudioContinueInput
+  ): Promise<StudioOperationReceipt> {
     this._requireOpen();
-    const ownership = this._requireOperation(operationId);
-    const snapshot = await this._options.runtime.continue({
+    const ownership = this._requireOperation(playgroundId, operationId);
+    const snapshot = await executeDebugCommand({
+      store: this._options.store,
+      sessionId: ownership.sessionId,
+      operationId,
+      commandId: input.commandId,
+      method: "continue",
+      input,
+      clock: this._clock,
+      execute: () =>
+        this._options.runtime.continue({
+          sessionId: ownership.sessionId,
+          lane: ownership.lane,
+        }),
+    });
+    if (snapshot !== undefined) this._recordSnapshot(operationId, snapshot);
+    return { sessionId: ownership.sessionId, operationId };
+  }
+
+  /** Commits a user decision for the operation's pending tool approval. */
+  async resolveToolApproval(
+    playgroundId: string,
+    operationId: string,
+    input: StudioToolApprovalInput
+  ): Promise<StudioOperationReceipt> {
+    this._requireOpen();
+    const ownership = this._requireOperation(playgroundId, operationId);
+    const snapshot = await this._options.runtime.resolveToolApproval({
       sessionId: ownership.sessionId,
       lane: ownership.lane,
+      toolCallId: input.toolCallId,
+      approved: input.approved,
     });
     this._recordSnapshot(operationId, snapshot);
     return { sessionId: ownership.sessionId, operationId };
   }
 
   /** Persists abort intent for the owning Pi Session operation. */
-  async cancelRun(operationId: string): Promise<void> {
+  async cancelRun(playgroundId: string, operationId: string): Promise<void> {
     this._requireOpen();
-    const ownership = this._requireOperation(operationId);
+    const ownership = this._requireOperation(playgroundId, operationId);
     const snapshot = await this._options.runtime.abort({
       sessionId: ownership.sessionId,
       lane: ownership.lane,
     });
     this._recordSnapshot(operationId, snapshot);
+  }
+
+  /** Reads the current durable debugger state for an owned operation. */
+  async inspectRun(
+    playgroundId: string,
+    operationId: string
+  ): Promise<PiSessionSnapshot> {
+    this._requireOpen();
+    const ownership = this._requireOperation(playgroundId, operationId);
+    return this._options.runtime.open({
+      sessionId: ownership.sessionId,
+      lane: ownership.lane,
+    });
   }
 
   /** Resolves one historical operation through Studio's Pi identity index. */
@@ -324,7 +450,12 @@ class PlaygroundApplicationImpl implements PlaygroundApplication {
     cursor: { readonly afterSeq?: number; readonly signal?: AbortSignal } = {}
   ): AsyncIterable<PiCommittedChange> {
     this._requireOpen();
-    const ownership = this._requireOperation(operationId);
+    const ownership = this._findOperation(operationId);
+    if (ownership === undefined) {
+      throw new Error(
+        `Operation "${operationId}" does not belong to a Playground.`
+      );
+    }
     yield* this._options.runtime.watch({
       sessionId: ownership.sessionId,
       lane: ownership.lane,
@@ -448,11 +579,14 @@ class PlaygroundApplicationImpl implements PlaygroundApplication {
   }
 
   /** Requires Studio ownership before forwarding a mutating runtime command. */
-  private _requireOperation(operationId: string) {
-    const reference = this._findOperation(operationId);
+  private _requireOperation(playgroundId: string, operationId: string) {
+    const playground = this._requireRecord(playgroundId);
+    const reference = playground.operationReferences.find(
+      (candidate) => candidate.operationId === operationId
+    );
     if (reference === undefined) {
       throw new Error(
-        `Operation "${operationId}" does not belong to a Playground.`
+        `Operation "${operationId}" does not belong to Playground "${playgroundId}".`
       );
     }
     return reference;

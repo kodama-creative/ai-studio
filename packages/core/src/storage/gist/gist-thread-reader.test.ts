@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import type { Thread } from "../../types/threads/thread";
+import type { PortableThreadSnapshot } from "../../types/threads/thread-snapshot";
 import { readLatestThread } from "../read-latest";
 
 import { GistThreadReader } from "./gist-thread-reader";
@@ -8,6 +9,18 @@ import { GistThreadReader } from "./gist-thread-reader";
 const GIST_ID = "113dadfadb8a0839de50e882f82b17dd";
 const VERSION = "6ae1efbfd7d1197767166a88e61fe245def4135e";
 const THREAD: Thread = { title: "Browser use" };
+const SNAPSHOT: PortableThreadSnapshot = {
+  kind: "llm-space.thread-snapshot",
+  schemaVersion: 1,
+  source: {
+    product: "experiment",
+    productId: "experiment-1",
+    sessionId: "session-1",
+    lane: "main",
+    leafId: null,
+  },
+  thread: THREAD,
+};
 
 interface StubCall {
   url: string;
@@ -207,5 +220,46 @@ describe("GistThreadReader.readShared", () => {
       createdAt: "2026-07-17T09:04:14Z",
       updatedAt: "2026-07-17T10:00:00Z",
     });
+  });
+
+  test("projects a portable snapshot envelope for the web viewer", async () => {
+    const { fetch } = _stubFetch({
+      [`https://api.github.com/gists/${GIST_ID}`]: () =>
+        _json({
+          id: GIST_ID,
+          files: {
+            "browser-use.json": {
+              filename: "browser-use.json",
+              content: JSON.stringify(SNAPSHOT),
+            },
+          },
+          history: [{ version: VERSION }],
+        }),
+    });
+
+    const shared = await new GistThreadReader({ fetch }).readShared(GIST_ID);
+
+    expect(shared.thread).toEqual(THREAD);
+    expect(shared.meta.title).toBe("Browser use");
+  });
+});
+
+describe("GistThreadReader.readSnapshot", () => {
+  test("returns the validated snapshot with its source identity", async () => {
+    const { fetch } = _stubFetch({
+      [`https://api.github.com/gists/${GIST_ID}`]: () =>
+        _json({
+          files: {
+            "browser-use.json": {
+              filename: "browser-use.json",
+              content: JSON.stringify(SNAPSHOT),
+            },
+          },
+        }),
+    });
+
+    expect(await new GistThreadReader({ fetch }).readSnapshot(GIST_ID)).toEqual(
+      SNAPSHOT
+    );
   });
 });

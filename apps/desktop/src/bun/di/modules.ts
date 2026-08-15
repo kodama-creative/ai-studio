@@ -1,6 +1,6 @@
-import { createPiAcpAgent } from "@llm-space/acp";
 import type { ModelManager } from "@llm-space/runtime/models";
 import type { RuntimeRouter } from "@llm-space/runtime/runtime";
+import type { SkillsManager } from "@llm-space/runtime/skills";
 import { createStudio, type Studio } from "@llm-space/studio/server";
 import type { BrowserWindow } from "electrobun/bun";
 import {
@@ -9,17 +9,18 @@ import {
   type ServiceIdentifier,
 } from "inversify";
 
-import desktopPackage from "../../../package.json";
 import type { AgentProjectView } from "../../shared/agent-project";
 import { DesktopPlaygroundApplicationImpl } from "../application/playground-application";
 import { createPlaygroundHost } from "../playgrounds/playground-host";
 import type { AgentProject } from "../projects/agent-project";
 import { ProjectSandbox } from "../projects/project-sandbox";
-import type { RemoteServerManager } from "../remote";
 import type { MainWindowRPCController } from "../rpc";
-import { AcpRpcServer } from "../rpc/acp-rpc-server";
 import { PlaygroundRpcServer } from "../rpc/playground-rpc-server";
 import { ProjectRpcServer } from "../rpc/project-rpc-server";
+import {
+  PlaygroundThreadRpcServer,
+  StudioThreadRpcServer,
+} from "../rpc/thread-rpc-server";
 
 import type { DesktopWindowScope } from "./process-container";
 import {
@@ -109,13 +110,34 @@ export function projectWindowModule(input: {
         const modelManager = context.get<ModelManager>(
           PROCESS_TOKENS.modelManager
         );
+        const skillsManager = context.get<SkillsManager>(
+          PROCESS_TOKENS.skillsManager
+        );
         return createStudio({
           projectRoot: source.rootPath,
           dataRoot: source.studioStateRoot,
           models: () => modelManager.getAvailableModels(),
           resolveConnection: ({ providerId }) =>
             modelManager.resolveConnection({ providerId }),
-          runtimeServices: { sandbox: new ProjectSandbox(source.rootPath) },
+          runtimeServices: {
+            sandbox: new ProjectSandbox(source.rootPath),
+            skills: {
+              resolve({ identifier }) {
+                const skill = skillsManager.findSkill(identifier);
+                if (skill === null) {
+                  throw new Error(`Skill "${identifier}" is not available.`);
+                }
+                const name = skill.frontmatters.name;
+                const description = skill.frontmatters.description;
+                if (typeof name !== "string" || typeof description !== "string") {
+                  throw new Error(
+                    `Skill "${identifier}" has invalid frontmatter.`
+                  );
+                }
+                return { name, description, markdown: skill.content };
+              },
+            },
+          },
         }).then((studio) =>
           Object.assign(studio, { dispose: () => studio.close() })
         );
@@ -139,44 +161,27 @@ export function projectWindowIdentityModule(
 
 class PlaygroundContribution implements RpcContributionApi {
   constructor(
-    private readonly _application: DesktopPlaygroundApplicationImpl,
-    private readonly _host: ReturnType<typeof createPlaygroundHost>,
-    private readonly _remoteServers: RemoteServerManager
+    private readonly _application: DesktopPlaygroundApplicationImpl
   ) {}
 
   /** Register durable Playground operations for the Main window. */
   registerRpc(rpc: RpcRegistry): void {
     rpc.registerServer(new PlaygroundRpcServer(this._application));
-    rpc.registerServer(
-      new AcpRpcServer(
-        createPiAcpAgent({
-          backend: this._host.acpBackend,
-          version: desktopPackage.version,
-        }),
-        (target, onSessionUpdate) =>
-          this._remoteServers.openAgentConnection({
-            runtimeId: target.runtimeId,
-            projectRoot: target.projectRoot,
-            onSessionUpdate,
-          })
-      )
-    );
+    rpc.registerServer(new PlaygroundThreadRpcServer(this._application));
   }
 }
 
 class ProjectContribution implements RpcContributionApi {
-  constructor(private readonly _studio: Studio) {}
+  constructor(
+    private readonly _studio: Studio,
+    private readonly _projectId: string
+  ) {}
 
   /** Register Studio operations for one Agent Project window. */
   registerRpc(rpc: RpcRegistry): void {
     rpc.registerServer(new ProjectRpcServer(this._studio));
     rpc.registerServer(
-      new AcpRpcServer(
-        createPiAcpAgent({
-          backend: this._studio.acpBackend,
-          version: desktopPackage.version,
-        })
-      )
+      new StudioThreadRpcServer(this._studio, this._projectId)
     );
   }
 }
@@ -188,12 +193,9 @@ export function playgroundContributionsModule(
   return new ContainerModule(({ bind }) => {
     bind(PlaygroundContribution)
       .toDynamicValue(
-        () =>
-          new PlaygroundContribution(
-            scope.get(PROCESS_TOKENS.playgroundApplication),
-            scope.get(PROCESS_TOKENS.playgroundHost),
-            scope.get(PROCESS_TOKENS.remoteServerManager)
-          )
+        () => new PlaygroundContribution(
+          scope.get(PROCESS_TOKENS.playgroundApplication)
+        )
       )
       .inSingletonScope();
     bind<RpcContributionApi>(RpcContribution).toService(PlaygroundContribution);
@@ -207,7 +209,11 @@ export function projectContributionsModule(
   return new ContainerModule(({ bind }) => {
     bind(ProjectContribution)
       .toDynamicValue(
-        () => new ProjectContribution(scope.get(PROJECT_WINDOW_TOKENS.studio))
+        () =>
+          new ProjectContribution(
+            scope.get(PROJECT_WINDOW_TOKENS.studio),
+            scope.get<AgentProjectView>(PROJECT_WINDOW_TOKENS.project).id
+          )
       )
       .inSingletonScope();
     bind<RpcContributionApi>(RpcContribution).toService(ProjectContribution);

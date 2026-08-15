@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import type { ModelProviderGroup, Thread } from "@llm-space/core";
 
+import { ThreadSharingApplication } from "./application-services";
 import { buildSharedThread } from "./thread-sharing";
 
 function _model(
@@ -62,5 +63,96 @@ describe("buildSharedThread", () => {
       model: { provider: "missing", id: "legacy-model" },
     };
     expect(buildSharedThread(thread, [], null)).toEqual(thread);
+  });
+});
+
+describe("ThreadSharingApplication", () => {
+  test("builds a portable snapshot from the committed Playground identity", async () => {
+    const playground = {
+      schemaVersion: 1,
+      id: "playground-1",
+      title: "Committed Playground",
+      sessionId: "session-1",
+      lane: "main",
+      leafId: "leaf-1",
+      runtimeFormatVersion: 1,
+      agentSpec: { schemaVersion: 1, instructions: ["Be useful"], tools: [] },
+      conversation: { messages: [], state: {} },
+      dirty: false,
+      createdAt: 1,
+      updatedAt: 2,
+    } as const;
+    const application = new ThreadSharingApplication(
+      { load: () => Promise.resolve(playground) } as never,
+      {
+        list: () => Promise.resolve([]),
+        getDefault: () => Promise.resolve(null),
+      } as never,
+      { writeSnapshot: () => Promise.reject(new Error("unused")) },
+      { readSnapshot: () => Promise.reject(new Error("unused")) }
+    );
+
+    expect(await application.read(playground.id)).toEqual({
+      kind: "llm-space.thread-snapshot",
+      schemaVersion: 1,
+      source: {
+        product: "playground",
+        productId: "playground-1",
+        sessionId: "session-1",
+        lane: "main",
+        leafId: "leaf-1",
+      },
+      thread: {
+        title: "Committed Playground",
+        context: { systemPrompt: "Be useful", tools: [], messages: [] },
+      },
+    });
+  });
+
+  test("imports a snapshot as a new Playground document", async () => {
+    let createdDocument: unknown;
+    const created = { id: "playground-new" };
+    const application = new ThreadSharingApplication(
+      {
+        create: (document: unknown) => {
+          createdDocument = document;
+          return Promise.resolve(created);
+        },
+      } as never,
+      {} as never,
+      { writeSnapshot: () => Promise.reject(new Error("unused")) },
+      { readSnapshot: () => Promise.reject(new Error("unused")) }
+    );
+
+    const result = await application.importSnapshot({
+      kind: "llm-space.thread-snapshot",
+      schemaVersion: 1,
+      source: {
+        product: "playground",
+        productId: "playground-old",
+        sessionId: "session-old",
+        lane: "main",
+        leafId: null,
+      },
+      thread: {
+        title: "Imported",
+        context: {
+          systemPrompt: "Imported instructions",
+          tools: [],
+          messages: [],
+        },
+      },
+    });
+
+    expect(result.id).toBe(created.id);
+    expect(createdDocument).toEqual({
+      title: "Imported",
+      agentSpec: {
+        schemaVersion: 1,
+        instructions: ["Imported instructions"],
+        tools: [],
+      },
+      conversation: { messages: [], state: {} },
+    });
   });
 });

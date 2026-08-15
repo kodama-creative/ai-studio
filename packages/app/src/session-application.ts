@@ -1,14 +1,9 @@
 import { SessionError, type AgentMessage } from "@earendil-works/pi-agent-core";
 import type {
-  PiAcpContinueRequest,
-  PiAcpSnapshotRequest,
-  PiAcpStepRequest,
-} from "@llm-space/acp";
-import type {
   PiOperationSnapshot,
   PiSessionSnapshot,
   RuntimeBinding,
-  StudioPiSessionRuntime,
+  DurablePiRuntime,
 } from "@llm-space/pi-runtime";
 
 import {
@@ -18,16 +13,23 @@ import {
   type AppCommandReceipt,
   type AppSessionRecord,
   type Session,
+  type SessionContinueInput,
   type SessionEntry,
+  type SessionInspectInput,
+  type SessionStepInput,
   type Task,
 } from "./domain";
 import type { ApplicationStore } from "./storage";
 
 export interface CreateSessionApplicationOptions {
-  readonly runtime: StudioPiSessionRuntime;
+  readonly runtime: DurablePiRuntime;
   readonly store: ApplicationStore;
   readonly agentId: string;
-  readonly resolveBinding: () => RuntimeBinding | Promise<RuntimeBinding>;
+  readonly resolveBinding: (input: {
+    readonly sessionId: string;
+    readonly operationId: string;
+    readonly messages: readonly AgentMessage[];
+  }) => RuntimeBinding | Promise<RuntimeBinding>;
   readonly clock?: () => number;
   readonly generateId?: (prefix: string) => string;
 }
@@ -43,10 +45,10 @@ export interface SessionApplication {
   listEntries(sessionId: string): Promise<readonly SessionEntry[]>;
   listOperations(sessionId: string): Promise<readonly PiOperationSnapshot[]>;
   readCommitted(
-    input: PiAcpSnapshotRequest
-  ): ReturnType<StudioPiSessionRuntime["readCommitted"]>;
-  step(input: PiAcpStepRequest): Promise<PiSessionSnapshot>;
-  continue(input: PiAcpContinueRequest): Promise<PiSessionSnapshot>;
+    input: SessionInspectInput
+  ): ReturnType<DurablePiRuntime["readCommitted"]>;
+  step(input: SessionStepInput): Promise<PiSessionSnapshot>;
+  continue(input: SessionContinueInput): Promise<PiSessionSnapshot>;
   recordSystemMessage(input: {
     readonly sessionId: string;
     readonly code: string;
@@ -193,13 +195,13 @@ class SessionApplicationImpl implements SessionApplication {
   }
 
   readCommitted(
-    input: PiAcpSnapshotRequest
-  ): ReturnType<StudioPiSessionRuntime["readCommitted"]> {
+    input: SessionInspectInput
+  ): ReturnType<DurablePiRuntime["readCommitted"]> {
     this._requireRecord(input.sessionId);
     return this._options.runtime.readCommitted(input);
   }
 
-  step(input: PiAcpStepRequest): Promise<PiSessionSnapshot> {
+  step(input: SessionStepInput): Promise<PiSessionSnapshot> {
     this._requireRecord(input.sessionId);
     return this._debugCommand("step", input, () =>
       this._options.runtime.step({
@@ -211,7 +213,7 @@ class SessionApplicationImpl implements SessionApplication {
     );
   }
 
-  continue(input: PiAcpContinueRequest): Promise<PiSessionSnapshot> {
+  continue(input: SessionContinueInput): Promise<PiSessionSnapshot> {
     this._requireRecord(input.sessionId);
     return this._debugCommand("continue", input, () =>
       this._options.runtime.continue({
@@ -309,14 +311,20 @@ class SessionApplicationImpl implements SessionApplication {
     }
     input.signal?.throwIfAborted();
     const operationId = input.operationId ?? this._generateId("operation");
-    const binding = await this._options.resolveBinding();
-    input.signal?.throwIfAborted();
     let snapshot = await this._options.runtime.start({
       operationId,
       sessionId: input.sessionId,
       lane: APP_PI_LANE,
       messages: input.messages.map((message) => structuredClone(message)),
-      binding,
+      binding: async () => {
+        const binding = await this._options.resolveBinding({
+          sessionId: input.sessionId,
+          operationId,
+          messages: input.messages,
+        });
+        input.signal?.throwIfAborted();
+        return binding;
+      },
     });
     if (input.taskId !== undefined) {
       this._setTaskOperation(input.taskId, input.sessionId, operationId);
@@ -424,7 +432,7 @@ class SessionApplicationImpl implements SessionApplication {
 
   private async _compose(
     record: AppSessionRecord,
-    known?: Awaited<ReturnType<StudioPiSessionRuntime["open"]>>,
+    known?: Awaited<ReturnType<DurablePiRuntime["open"]>>,
     knownName?: string
   ): Promise<Session> {
     const snapshot =
@@ -523,7 +531,7 @@ class SessionApplicationImpl implements SessionApplication {
   /** Durably accepts debugger identity before effects and reconciles retries from Pi. */
   private async _debugCommand(
     method: "step" | "continue",
-    input: PiAcpStepRequest | PiAcpContinueRequest,
+    input: SessionStepInput | SessionContinueInput,
     execute: () => Promise<PiSessionSnapshot>
   ): Promise<PiSessionSnapshot> {
     const fingerprint = JSON.stringify({ method, input });
@@ -638,7 +646,7 @@ function _activeOperationId(snapshot: PiSessionSnapshot): string | undefined {
 
 function _debugCommandNeedsExecution(
   method: "step" | "continue",
-  input: PiAcpStepRequest | PiAcpContinueRequest,
+  input: SessionStepInput | SessionContinueInput,
   snapshot: PiSessionSnapshot
 ): boolean {
   if (method === "step") {

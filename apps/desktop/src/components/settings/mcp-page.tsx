@@ -216,8 +216,6 @@ export function McpPage({ runtimeId }: { runtimeId: RuntimeId }) {
   );
   const normalizedName = normalizeMcpName(form.name);
   const testing = selectedServer?.id === testingServerId;
-  const userServers = servers.filter((server) => server.source !== "plugin");
-  const pluginServers = servers.filter((server) => server.source === "plugin");
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -487,7 +485,7 @@ export function McpPage({ runtimeId }: { runtimeId: RuntimeId }) {
             </div>
             <ScrollArea className="min-h-0 grow">
               <div className="flex flex-col gap-1 pr-2">
-                {userServers.map((server) => (
+                {servers.map((server) => (
                   <button
                     key={server.id}
                     type="button"
@@ -526,42 +524,6 @@ export function McpPage({ runtimeId }: { runtimeId: RuntimeId }) {
                     </span>
                   </button>
                 ) : null}
-                {pluginServers.length > 0 ? (
-                  <>
-                    <div className="text-muted-foreground mt-5 px-2 text-xs font-medium tracking-wide uppercase">
-                      MCPs in Plugins
-                    </div>
-                    {pluginServers.map((server) => (
-                      <button
-                        key={server.id}
-                        type="button"
-                        disabled={saving || dirty || testingServerId !== null}
-                        className={cn(
-                          "hover:bg-accent flex min-w-0 flex-col gap-1 rounded-md px-2 py-2 text-left transition-colors disabled:pointer-events-none disabled:opacity-50",
-                          selectedId === server.id && "bg-accent"
-                        )}
-                        onClick={() => {
-                          setCreating(false);
-                          setFormError(null);
-                          setSelectedId(server.id);
-                        }}
-                      >
-                        <span className="flex min-w-0 items-center gap-2">
-                          <StatusDot server={server} />
-                          <span className="truncate text-sm font-medium">
-                            {server.name}
-                          </span>
-                        </span>
-                        <span className="text-muted-foreground truncate pl-4 font-mono text-xs">
-                          {server.transport}
-                        </span>
-                        <span className="text-muted-foreground truncate pl-4 text-xs">
-                          {_sidebarReadiness(server)}
-                        </span>
-                      </button>
-                    ))}
-                  </>
-                ) : null}
               </div>
             </ScrollArea>
           </aside>
@@ -572,7 +534,7 @@ export function McpPage({ runtimeId }: { runtimeId: RuntimeId }) {
                 form={form}
                 normalizedName={normalizedName}
                 server={selectedServer}
-                readOnly={selectedServer?.readOnly === true}
+                readOnly={false}
                 formError={formError}
                 saving={saving}
                 dirty={dirty}
@@ -732,11 +694,6 @@ function ServerEditor({
               <h3 className="font-heading truncate text-lg font-medium">
                 {form.name || "MCP Server"}
               </h3>
-              {readOnly ? (
-                <span className="bg-muted text-muted-foreground shrink-0 rounded px-1.5 py-0.5 text-[10px] uppercase">
-                  Plugin · Read only
-                </span>
-              ) : null}
             </div>
             {server ? (
               <div className="text-muted-foreground truncate font-mono text-xs">

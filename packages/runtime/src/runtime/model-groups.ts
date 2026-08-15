@@ -7,7 +7,6 @@ export async function getModelProviderGroups(
 ): Promise<ModelProviderGroup[]> {
   const models = await modelManager.getAvailableModels();
   return models.getProviders().map((provider): ModelProviderGroup => ({
-    ...modelManager.getProviderSource(provider.id),
     id: provider.id,
     name: provider.name,
     builtin: modelManager.isBuiltin(provider.id),

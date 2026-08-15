@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 
-import type { AgentEvent, AgentStreamRequest } from "@llm-space/core";
 import type { HostServices } from "@llm-space/ui/host";
 import { renderToStaticMarkup } from "react-dom/server";
 
@@ -87,11 +86,7 @@ const { CommandProvider } = await import("@/commands");
 const { DesktopHostProvider } = await import("./host-services");
 const { useHostServices } = await import("@llm-space/ui/host");
 
-const REMOTE_RUNTIME: RuntimeId = "remote:auxiliary-generation";
-const REQUEST: AgentStreamRequest = {
-  model: { provider: "test", id: "test" },
-  context: { messages: [], tools: [], responseApiNativeTools: [] },
-};
+const LOCAL_RUNTIME: RuntimeId = "local";
 
 function _captureHost(): HostServices {
   let captured: HostServices | null = null;
@@ -113,18 +108,30 @@ function _captureHost(): HostServices {
 describe("Desktop runtime-scoped host services", () => {
   beforeEach(() => RPC.reset());
 
-  test("streams through the agentExecution namespace with its Runtime owner", async () => {
-    const transport = _captureHost().createTransport(REMOTE_RUNTIME);
-    if (!transport) throw new Error("Desktop host did not provide transport");
-    const iterator = transport(REQUEST, {})[Symbol.asyncIterator]();
+  test("streams stateless text through the auxiliaryGeneration namespace", async () => {
+    const generation = _captureHost().auxiliaryGeneration;
+    if (!generation) throw new Error("Desktop host did not provide generation");
+    const iterator = generation
+      .generate({
+        systemPrompt: "Write a title",
+        messages: [],
+        model: { provider: "test", id: "test" },
+      })
+      [Symbol.asyncIterator]();
     const pending = iterator.next();
     const stream = RPC.streams[0];
     expect(stream).toMatchObject({
-      namespace: "agentExecution",
-      method: "stream",
-      args: [REMOTE_RUNTIME, REQUEST, { connection: undefined }],
+      namespace: "auxiliaryGeneration",
+      method: "generate",
+      args: [
+        {
+          systemPrompt: "Write a title",
+          messages: [],
+          model: { provider: "test", id: "test" },
+        },
+      ],
     });
-    const event: AgentEvent = { type: "agent_start" };
+    const event = { type: "text.completed" as const, text: "A useful title" };
     RPC.emit({
       subscriptionId: stream.subscriptionId,
       type: "item",
@@ -138,32 +145,32 @@ describe("Desktop runtime-scoped host services", () => {
   test("runtime-sensitive host calls use typed namespace arguments", async () => {
     const host = _captureHost();
     if (!host.generator) throw new Error("Generator services are unavailable");
-    await host.skills.getSettings({ runtimeId: REMOTE_RUNTIME });
-    await host.skills.listAvailable({ runtimeId: REMOTE_RUNTIME });
+    await host.skills.getSettings({ runtimeId: LOCAL_RUNTIME });
+    await host.skills.listAvailable({ runtimeId: LOCAL_RUNTIME });
     await host.skills.listSkills("/remote/skills", {
-      runtimeId: REMOTE_RUNTIME,
+      runtimeId: LOCAL_RUNTIME,
     });
-    await host.mcp.listServers({ runtimeId: REMOTE_RUNTIME });
-    await host.generator.getSearchSettings({ runtimeId: REMOTE_RUNTIME });
+    await host.mcp.listServers({ runtimeId: LOCAL_RUNTIME });
+    await host.generator.getSearchSettings({ runtimeId: LOCAL_RUNTIME });
     await host.generator.resolveEnv("remote-provider", ["REMOTE_SEARCH_KEY"], {
-      runtimeId: REMOTE_RUNTIME,
+      runtimeId: LOCAL_RUNTIME,
     });
 
     expect(RPC.requests).toEqual([
-      { namespace: "skills", method: "getSettings", args: [REMOTE_RUNTIME] },
-      { namespace: "skills", method: "listAvailable", args: [REMOTE_RUNTIME] },
+      { namespace: "skills", method: "getSettings", args: [LOCAL_RUNTIME] },
+      { namespace: "skills", method: "listAvailable", args: [LOCAL_RUNTIME] },
       {
         namespace: "skills",
         method: "list",
-        args: [REMOTE_RUNTIME, "/remote/skills"],
+        args: [LOCAL_RUNTIME, "/remote/skills"],
       },
-      { namespace: "mcp", method: "listServers", args: [REMOTE_RUNTIME] },
-      { namespace: "search", method: "get", args: [REMOTE_RUNTIME] },
+      { namespace: "mcp", method: "listServers", args: [LOCAL_RUNTIME] },
+      { namespace: "search", method: "get", args: [LOCAL_RUNTIME] },
       {
         namespace: "generator",
         method: "resolveEnv",
         args: [
-          REMOTE_RUNTIME,
+          LOCAL_RUNTIME,
           { providerId: "remote-provider", envNames: ["REMOTE_SEARCH_KEY"] },
         ],
       },

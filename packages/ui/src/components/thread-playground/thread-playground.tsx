@@ -243,6 +243,7 @@ function ThreadPlaygroundContent({
 >) {
   const containerRef = useRef<HTMLDivElement>(null);
   const status = useThreadStore((s) => s.status);
+  const pendingToolApproval = useThreadStore((s) => s.pendingToolApproval);
   const savedModel = useThreadStore((s) => s.thread.model);
   const fallbackModel = useFirstAvailableModel();
   // A thread can run once a model resolves (its own, or the first available).
@@ -251,7 +252,8 @@ function ThreadPlaygroundContent({
   const redoable = useThreadStore((s) => canRedo(s.changeHistory));
   const { effectiveAutoRunTools, reactLoop, setAutoRunTools, setReactLoop } =
     useRunMode();
-  const { run, abort, undo, redo, syncTitle } = useThreadStoreActions();
+  const { run, abort, undo, redo, syncTitle, resolveToolApproval } =
+    useThreadStoreActions();
   const [systemPromptStreaming, setSystemPromptStreaming] = useState(false);
   const title = useMemo(
     () => titleFromProps ?? threadTitleFromPath(path),
@@ -492,6 +494,31 @@ function ThreadPlaygroundContent({
               {headerActions}
             </div>
           </header>
+          {pendingToolApproval ? (
+            <div className="bg-muted/40 flex min-h-12 items-center gap-3 border-b px-4 py-2">
+              <div className="min-w-0 grow text-sm">
+                <span className="font-medium">Tool approval required</span>
+                <span className="text-muted-foreground ml-2">
+                  {pendingToolApproval.toolName}
+                </span>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={status !== "idle"}
+                onClick={() => void resolveToolApproval(false)}
+              >
+                Deny
+              </Button>
+              <Button
+                size="sm"
+                disabled={status !== "idle"}
+                onClick={() => void resolveToolApproval(true)}
+              >
+                Approve
+              </Button>
+            </div>
+          ) : null}
           <ResizablePanelGroup
             className="flex min-h-0 grow"
             orientation="horizontal"

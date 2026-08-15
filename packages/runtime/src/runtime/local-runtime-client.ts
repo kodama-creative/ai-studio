@@ -3,23 +3,17 @@ import {
   userTextFileExists,
   type LocalFileSystem,
 } from "@llm-space/core/server";
+import { streamAgent } from "@llm-space/core/server";
 
 import type { McpManager } from "../mcp";
 import type { ModelManager } from "../models";
 import type { NetworkSettingsManager } from "../network";
 import type { SearchSettingsManager } from "../search";
 import type { SkillsManager } from "../skills";
-import type { StreamThreadController } from "../streaming";
 import type { ToolRegistry } from "../tools/tool-registry";
 
 import { getModelProviderGroups } from "./model-groups";
-import type {
-  RuntimeAbortStreamPayload,
-  RuntimeClient,
-  RuntimeInfo,
-  RuntimeStreamRequestPayload,
-  RuntimeStreamResponsePayload,
-} from "./types";
+import type { RuntimeClient, RuntimeInfo } from "./types";
 
 export interface LocalRuntimeClientDependencies {
   localFs: LocalFileSystem;
@@ -28,7 +22,6 @@ export interface LocalRuntimeClientDependencies {
   networkSettings: NetworkSettingsManager;
   searchSettings: SearchSettingsManager;
   skillsManager: SkillsManager;
-  streaming: StreamThreadController;
   tools: ToolRegistry;
   rmPath?: (path: string) => Promise<void>;
 }
@@ -43,7 +36,6 @@ export class LocalRuntimeClient implements RuntimeClient {
       name: "Local",
       status: "connected",
       capabilities: [
-        "streamThread",
         "filesystem",
         "models",
         "mcp",
@@ -156,7 +148,48 @@ export class LocalRuntimeClient implements RuntimeClient {
   async testModelConnection(
     input: Parameters<RuntimeClient["testModelConnection"]>[0]
   ) {
-    await this._deps.streaming.testModelConnection(input);
+    const models = input.candidate
+      ? this._deps.modelManager.buildModelsWithCandidate(
+          input.providerId,
+          input.candidate
+        )
+      : await this._deps.modelManager.getAvailableModels();
+    const targetId = input.candidate?.id ?? input.modelId;
+    const connection = await this._deps.modelManager.resolveConnection({
+      providerId: input.providerId,
+      profileId: input.profileId,
+    });
+    for await (const event of streamAgent(
+      {
+        model: { provider: input.providerId, id: targetId },
+        context: {
+          systemPrompt: "You are a connection tester.",
+          messages: [
+            {
+              role: "user",
+              content: [{ type: "text", text: 'Reply with "ok".' }],
+              timestamp: Date.now(),
+            },
+          ],
+          tools: [],
+          responseApiNativeTools: [],
+        },
+      },
+      {
+        models,
+        signal: new AbortController().signal,
+        getApiKey: () => connection.apiKey,
+        getBaseUrl: () => connection.baseUrl,
+        getHeaders: () => connection.headers,
+      }
+    )) {
+      if (event.type !== "agent_end") continue;
+      for (const message of event.messages) {
+        if (message.role === "assistant" && message.errorMessage) {
+          throw new Error(message.errorMessage);
+        }
+      }
+    }
   }
 
   async removeCustomModel(
@@ -310,25 +343,6 @@ export class LocalRuntimeClient implements RuntimeClient {
     );
   }
 
-  skillsSetPluginSkillHidden(
-    input: Parameters<RuntimeClient["skillsSetPluginSkillHidden"]>[0]
-  ) {
-    return this._deps.skillsManager.setPluginSkillHidden(
-      input.pluginId,
-      input.skillName,
-      input.hidden
-    );
-  }
-
-  skillsSetAllPluginSkillsHidden(
-    input: Parameters<RuntimeClient["skillsSetAllPluginSkillsHidden"]>[0]
-  ) {
-    return this._deps.skillsManager.setAllPluginSkillsHidden(
-      input.pluginId,
-      input.hidden
-    );
-  }
-
   skillsSetAllSkillsHidden(
     input: Parameters<RuntimeClient["skillsSetAllSkillsHidden"]>[0]
   ) {
@@ -342,10 +356,6 @@ export class LocalRuntimeClient implements RuntimeClient {
     return this._deps.skillsManager.listAvailableSkills();
   }
 
-  skillsListPluginSkills() {
-    return this._deps.skillsManager.listPluginSkills();
-  }
-
   skillsListSkills(path: string) {
     return this._deps.skillsManager.listSkills(path);
   }
@@ -354,18 +364,4 @@ export class LocalRuntimeClient implements RuntimeClient {
     return this._deps.skillsManager.readSkill(path);
   }
 
-  streamThread(
-    payload: RuntimeStreamRequestPayload,
-    send: (message: RuntimeStreamResponsePayload) => void
-  ) {
-    return this._deps.streaming.run(payload, send);
-  }
-
-  abortStream(payload: RuntimeAbortStreamPayload) {
-    this._deps.streaming.abort(payload);
-  }
-
-  shutdown() {
-    this._deps.streaming.shutdown();
-  }
 }

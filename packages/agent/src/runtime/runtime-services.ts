@@ -23,6 +23,7 @@ export interface SkillService {
   resolve(input: {
     readonly agentId: string;
     readonly sessionId: string;
+    readonly operationId: string;
     readonly identifier: string;
   }): SkillHandle;
   close?(): Promise<void>;
@@ -91,6 +92,7 @@ export function createRuntimeToolContext(
       return skills.resolve({
         agentId: context.agentId,
         sessionId: context.execution.sessionId,
+        operationId: context.execution.runId,
         identifier,
       });
     },

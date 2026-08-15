@@ -429,8 +429,7 @@ function ProviderListItem({
       />
       <span className="line-clamp-1 grow">{provider.name}</span>
 
-      {!provider.readOnly ? (
-        <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+      <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
           <DropdownMenuTrigger asChild>
             <span
               role="button"
@@ -457,15 +456,9 @@ function ProviderListItem({
               Remove {provider.name}
             </DropdownMenuItem>
           </DropdownMenuContent>
-        </DropdownMenu>
-      ) : (
-        <span className="text-muted-foreground text-[10px] uppercase">
-          Plugin
-        </span>
-      )}
+      </DropdownMenu>
 
-      {!provider.readOnly ? (
-        <ConfirmDialog
+      <ConfirmDialog
           open={confirmOpen}
           onOpenChange={setConfirmOpen}
           title={`Remove ${provider.name}?`}
@@ -476,8 +469,7 @@ function ProviderListItem({
             setConfirmOpen(false);
             void removeProvider(provider.id);
           }}
-        />
-      ) : null}
+      />
     </div>
   );
 }
@@ -570,30 +562,6 @@ function ProviderEditor({ provider }: { provider: ModelProviderGroup | null }) {
     return (
       <div className="text-muted-foreground flex min-w-0 grow items-center justify-center text-sm">
         Select or add a provider from the left sidebar
-      </div>
-    );
-  }
-
-  if (provider.readOnly) {
-    return (
-      <div className="flex min-w-0 grow flex-col overflow-auto px-6 py-4">
-        <div className="flex items-center gap-2">
-          <h3 className="font-heading text-lg font-medium">{provider.name}</h3>
-          <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 text-[10px] uppercase">
-            Plugin · Read only
-          </span>
-        </div>
-        <p className="text-muted-foreground mt-1 text-xs">{provider.id}</p>
-        <div className="mt-5 space-y-2">
-          {provider.models.map((model) => (
-            <div key={model.id} className="rounded-md border px-3 py-2 text-sm">
-              <div className="font-medium">{model.name}</div>
-              <div className="text-muted-foreground font-mono text-xs">
-                {model.id}
-              </div>
-            </div>
-          ))}
-        </div>
       </div>
     );
   }

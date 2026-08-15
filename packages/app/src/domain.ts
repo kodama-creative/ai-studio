@@ -42,7 +42,26 @@ export interface Task {
   readonly updatedAt: number;
 }
 
-/** Durable ACP mutation identity without protocol payload or transcript data. */
+/** Product-owned committed-log cursor for one Pi-backed Session. */
+export interface SessionInspectInput {
+  readonly sessionId: string;
+  readonly lane?: string;
+  readonly afterSeq?: number;
+}
+
+/** Durable debugger command identity, independent of any transport protocol. */
+export interface SessionMutationInput extends SessionInspectInput {
+  readonly commandId: string;
+}
+
+export interface SessionStepInput extends SessionMutationInput {
+  readonly expectedActionId: string;
+  readonly kind: "model" | "tool";
+}
+
+export type SessionContinueInput = SessionMutationInput;
+
+/** Durable debugger mutation identity without protocol payload or transcript data. */
 export interface AppCommandReceipt {
   readonly sessionId: string;
   readonly commandId: string;

@@ -1,12 +1,25 @@
 import { describe, expect, test } from "bun:test";
 
 import type { Thread } from "../../types/threads/thread";
+import type { PortableThreadSnapshot } from "../../types/threads/thread-snapshot";
 
 import { GistThreadWriter } from "./gist-thread-writer";
 
 const GIST_ID = "113dadfadb8a0839de50e882f82b17dd";
 const NEW_VERSION = "ffffffffffffffffffffffffffffffffffffffff";
 const THREAD: Thread = { title: "Browser Use!" };
+const SNAPSHOT: PortableThreadSnapshot = {
+  kind: "llm-space.thread-snapshot",
+  schemaVersion: 1,
+  source: {
+    product: "playground",
+    productId: "playground-1",
+    sessionId: "session-1",
+    lane: "main",
+    leafId: "leaf-1",
+  },
+  thread: { title: "Browser Use!", runHistory: [{ timestamp: 1, thread: {} }] },
+};
 
 interface StubCall {
   url: string;
@@ -145,5 +158,26 @@ describe("GistThreadWriter.write (auth)", () => {
       error = e;
     }
     expect((error as Error | undefined)?.message).toMatch(/sign-in required/i);
+  });
+});
+
+describe("GistThreadWriter.writeSnapshot", () => {
+  test("publishes the versioned Pi projection identity and strips local run history", async () => {
+    const { fetch, calls } = _stubFetch({
+      "POST https://api.github.com/gists": () =>
+        _json({ id: GIST_ID, history: [{ version: NEW_VERSION }] }),
+    });
+    const writer = new GistThreadWriter({ fetch, getToken: () => "tok" });
+
+    await writer.writeSnapshot(SNAPSHOT);
+
+    const body = calls[0]!.body as {
+      files: Record<string, { content: string }>;
+    };
+    const published = JSON.parse(
+      body.files["browser-use.json"]!.content
+    ) as PortableThreadSnapshot;
+    expect(published.source).toEqual(SNAPSHOT.source);
+    expect(published.thread.runHistory).toEqual([]);
   });
 });

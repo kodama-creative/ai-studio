@@ -1,5 +1,3 @@
-import { existsSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { getLlmSpaceHomePath } from "@llm-space/core/server";
@@ -10,12 +8,10 @@ import {
   ModelManager,
 } from "@llm-space/runtime/models";
 import { NetworkSettingsManager } from "@llm-space/runtime/network";
-import { PluginManager } from "@llm-space/runtime/plugins";
 import { LocalRuntimeClient, RuntimeRouter } from "@llm-space/runtime/runtime";
 import { SearchSettingsManager } from "@llm-space/runtime/search";
 import { SkillsManager } from "@llm-space/runtime/skills";
 import { createLocalFileSystem } from "@llm-space/runtime/storage";
-import { StreamThreadController } from "@llm-space/runtime/streaming";
 import { createBuiltInToolsModule } from "@llm-space/runtime/tools/built-in";
 import type { Studio } from "@llm-space/studio/server";
 import Electrobun, {
@@ -23,10 +19,8 @@ import Electrobun, {
   type BrowserWindow,
   type ElectrobunEvent,
   Utils,
-  PATHS,
 } from "electrobun/bun";
 
-import packageJson from "../../../package.json";
 import type { AgentProjectView } from "../../shared/agent-project";
 import type { Command } from "../../shared/commands";
 import { resolveDeepLinkScheme } from "../../shared/deep-link-scheme";
@@ -52,29 +46,10 @@ import {
   nativeContributionsModule,
   NATIVE_APPLICATION_TOKENS,
 } from "../application/native-module";
-import type {
-  PluginCommandsApplication,
-  PluginsApplication,
-} from "../application/plugin-applications";
-import {
-  pluginContributionsModule,
-  pluginModule,
-  PLUGIN_APPLICATION_TOKENS,
-} from "../application/plugin-module";
-import {
-  remoteContributionsModule,
-  remoteModule,
-} from "../application/remote-module";
 import {
   runtimeApplicationsModule,
   runtimeContributionsModule,
 } from "../application/runtime-module";
-import type { SharedImportApplication } from "../application/shared-import-application";
-import {
-  sharedImportContributionsModule,
-  sharedImportModule,
-  SHARED_IMPORT_APPLICATION,
-} from "../application/shared-import-module";
 import { GitHubAuthManager } from "../auth/github-auth-manager";
 import { isStudioOpenDeepLink } from "../deep-link";
 import { activateWindowForDeepLink } from "../deep-link/activate-window";
@@ -99,20 +74,12 @@ import { windowRegistryModule } from "../di/window-registry-module";
 import { attachWindowScope } from "../di/window-scope";
 import { moveToTrash, openPath, revealInFileManager } from "../fs";
 import { DesktopHost } from "../host/desktop-host";
-import {
-  PluginCommandExecutionController,
-  type PluginCommandReportInput,
-} from "../plugins/plugin-command-execution-controller";
 import { ProjectWindowManager } from "../projects/project-window-manager";
 import {
   FileAgentProjectCatalogStore,
   FileProjectWindowStateStore,
   ProjectWindowStateFile,
 } from "../projects/project-window-state";
-import {
-  RemoteServerManager,
-  registerConfiguredRemoteRuntime,
-} from "../remote";
 import {
   createMainWindowRPC,
   type MainWindowRPC,
@@ -172,105 +139,6 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
   const gistReader = new GistThreadReader({
     getToken: () => githubAuth.getAccessToken(),
   });
-  const packagedRunnerPath = path.join(
-    PATHS.RESOURCES_FOLDER,
-    "app",
-    "plugin-runner.ts"
-  );
-  const sourceRunnerPath = path.resolve(
-    import.meta.dir,
-    "../../../../../packages/runtime/src/plugins/plugin-runner.ts"
-  );
-  let executePluginHostCommand = (type: string): Promise<unknown> =>
-    Promise.reject(new Error(`Command execution is not ready: ${type}`));
-  let reportPluginCommand = (
-    input: PluginCommandReportInput
-  ): Promise<unknown> =>
-    Promise.reject(
-      new Error(`Command reporting is not ready: ${input.commandId}`)
-    );
-  let notifyPluginsChanged = (): void => undefined;
-  let notifyPluginCommandExecution: (
-    event: import("../../shared/plugin-command-execution").PluginCommandExecutionEvent
-  ) => void = () => undefined;
-  const pluginManager = await PluginManager.create({
-    homePath,
-    appVersion: packageJson.version,
-    runnerPath: existsSync(packagedRunnerPath)
-      ? packagedRunnerPath
-      : sourceRunnerPath,
-    skillsManager,
-    mcpManager,
-    modelManager,
-    onChanged: () => notifyPluginsChanged(),
-    handleHostRequest: async (method, rawParams) => {
-      const params = (rawParams ?? {}) as Record<string, unknown>;
-      if (method === "notify") {
-        Utils.showNotification({
-          title: "LLM Space",
-          body: _stringParam(params, "message"),
-        });
-        return null;
-      }
-      if (method === "shell.openLink") {
-        Utils.openExternal(_stringParam(params, "url"));
-        return null;
-      }
-      if (method === "pickFile") {
-        const selected = await Utils.openFileDialog({
-          startingFolder: "~/",
-          canChooseFiles: true,
-          canChooseDirectory: false,
-          allowsMultipleSelection: false,
-        });
-        return selected[0] ?? null;
-      }
-      if (method === "readWorkspaceFile") {
-        return readFile(localFs.realpath(_stringParam(params, "path")), "utf8");
-      }
-      if (method === "writeWorkspaceFile") {
-        const filePath = localFs.realpath(_stringParam(params, "path"));
-        await mkdir(path.dirname(filePath), { recursive: true });
-        await writeFile(filePath, _stringParam(params, "content"), "utf8");
-        return null;
-      }
-      if (method === "executeHostCommand") {
-        return executePluginHostCommand(_stringParam(params, "type"));
-      }
-      if (method === "report") {
-        return reportPluginCommand({
-          executionId: _stringParam(params, "executionId"),
-          commandId: _stringParam(params, "commandId"),
-          report: _commandReportParam(params),
-        });
-      }
-      throw new Error(`Unsupported plugin host operation: ${method}`);
-    },
-  });
-  const pluginCommandExecutions = new PluginCommandExecutionController(
-    {
-      execute: (commandId, context, args, executionId) =>
-        pluginManager.commands.executeWithContext(
-          commandId,
-          context,
-          args,
-          executionId
-        ),
-    },
-    (event) => notifyPluginCommandExecution(event)
-  );
-  reportPluginCommand = (input) => {
-    pluginCommandExecutions.report(input);
-    return Promise.resolve(null);
-  };
-  pluginManager.threadStorages.registerBuiltin({
-    id: "builtin:github-gist",
-    displayName: "GitHub Gist",
-    description: "Read and write a thread using GitHub Gist.",
-    reader: gistReader,
-    writer: gistWriter,
-  });
-  const streaming = new StreamThreadController(modelManager, analytics);
   const host = new DesktopHost({
     modules: [
       createBuiltInToolsModule({
@@ -292,7 +160,6 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
     networkSettings,
     searchSettings,
     skillsManager,
-    streaming,
     tools: host.tools,
     rmPath: async (workspacePath) => {
       const abs = localFs.realpath(workspacePath);
@@ -303,11 +170,6 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
     },
   });
   const runtimeRouter = new RuntimeRouter(localRuntime);
-  const remoteServerManager = new RemoteServerManager(runtimeRouter);
-  const remoteRuntime = await registerConfiguredRemoteRuntime({
-    env: process.env,
-    runtimeRouter,
-  });
 
   let notifyUpdateChanged: (
     message: import("../../shared/updates").UpdateStatusChangedPayload
@@ -417,19 +279,16 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
       desktopHost: host,
       githubAuth,
       gistWriter,
+      gistReader,
       homePath,
       localFs,
       mcpManager,
       modelManager,
       networkSettings,
-      pluginCommandExecutions,
-      pluginManager,
       projectWindows,
-      remoteServerManager,
       runtimeRouter,
       searchSettings,
       skillsManager,
-      streaming,
       updater,
       windowStates,
     })
@@ -438,18 +297,7 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
   processContainer.load(nativeApplicationsModule());
   processContainer.load(generatorModule());
   processContainer.load(agentProjectsModule());
-  processContainer.load(remoteModule());
-  processContainer.load(pluginModule());
   processContainer.load(applicationModule());
-  processContainer.load(sharedImportModule());
-  notifyPluginsChanged = () =>
-    processContainer
-      .get<PluginsApplication>(PLUGIN_APPLICATION_TOKENS.plugins)
-      .notifyChanged();
-  notifyPluginCommandExecution = (event) =>
-    processContainer
-      .get<PluginCommandsApplication>(PLUGIN_APPLICATION_TOKENS.commands)
-      .notifyExecutionChanged(event);
   notifyGithubChanged = (state) =>
     processContainer
       .get<GithubAccountApplication>(APPLICATION_TOKENS.github)
@@ -464,32 +312,17 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
   processContainer.onDispose(() => {
     // External managers may emit one final callback while shutting down. Stop
     // them from resolving Applications after the DI root entered disposal.
-    notifyPluginsChanged = () => undefined;
-    notifyPluginCommandExecution = () => undefined;
     notifyGithubChanged = () => undefined;
     notifyUpdateChanged = () => undefined;
     return _stopDesktopApp([
       ["window state", () => windowStates.flush()],
       ["updater", () => updater.stop()],
-      ["remote runtime", () => remoteRuntime?.stop()],
-      ["remote servers", () => remoteServerManager.shutdown()],
-      ["streaming", () => streaming.shutdown()],
       ["desktop host", () => host.stop()],
       ["MCP manager", () => mcpManager.shutdown()],
-      ["plugin manager", () => pluginManager.shutdown()],
       ["GitHub auth", () => githubAuth.cancelSignIn()],
       ["analytics", () => analytics.shutdown()],
     ]);
   });
-  executePluginHostCommand = async (type) => {
-    if (type !== "app.openSettings" && type !== "workspace.refresh") {
-      throw new Error(`Plugin host command is not allowed: ${type}`);
-    }
-    const main = await _requireMainWindows(mainWindows).open();
-    executeCommand({ type, args: {} }, main.window);
-    return null;
-  };
-
   let stopPromise: Promise<void> | null = null;
   const runtime: DesktopAppRuntime = {
     stop() {
@@ -545,20 +378,22 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
     });
     registerMenuActions(() => mainWindows?.current()?.window, executeCommand);
 
-    const sharedImport = processContainer.get<SharedImportApplication>(
-      SHARED_IMPORT_APPLICATION
-    );
     const deepLinkScheme = resolveDeepLinkScheme(
       process.env.LLM_SPACE_DEEP_LINK_SCHEME
     );
     const pendingDeepLinks = getPendingDeepLinks();
     setDeepLinkHandler((url) => {
       void (async () => {
-        if (!isStudioOpenDeepLink(url, deepLinkScheme)) {
+        if (isStudioOpenDeepLink(url, deepLinkScheme)) {
+          const project = new URL(url).searchParams.get("project")?.trim();
+          if (!project) {
+            throw new Error("Can't open Studio: the project path is missing.");
+          }
+          await projectWindows.openProject(project);
+        } else {
           const main = await _requireMainWindows(mainWindows).open();
           activateWindowForDeepLink(main.window, url, deepLinkScheme);
         }
-        await sharedImport.handle(url);
       })().catch((error) => {
         console.error("Failed to handle deep link:", error);
         Utils.showNotification({
@@ -640,12 +475,9 @@ function _createWindowInfrastructure(
   scope.load(agentProjectsContributionsModule(scope, kind === "main"));
   scope.load(generatorContributionsModule(scope));
   scope.load(nativeContributionsModule(scope, { getWindow, commandSink }));
-  scope.load(pluginContributionsModule(scope));
   scope.load(runtimeContributionsModule(scope));
   if (kind === "main") {
     scope.load(playgroundContributionsModule(scope));
-    scope.load(remoteContributionsModule(scope));
-    scope.load(sharedImportContributionsModule(scope));
   } else {
     scope.load(projectContributionsModule(scope));
   }
@@ -679,26 +511,8 @@ function _requireMainWindows(
   return value;
 }
 
-function _stringParam(params: Record<string, unknown>, key: string): string {
-  const value = params[key];
-  if (typeof value !== "string") {
-    throw new Error(`Plugin host parameter must be a string: ${key}`);
-  }
-  return value;
-}
-
 function _errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function _commandReportParam(
-  params: Record<string, unknown>
-): PluginCommandReportInput["report"] {
-  const report = params.report;
-  if (!report || typeof report !== "object" || Array.isArray(report)) {
-    throw new Error("Plugin Command report must be an object.");
-  }
-  return report as PluginCommandReportInput["report"];
 }
 
 async function _stopDesktopApp(

@@ -19,7 +19,6 @@ import {
   type GeneratorResult,
 } from "@llm-space/core/generator";
 import {
-  createOneShotRunner,
   createWorkflowContext,
   type WorkflowEvent,
 } from "@llm-space/core/workflow";
@@ -110,7 +109,7 @@ export function GenerateProjectButton({
 }) {
   const {
     generator,
-    createTransport,
+    auxiliaryGeneration,
     skills,
     files,
     builtinTools,
@@ -209,7 +208,8 @@ export function GenerateProjectButton({
       }
       const generationRuntime = bindProjectGenerationRuntime({
         runtimeId,
-        createTransport,
+        auxiliaryGeneration,
+        ...(selectedProfileId ? { profileId: selectedProfileId } : {}),
         skills,
         mcp,
         generator,
@@ -249,13 +249,7 @@ export function GenerateProjectButton({
           useMetaUserPrompt,
         });
         const workflow = createWorkflowContext({
-          runOneShot: createOneShotRunner({
-            transport: generationRuntime.transport,
-            connection: {
-              providerId: model.provider,
-              ...(selectedProfileId ? { profileId: selectedProfileId } : {}),
-            },
-          }),
+          runOneShot: generationRuntime.runOneShot,
           defaultModel: model,
           signal: controller.signal,
           report: (event) => setEvents((prev) => [...prev, event]),
@@ -303,7 +297,7 @@ export function GenerateProjectButton({
     },
     [
       generator,
-      createTransport,
+      auxiliaryGeneration,
       runtimeId,
       model,
       context,

@@ -1,6 +1,4 @@
 import type {
-  AgentEvent,
-  AgentStreamRequest,
   ArkImageGenerationConfig,
   BuiltinTool,
   BuiltinToolCallResponse,
@@ -28,7 +26,6 @@ import type { RuntimeId } from "./runtime-id";
 export type { RuntimeId };
 
 export type RuntimeCapability =
-  | "streamThread"
   | "filesystem"
   | "models"
   | "mcp"
@@ -39,7 +36,7 @@ export type RuntimeCapability =
 
 export interface RuntimeInfo {
   id: RuntimeId;
-  kind: "local" | "remote";
+  kind: "local";
   name: string;
   status: "connected" | "connecting" | "disconnected" | "error";
   capabilities: RuntimeCapability[];
@@ -49,25 +46,10 @@ export interface RuntimeScopedParams {
   runtimeId?: RuntimeId;
 }
 
-export interface RuntimeStreamRequestPayload extends RuntimeScopedParams {
-  streamId: string;
-  request: AgentStreamRequest;
-  connection?: ProviderConnectionRef;
-}
-
 export interface UpdateProviderProfileInput extends ProviderProfilePatch {
   providerId: string;
   profileId: string;
 }
-
-export interface RuntimeAbortStreamPayload extends RuntimeScopedParams {
-  streamId: string;
-}
-
-export type RuntimeStreamResponsePayload =
-  | { streamId: string; type: "event"; event: AgentEvent }
-  | { streamId: string; type: "done" }
-  | { streamId: string; type: "error"; message: string };
 
 export type MaybePromise<T> = T | Promise<T>;
 
@@ -185,28 +167,12 @@ export interface RuntimeClient {
     skillName: string;
     hidden: boolean;
   }): MaybePromise<SkillsSettings>;
-  skillsSetPluginSkillHidden(input: {
-    pluginId: string;
-    skillName: string;
-    hidden: boolean;
-  }): MaybePromise<SkillsSettings>;
-  skillsSetAllPluginSkillsHidden(input: {
-    pluginId: string;
-    hidden: boolean;
-  }): MaybePromise<SkillsSettings>;
   skillsSetAllSkillsHidden(input: {
     path: string;
     hidden: boolean;
   }): MaybePromise<SkillsSettings>;
   skillsListAvailable(): MaybePromise<SkillInfo[]>;
-  skillsListPluginSkills(): MaybePromise<SkillInfo[]>;
   skillsListSkills(path: string): MaybePromise<SkillInfo[]>;
   skillsReadSkill(path: string): MaybePromise<SkillContent>;
 
-  streamThread(
-    payload: RuntimeStreamRequestPayload,
-    send: (message: RuntimeStreamResponsePayload) => void
-  ): Promise<void>;
-  abortStream(payload: RuntimeAbortStreamPayload): void;
-  shutdown(): void;
 }
