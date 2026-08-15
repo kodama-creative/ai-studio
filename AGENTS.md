@@ -171,8 +171,8 @@ the module id. Electrobun quit uses a two-phase handshake so asynchronous host,
 MCP, and analytics cleanup finishes before the process exits.
 
 V1 exposes one internal extension seam: `ToolContribution` through
-`ToolRegistry` (`src/bun/tools/tool-registry.ts`). Contributions have stable
-unique ids and tool names; registration snapshots and freezes tool definitions.
+`ToolRegistry` (`packages/runtime/src/tools/tool-registry.ts`). Contributions
+have stable unique ids and tool names; registration snapshots and freezes tool definitions.
 The bundled built-in-tools module is the reference implementation. This is not
 a public plugin SDK: dynamic loading, manifests, permissions, runtime
 enable/disable, renderer contributions, and third-party compatibility remain

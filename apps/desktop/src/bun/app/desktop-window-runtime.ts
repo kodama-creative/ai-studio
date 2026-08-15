@@ -17,6 +17,7 @@ import {
   WINDOW_APPLICATION,
   type WindowApplication,
 } from "../native/native-window-module";
+import { promptFilesRpcModule } from "../native/prompt-files-module";
 import { shellCommandsModule } from "../native/shell-module";
 import { playgroundContributionsModule } from "../playgrounds/playground-module";
 import { agentProjectsContributionsModule } from "../projects/agent-projects-module";
@@ -31,7 +32,6 @@ import { builtinToolsRpcModule } from "../rpc/builtin-tools-rpc-feature";
 import { githubAccountRpcModule } from "../rpc/github-account-rpc-feature";
 import { mcpRpcModule } from "../rpc/mcp-rpc-feature";
 import { networkRpcModule } from "../rpc/network-rpc-feature";
-import { promptFilesRpcModule } from "../rpc/prompt-files-rpc-feature";
 import { remindersRpcModule } from "../rpc/reminders-rpc-feature";
 import { searchRpcModule } from "../rpc/search-rpc-feature";
 import { skillsRpcModule } from "../rpc/skills-rpc-feature";
