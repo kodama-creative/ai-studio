@@ -206,6 +206,103 @@ test("a source-defined Agent tool executes inside one continued Studio Run", asy
   });
 });
 
+test("load_skill uses the Skill set frozen for the Studio operation", async () => {
+  const projectRoot = await _project();
+  const dataRoot = await _temp("llm-space-studio-skill-data-");
+  const faux = fauxProvider({ tokensPerSecond: 0 });
+  const model = faux.getModel();
+  const models = createModels();
+  models.setProvider(faux.provider);
+  faux.setResponses([
+    fauxAssistantMessage(
+      [fauxToolCall("load_skill", { skill: "review" }, { id: "skill-call" })],
+      { stopReason: "toolUse" }
+    ),
+  ]);
+  await writeFile(
+    join(projectRoot, "agent", "agent.ts"),
+    `export default { model: "${model.provider}/${model.id}" };\n`
+  );
+  await writeFile(
+    join(projectRoot, "agent", "instructions.md"),
+    "Skills:\n{{available_skills}}\n"
+  );
+  await mkdir(join(projectRoot, "agent", "skills", "review"), {
+    recursive: true,
+  });
+  const skillPath = join(
+    projectRoot,
+    "agent",
+    "skills",
+    "review",
+    "SKILL.md"
+  );
+  await writeFile(
+    skillPath,
+    "---\ndescription: Review code\n---\nUse the original checklist.\n"
+  );
+
+  const studio = await _studio({
+    projectRoot,
+    dataRoot,
+    models,
+    runtimeServices: {},
+  });
+  expect(studio.agent.instructions[0]).toContain("Skills:\nAvailable skills\n");
+  expect(studio.agent.instructions[0]).toContain(
+    "- review: Review code (path: skills/review/SKILL.md)"
+  );
+  expect(studio.agent.tools.map((tool) => tool.name)).toContain("load_skill");
+  const thread = await studio.createThread({ title: "Frozen Skill" });
+  const saved = await studio.saveDocument(thread.id, {
+    ...thread.document,
+    conversation: {
+      messages: [
+        {
+          id: "user-skill",
+          role: "user",
+          content: [{ type: "text", text: "Review this" }],
+        },
+      ],
+      state: {},
+    },
+  });
+
+  const receipt = await studio.run(saved.id, {
+    fromMessageId: "user-skill",
+    commandId: "start-skill",
+    mode: "step",
+  });
+  await rm(skillPath);
+  const paused = await studio.inspectRun(saved.id, receipt.operationId);
+  if (paused.nextAction === undefined) {
+    throw new Error(`Expected pending Skill tool: ${JSON.stringify(paused)}`);
+  }
+  expect(paused.nextAction).toMatchObject({ kind: "tool" });
+  await studio.stepRun(saved.id, receipt.operationId, {
+    commandId: "load-frozen-skill",
+    expectedActionId: paused.nextAction.id,
+    kind: "tool",
+  });
+
+  const messages = (await studio.loadThread(saved.id))?.document.conversation
+    .messages;
+  const toolMessage = messages?.find(
+    (message) => message.role === "assistant" && message.toolCalls?.length
+  );
+  expect(toolMessage).toMatchObject({
+    toolCalls: [
+      {
+        id: "skill-call",
+        output: {
+          content: [{ type: "text", text: "Use the original checklist." }],
+          isError: false,
+        },
+      },
+    ],
+  });
+});
+
 /** Wait for the durable Studio projection and return this Run's terminal event. */
 async function _terminalEvent(
   studio: Studio,

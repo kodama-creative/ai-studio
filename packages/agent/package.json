@@ -22,6 +22,7 @@
     "./tools": "./src/tools/index.ts",
     "./tools/approval": "./src/tools/approval.ts",
     "./tools/schema-validation": "./src/tools/schema-validation.ts",
+    "./variables": "./src/variables/index.ts",
     "./package.json": "./package.json"
   },
   "dependencies": {

@@ -46,6 +46,7 @@ export interface AgentSourceManifest {
   readonly sandboxWorkspace: readonly AgentSourceRef[];
   readonly schedules: readonly AgentSourceRef[];
   readonly skills: readonly AgentSourceRef[];
+  readonly skillsVariable?: AgentSourceRef;
   readonly subagents: readonly AgentSourceManifest[];
   readonly tools: readonly AgentSourceRef[];
 }
@@ -159,6 +160,7 @@ export interface AgentManifest {
   readonly sandboxWorkspace: readonly AgentManifestSource[];
   readonly schedules: readonly LoadedScheduleDefinition[];
   readonly skills: readonly LoadedSkillDefinition[];
+  readonly skillsVariable?: AgentManifestSource;
   readonly tools: readonly LoadedToolDefinition[];
   readonly subagents: readonly AgentManifest[];
 }

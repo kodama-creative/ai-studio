@@ -5,7 +5,10 @@ import type { Models, Tool as PiTool } from "@earendil-works/pi-ai";
 import { loadAgent } from "@llm-space/agent/loader";
 import {
   closeRuntimeServices,
+  createLoadSkillToolDefinition,
   createRuntimeToolContext,
+  LOAD_SKILL_TOOL_IMPLEMENTATION_ID,
+  mountAgentFrameworkTools,
   resolveAgentGeneration,
   resolveAgentOperation,
   type PreparedAgentDefinition,
@@ -102,7 +105,6 @@ export async function createAgent(options: CreateAgentOptions): Promise<Agent> {
     await repository.close();
     throw error;
   }
-  let currentSkills = new Map<string, SkillHandle>();
   const resolveCurrentAgent = async () => {
     const current = await _loadExecutable(options.projectRoot);
     if (current.agentId !== first.agentId) {
@@ -112,8 +114,10 @@ export async function createAgent(options: CreateAgentOptions): Promise<Agent> {
     }
     return current;
   };
-  const resolveTools = async (): Promise<ReadonlyMap<string, RuntimeTool>> =>
-    (await resolveCurrentAgent()).tools;
+  const resolveTools = async (
+    binding: RuntimeBinding
+  ): Promise<ReadonlyMap<string, RuntimeTool>> =>
+    _resolveRuntimeTools(binding, async () => (await resolveCurrentAgent()).tools);
   const runtime = new DurablePiRuntime({
     repository,
     bindings,
@@ -125,9 +129,9 @@ export async function createAgent(options: CreateAgentOptions): Promise<Agent> {
       resolveTools: _modelTools,
     }),
     resolveTools,
-    createToolContext: ({ execution, signal }) =>
+    createToolContext: ({ binding, execution, signal }) =>
       createRuntimeToolContext(
-        _withMountedSkills(options.runtimeServices, () => currentSkills),
+        _withMountedSkills(options.runtimeServices, binding.skills ?? []),
         {
         agentId: first.agentId,
         execution,
@@ -154,14 +158,8 @@ export async function createAgent(options: CreateAgentOptions): Promise<Agent> {
     runtime,
     store,
     agentId: first.agentId,
-    resolveBinding: async (input) => {
-      const resolved = await _operationBinding(
-        await resolveCurrentAgent(),
-        input
-      );
-      currentSkills = new Map(resolved.skills);
-      return resolved.binding;
-    },
+    resolveBinding: async (input) =>
+      _operationBinding(await resolveCurrentAgent(), input),
     ...(options.clock === undefined ? {} : { clock: options.clock }),
     ...(options.generateId === undefined
       ? {}
@@ -283,12 +281,13 @@ interface LoadedExecutable {
 
 /** Loads current project source into one immutable Pi operation binding. */
 async function _loadExecutable(projectRoot: string): Promise<LoadedExecutable> {
-  const definition = await resolveAgentGeneration(
-    await loadAgent({ startPath: projectRoot })
+  const definition = mountAgentFrameworkTools(
+    await resolveAgentGeneration(await loadAgent({ startPath: projectRoot }))
   );
   const tools = new Map<string, RuntimeTool>();
   const frozenTools = [...definition.tools.entries()].map(([name, tool]) => {
-    const implementationId = `source:${definition.generationId}:${name}`;
+    const implementationId =
+      tool.implementationId ?? `source:${definition.generationId}:${name}`;
     tools.set(
       name,
       runtimeTool(tool.definition, {
@@ -305,10 +304,14 @@ async function _loadExecutable(projectRoot: string): Promise<LoadedExecutable> {
       implementationId,
       replay: tool.definition.replay ?? "never",
       hostBinding: {
-        type: "app.project-tool",
-        agentSpecId: definition.agentId,
-        sourceRevision: definition.generationId,
-        toolName: name,
+        ...(tool.implementationId === LOAD_SKILL_TOOL_IMPLEMENTATION_ID
+          ? { type: "llm-space.agent-load-skill" }
+          : {
+              type: "app.project-tool",
+              agentSpecId: definition.agentId,
+              sourceRevision: definition.generationId,
+              toolName: name,
+            }),
       },
     };
   });
@@ -328,18 +331,13 @@ async function _operationBinding(
     readonly operationId: string;
     readonly messages: readonly AgentMessage[];
   }
-): Promise<{
-  readonly binding: RuntimeBinding;
-  readonly skills: ReadonlyMap<string, SkillHandle>;
-}> {
+): Promise<RuntimeBinding> {
   const resolved = await resolveAgentOperation(executable.definition, input);
   const separator = resolved.model.indexOf("/");
   if (separator <= 0 || separator === resolved.model.length - 1) {
     throw new Error(`Pi model "${resolved.model}" must use provider/model format.`);
   }
   return {
-    skills: resolved.skills,
-    binding: {
     formatVersion: APP_PI_RUNTIME_FORMAT_VERSION,
     agent: {
       agentSpecId: executable.definition.agentId,
@@ -350,21 +348,22 @@ async function _operationBinding(
       modelId: resolved.model.slice(separator + 1),
     },
     systemPrompt: resolved.instructions.join("\n\n"),
+    skills: [...resolved.skills.values()],
     tools: executable.bindingTools,
-    },
   };
 }
 
 function _withMountedSkills(
   services: RuntimeServices,
-  current: () => ReadonlyMap<string, SkillHandle>
+  mountedSkills: readonly SkillHandle[]
 ): RuntimeServices {
+  const mounted = new Map(mountedSkills.map((skill) => [skill.name, skill]));
   return {
     ...services,
     skills: {
       resolve(input) {
-        const mounted = current().get(input.identifier);
-        if (mounted !== undefined) return mounted;
+        const skill = mounted.get(input.identifier);
+        if (skill !== undefined) return skill;
         if (services.skills !== undefined) return services.skills.resolve(input);
         throw new Error(
           `Agent "${input.agentId}" does not mount Skill "${input.identifier}".`
@@ -372,6 +371,32 @@ function _withMountedSkills(
       },
     },
   };
+}
+
+/** Restores framework tools from the binding when current source no longer declares them. */
+async function _resolveRuntimeTools(
+  binding: RuntimeBinding,
+  loadCurrent: () => Promise<ReadonlyMap<string, RuntimeTool>>
+): Promise<ReadonlyMap<string, RuntimeTool>> {
+  const tools = new Map<string, RuntimeTool>();
+  for (const frozen of binding.tools) {
+    if (frozen.implementationId === LOAD_SKILL_TOOL_IMPLEMENTATION_ID) {
+      tools.set(
+        frozen.name,
+        runtimeTool(createLoadSkillToolDefinition(binding.skills ?? []), {
+          implementationId: LOAD_SKILL_TOOL_IMPLEMENTATION_ID,
+        })
+      );
+    }
+  }
+  try {
+    for (const [name, tool] of await loadCurrent()) {
+      if (!tools.has(name)) tools.set(name, tool);
+    }
+  } catch (error) {
+    if (tools.size === 0) throw error;
+  }
+  return tools;
 }
 
 /** Projects frozen tool schemas to Pi's model-visible contract. */

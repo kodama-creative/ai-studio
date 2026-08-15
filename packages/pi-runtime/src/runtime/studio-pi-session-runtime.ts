@@ -248,6 +248,7 @@ export class DurablePiRuntime {
     | ReadonlyMap<string, RuntimeTool>
     | Promise<ReadonlyMap<string, RuntimeTool>>;
   private readonly _createToolContext?: (input: {
+    readonly binding: RuntimeBinding;
     readonly execution: ToolContext["execution"];
     readonly signal: AbortSignal;
   }) => ToolContext;
@@ -273,6 +274,7 @@ export class DurablePiRuntime {
       | ReadonlyMap<string, RuntimeTool>
       | Promise<ReadonlyMap<string, RuntimeTool>>;
     readonly createToolContext?: (input: {
+      readonly binding: RuntimeBinding;
       readonly execution: ToolContext["execution"];
       readonly signal: AbortSignal;
     }) => ToolContext;
@@ -1172,6 +1174,7 @@ export class DurablePiRuntime {
         throw new Error("ToolContext factory is unavailable.");
       }
       const context = this._createToolContext({
+        binding,
         execution: {
           sessionId: snapshot.sessionId,
           lane,

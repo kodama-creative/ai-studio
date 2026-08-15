@@ -86,6 +86,33 @@ describe("agent discovery", () => {
     expect(result.manifest.subagents[0]?.agent?.logicalPath).toBe("agent.ts");
   });
 
+  test("reserves skills/index.ts for the Skills collection variable", async () => {
+    const root = await _fixture();
+    const agentRoot = join(root, "agent");
+    await mkdir(join(agentRoot, "skills", "review"), { recursive: true });
+    await writeFile(join(root, "package.json"), '{"name":"skills-variable"}');
+    await writeFile(join(agentRoot, "instructions.md"), "{{available_skills}}");
+    await writeFile(
+      join(agentRoot, "skills", "index.ts"),
+      "export default { name: 'skill_catalog', resolve() { return 'catalog'; } };"
+    );
+    await writeFile(
+      join(agentRoot, "skills", "review", "SKILL.md"),
+      "---\ndescription: Review work\n---\nReview carefully."
+    );
+
+    const result = await discoverAgent({ startPath: root });
+
+    expect(result.manifest.skillsVariable).toMatchObject({
+      logicalPath: "skills/index.ts",
+      moduleId: "skills/index.ts",
+      sourceKind: "module",
+    });
+    expect(result.manifest.skills).toEqual([
+      expect.objectContaining({ name: "review" }),
+    ]);
+  });
+
   test("returns stable diagnostics for missing instructions and invalid tools", async () => {
     const root = await _fixture();
     await mkdir(join(root, "tools"), { recursive: true });

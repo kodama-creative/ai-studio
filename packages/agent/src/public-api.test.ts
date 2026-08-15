@@ -24,6 +24,7 @@ import {
   webSearch,
 } from "./tools";
 import { always, never, once } from "./tools/approval";
+import { defineVariable } from "./variables";
 
 import { defineAgent, defineDynamic, defineRemoteAgent } from "./index";
 
@@ -64,6 +65,12 @@ describe("authoring helpers", () => {
       description: "Review",
       markdown: "Review carefully",
     });
+    const variable = defineVariable({
+      name: "skill_catalog",
+      resolve: ({ skills }) => skills.map((skill) => skill.name).join(","),
+    });
+    expect(variable.name).toBe("skill_catalog");
+    expect(variable.resolve).toBeFunction();
     expect(
       defineHook({ events: { "turn.started": () => undefined } })
     ).toHaveProperty("events");

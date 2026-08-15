@@ -9,6 +9,16 @@ import type {
 } from "../shared/types";
 import type { SkillHandle } from "../skills";
 import type { ToolDefinition } from "../tools";
+import type { VariableDefinition } from "../variables";
+
+import {
+  createLoadSkillToolDefinition,
+  LOAD_SKILL_TOOL_DESCRIPTION,
+  LOAD_SKILL_TOOL_IMPLEMENTATION_ID,
+  LOAD_SKILL_TOOL_NAME,
+} from "./skill-loader";
+
+const DEFAULT_SKILLS_VARIABLE_NAME = "available_skills";
 
 export type AgentGeneration = Pick<
   LoadAgentResult,
@@ -17,6 +27,7 @@ export type AgentGeneration = Pick<
 
 export interface PreparedTool {
   readonly definition: ToolDefinition;
+  readonly implementationId?: string;
   readonly model: {
     readonly name: string;
     readonly description: string;
@@ -31,6 +42,8 @@ export interface PreparedAgentDefinition {
   readonly instructions: readonly PreparedInstructionsDefinition[];
   readonly model: AgentModelDefinition;
   readonly skills: ReadonlyMap<string, PreparedSkillDefinition>;
+  readonly skillPaths: ReadonlyMap<string, string>;
+  readonly skillsVariable?: VariableDefinition;
   readonly tools: ReadonlyMap<string, PreparedTool>;
 }
 
@@ -130,6 +143,7 @@ export async function resolveAgentGeneration(
   }
 
   const skills = new Map<string, PreparedSkillDefinition>();
+  const skillPaths = new Map<string, string>();
   for (const source of generation.manifest.skills) {
     const value =
       source.markdown === undefined
@@ -148,7 +162,18 @@ export async function resolveAgentGeneration(
       );
     }
     skills.set(source.name, prepared);
+    skillPaths.set(source.name, source.logicalPath);
   }
+
+  const skillsVariable =
+    generation.manifest.skillsVariable === undefined
+      ? undefined
+      : (_asRecordOrEmpty(
+          await _loadDefinition(
+            generation,
+            generation.manifest.skillsVariable
+          )
+        ) as unknown as VariableDefinition);
 
   return {
     agentId: generation.manifest.agentId,
@@ -156,7 +181,34 @@ export async function resolveAgentGeneration(
     instructions,
     model: agent.model,
     skills,
+    skillPaths,
+    ...(skillsVariable === undefined ? {} : { skillsVariable }),
     tools,
+  };
+}
+
+/** Lets a Studio/App host add framework-owned tools after loading Agent source. */
+export function mountAgentFrameworkTools(
+  definition: PreparedAgentDefinition
+): PreparedAgentDefinition {
+  if (definition.skills.size === 0) return definition;
+  if (definition.tools.has(LOAD_SKILL_TOOL_NAME)) {
+    throw new AgentGenerationResolutionError(
+      `Agent "${definition.agentId}" reserves framework tool "${LOAD_SKILL_TOOL_NAME}" when Skills are declared.`
+    );
+  }
+  const loadSkill = createLoadSkillToolDefinition();
+  return {
+    ...definition,
+    tools: new Map(definition.tools).set(LOAD_SKILL_TOOL_NAME, {
+      definition: loadSkill,
+      implementationId: LOAD_SKILL_TOOL_IMPLEMENTATION_ID,
+      model: {
+        name: LOAD_SKILL_TOOL_NAME,
+        description: LOAD_SKILL_TOOL_DESCRIPTION,
+        inputSchema: loadSkill.inputSchema as Readonly<Record<string, unknown>>,
+      },
+    }),
   };
 }
 
@@ -205,7 +257,7 @@ async function _resolvePreparedAgent(
     );
   }
 
-  const instructions = await Promise.all(
+  const rawInstructions = await Promise.all(
     definition.instructions.map(async (prepared) => {
       const value = await resolve(prepared);
       const markdown =
@@ -224,7 +276,62 @@ async function _resolvePreparedAgent(
   for (const [name, prepared] of definition.skills) {
     skills.set(name, _skillHandle(name, await resolve(prepared)));
   }
+  const variable =
+    definition.skillsVariable ?? _defaultSkillsVariable(definition.skillPaths);
+  let instructions = rawInstructions;
+  if (rawInstructions.some((instruction) => _hasVariable(instruction, variable.name))) {
+    const variableValue = await variable.resolve({
+      skills: [...skills.values()],
+    });
+    if (typeof variableValue !== "string") {
+      throw new AgentGenerationResolutionError(
+        `Skills variable "${variable.name}" must resolve to a string.`
+      );
+    }
+    instructions = rawInstructions.map((instruction) =>
+      _replaceVariable(instruction, variable.name, variableValue)
+    );
+  }
   return { model: selectedModel, instructions, skills };
+}
+
+function _defaultSkillsVariable(
+  skillPaths: ReadonlyMap<string, string>
+): VariableDefinition {
+  return {
+    name: DEFAULT_SKILLS_VARIABLE_NAME,
+    resolve({ skills }) {
+      if (skills.length === 0) return "";
+      return [
+        "Available skills",
+        "Listed skills are available in this run. Do not claim a listed skill is inaccessible unless activation actually fails.",
+        "If the user names a skill or the request clearly matches one of the descriptions below, call load_skill before proceeding.",
+        "If multiple skills match, activate the minimal set that covers the task. After activation, follow the returned instructions instead of improvising around them.",
+        "If activation fails, say so briefly and continue with the best available alternative.",
+        ...skills.map(
+          (skill) =>
+            `- ${skill.name}: ${_singleLine(skill.description)} (path: ${skillPaths.get(skill.name) ?? `skills/${skill.name}`})`
+        ),
+      ].join("\n");
+    },
+  };
+}
+
+function _hasVariable(text: string, name: string): boolean {
+  return _variablePattern(name).test(text);
+}
+
+function _replaceVariable(text: string, name: string, value: string): string {
+  return text.replace(_variablePattern(name, "g"), value);
+}
+
+function _variablePattern(name: string, flags?: string): RegExp {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`\\{\\{\\s*${escaped}\\s*\\}\\}`, flags);
+}
+
+function _singleLine(value: string): string {
+  return value.trim().replace(/\s+/g, " ") || "No description";
 }
 
 function _assertSupportedManifestFeatures(generation: AgentGeneration): void {

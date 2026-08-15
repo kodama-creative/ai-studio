@@ -327,6 +327,10 @@ describe("loadAgent", () => {
       "---\nname: review\ndescription: Review work\nlicense: Apache-2.0\n---\nReview carefully."
     );
     await writeFile(
+      join(agentRoot, "skills", "index.ts"),
+      'export default { name: "skill_catalog", resolve({ skills }) { return skills.map((skill) => skill.name).join(","); } };'
+    );
+    await writeFile(
       join(agentRoot, "sandbox.ts"),
       'export default { backend: { kind: "local", secret() {} }, bootstrap() {} };'
     );
@@ -372,6 +376,14 @@ describe("loadAgent", () => {
         name: "review",
       }),
     ]);
+    expect(loaded.manifest.skillsVariable).toEqual({
+      logicalPath: "skills/index.ts",
+      sourceId: "skills/index.ts",
+      sourceKind: "module",
+    });
+    expect(
+      loaded.moduleMap.nodes.$root.modules["skills/index.ts"]?.default
+    ).toMatchObject({ name: "skill_catalog" });
     expect(loaded.manifest.sandbox?.backend).toEqual({ kind: "local" });
     expect(loaded.manifest.sandbox?.hasBootstrap).toBeTrue();
     expect(loaded.manifest.sandboxWorkspace).toEqual([

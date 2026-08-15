@@ -1,5 +1,6 @@
 export {
   AgentGenerationResolutionError,
+  mountAgentFrameworkTools,
   resolveAgentGeneration,
   resolveAgentOperation,
   resolveAgentPreview,
@@ -21,3 +22,9 @@ export {
   type SkillService,
   type ToolRuntimeContext,
 } from "./runtime-services";
+export {
+  createLoadSkillToolDefinition,
+  LOAD_SKILL_TOOL_DESCRIPTION,
+  LOAD_SKILL_TOOL_IMPLEMENTATION_ID,
+  LOAD_SKILL_TOOL_NAME,
+} from "./skill-loader";

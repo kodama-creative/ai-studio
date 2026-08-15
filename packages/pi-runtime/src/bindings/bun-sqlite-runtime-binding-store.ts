@@ -1,6 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
+import type { SkillHandle } from "@llm-space/agent/skills";
 import { Database } from "bun:sqlite";
 
 export interface RuntimeBinding {
@@ -16,6 +17,8 @@ export interface RuntimeBinding {
     thinkingLevel?: string;
   };
   systemPrompt: string;
+  /** Agent-scoped Skills frozen for ToolContext and load_skill replay. */
+  skills?: readonly SkillHandle[];
   tools: {
     name: string;
     description?: string;

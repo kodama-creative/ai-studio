@@ -448,6 +448,7 @@ class StudioApplicationImpl implements StudioApplication {
       this._clock()
     );
     let effectiveAgent: StudioAgentSnapshot | undefined;
+    let effectiveSkills: StudioExecutableAgent["skills"] | undefined;
     let snapshot = await this._options.runtime.start({
       operationId,
       sessionId: experiment.sessionId,
@@ -465,7 +466,8 @@ class StudioApplicationImpl implements StudioApplication {
             ? {}
             : { model: input.modelOverride }),
         };
-        return _runtimeBinding(effectiveAgent);
+        effectiveSkills = currentAgent.skills;
+        return _runtimeBinding(effectiveAgent, effectiveSkills);
       },
     });
     if (effectiveAgent === undefined) {
@@ -889,7 +891,10 @@ class StudioApplicationImpl implements StudioApplication {
 }
 
 /** Freezes current source, model, prompt, and tool identities for one Pi operation. */
-function _runtimeBinding(agent: StudioAgentSnapshot): RuntimeBinding {
+function _runtimeBinding(
+  agent: StudioAgentSnapshot,
+  skills: StudioExecutableAgent["skills"] = new Map()
+): RuntimeBinding {
   const separator = agent.model.indexOf("/");
   if (separator <= 0 || separator === agent.model.length - 1) {
     throw new Error(
@@ -907,6 +912,7 @@ function _runtimeBinding(agent: StudioAgentSnapshot): RuntimeBinding {
       modelId: agent.model.slice(separator + 1),
     },
     systemPrompt: agent.instructions.join("\n\n"),
+    skills: [...skills.values()],
     tools: agent.tools.map((tool) => ({
       name: tool.name,
       description: tool.description,

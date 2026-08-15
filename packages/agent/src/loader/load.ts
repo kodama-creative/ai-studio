@@ -15,6 +15,7 @@ import type {
   AgentExecutableModuleMap,
   AgentDiagnostic,
   AgentManifest,
+  AgentManifestSource,
   AgentSourceManifest,
   AgentSourceRef,
   LoadAgentOptions,
@@ -79,6 +80,7 @@ function _moduleRefs(source: AgentSourceManifest): AgentSourceRef[] {
     ...(source.sandbox === undefined ? [] : [source.sandbox]),
     ...source.schedules,
     ...source.skills,
+    ...(source.skillsVariable === undefined ? [] : [source.skillsVariable]),
     ...source.tools,
   ].filter((ref) => ref.sourceKind === "module");
 }
@@ -676,6 +678,32 @@ async function _loadNode(
     });
   }
 
+  let skillsVariable: AgentManifestSource | undefined;
+  if (source.skillsVariable !== undefined) {
+    const value = await _materialize(
+      source.agentRoot,
+      modules,
+      source.skillsVariable
+    );
+    const definition = _record(value);
+    if (
+      !_isRecord(value) ||
+      typeof definition.name !== "string" ||
+      !/^[A-Za-z_][A-Za-z0-9_]*$/.test(definition.name) ||
+      typeof definition.resolve !== "function"
+    ) {
+      diagnostics.push(
+        _definitionDiagnostic(
+          "load/skills-variable-definition-invalid",
+          `Skills variable "${source.skillsVariable.logicalPath}" requires a valid variable name and resolve function.`,
+          source.agentRoot,
+          source.skillsVariable
+        )
+      );
+    }
+    skillsVariable = _source(source.skillsVariable);
+  }
+
   let sandbox: LoadedSandboxDefinition | undefined;
   if (source.sandbox !== undefined) {
     const value = await _materialize(source.agentRoot, modules, source.sandbox);
@@ -776,6 +804,7 @@ async function _loadNode(
     sandboxWorkspace: source.sandboxWorkspace.map(_source),
     schedules,
     skills,
+    ...(skillsVariable === undefined ? {} : { skillsVariable }),
     tools,
     subagents,
   };

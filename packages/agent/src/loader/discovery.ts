@@ -281,6 +281,7 @@ async function _skills(
       continue;
     }
     if (!entry.isFile()) continue;
+    if (moduleBaseName(entry.name) === "index") continue;
     if (entry.name.toLowerCase().endsWith(".md")) {
       result.push(
         _markdownRef(`skills/${entry.name}`, basename(entry.name, ".md"))
@@ -519,6 +520,15 @@ async function _discoverNode(input: {
         })
       : [];
   const skills = await _skills(agentRoot, diagnostics);
+  const discoveredSkillsVariable = await _moduleSlot(
+    join(agentRoot, "skills"),
+    "index",
+    diagnostics
+  );
+  const skillsVariable =
+    discoveredSkillsVariable === undefined
+      ? undefined
+      : _moduleRef(`skills/${discoveredSkillsVariable.logicalPath}`);
   const sandbox =
     input.nodeKind === "extension"
       ? { sandbox: undefined, workspace: [] }
@@ -604,6 +614,7 @@ async function _discoverNode(input: {
     sandboxWorkspace: sandbox.workspace,
     schedules,
     skills,
+    ...(skillsVariable === undefined ? {} : { skillsVariable }),
     subagents,
     tools,
   };

@@ -33,6 +33,7 @@ export const WEB_SEARCH_TOOL_SENTINEL_KIND =
 
 export const TOOL_BRAND = Symbol.for("@llm-space/agent/tool");
 export const SKILL_BRAND = Symbol.for("@llm-space/agent/skill");
+export const VARIABLE_BRAND = Symbol.for("@llm-space/agent/variable");
 export const INSTRUCTIONS_BRAND = Symbol.for("@llm-space/agent/instructions");
 export const EXTENSION_MOUNT_BRAND = Symbol.for(
   "@llm-space/agent/mounted-extension"

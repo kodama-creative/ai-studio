@@ -7,6 +7,7 @@ import {
   createModels,
   fauxAssistantMessage,
   fauxProvider,
+  fauxToolCall,
 } from "@earendil-works/pi-ai";
 
 import { createAgent, type Agent } from "./agent";
@@ -145,6 +146,155 @@ test("createAgent rejects durable Sessions owned by a previous Agent identity", 
   expect(String(error)).toContain(
     `belongs to Agent "${originalAgentId}", not "${replacement.agentId}"`
   );
+});
+
+test("createAgent automatically executes the agent-scoped load_skill tool", async () => {
+  const projectRoot = await _project();
+  const dataRoot = await _temp("llm-space-agent-skill-data-");
+  const faux = fauxProvider({ tokensPerSecond: 0 });
+  const model = faux.getModel();
+  const models = createModels();
+  models.setProvider(faux.provider);
+  faux.setResponses([
+    fauxAssistantMessage(
+      [fauxToolCall("load_skill", { skill: "review" }, { id: "skill-call" })],
+      { stopReason: "toolUse" }
+    ),
+    fauxAssistantMessage("Checklist loaded."),
+  ]);
+  await writeFile(
+    join(projectRoot, "agent", "agent.ts"),
+    `export default { model: "${model.provider}/${model.id}" };\n`
+  );
+  await writeFile(
+    join(projectRoot, "agent", "instructions.md"),
+    "Skills:\n{{available_skills}}\n"
+  );
+  await mkdir(join(projectRoot, "agent", "skills", "review"), {
+    recursive: true,
+  });
+  await writeFile(
+    join(projectRoot, "agent", "skills", "review", "SKILL.md"),
+    "---\ndescription: Review code\n---\nUse the App checklist.\n"
+  );
+
+  const agent = await _agent({
+    projectRoot,
+    dataRoot,
+    models,
+    runtimeServices: {},
+  });
+  const session = await agent.createSession();
+  const result = await agent.exec(session.sessionId, {
+    operationId: "operation-skill",
+    messages: [{ role: "user", content: "Review this", timestamp: 1 }],
+  });
+
+  expect(result.messages).toMatchObject([
+    { role: "user" },
+    {
+      role: "assistant",
+      content: [
+        {
+          type: "toolCall",
+          id: "skill-call",
+          name: "load_skill",
+        },
+      ],
+    },
+    {
+      role: "toolResult",
+      toolCallId: "skill-call",
+      toolName: "load_skill",
+      content: [{ type: "text", text: "Use the App checklist." }],
+      isError: false,
+    },
+    {
+      role: "assistant",
+      content: [{ type: "text", text: "Checklist loaded." }],
+    },
+  ]);
+});
+
+test("load_skill cannot resolve a Skill outside the frozen Agent binding", async () => {
+  const projectRoot = await _project();
+  const dataRoot = await _temp("llm-space-agent-scoped-skill-data-");
+  const faux = fauxProvider({ tokensPerSecond: 0 });
+  const model = faux.getModel();
+  const models = createModels();
+  models.setProvider(faux.provider);
+  faux.setResponses([
+    fauxAssistantMessage(
+      [fauxToolCall("load_skill", { skill: "global" }, { id: "global-skill" })],
+      { stopReason: "toolUse" }
+    ),
+    fauxAssistantMessage(
+      [fauxToolCall("read_global", {}, { id: "authored-global-skill" })],
+      { stopReason: "toolUse" }
+    ),
+    fauxAssistantMessage("Compared both Skill paths."),
+  ]);
+  await writeFile(
+    join(projectRoot, "agent", "agent.ts"),
+    `export default { model: "${model.provider}/${model.id}" };\n`
+  );
+  await mkdir(join(projectRoot, "agent", "skills", "review"), {
+    recursive: true,
+  });
+  await writeFile(
+    join(projectRoot, "agent", "skills", "review", "SKILL.md"),
+    "---\ndescription: Review code\n---\nUse the bound checklist.\n"
+  );
+  await mkdir(join(projectRoot, "agent", "tools"), { recursive: true });
+  await writeFile(
+    join(projectRoot, "agent", "tools", "read_global.ts"),
+    `export default {
+      description: "Read a Skill through authored ToolContext",
+      inputSchema: { type: "object", additionalProperties: false },
+      execute: (_input, context) => context.getSkill("global").markdown,
+    };\n`
+  );
+
+  const agent = await _agent({
+    projectRoot,
+    dataRoot,
+    models,
+    runtimeServices: {
+      skills: {
+        resolve: () => ({
+          name: "global",
+          description: "Must remain inaccessible",
+          markdown: "Leaked process-global Skill.",
+        }),
+      },
+    },
+  });
+  const session = await agent.createSession();
+  const result = await agent.exec(session.sessionId, {
+    operationId: "operation-scoped-skill",
+    messages: [{ role: "user", content: "Load global", timestamp: 1 }],
+  });
+  const toolResults = result.messages.filter(
+    (message) => message.role === "toolResult"
+  );
+
+  expect(toolResults[0]).toMatchObject({
+    role: "toolResult",
+    toolName: "load_skill",
+    isError: true,
+  });
+  expect(JSON.stringify(toolResults[0])).toContain(
+    'No skill named \\"global\\". Available skills: review.'
+  );
+  expect(JSON.stringify(toolResults[0])).not.toContain(
+    "Leaked process-global Skill"
+  );
+  expect(toolResults[1]).toMatchObject({
+    role: "toolResult",
+    toolName: "read_global",
+    content: [{ type: "text", text: "Leaked process-global Skill." }],
+    isError: false,
+  });
 });
 
 async function _agent(options: Parameters<typeof createAgent>[0]) {
