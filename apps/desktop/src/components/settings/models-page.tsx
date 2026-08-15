@@ -101,9 +101,16 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { Fragment, useEffect, useMemo, useState } from "react";
+import {
+  Fragment,
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { toast } from "sonner";
 
+import { AddProviderController } from "@/app/settings/add-provider-controller";
 import { runSettingsMutation } from "@/app/settings/run-settings-mutation";
 
 import { ApiKeyField } from "./api-key-field";
@@ -280,28 +287,40 @@ function AddProviderMenu({ onAdd }: { onAdd: (id: string) => void }) {
   const addProvider = useAddProvider();
   const addCustomProvider = useAddCustomProvider();
   const fetchBuiltins = useFetchBuiltinProviders();
-  const [open, setOpen] = useState(false);
-  const [builtins, setBuiltins] = useState<ModelProviderGroup[] | null>(null);
+  const controller = useMemo(
+    () =>
+      new AddProviderController({
+        fetchBuiltinProviders: fetchBuiltins,
+        addBuiltinProvider: addProvider,
+        addCustomProvider: () => addCustomProvider("Custom provider", ""),
+        providerAdded: onAdd,
+        addFailed: (providerName, error) => {
+          toast.error(`Failed to add ${providerName}`, {
+            description:
+              error instanceof Error ? error.message : "Please try again.",
+          });
+        },
+      }),
+    [addCustomProvider, addProvider, fetchBuiltins, onAdd]
+  );
+  const snapshot = useSyncExternalStore(
+    controller.subscribe,
+    controller.getSnapshot,
+    controller.getSnapshot
+  );
+
+  useEffect(() => () => controller.setOpen(false), [controller]);
 
   const configuredIds = useMemo(
     () => new Set(configured.map((provider) => provider.id)),
     [configured]
   );
 
-  const handleOpenChange = (next: boolean) => {
-    setOpen(next);
-    if (next) {
-      void fetchBuiltins()
-        .then(setBuiltins)
-        .catch((error) => console.error("Failed to load providers", error));
-    }
-  };
-
   const groups = useMemo(() => {
     const discovered: ModelProviderGroup[] = [];
     const recommended: ModelProviderGroup[] = [];
     const rest: ModelProviderGroup[] = [];
-    for (const provider of builtins ?? []) {
+    for (const provider of snapshot.builtinProviders ?? []) {
       // Only offer providers that haven't been added yet.
       if (configuredIds.has(provider.id)) {
         continue;
@@ -345,10 +364,10 @@ function AddProviderMenu({ onAdd }: { onAdd: (id: string) => void }) {
       groups.push({ id: "built-in", label: "Built-in", items: rest });
     }
     return groups;
-  }, [builtins, configuredIds]);
+  }, [configuredIds, snapshot.builtinProviders]);
 
   return (
-    <Popover open={open} onOpenChange={handleOpenChange} modal>
+    <Popover open={snapshot.open} onOpenChange={controller.setOpen} modal>
       <PopoverTrigger asChild>
         <Button variant="outline" className="w-full">
           <Plus />
@@ -363,19 +382,31 @@ function AddProviderMenu({ onAdd }: { onAdd: (id: string) => void }) {
             <CommandGroup heading="Customized">
               <CommandItem
                 value="Add custom provider"
-                onSelect={() => {
-                  setOpen(false);
-                  runModelMutation(
-                    "Failed to add custom provider",
-                    () => addCustomProvider("Custom provider", ""),
-                    { onSuccess: onAdd }
-                  );
-                }}
+                disabled={snapshot.addingProviderId !== null}
+                onSelect={() => void controller.choose({ type: "custom" })}
               >
                 <ProviderAvatar id="custom-provider" name="Custom provider" />
                 <span className="line-clamp-1 grow">Add custom provider</span>
+                {snapshot.addingProviderId === "custom" && (
+                  <Loader2 className="size-3.5 animate-spin" />
+                )}
               </CommandItem>
             </CommandGroup>
+            {snapshot.builtinProviders === null && (
+              <CommandGroup heading="Built-in">
+                <CommandItem disabled value="Loading built-in providers">
+                  <Loader2 className="size-3.5 animate-spin" />
+                  Loading providers…
+                </CommandItem>
+              </CommandGroup>
+            )}
+            {snapshot.discoveryFailed && (
+              <CommandGroup heading="Built-in">
+                <CommandItem disabled value="Provider discovery failed">
+                  Built-in providers could not be loaded.
+                </CommandItem>
+              </CommandGroup>
+            )}
             {groups.map((group) => (
               <Fragment key={group.id}>
                 <CommandSeparator />
@@ -384,14 +415,10 @@ function AddProviderMenu({ onAdd }: { onAdd: (id: string) => void }) {
                     <CommandItem
                       key={provider.id}
                       value={`${provider.name} ${provider.id}`}
-                      onSelect={() => {
-                        setOpen(false);
-                        runModelMutation(
-                          `Failed to add ${provider.name}`,
-                          () => addProvider(provider.id),
-                          { onSuccess: () => onAdd(provider.id) }
-                        );
-                      }}
+                      disabled={snapshot.addingProviderId !== null}
+                      onSelect={() =>
+                        void controller.choose({ type: "builtin", provider })
+                      }
                     >
                       <ProviderAvatar
                         id={provider.id}
@@ -399,6 +426,9 @@ function AddProviderMenu({ onAdd }: { onAdd: (id: string) => void }) {
                         icon={provider.icon}
                       />
                       <span className="line-clamp-1 grow">{provider.name}</span>
+                      {snapshot.addingProviderId === provider.id && (
+                        <Loader2 className="size-3.5 animate-spin" />
+                      )}
                       {provider.websiteURL && (
                         <Link
                           href={provider.websiteURL}
