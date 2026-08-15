@@ -82,9 +82,11 @@ import { UpdaterService } from "../updates";
 import { UpdatesState } from "../updates/state";
 import { UPDATER, updatesModule } from "../updates/updates-module";
 
-import { DesktopAppRuntime } from "./desktop-app-runtime";
 import { DesktopLaunchController } from "./desktop-launch-controller";
-import { DesktopProcessLifecycle } from "./desktop-process-lifecycle";
+import {
+  type DesktopAppRuntime,
+  DesktopLifecycle,
+} from "./desktop-lifecycle";
 import { DesktopWindowFactory } from "./desktop-window-factory";
 import { MainWindowManager } from "./main-window-manager";
 import { registerMenuActions } from "./menu";
@@ -97,12 +99,11 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
   try {
     return await _startDesktopApp(processContainer);
   } catch (error) {
-    await new DesktopAppRuntime([
-      {
-        name: "desktop process scope after startup failure",
-        stop: () => processContainer.dispose(),
-      },
-    ]).stop();
+    const startupFailure = new DesktopLifecycle();
+    startupFailure.defer("desktop process scope after startup failure", () =>
+      processContainer.dispose()
+    );
+    await startupFailure.stop();
     throw error;
   }
 }
@@ -110,8 +111,8 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
 async function _startDesktopApp(
   processContainer: DesktopProcessContainer
 ): Promise<DesktopAppRuntime> {
-  const processLifecycle = new DesktopProcessLifecycle();
-  processContainer.onDispose(() => processLifecycle.dispose());
+  const processLifecycle = new DesktopLifecycle();
+  processContainer.onDispose(() => processLifecycle.stop());
   const homePath = getLlmSpaceHomePath();
   const workspacePath = path.join(homePath, "workspace");
   const analytics = new Analytics();
@@ -239,11 +240,10 @@ async function _startDesktopApp(
       });
     },
   });
-  const runtime = new DesktopAppRuntime([
-    { name: "desktop launch", stop: () => launch.dispose() },
-    { name: "agent project windows", stop: () => projectWindows.closeAll() },
-    { name: "desktop process scope", stop: () => processContainer.dispose() },
-  ]);
+  const runtime = new DesktopLifecycle();
+  runtime.defer("desktop process scope", () => processContainer.dispose());
+  runtime.defer("agent project windows", () => projectWindows.closeAll());
+  runtime.defer("desktop launch", () => launch.dispose());
 
   try {
     registerMenuActions(
