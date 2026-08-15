@@ -37,7 +37,10 @@ import { GitHubAuthManager } from "../auth/github-auth-manager";
 import { isStudioOpenDeepLink } from "../deep-link";
 import { activateWindowForDeepLink } from "../deep-link/activate-window";
 import { getPendingDeepLinks, setDeepLinkHandler } from "../deep-link/launch";
-import { createDesktopProcessContainer } from "../di/process-container";
+import {
+  createDesktopProcessContainer,
+  type DesktopProcessContainer,
+} from "../di/process-container";
 import { processServicesModule } from "../di/process-module";
 import { PROCESS_TOKENS } from "../di/tokens";
 import { openPath, revealInFileManager } from "../fs";
@@ -51,6 +54,7 @@ import {
 import { getManagedSkillsDir } from "../skills/seed";
 import { UpdaterService } from "../updates";
 
+import { DesktopProcessLifecycle } from "./desktop-process-lifecycle";
 import {
   DesktopWindowFactory,
   type DesktopMainWindowHandle,
@@ -67,13 +71,31 @@ export interface DesktopAppRuntime {
 /** Build and start the production Bun object graph. */
 export async function startDesktopApp(): Promise<DesktopAppRuntime> {
   const processContainer = createDesktopProcessContainer();
+  try {
+    return await _startDesktopApp(processContainer);
+  } catch (error) {
+    await _stopDesktopApp([
+      ["desktop process scope after startup failure", () =>
+        processContainer.dispose()],
+    ]);
+    throw error;
+  }
+}
+
+async function _startDesktopApp(
+  processContainer: DesktopProcessContainer
+): Promise<DesktopAppRuntime> {
+  const processLifecycle = new DesktopProcessLifecycle();
+  processContainer.onDispose(() => processLifecycle.dispose());
   const homePath = getLlmSpaceHomePath();
   const workspacePath = path.join(homePath, "workspace");
   const analytics = new Analytics();
+  processLifecycle.defer("analytics", () => analytics.shutdown());
   // Apply the configured proxy to `process.env` before anything spawns a
   // subprocess (MCP) or makes a request, so egress is routed from the start.
   const networkSettings = new NetworkSettingsManager();
   const mcpManager = new McpManager();
+  processLifecycle.defer("MCP manager", () => mcpManager.shutdown());
   const modelManager = new ModelManager();
   const generateImage = createConfiguredArkImageGenerator({
     modelManager,
@@ -90,6 +112,7 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
   const githubAuth = new GitHubAuthManager({
     onChange: (state) => notifyGithubChanged(state),
   });
+  processLifecycle.defer("GitHub auth", () => githubAuth.cancelSignIn());
   // Write-side gist connector for the "Share thread" flow. Reuses the signed-in
   // GitHub token (the `gist` scope); creates secret gists readable by URL.
   const gistWriter = new GistThreadWriter({
@@ -111,13 +134,16 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
       }),
     ],
   });
+  processLifecycle.defer("desktop host", () => host.stop());
   await host.start();
 
   let notifyUpdateChanged: (
     message: import("../../shared/updates").UpdateStatusChangedPayload
   ) => void = () => undefined;
   const updater = new UpdaterService((message) => notifyUpdateChanged(message));
+  processLifecycle.defer("updater", () => updater.stop());
   const windowStates = new WindowStateManager();
+  processLifecycle.defer("window state", () => windowStates.flush());
   const windowFactory = new DesktopWindowFactory(
     processContainer,
     homePath,
@@ -175,14 +201,6 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
     // them from resolving Applications after the DI root entered disposal.
     notifyGithubChanged = () => undefined;
     notifyUpdateChanged = () => undefined;
-    return _stopDesktopApp([
-      ["window state", () => windowStates.flush()],
-      ["updater", () => updater.stop()],
-      ["desktop host", () => host.stop()],
-      ["MCP manager", () => mcpManager.shutdown()],
-      ["GitHub auth", () => githubAuth.cancelSignIn()],
-      ["analytics", () => analytics.shutdown()],
-    ]);
   });
   let stopPromise: Promise<void> | null = null;
   const runtime: DesktopAppRuntime = {

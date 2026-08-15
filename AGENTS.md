@@ -114,6 +114,11 @@ transports before closing the window. Callers must not reproduce that sequence.
 including Studio resolution, immutable Project identity, window-state binding,
 command routing, and failed-scope cleanup; window managers consume the factory
 instead of reconstructing those steps.
+External process resources which are not DI disposables register with
+`DesktopProcessLifecycle` immediately after construction. It cleans them once
+in reverse order and continues after individual failures; the startup wrapper
+always disposes the process scope if composition fails. Do not defer cleanup
+registration until the end of startup.
 The named generic `ContributionProvider<T>` keeps both Registries independent
 from Inversify. Registries start once before the Electrobun bridge and native
 window are created, reject late registration, then dispose registrations before
