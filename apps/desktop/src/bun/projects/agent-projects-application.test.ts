@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test";
 
+import { EventHub } from "../../shared/event-hub";
+
 import type { AgentProject } from "./agent-project";
 import { AgentProjectsApplication } from "./agent-projects-application";
+import type { ProjectWindowManagerEvents } from "./project-window-manager";
 
 const PROJECT: AgentProject = {
   id: "project-1",
@@ -15,11 +18,14 @@ const PROJECT: AgentProject = {
 describe("AgentProjectsApplication", () => {
   test("publishes catalog changes after command-owned open actions", async () => {
     const opened: string[] = [];
+    const projectEvents = new EventHub<ProjectWindowManagerEvents>();
     const app = new AgentProjectsApplication(
       {
+        events: projectEvents,
         listProjects: () => Promise.resolve([PROJECT]),
         openProject: (rootPath) => {
           opened.push(rootPath);
+          projectEvents.publish("catalogChanged", {});
           return Promise.resolve();
         },
       },
@@ -43,6 +49,7 @@ describe("AgentProjectsApplication", () => {
   test("contains open failures and publishes renderer-safe feedback", async () => {
     const app = new AgentProjectsApplication(
       {
+        events: new EventHub<ProjectWindowManagerEvents>(),
         listProjects: () => Promise.resolve([]),
         openProject: () => Promise.reject(new Error("Not an Agent Project")),
       },
@@ -62,5 +69,25 @@ describe("AgentProjectsApplication", () => {
 
     expect(failures).toEqual(["Not an Agent Project"]);
     expect(changes).toBe(0);
+  });
+
+  test("publishes catalog changes opened outside the renderer command", () => {
+    const projectEvents = new EventHub<ProjectWindowManagerEvents>();
+    const app = new AgentProjectsApplication(
+      {
+        events: projectEvents,
+        listProjects: () => Promise.resolve([]),
+        openProject: () => Promise.resolve(),
+      },
+      { pickDirectory: () => Promise.resolve(null) }
+    );
+    let changes = 0;
+    app.events.subscribe("changed", () => {
+      changes += 1;
+    });
+
+    projectEvents.publish("catalogChanged", {});
+
+    expect(changes).toBe(1);
   });
 });

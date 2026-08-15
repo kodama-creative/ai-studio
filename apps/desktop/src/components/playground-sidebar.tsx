@@ -10,49 +10,28 @@ import {
   EmptyTitle,
 } from "@llm-space/ui/ui/empty";
 import { Spinner } from "@llm-space/ui/ui/spinner";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { FolderGit2Icon, MessagesSquareIcon, PlusIcon } from "lucide-react";
-import { memo, useEffect } from "react";
-import { toast } from "sonner";
+import { memo } from "react";
 
-import { disposeBestEffort } from "@/app/lifecycle/dispose-best-effort";
-import type { AgentProjectClient } from "@/client/agent-project-client";
 import { useCommands } from "@/commands";
+import type { AgentProjectSummary } from "@/shared/agent-project";
 
 function _PlaygroundSidebar({
   playgrounds,
   loadingPlaygrounds,
-  projectClient,
+  projects,
+  loadingProjects,
   onOpen,
   onCreate,
 }: {
   playgrounds: readonly Playground[];
   loadingPlaygrounds: boolean;
-  projectClient: AgentProjectClient;
+  projects: readonly AgentProjectSummary[];
+  loadingProjects: boolean;
   onOpen: (playground: Playground) => void;
   onCreate: () => void;
 }) {
-  const queryClient = useQueryClient();
   const { executeCommand } = useCommands();
-  const { data: projects = [], isLoading: loadingProjects } = useQuery({
-    queryKey: ["agent-projects"],
-    queryFn: () => projectClient.list(),
-  });
-
-  useEffect(() => {
-    const changed = projectClient.on("changed", () => {
-      void queryClient.invalidateQueries({ queryKey: ["agent-projects"] });
-    });
-    const failed = projectClient.on("openFailed", ({ message }) => {
-      toast.error("Unable to open Agent Project", {
-        description: message,
-      });
-    });
-    return () => {
-      disposeBestEffort(failed);
-      disposeBestEffort(changed);
-    };
-  }, [projectClient, queryClient]);
 
   return (
     <section className="flex min-h-0 flex-1 flex-col">

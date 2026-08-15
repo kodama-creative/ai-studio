@@ -67,6 +67,7 @@ import {
   PlaygroundWorkspaceController,
   type SnapshotDocument,
 } from "./playground/playground-workspace-controller";
+import { AgentProjectCatalogController } from "./project/agent-project-catalog-controller";
 import { RemindersProvider } from "./reminders/reminders-provider";
 
 // Overlay surfaces that aren't part of the first paint — settings, the command
@@ -163,6 +164,27 @@ function PageWorkspace() {
   const tabs = useThreadTabs({ canPruneRestoredTab });
   const playgroundClient = useMemo(() => createPlaygroundClient(), []);
   const agentProjectClient = useMemo(() => createAgentProjectClient(), []);
+  const agentProjectCatalogController = useMemo(
+    () =>
+      new AgentProjectCatalogController({
+        client: agentProjectClient,
+        reportError: (title, error) =>
+          toast.error(title, {
+            description:
+              error instanceof Error ? error.message : "Please try again.",
+          }),
+      }),
+    [agentProjectClient]
+  );
+  const agentProjectCatalog = useSyncExternalStore(
+    agentProjectCatalogController.subscribe,
+    agentProjectCatalogController.getSnapshot,
+    agentProjectCatalogController.getSnapshot
+  );
+  useEffect(() => {
+    agentProjectCatalogController.start();
+    return () => agentProjectCatalogController.stop();
+  }, [agentProjectCatalogController]);
   const analytics = useMemo(() => createAnalyticsClient(), []);
   const threadSharingClient = useMemo(() => createThreadSharingClient(), []);
   const seedHost = useHostServices();
@@ -554,7 +576,8 @@ function PageWorkspace() {
             <PlaygroundSidebar
               playgrounds={playgroundCatalog.playgrounds}
               loadingPlaygrounds={playgroundCatalog.loading}
-              projectClient={agentProjectClient}
+              projects={agentProjectCatalog.projects}
+              loadingProjects={agentProjectCatalog.loading}
               onOpen={(playground) =>
                 openPlayground(playground.id, playground.title)
               }

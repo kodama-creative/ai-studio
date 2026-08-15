@@ -1,5 +1,11 @@
+import { EventHub } from "../../shared/event-hub";
+
 import type { AgentProject } from "./agent-project";
 import { openAgentProject } from "./agent-project";
+
+export interface ProjectWindowManagerEvents {
+  catalogChanged: Record<string, never>;
+}
 
 export interface ProjectWindowHandle {
   activate(): void;
@@ -30,11 +36,15 @@ export interface ProjectWindowManagerOptions {
 
 /** Owns the one-project/one-window invariant for the desktop process. */
 export class ProjectWindowManager {
+  /** Process-wide catalog mutations, independent of which adapter opened it. */
+  readonly events = new EventHub<ProjectWindowManagerEvents>();
+
   private readonly _windows = new Map<
     string,
     { readonly project: AgentProject; readonly handle: ProjectWindowHandle }
   >();
   private readonly _opening = new Map<string, Promise<ProjectWindowHandle>>();
+  private _catalogMutation = Promise.resolve();
   private _closingAll = false;
 
   constructor(private readonly _options: ProjectWindowManagerOptions) {}
@@ -117,10 +127,20 @@ export class ProjectWindowManager {
     );
   }
 
-  private async _rememberProject(rootPath: string): Promise<void> {
+  private _rememberProject(rootPath: string): Promise<void> {
+    const mutation = this._catalogMutation.then(() =>
+      this._commitRememberedProject(rootPath)
+    );
+    this._catalogMutation = mutation.catch(() => undefined);
+    return mutation;
+  }
+
+  private async _commitRememberedProject(rootPath: string): Promise<void> {
     if (this._options.catalog === undefined) return;
     const paths = new Set(await this._options.catalog.load());
+    if (paths.has(rootPath)) return;
     paths.add(rootPath);
     await this._options.catalog.save([...paths].sort());
+    this.events.publish("catalogChanged", {});
   }
 }

@@ -113,6 +113,32 @@ test("different projects remain isolated and close together", async () => {
   expect(closed).toEqual([alpha, beta]);
 });
 
+test("concurrent project opens serialize durable catalog mutations", async () => {
+  const alpha = await _project("alpha-catalog");
+  const beta = await _project("beta-catalog");
+  let paths: readonly string[] = [];
+  let saves = 0;
+  const manager = new ProjectWindowManager({
+    catalog: {
+      load: async () => {
+        await Bun.sleep(1);
+        return paths;
+      },
+      save: (next) => {
+        saves += 1;
+        paths = [...next];
+        return Promise.resolve();
+      },
+    },
+    windows: _windows([]),
+  });
+
+  await Promise.all([manager.openProject(alpha), manager.openProject(beta)]);
+
+  expect(new Set(paths)).toEqual(new Set([alpha, beta]));
+  expect(saves).toBe(2);
+});
+
 test("opened projects remain in the main-window catalog after their windows close", async () => {
   const root = await _project("catalog");
   let paths: readonly string[] = [];
@@ -136,11 +162,17 @@ test("opened projects remain in the main-window catalog after their windows clos
         }),
     },
   });
+  let catalogChanges = 0;
+  manager.events.subscribe("catalogChanged", () => {
+    catalogChanges += 1;
+  });
 
+  await manager.openProject(root);
   await manager.openProject(root);
   await manager.closeAll();
 
   expect(paths).toEqual([root]);
+  expect(catalogChanges).toBe(1);
   expect(
     (await manager.listProjects()).map((project) => project.rootPath)
   ).toEqual([root]);

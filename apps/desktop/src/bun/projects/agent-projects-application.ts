@@ -16,14 +16,20 @@ export class AgentProjectsApplication
   implements AgentProjectsRequests, Disposable
 {
   readonly events = new EventHub<AgentProjectsEvents>();
+  private readonly _catalogSubscription: Disposable;
 
   constructor(
     private readonly _projects: Pick<
       ProjectWindowManager,
-      "listProjects" | "openProject"
+      "events" | "listProjects" | "openProject"
     >,
     private readonly _dialogs: DirectoryPicker
-  ) {}
+  ) {
+    this._catalogSubscription = this._projects.events.subscribe(
+      "catalogChanged",
+      () => this.events.publish("changed", {})
+    );
+  }
 
   /** Return durable catalog entries without loading Studio runtimes. */
   async list() {
@@ -40,13 +46,13 @@ export class AgentProjectsApplication
       const selected = rootPath ?? (await this._dialogs.pickDirectory());
       if (selected === null) return;
       await this._projects.openProject(selected);
-      this.events.publish("changed", {});
     } catch (error) {
       this.events.publish("openFailed", { message: _errorMessage(error) });
     }
   }
 
-  dispose(): void {
+  async dispose(): Promise<void> {
+    await this._catalogSubscription.dispose();
     this.events.dispose();
   }
 }
