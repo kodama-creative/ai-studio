@@ -3,12 +3,7 @@ import { Updater } from "electrobun/bun";
 import type { UpdateMode, UpdateStatus } from "../../shared/updates";
 import { setUpdateReadyInMenu } from "../app/menu";
 
-import {
-  getLastSeenHash,
-  getUpdateMode,
-  setLastSeenHash,
-  setUpdateMode as persistUpdateMode,
-} from "./state";
+import { UpdatesState } from "./state";
 
 const INITIAL_CHECK_DELAY_MS = 30_000;
 const CHECK_INTERVAL_MS = 4 * 60 * 60_000;
@@ -29,7 +24,8 @@ export class UpdaterService {
   private _backgroundInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor(
-    private readonly _sendUpdateStatus: (message: UpdateStatusMessage) => void
+    private readonly _sendUpdateStatus: (message: UpdateStatusMessage) => void,
+    private readonly _state: UpdatesState
   ) {}
 
   async checkForUpdates(manual: boolean): Promise<void> {
@@ -92,11 +88,11 @@ export class UpdaterService {
   }
 
   async getUpdateModeSetting(): Promise<UpdateMode> {
-    return getUpdateMode();
+    return this._state.getMode();
   }
 
   async setUpdateModeSetting(mode: UpdateMode): Promise<void> {
-    await persistUpdateMode(mode);
+    await this._state.setMode(mode);
     this._applySchedule(mode);
   }
 
@@ -104,15 +100,16 @@ export class UpdaterService {
     const { channel, hash, version, identifier } = await Updater.getLocalInfo();
     if (channel === "dev") return;
 
-    const lastSeen = await getLastSeenHash(identifier);
+    const lastSeen = await this._state.getLastSeenHash(identifier);
     if (lastSeen && lastSeen !== hash) this._installedVersion = version;
-    if (lastSeen !== hash) await setLastSeenHash(identifier, hash);
+    if (lastSeen !== hash) await this._state.setLastSeenHash(identifier, hash);
 
-    this._applySchedule(await getUpdateMode());
+    this._applySchedule(await this._state.getMode());
   }
 
-  stop(): void {
+  async stop(): Promise<void> {
     this._clearSchedule();
+    await this._state.dispose();
   }
 
   private _sendStatus(status: UpdateStatus): void {

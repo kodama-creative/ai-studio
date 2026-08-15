@@ -54,6 +54,7 @@ import {
 import { remindersModule } from "../reminders/reminders-module";
 import { getManagedSkillsDir } from "../skills/seed";
 import { UpdaterService } from "../updates";
+import { UpdatesState } from "../updates/state";
 
 import { DesktopProcessLifecycle } from "./desktop-process-lifecycle";
 import {
@@ -141,7 +142,10 @@ async function _startDesktopApp(
   let notifyUpdateChanged: (
     message: import("../../shared/updates").UpdateStatusChangedPayload
   ) => void = () => undefined;
-  const updater = new UpdaterService((message) => notifyUpdateChanged(message));
+  const updater = new UpdaterService(
+    (message) => notifyUpdateChanged(message),
+    new UpdatesState(path.join(homePath, "settings", "updates.json"))
+  );
   processLifecycle.defer("updater", () => updater.stop());
   const windowStates = new WindowStateManager();
   processLifecycle.defer("window state", () => windowStates.flush());
