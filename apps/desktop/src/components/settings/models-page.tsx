@@ -101,6 +101,8 @@ import {
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
+import { runSettingsMutation } from "@/app/settings/run-settings-mutation";
+
 import { ApiKeyField } from "./api-key-field";
 import {
   CUSTOM_PROVIDER_API_TYPES,
@@ -119,6 +121,26 @@ import { SettingsPage } from "./settings-page";
  */
 const ANTHROPIC_BASE_URL_HINT =
   "The Anthropic SDK adds /v1 to the request path itself, so enter the URL without a /v1 suffix.";
+
+function runModelMutation<T>(
+  title: string,
+  mutate: () => Promise<T>,
+  options: {
+    readonly onSuccess?: (value: T) => void;
+    readonly onError?: (error: unknown) => void;
+  } = {}
+): void {
+  runSettingsMutation(mutate, {
+    onSuccess: options.onSuccess,
+    onError: (error) => {
+      options.onError?.(error);
+      toast.error(title, {
+        description:
+          error instanceof Error ? error.message : "Please try again.",
+      });
+    },
+  });
+}
 
 function sortProviders(providers: ModelProviderGroup[]): ModelProviderGroup[] {
   return [...providers].sort((a, b) => a.name.localeCompare(b.name));
@@ -340,7 +362,11 @@ function AddProviderMenu({ onAdd }: { onAdd: (id: string) => void }) {
                 value="Add custom provider"
                 onSelect={() => {
                   setOpen(false);
-                  void addCustomProvider("Custom provider", "").then(onAdd);
+                  runModelMutation(
+                    "Failed to add custom provider",
+                    () => addCustomProvider("Custom provider", ""),
+                    { onSuccess: onAdd }
+                  );
                 }}
               >
                 <ProviderAvatar id="custom-provider" name="Custom provider" />
@@ -357,8 +383,10 @@ function AddProviderMenu({ onAdd }: { onAdd: (id: string) => void }) {
                       value={`${provider.name} ${provider.id}`}
                       onSelect={() => {
                         setOpen(false);
-                        void addProvider(provider.id).then(() =>
-                          onAdd(provider.id)
+                        runModelMutation(
+                          `Failed to add ${provider.name}`,
+                          () => addProvider(provider.id),
+                          { onSuccess: () => onAdd(provider.id) }
                         );
                       }}
                     >
@@ -467,7 +495,9 @@ function ProviderListItem({
           dimBackground={false}
           onConfirm={() => {
             setConfirmOpen(false);
-            void removeProvider(provider.id);
+            runModelMutation(`Failed to remove ${provider.name}`, () =>
+              removeProvider(provider.id)
+            );
           }}
       />
     </div>
@@ -526,7 +556,12 @@ function ProviderEditor({ provider }: { provider: ModelProviderGroup | null }) {
     if (value === "" || value === provider.name) {
       return;
     }
-    void updateProvider(provider.id, { name: value });
+    const input = event.currentTarget;
+    runModelMutation(
+      "Failed to rename provider",
+      () => updateProvider(provider.id, { name: value }),
+      { onError: () => void (input.value = provider.name) }
+    );
   };
 
   const handleApiChange = (api: CustomProviderApi) => {
@@ -538,13 +573,11 @@ function ProviderEditor({ provider }: { provider: ModelProviderGroup | null }) {
     if (api === previous) {
       return;
     }
-    void updateProvider(provider.id, { api }).catch((error) => {
-      setApiValue(previous);
-      toast.error("Failed to update API type", {
-        description:
-          error instanceof Error ? error.message : "Please try again.",
-      });
-    });
+    runModelMutation(
+      "Failed to update API type",
+      () => updateProvider(provider.id, { api }),
+      { onError: () => setApiValue(previous) }
+    );
   };
 
   // Persist the icon override on blur when changed. Empty ⇒ auto-resolve.
@@ -554,7 +587,11 @@ function ProviderEditor({ provider }: { provider: ModelProviderGroup | null }) {
     const next = value === "" ? null : value;
     const current = provider.icon ?? null;
     if (next !== current) {
-      void updateProvider(provider.id, { icon: next });
+      runModelMutation(
+        "Failed to update provider icon",
+        () => updateProvider(provider.id, { icon: next }),
+        { onError: () => setIconDraft(current ?? "") }
+      );
     }
   };
 
@@ -814,7 +851,9 @@ function ProviderEditor({ provider }: { provider: ModelProviderGroup | null }) {
                   <DropdownMenuContent align="end" className="w-44">
                     <DropdownMenuItem
                       onSelect={() =>
-                        void setAllModelsEnabled(provider.id, false)
+                        runModelMutation("Failed to disable models", () =>
+                          setAllModelsEnabled(provider.id, false)
+                        )
                       }
                     >
                       <Ban />
@@ -822,7 +861,9 @@ function ProviderEditor({ provider }: { provider: ModelProviderGroup | null }) {
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       onSelect={() =>
-                        void setAllModelsEnabled(provider.id, true)
+                        runModelMutation("Failed to enable models", () =>
+                          setAllModelsEnabled(provider.id, true)
+                        )
                       }
                     >
                       <CheckCheck />
@@ -869,7 +910,10 @@ function ProviderEditor({ provider }: { provider: ModelProviderGroup | null }) {
                     enabled={!disabledModels.has(model.id)}
                     isCustom={customModels.has(model.id)}
                     onToggle={(next) =>
-                      void setModelEnabled(provider.id, model.id, next)
+                      runModelMutation(
+                        `Failed to ${next ? "enable" : "disable"} ${model.name}`,
+                        () => setModelEnabled(provider.id, model.id, next)
+                      )
                     }
                     onEdit={() => openEditModel(model)}
                   />
@@ -940,20 +984,21 @@ function _ProviderProfileEditor({
       event.target.value = profile.name;
       return;
     }
-    void update({ name: value }).catch((error) => {
-      event.target.value = profile.name;
-      toast.error("Failed to rename connection profile", {
-        description:
-          error instanceof Error ? error.message : "Please try again.",
-      });
-    });
+    const input = event.currentTarget;
+    runModelMutation(
+      "Failed to rename connection profile",
+      () => update({ name: value }),
+      { onError: () => void (input.value = profile.name) }
+    );
   };
 
   const handleApiKeyBlur = (event: React.FocusEvent<HTMLInputElement>) => {
     const value = event.target.value.trim();
     const next = value === "" ? null : value;
     if (next !== (profile.apiKey ?? null)) {
-      void update({ apiKey: next });
+      runModelMutation("Failed to update API key", () =>
+        update({ apiKey: next })
+      );
     }
   };
 
@@ -961,14 +1006,20 @@ function _ProviderProfileEditor({
     const value = event.target.value.trim();
     const next = value === "" ? null : value;
     if (next !== (profile.baseUrl ?? null)) {
-      void update({ baseUrl: next });
+      runModelMutation("Failed to update base URL", () =>
+        update({ baseUrl: next })
+      );
     }
   };
 
   const handleBaseUrlToggle = (enabled: boolean) => {
     setBaseUrlEnabled(enabled);
     if (!enabled) {
-      void update({ baseUrl: null });
+      runModelMutation(
+        "Failed to clear base URL",
+        () => update({ baseUrl: null }),
+        { onError: () => setBaseUrlEnabled(true) }
+      );
     }
   };
 
@@ -1091,12 +1142,9 @@ function _ArkImageGenerationEditor({
   });
 
   const update = (imageGeneration: ArkImageGenerationConfig) => {
-    void updateProvider(provider.id, { imageGeneration }).catch((error) => {
-      toast.error("Failed to update image generation", {
-        description:
-          error instanceof Error ? error.message : "Please try again.",
-      });
-    });
+    runModelMutation("Failed to update image generation", () =>
+      updateProvider(provider.id, { imageGeneration })
+    );
   };
 
   /** Enable or disable one image model without changing Thread tool bindings. */
@@ -1382,9 +1430,11 @@ function _ProviderHeadersEditor({
       Object.keys(headers).length === currentKeys.length &&
       currentKeys.every((key) => headers[key] === current[key]);
     if (same) return;
-    void updateProviderProfile(providerId, profile.id, {
-      headers: Object.keys(headers).length > 0 ? headers : null,
-    });
+    runModelMutation("Failed to update custom headers", () =>
+      updateProviderProfile(providerId, profile.id, {
+        headers: Object.keys(headers).length > 0 ? headers : null,
+      })
+    );
   };
 
   const removeRow = (index: number) => {
@@ -1556,7 +1606,9 @@ function ModelListItem({
           dimBackground={false}
           onConfirm={() => {
             setConfirmOpen(false);
-            void removeCustomModel(providerId, model.id);
+            runModelMutation(`Failed to delete ${model.name}`, () =>
+              removeCustomModel(providerId, model.id)
+            );
           }}
         />
       )}

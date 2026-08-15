@@ -35,6 +35,7 @@ import {
 } from "react";
 import { toast } from "sonner";
 
+import { runSettingsMutation } from "@/app/settings/run-settings-mutation";
 import { SettingsFormController } from "@/app/settings/settings-form-controller";
 import { createAnalyticsClient } from "@/client/analytics";
 import { createUpdatesClient } from "@/client/updates";
@@ -138,15 +139,28 @@ function DefaultModelSelect() {
 
   const handleChange = (next: string) => {
     if (next === AUTO_DEFAULT_MODEL) {
-      void setDefaultModel(null);
+      runSettingsMutation(() => setDefaultModel(null), {
+        onError: _reportDefaultModelError,
+      });
       return;
     }
     const separator = next.indexOf(":");
-    void setDefaultModel({
-      provider: next.slice(0, separator),
-      id: next.slice(separator + 1),
-    });
+    runSettingsMutation(
+      () =>
+        setDefaultModel({
+          provider: next.slice(0, separator),
+          id: next.slice(separator + 1),
+        }),
+      { onError: _reportDefaultModelError }
+    );
   };
+
+  function _reportDefaultModelError(error: unknown): void {
+    toast.error("Failed to update default model", {
+      description:
+        error instanceof Error ? error.message : "Please try again.",
+    });
+  }
 
   return (
     <Select value={value} onValueChange={handleChange}>
