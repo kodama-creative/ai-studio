@@ -2,13 +2,11 @@ import { ContainerModule } from "inversify";
 
 import {
   GITHUB_ACCOUNT_RPC,
+  type GithubAccountRequests,
   type GithubAccountRpc,
 } from "../../shared/github-account-rpc";
 import type { RpcServer } from "../../shared/namespaced-rpc";
-import {
-  GITHUB_ACCOUNT_APPLICATION,
-  type GithubAccountApplication,
-} from "../application/github-account-application";
+import type { GitHubAuthManager } from "../auth/github-auth-manager";
 import {
   CommandContribution,
   type CommandContribution as CommandContributionApi,
@@ -19,33 +17,38 @@ import {
   type RpcContribution as RpcContributionApi,
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
+import { PROCESS_TOKENS } from "../di/tokens";
 
 class GithubAccountRpcServer implements RpcServer<GithubAccountRpc> {
   readonly namespace = GITHUB_ACCOUNT_RPC;
   readonly streams = {};
   readonly eventSource;
+  readonly requests: GithubAccountRequests;
 
-  constructor(readonly requests: GithubAccountApplication) {
-    this.eventSource = requests.events;
+  constructor(auth: GitHubAuthManager) {
+    this.requests = {
+      getState: () => Promise.resolve(auth.getState()),
+    };
+    this.eventSource = auth.events;
   }
 }
 
 class GithubAccountContribution
   implements CommandContributionApi, RpcContributionApi
 {
-  constructor(private readonly _application: GithubAccountApplication) {}
+  constructor(private readonly _auth: GitHubAuthManager) {}
 
   registerCommands(commands: CommandRegistry): void {
     commands.registerCommand("githubAccount.login", {
-      execute: () => void this._application.login(),
+      execute: () => void this._auth.signIn(),
     });
     commands.registerCommand("githubAccount.logout", {
-      execute: () => this._application.logout(),
+      execute: () => this._auth.signOut(),
     });
   }
 
   registerRpc(rpc: RpcRegistry): void {
-    rpc.registerServer(new GithubAccountRpcServer(this._application));
+    rpc.registerServer(new GithubAccountRpcServer(this._auth));
   }
 }
 
@@ -56,7 +59,7 @@ export function githubAccountRpcModule(): ContainerModule {
       .toDynamicValue(
         (context) =>
           new GithubAccountContribution(
-            context.get(GITHUB_ACCOUNT_APPLICATION)
+            context.get<GitHubAuthManager>(PROCESS_TOKENS.githubAuth)
           )
       )
       .inSingletonScope();

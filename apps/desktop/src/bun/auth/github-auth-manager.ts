@@ -13,6 +13,9 @@ import {
   type AuthConfig,
   type GithubAuthState,
 } from "../../shared/auth";
+import type { Disposable } from "../../shared/disposable";
+import { EventHub } from "../../shared/event-hub";
+import type { GithubAccountEvents } from "../../shared/github-account-rpc";
 
 import {
   DeviceFlowError,
@@ -37,8 +40,6 @@ const AuthConfigSchema: z.ZodType<AuthConfig | null> = z
   .or(z.null());
 
 export interface GitHubAuthManagerOptions {
-  /** Pushed on every auth-state transition (→ renderer over RPC). */
-  onChange: (state: GithubAuthState) => void;
   /** Device Flow request implementation; defaults to the GitHub HTTP helpers. */
   deviceFlow?: GitHubDeviceFlow;
 }
@@ -62,18 +63,17 @@ const GITHUB_DEVICE_FLOW: GitHubDeviceFlow = {
  * "signed out" (no seeding) and the token never leaves the bun process — the
  * renderer only ever sees {@link GithubAuthState}.
  */
-export class GitHubAuthManager {
+export class GitHubAuthManager implements Disposable {
+  readonly events = new EventHub<GithubAccountEvents>();
   private _config: AuthConfig | null;
   private readonly _deviceFlow: GitHubDeviceFlow;
-  private readonly _onChange: (state: GithubAuthState) => void;
   /** Non-null while a Device Flow is in progress; aborts the token poll. */
   private _signInController: AbortController | null = null;
   /** The pairing code + verification URL, once the device code is issued. */
   private _pending: { userCode: string; verificationUri: string } | null = null;
 
-  constructor(options: GitHubAuthManagerOptions) {
+  constructor(options: GitHubAuthManagerOptions = {}) {
     this._deviceFlow = options.deviceFlow ?? GITHUB_DEVICE_FLOW;
-    this._onChange = options.onChange;
     this._config = this._loadConfig();
   }
 
@@ -95,7 +95,7 @@ export class GitHubAuthManager {
   /**
    * Run the Device Flow: request a code, open the verification window, poll for
    * the token, load the profile, and persist. Safe to call fire-and-forget —
-   * failures revert to the prior state and surface a message via `onChange`.
+   * failures revert to the prior state and publish a renderer-safe state event.
    */
   async signIn(): Promise<void> {
     if (this._signInController) {
@@ -103,7 +103,7 @@ export class GitHubAuthManager {
       return;
     }
     if (!GITHUB_OAUTH_CLIENT_ID) {
-      this._onChange({
+      this.events.publish("changed", {
         status: "signedOut",
         error: "GitHub sign-in is not configured yet.",
       });
@@ -153,7 +153,10 @@ export class GitHubAuthManager {
       this._saveConfig();
     } catch (error) {
       if (!controller.signal.aborted) {
-        this._onChange({ status: "signedOut", error: _errorMessage(error) });
+        this.events.publish("changed", {
+          status: "signedOut",
+          error: _errorMessage(error),
+        });
       }
       return;
     } finally {
@@ -193,8 +196,13 @@ export class GitHubAuthManager {
     return this._config?.accessToken ?? null;
   }
 
+  dispose(): void {
+    this.cancelSignIn();
+    this.events.dispose();
+  }
+
   private _emit(): void {
-    this._onChange(this.getState());
+    this.events.publish("changed", this.getState());
   }
 
   private get _configPath(): string {

@@ -16,11 +16,6 @@ import Electrobun, { app, type ElectrobunEvent, Utils } from "electrobun/bun";
 import { resolveDeepLinkScheme } from "../../shared/deep-link-scheme";
 import { Analytics } from "../analytics";
 import { auxiliaryGenerationModule } from "../application/auxiliary-generation-module";
-import {
-  GITHUB_ACCOUNT_APPLICATION,
-  GithubAccountApplication,
-  githubAccountApplicationModule,
-} from "../application/github-account-application";
 import { modelsModule } from "../application/models-module";
 import { threadSharingApplicationModule } from "../application/thread-sharing-application";
 import {
@@ -108,13 +103,8 @@ async function _startDesktopApp(
     managedSkillsDir: getManagedSkillsDir(),
   });
   let mainWindows: MainWindowManager<DesktopMainWindowHandle> | undefined;
-  let notifyGithubChanged: (
-    state: import("../../shared/auth").GithubAuthState
-  ) => void = () => undefined;
-  const githubAuth = new GitHubAuthManager({
-    onChange: (state) => notifyGithubChanged(state),
-  });
-  processLifecycle.defer("GitHub auth", () => githubAuth.cancelSignIn());
+  const githubAuth = new GitHubAuthManager();
+  processLifecycle.defer("GitHub auth", () => githubAuth.dispose());
   // Write-side gist connector for the "Share thread" flow. Reuses the signed-in
   // GitHub token (the `gist` scope); creates secret gists readable by URL.
   const gistWriter = new GistThreadWriter({
@@ -189,12 +179,7 @@ async function _startDesktopApp(
   processContainer.load(agentProjectsModule());
   processContainer.load(remindersModule());
   processContainer.load(threadSharingApplicationModule());
-  processContainer.load(githubAccountApplicationModule());
   processContainer.load(updatesApplicationModule());
-  notifyGithubChanged = (state) =>
-    processContainer
-      .get<GithubAccountApplication>(GITHUB_ACCOUNT_APPLICATION)
-      .notifyChanged(state);
   notifyUpdateChanged = (message) =>
     processContainer
       .get<UpdatesApplication>(UPDATES_APPLICATION)
@@ -205,7 +190,6 @@ async function _startDesktopApp(
   processContainer.onDispose(() => {
     // External managers may emit one final callback while shutting down. Stop
     // them from resolving Applications after the DI root entered disposal.
-    notifyGithubChanged = () => undefined;
     notifyUpdateChanged = () => undefined;
   });
   let stopPromise: Promise<void> | null = null;

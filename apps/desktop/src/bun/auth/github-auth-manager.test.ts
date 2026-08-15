@@ -54,6 +54,7 @@ const DEVICE_FLOW: GitHubDeviceFlow = {
 
 const ORIGINAL_HOME = process.env.LLM_SPACE_HOME;
 const TEMP_DIRS: string[] = [];
+const MANAGERS: GitHubAuthManager[] = [];
 
 beforeEach(() => {
   DEVICE_CODES.splice(0, DEVICE_CODES.length, _deviceCode("FIRST"));
@@ -62,6 +63,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  for (const manager of MANAGERS.splice(0)) manager.dispose();
   process.env.LLM_SPACE_HOME = ORIGINAL_HOME;
   await Promise.all(
     TEMP_DIRS.splice(0).map((directory) =>
@@ -127,12 +129,12 @@ async function _createManager(): Promise<{
   TEMP_DIRS.push(home);
   process.env.LLM_SPACE_HOME = home;
   const states: GithubAuthState[] = [];
+  const manager = new GitHubAuthManager({ deviceFlow: DEVICE_FLOW });
+  MANAGERS.push(manager);
+  manager.events.subscribe("changed", (state) => states.push(state));
   return {
     authPath: path.join(home, "settings", "auth.json"),
-    manager: new GitHubAuthManager({
-      deviceFlow: DEVICE_FLOW,
-      onChange: (state) => states.push(state),
-    }),
+    manager,
     states,
   };
 }
