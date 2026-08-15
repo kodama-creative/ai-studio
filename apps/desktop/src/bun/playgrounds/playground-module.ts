@@ -2,7 +2,6 @@ import type { McpManager } from "@llm-space/runtime/mcp";
 import type { ModelManager } from "@llm-space/runtime/models";
 import { ContainerModule, type ResolutionContext } from "inversify";
 
-import { DesktopPlaygroundApplicationImpl } from "../application/playground-application";
 import {
   RpcContribution,
   type RpcContribution as RpcContributionApi,
@@ -13,12 +12,15 @@ import type { DesktopHost } from "../host/desktop-host";
 import { PlaygroundRpcServer } from "../rpc/playground-rpc-server";
 import { PlaygroundThreadRpcServer } from "../rpc/thread-rpc-server";
 
-import { createPlaygroundHost } from "./playground-host";
+import {
+  createDesktopPlaygroundApplication,
+  type DesktopPlaygroundApplication,
+} from "./playground-application";
 
-/** Bind the process-owned Playground host and application facade. */
+/** Bind the process-owned Playground application host. */
 export function playgroundModule(): ContainerModule {
   return new ContainerModule(({ bind }) => {
-    bind(PROCESS_TOKENS.playgroundHost)
+    bind(PROCESS_TOKENS.playgroundApplication)
       .toDynamicValue((context: ResolutionContext) => {
         const modelManager = context.get<ModelManager>(
           PROCESS_TOKENS.modelManager
@@ -27,7 +29,7 @@ export function playgroundModule(): ContainerModule {
           PROCESS_TOKENS.desktopHost
         );
         const mcpManager = context.get<McpManager>(PROCESS_TOKENS.mcpManager);
-        return createPlaygroundHost({
+        return createDesktopPlaygroundApplication({
           homePath: context.get(PROCESS_TOKENS.homePath),
           models: () => modelManager.getAvailableModels(),
           resolveConnection: ({ providerId }) =>
@@ -41,14 +43,6 @@ export function playgroundModule(): ContainerModule {
         });
       })
       .inSingletonScope();
-    bind(PROCESS_TOKENS.playgroundApplication)
-      .toDynamicValue(
-        (context: ResolutionContext) =>
-          new DesktopPlaygroundApplicationImpl(
-            context.get(PROCESS_TOKENS.playgroundHost)
-          )
-      )
-      .inSingletonScope();
   });
 }
 
@@ -60,9 +54,7 @@ export function playgroundWindowModule(): ContainerModule {
 }
 
 class PlaygroundContribution implements RpcContributionApi {
-  constructor(
-    private readonly _application: DesktopPlaygroundApplicationImpl
-  ) {}
+  constructor(private readonly _application: DesktopPlaygroundApplication) {}
 
   registerRpc(rpc: RpcRegistry): void {
     rpc.registerServer(new PlaygroundRpcServer(this._application));

@@ -16,10 +16,9 @@ import type {
 } from "../../shared/agent-project";
 import type { Analytics } from "../analytics";
 import type { WindowStateManager } from "../app/window-state";
-import type { DesktopPlaygroundApplication } from "../application/playground-application";
 import type { GitHubAuthManager } from "../auth/github-auth-manager";
 import type { DesktopHost } from "../host/desktop-host";
-import type { PlaygroundHost } from "../playgrounds/playground-host";
+import type { DesktopPlaygroundApplication } from "../playgrounds/playground-application";
 import type { AgentProject } from "../projects/agent-project";
 import type { ProjectWindowManager } from "../projects/project-window-manager";
 import type { MainWindowRPC } from "../rpc";
@@ -52,10 +51,9 @@ export const PROCESS_TOKENS = {
     "process",
     "network-settings"
   ),
-  playgroundHost: desktopToken<PlaygroundHost>("process", "playground-host"),
   playgroundApplication: desktopToken<DesktopPlaygroundApplication>(
-    "process",
-    "playground-application"
+    "playground",
+    "application"
   ),
   projectWindows: desktopToken<ProjectWindowManager>(
     "process",

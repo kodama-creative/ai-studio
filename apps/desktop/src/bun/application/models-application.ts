@@ -11,11 +11,8 @@ import {
 import type { ModelsRequests } from "../../shared/models-rpc";
 import type { Analytics } from "../analytics";
 
-/** Models keeps an application layer because it owns analytics and use cases. */
-export interface ModelsApplication extends ModelsRequests {}
-
 /** Owns model configuration use cases and their product analytics. */
-export class ModelsApplicationImpl implements ModelsApplication {
+export class ModelsApplication implements ModelsRequests {
   constructor(
     private readonly _models: ModelManager,
     private readonly _analytics: Analytics
@@ -42,7 +39,7 @@ export class ModelsApplicationImpl implements ModelsApplication {
   }
 
   async addCustomProvider(
-    input: Parameters<ModelsApplication["addCustomProvider"]>[0]
+    input: Parameters<ModelsRequests["addCustomProvider"]>[0]
   ) {
     this._models.addCustomProvider(input);
     const groups = await this.list();
@@ -70,7 +67,7 @@ export class ModelsApplicationImpl implements ModelsApplication {
   }
 
   async updateProvider(
-    input: Parameters<ModelsApplication["updateProvider"]>[0]
+    input: Parameters<ModelsRequests["updateProvider"]>[0]
   ) {
     const { providerId, ...fields } = input;
     this._models.updateProvider(providerId, fields);
@@ -97,7 +94,7 @@ export class ModelsApplicationImpl implements ModelsApplication {
   }
 
   async testConnection(
-    input: Parameters<ModelsApplication["testConnection"]>[0]
+    input: Parameters<ModelsRequests["testConnection"]>[0]
   ) {
     const models = input.candidate
       ? this._models.buildModelsWithCandidate(input.providerId, input.candidate)
@@ -155,7 +152,7 @@ export class ModelsApplicationImpl implements ModelsApplication {
   }
 
   async resolveGeneratorEnv(
-    input: Parameters<ModelsApplication["resolveGeneratorEnv"]>[0]
+    input: Parameters<ModelsRequests["resolveGeneratorEnv"]>[0]
   ) {
     const modelApiKey =
       (

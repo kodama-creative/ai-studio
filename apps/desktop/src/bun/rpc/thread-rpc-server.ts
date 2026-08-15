@@ -1,6 +1,4 @@
-import type {
-  StudioApplication,
-} from "@llm-space/studio";
+import type { StudioApplication } from "@llm-space/studio";
 
 import type { RpcServer } from "../../shared/namespaced-rpc";
 import {
@@ -10,7 +8,7 @@ import {
   type ThreadRunInput,
   type ThreadTarget,
 } from "../../shared/thread-rpc";
-import type { DesktopPlaygroundApplication } from "../application/playground-application";
+import type { DesktopPlaygroundApplication } from "../playgrounds/playground-application";
 
 /** Main-window Thread commands backed by the Playground product service. */
 export class PlaygroundThreadRpcServer implements RpcServer<ThreadRpc> {

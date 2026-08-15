@@ -13,10 +13,10 @@ import { ContainerModule, type ResolutionContext } from "inversify";
 import { buildWebShareUrl } from "../../shared/share";
 import type { ThreadSharingRequests } from "../../shared/thread-sharing-rpc";
 import { desktopToken, PROCESS_TOKENS } from "../di/tokens";
+import type { DesktopPlaygroundApplication } from "../playgrounds/playground-application";
 
 import type { ModelsApplication } from "./models-application";
 import { MODELS_APPLICATION } from "./models-module";
-import type { DesktopPlaygroundApplication } from "./playground-application";
 import { buildSharedThread } from "./thread-sharing";
 
 export const THREAD_SHARING_APPLICATION =
@@ -25,7 +25,10 @@ export const THREAD_SHARING_APPLICATION =
 /** Publishes immutable Playground copies through the Gist connector. */
 export class ThreadSharingApplication implements ThreadSharingRequests {
   constructor(
-    private readonly _playgrounds: DesktopPlaygroundApplication,
+    private readonly _playgrounds: Pick<
+      DesktopPlaygroundApplication,
+      "loadPlayground" | "createPlayground"
+    >,
     private readonly _models: ModelsApplication,
     private readonly _writer: Pick<GistThreadWriter, "writeSnapshot">,
     private readonly _reader: Pick<GistThreadReader, "readSnapshot">
@@ -33,7 +36,7 @@ export class ThreadSharingApplication implements ThreadSharingRequests {
 
   async read(playgroundId: string): Promise<PortableThreadSnapshot> {
     const [playground, providers, defaultModel] = await Promise.all([
-      this._playgrounds.load(playgroundId),
+      this._playgrounds.loadPlayground(playgroundId),
       this._models.list(),
       this._models.getDefault(),
     ]);
@@ -81,7 +84,7 @@ export class ThreadSharingApplication implements ThreadSharingRequests {
 
   importSnapshot(snapshot: PortableThreadSnapshot) {
     const document = threadToPlaygroundDocument(snapshot.thread, {});
-    return this._playgrounds.create(document);
+    return this._playgrounds.createPlayground(document);
   }
 
   async importGist(gistId: string) {

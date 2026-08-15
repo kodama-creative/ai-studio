@@ -9,7 +9,7 @@ type TokenValue<T> = T extends DesktopToken<infer TValue> ? TValue : never;
 type ProcessServices = {
   readonly [TKey in Exclude<
     keyof typeof PROCESS_TOKENS,
-    "playgroundApplication" | "playgroundHost"
+    "playgroundApplication"
   >]: TokenValue<(typeof PROCESS_TOKENS)[TKey]>;
 };
 

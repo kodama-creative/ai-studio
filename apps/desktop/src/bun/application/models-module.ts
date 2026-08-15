@@ -3,7 +3,7 @@ import { ContainerModule } from "inversify";
 
 import { desktopToken, PROCESS_TOKENS } from "../di/tokens";
 
-import { ModelsApplicationImpl, type ModelsApplication } from "./models-application";
+import { ModelsApplication } from "./models-application";
 
 export const MODELS_APPLICATION = desktopToken<ModelsApplication>(
   "models",
@@ -16,7 +16,7 @@ export function modelsModule(): ContainerModule {
     bind<ModelsApplication>(MODELS_APPLICATION)
       .toDynamicValue(
         (context) =>
-          new ModelsApplicationImpl(
+          new ModelsApplication(
             context.get<ModelManager>(PROCESS_TOKENS.modelManager),
             context.get(PROCESS_TOKENS.analytics)
           )

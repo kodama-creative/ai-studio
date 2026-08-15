@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 
 import type { StudioApplication } from "@llm-space/studio";
 
-import type { DesktopPlaygroundApplication } from "../application/playground-application";
+import type { DesktopPlaygroundApplication } from "../playgrounds/playground-application";
 
 import {
   PlaygroundThreadRpcServer,

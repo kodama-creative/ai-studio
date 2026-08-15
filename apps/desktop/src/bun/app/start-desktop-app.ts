@@ -199,7 +199,7 @@ async function _startDesktopApp(
       .notifyStatus(message);
   // Resolve the lazy application root through DI so its Disposable lifecycle
   // is adopted by the process scope before any window can request it.
-  processContainer.get(PROCESS_TOKENS.playgroundHost);
+  processContainer.get(PROCESS_TOKENS.playgroundApplication);
   processContainer.onDispose(() => {
     // External managers may emit one final callback while shutting down. Stop
     // them from resolving Applications after the DI root entered disposal.

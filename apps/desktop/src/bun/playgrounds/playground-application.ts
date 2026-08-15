@@ -27,7 +27,7 @@ import {
 } from "@llm-space/studio";
 import { createSqliteStudioStore } from "@llm-space/studio/storage/sqlite";
 
-export interface CreatePlaygroundHostOptions {
+export interface CreateDesktopPlaygroundApplicationOptions {
   readonly homePath: string;
   readonly models: Models | (() => Models | Promise<Models>);
   readonly resolveConnection?: (input: {
@@ -55,14 +55,14 @@ export interface PlaygroundToolHost {
   }): Promise<McpCallToolResponse>;
 }
 
-export interface PlaygroundHost extends PlaygroundApplication {
+export interface DesktopPlaygroundApplication extends PlaygroundApplication {
   dispose(): Promise<void>;
 }
 
 /** Composes Studio metadata, Pi Session, and bindings over one SQLite file. */
-export function createPlaygroundHost(
-  options: CreatePlaygroundHostOptions
-): PlaygroundHost {
+export function createDesktopPlaygroundApplication(
+  options: CreateDesktopPlaygroundApplicationOptions
+): DesktopPlaygroundApplication {
   const databasePath = path.join(options.homePath, "studio", "studio.sqlite");
   const repository = new BunSqliteSessionRepository({ path: databasePath });
   let bindings: BunSqliteRuntimeBindingStore;
@@ -116,7 +116,7 @@ export function createPlaygroundHost(
 /** Restores only the tools frozen in the operation's immutable binding. */
 async function _resolveRuntimeTools(
   binding: RuntimeBinding,
-  options: CreatePlaygroundHostOptions
+  options: CreateDesktopPlaygroundApplicationOptions
 ): Promise<ReadonlyMap<string, RuntimeTool>> {
   const tools = new Map<string, RuntimeTool>();
   const builtins = new Map(
@@ -216,7 +216,7 @@ function _isRecord(value: unknown): value is Record<string, unknown> {
 async function _resolveFrozenTool(
   frozen: ExecutableTool,
   index: RuntimeToolIndex,
-  options: CreatePlaygroundHostOptions
+  options: CreateDesktopPlaygroundApplicationOptions
 ): Promise<ExecutableTool> {
   if (frozen.type === "builtin") {
     if (index.builtins.get(frozen.name) === undefined) {
@@ -247,7 +247,7 @@ async function _resolveFrozenTool(
 /** Adapts one frozen host tool to the Pi runtime ToolDefinition seam. */
 function _definition(
   tool: ExecutableTool,
-  options: CreatePlaygroundHostOptions
+  options: CreateDesktopPlaygroundApplicationOptions
 ): ToolDefinition {
   return {
     description: tool.description,

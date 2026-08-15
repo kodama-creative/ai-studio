@@ -83,7 +83,7 @@ describe("ThreadSharingApplication", () => {
       updatedAt: 2,
     } as const;
     const application = new ThreadSharingApplication(
-      { load: () => Promise.resolve(playground) } as never,
+      { loadPlayground: () => Promise.resolve(playground) } as never,
       {
         list: () => Promise.resolve([]),
         getDefault: () => Promise.resolve(null),
@@ -114,7 +114,7 @@ describe("ThreadSharingApplication", () => {
     const created = { id: "playground-new" };
     const application = new ThreadSharingApplication(
       {
-        create: (document: unknown) => {
+        createPlayground: (document: unknown) => {
           createdDocument = document;
           return Promise.resolve(created);
         },

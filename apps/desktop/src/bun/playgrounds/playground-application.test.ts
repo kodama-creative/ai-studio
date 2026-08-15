@@ -12,9 +12,9 @@ import {
 import type { McpServerToolsResponse, McpTool } from "@llm-space/core";
 
 import {
-  createPlaygroundHost,
+  createDesktopPlaygroundApplication,
   type PlaygroundToolHost,
-} from "./playground-host";
+} from "./playground-application";
 
 test("resolves and executes only the MCP tools frozen into a Playground Run", async () => {
   const homePath = await mkdtemp(
@@ -63,7 +63,7 @@ test("resolves and executes only the MCP tools frozen into a Playground Run", as
     fauxAssistantMessage("The weather service is unavailable."),
   ]);
   const createHost = () =>
-    createPlaygroundHost({
+    createDesktopPlaygroundApplication({
       homePath,
       tools,
       models,
@@ -150,7 +150,7 @@ test("reconstructs a durable Step receipt after Playground host restart", async 
   models.setProvider(faux.provider);
   faux.setResponses([fauxAssistantMessage("Committed once.")]);
   const createHost = () =>
-    createPlaygroundHost({
+    createDesktopPlaygroundApplication({
       homePath,
       models,
       tools: _emptyTools(),
@@ -265,7 +265,7 @@ function _mcpToolsResponse(tool: McpTool): McpServerToolsResponse {
 }
 
 async function _waitForTerminalRun(
-  host: ReturnType<typeof createPlaygroundHost>,
+  host: ReturnType<typeof createDesktopPlaygroundApplication>,
   operationId: string
 ): Promise<void> {
   for (let attempt = 0; attempt < 200; attempt += 1) {
@@ -285,7 +285,7 @@ async function _waitForTerminalRun(
 }
 
 async function _waitForRunStatus(
-  host: ReturnType<typeof createPlaygroundHost>,
+  host: ReturnType<typeof createDesktopPlaygroundApplication>,
   operationId: string,
   status: "paused"
 ): Promise<void> {

@@ -100,6 +100,13 @@ owns its application logic, DI module, RPC server/contribution, and local
 implementation details. Transport-only cross-cutting adapters live in
 `bun/rpc/*-rpc-feature.ts`. Do not recreate central `runtime-module` or catch-all
 `di/modules` files.
+
+The Playground slice binds one process-owned `DesktopPlaygroundApplication`,
+which directly owns Studio/Pi/SQLite/tool composition and disposal. RPC performs
+the transport naming projection; do not add a second pass-through Playground
+facade or duplicate host/application token. Likewise, a DI token backed by one
+concrete application class does not need an empty `*Application` interface plus
+an `*ApplicationImpl` class; implement the shared request contract directly.
 Cross-cutting capabilities such as GitHub account, updates, reminders,
 analytics, and thread sharing also keep separate `*-application.ts` and
 `*-rpc-feature.ts` modules, plus one feature-owned shared RPC contract and
