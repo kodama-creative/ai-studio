@@ -29,7 +29,7 @@ import {
   readTextFile,
   textFileExists,
 } from "@/client/paths";
-import { getSearchSettings } from "@/client/search";
+import { createSearchClient } from "@/client/search";
 import { createSkillsClient } from "@/client/skills";
 import { createToolExecutor } from "@/client/tool-execution";
 import { useCommands } from "@/commands";
@@ -88,6 +88,7 @@ export function DesktopHostProvider({ children }: { children: ReactNode }) {
     []
   );
   const mcp = useMemo(() => createMcpClient(), []);
+  const search = useMemo(() => createSearchClient(), []);
   const skills = useMemo(() => createSkillsClient(), []);
   const executeTool = useMemo(() => createToolExecutor(mcp), [mcp]);
 
@@ -125,7 +126,7 @@ export function DesktopHostProvider({ children }: { children: ReactNode }) {
         writeFile: writeProjectFile,
         removeFile: removeProjectFile,
         openDevTerminal: openGeneratorDevTerminal,
-        getSearchSettings: () => getSearchSettings(),
+        getSearchSettings: () => search.get(),
         resolveEnv: (
           providerId: string,
           envNames: string[],
@@ -160,6 +161,7 @@ export function DesktopHostProvider({ children }: { children: ReactNode }) {
       executeTool,
       mcp,
       registerCommandHandlers,
+      search,
       skills,
     ]
   );

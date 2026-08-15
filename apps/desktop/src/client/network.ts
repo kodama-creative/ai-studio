@@ -1,25 +1,11 @@
-import type { NetworkSettings, SystemProxyDetection } from "@llm-space/core";
-
 import { createRpcClient } from "@/shared/namespaced-rpc";
-import { NETWORK_RPC } from "@/shared/network-rpc";
+import { NETWORK_RPC, type NetworkRequests } from "@/shared/network-rpc";
 
 import { createElectrobunRpcClientTransport } from "./namespaced-rpc-client";
 
-const networkClient = createRpcClient(
-  NETWORK_RPC,
-  createElectrobunRpcClientTransport()
-);
+export type NetworkClient = NetworkRequests;
 
-export async function getNetworkSettings(): Promise<NetworkSettings> {
-  return networkClient.get();
-}
-
-export async function setNetworkSettings(
-  settings: NetworkSettings
-): Promise<NetworkSettings> {
-  return networkClient.set(settings);
-}
-
-export async function detectSystemProxy(): Promise<SystemProxyDetection> {
-  return networkClient.detectSystemProxy();
+/** Create one typed Network namespace proxy for its owning settings module. */
+export function createNetworkClient(): NetworkClient {
+  return createRpcClient(NETWORK_RPC, createElectrobunRpcClientTransport());
 }

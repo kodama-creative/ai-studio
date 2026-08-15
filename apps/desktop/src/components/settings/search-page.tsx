@@ -13,49 +13,43 @@ import {
   SelectValue,
 } from "@llm-space/ui/ui/select";
 import { Separator } from "@llm-space/ui/ui/separator";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { toast } from "sonner";
 
-import { getSearchSettings, setSearchSettings } from "@/client/search";
+import { SettingsFormController } from "@/app/settings/settings-form-controller";
+import { createSearchClient } from "@/client/search";
 
 import { ApiKeyField } from "./api-key-field";
 import { SettingsPage } from "./settings-page";
 
 export function SearchPage() {
-  const [settings, setSettings] = useState<SearchSettings>(
-    DEFAULT_SEARCH_SETTINGS
+  const client = useMemo(() => createSearchClient(), []);
+  const controller = useMemo(
+    () =>
+      new SettingsFormController<SearchSettings>({
+        initialSettings: DEFAULT_SEARCH_SETTINGS,
+        initialContext: undefined,
+        loadSettings: () => client.get(),
+        saveSettings: (settings) => client.set(settings),
+        notifySaveError: (error) => {
+          toast.error("Failed to save search settings", {
+            description:
+              error instanceof Error ? error.message : "Please try again.",
+          });
+        },
+      }),
+    [client]
   );
-
+  const snapshot = useSyncExternalStore(
+    controller.subscribe,
+    controller.getSnapshot,
+    controller.getSnapshot
+  );
   useEffect(() => {
-    let cancelled = false;
-    void getSearchSettings()
-      .then((loaded) => {
-        if (!cancelled) {
-          setSettings(loaded);
-        }
-      })
-      .catch(() => {
-        // Keep defaults; a load failure is non-fatal for the form.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const persist = useCallback(
-    async (next: SearchSettings) => {
-      try {
-        const saved = await setSearchSettings(next);
-        setSettings(saved);
-      } catch (error) {
-        toast.error("Failed to save search settings", {
-          description:
-            error instanceof Error ? error.message : "Please try again.",
-        });
-      }
-    },
-    []
-  );
+    controller.start();
+    return () => controller.stop();
+  }, [controller]);
+  const settings = snapshot.settings;
 
   return (
     <SettingsPage
@@ -75,7 +69,10 @@ export function SearchPage() {
           <Select
             value={settings.provider}
             onValueChange={(value) =>
-              void persist({ ...settings, provider: value as SearchProviderId })
+              void controller.commit({
+                ...settings,
+                provider: value as SearchProviderId,
+              })
             }
           >
             <SelectTrigger className="w-40" aria-label="Search provider">
@@ -96,9 +93,12 @@ export function SearchPage() {
           value={settings.braveApiKey}
           getKeyUrl="https://api-dashboard.search.brave.com/app/keys"
           onChange={(e) =>
-            setSettings({ ...settings, braveApiKey: e.target.value })
+            controller.update({
+              ...settings,
+              braveApiKey: e.target.value,
+            })
           }
-          onBlur={() => void persist(settings)}
+          onBlur={() => void controller.save()}
         />
 
         <ApiKeyField
@@ -106,9 +106,12 @@ export function SearchPage() {
           value={settings.firecrawlApiKey}
           getKeyUrl="https://www.firecrawl.dev/app/api-keys"
           onChange={(e) =>
-            setSettings({ ...settings, firecrawlApiKey: e.target.value })
+            controller.update({
+              ...settings,
+              firecrawlApiKey: e.target.value,
+            })
           }
-          onBlur={() => void persist(settings)}
+          onBlur={() => void controller.save()}
         />
 
         <ApiKeyField
@@ -116,9 +119,12 @@ export function SearchPage() {
           value={settings.tavilyApiKey}
           getKeyUrl="https://app.tavily.com/home"
           onChange={(e) =>
-            setSettings({ ...settings, tavilyApiKey: e.target.value })
+            controller.update({
+              ...settings,
+              tavilyApiKey: e.target.value,
+            })
           }
-          onBlur={() => void persist(settings)}
+          onBlur={() => void controller.save()}
         />
 
         <p className="text-muted-foreground text-xs">

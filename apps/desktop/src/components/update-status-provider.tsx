@@ -7,13 +7,14 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
 } from "react";
 import { toast } from "sonner";
 
-import { updatesClient } from "@/client/updates";
+import { createUpdatesClient } from "@/client/updates";
 import { useCommands } from "@/commands";
 import { UpdateDialog } from "@/components/update-dialog";
 import type {
@@ -139,6 +140,7 @@ const UpdateStatusContext = createContext<UpdateStatusValue | null>(null);
  */
 export function UpdateStatusProvider({ children }: { children: ReactNode }) {
   const { executeCommand } = useCommands();
+  const updatesClient = useMemo(() => createUpdatesClient(), []);
   const [readyVersion, setReadyVersion] = useState<string | null>(null);
   const lastNotifiedVersion = useRef<string | null>(null);
   // Manual "Check for Updates" flow.
@@ -241,7 +243,7 @@ export function UpdateStatusProvider({ children }: { children: ReactNode }) {
     return () => {
       void subscription.dispose();
     };
-  }, [restart]);
+  }, [restart, updatesClient]);
 
   // "We just updated" — pulled once on mount, race-free vs. the fire-and-forget
   // status messages (the bun signal is computed at startup, before we listen).
@@ -263,7 +265,7 @@ export function UpdateStatusProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [executeCommand]);
+  }, [executeCommand, updatesClient]);
 
   return (
     <UpdateStatusContext.Provider value={{ readyVersion }}>

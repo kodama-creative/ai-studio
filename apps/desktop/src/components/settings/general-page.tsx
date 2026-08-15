@@ -28,18 +28,21 @@ import {
 } from "@llm-space/ui/ui/select";
 import { Switch } from "@llm-space/ui/ui/switch";
 import {
-  useCallback,
   useEffect,
   useMemo,
-  useState,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
 import { toast } from "sonner";
 
-import { getAnalyticsSettings, setAnalyticsSettings } from "@/client/analytics";
-import { updatesClient } from "@/client/updates";
+import { SettingsFormController } from "@/app/settings/settings-form-controller";
+import { createAnalyticsClient } from "@/client/analytics";
+import { createUpdatesClient } from "@/client/updates";
 import { useCommands } from "@/commands";
-import { DEFAULT_ANALYTICS_SETTINGS } from "@/shared/analytics";
+import {
+  DEFAULT_ANALYTICS_SETTINGS,
+  type AnalyticsStatus,
+} from "@/shared/analytics";
 import { DEFAULT_UPDATE_MODE, type UpdateMode } from "@/shared/updates";
 
 import { PrimaryColorPicker } from "./primary-color-picker";
@@ -185,46 +188,20 @@ function DefaultModelSelect() {
  * instead of claiming data is being shared. See `shared/analytics.ts` for
  * exactly what is (and isn't) collected.
  */
-function AnalyticsRow() {
-  const [enabled, setEnabled] = useState(DEFAULT_ANALYTICS_SETTINGS.enabled);
-  const [available, setAvailable] = useState(true);
-
-  useEffect(() => {
-    let cancelled = false;
-    void getAnalyticsSettings()
-      .then((loaded) => {
-        if (cancelled) return;
-        setEnabled(loaded.enabled);
-        setAvailable(loaded.available);
-      })
-      .catch(() => {
-        // Keep the defaults; a load failure is non-fatal for the toggle.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const handleChange = useCallback(async (next: boolean) => {
-    setEnabled(next); // Optimistic; the RPC echoes the input, so no reconcile.
-    try {
-      await setAnalyticsSettings(next);
-    } catch (error) {
-      setEnabled(!next);
-      toast.error("Failed to update analytics setting", {
-        description:
-          error instanceof Error ? error.message : "Please try again.",
-      });
-    }
-  }, []);
-
+function AnalyticsRow({
+  status,
+  onEnabledChange,
+}: {
+  status: AnalyticsStatus;
+  onEnabledChange: (enabled: boolean) => void;
+}) {
   return (
     <SettingsRow
       label={
         <span className="flex flex-col gap-0.5">
           Share anonymous usage analytics
           <span className="text-muted-foreground text-xs">
-            {available
+            {status.available
               ? "Helps improve the app. Only anonymous actions are sent - never your prompts, messages, or API keys."
               : "Telemetry is turned off in this build or environment. Nothing is sent."}
           </span>
@@ -232,33 +209,74 @@ function AnalyticsRow() {
       }
     >
       <Switch
-        checked={available && enabled}
-        disabled={!available}
-        onCheckedChange={(next) => void handleChange(next)}
+        checked={status.available && status.enabled}
+        disabled={!status.available}
+        onCheckedChange={onEnabledChange}
         aria-label="Share anonymous usage analytics"
       />
     </SettingsRow>
   );
 }
 
-/** Read/write the bun-owned update mode over RPC. */
-function useUpdateMode(): [UpdateMode, (mode: UpdateMode) => void] {
-  const [mode, setMode] = useState<UpdateMode>(DEFAULT_UPDATE_MODE);
-  useEffect(() => {
-    void updatesClient.getMode().then(setMode);
-  }, []);
-  const change = (next: UpdateMode) => {
-    setMode(next);
-    void updatesClient.setMode(next);
-  };
-  return [mode, change];
-}
-
 export function GeneralPage() {
   const { theme, setTheme } = useTheme();
   const { executeCommand } = useCommands();
   const { fidelity, setFidelity } = useRenderingFidelity();
-  const [updateMode, setUpdateMode] = useUpdateMode();
+  const analyticsClient = useMemo(() => createAnalyticsClient(), []);
+  const updatesClient = useMemo(() => createUpdatesClient(), []);
+  const analyticsController = useMemo(
+    () =>
+      new SettingsFormController<AnalyticsStatus>({
+        initialSettings: { ...DEFAULT_ANALYTICS_SETTINGS, available: true },
+        initialContext: undefined,
+        loadSettings: () => analyticsClient.getSettings(),
+        saveSettings: (status) => analyticsClient.setEnabled(status.enabled),
+        notifySaveError: (error) => {
+          toast.error("Failed to update analytics setting", {
+            description:
+              error instanceof Error ? error.message : "Please try again.",
+          });
+        },
+      }),
+    [analyticsClient]
+  );
+  const updateModeController = useMemo(
+    () =>
+      new SettingsFormController<UpdateMode>({
+        initialSettings: DEFAULT_UPDATE_MODE,
+        initialContext: undefined,
+        loadSettings: () => updatesClient.getMode(),
+        saveSettings: async (mode) => {
+          await updatesClient.setMode(mode);
+          return mode;
+        },
+        notifySaveError: (error) => {
+          toast.error("Failed to update software update setting", {
+            description:
+              error instanceof Error ? error.message : "Please try again.",
+          });
+        },
+      }),
+    [updatesClient]
+  );
+  const analytics = useSyncExternalStore(
+    analyticsController.subscribe,
+    analyticsController.getSnapshot,
+    analyticsController.getSnapshot
+  );
+  const updateMode = useSyncExternalStore(
+    updateModeController.subscribe,
+    updateModeController.getSnapshot,
+    updateModeController.getSnapshot
+  );
+  useEffect(() => {
+    analyticsController.start();
+    updateModeController.start();
+    return () => {
+      updateModeController.stop();
+      analyticsController.stop();
+    };
+  }, [analyticsController, updateModeController]);
   const {
     primaryColor,
     resetPrimaryColor,
@@ -375,7 +393,15 @@ export function GeneralPage() {
         </SettingsSection>
 
         <SettingsSection title="Data & privacy">
-          <AnalyticsRow />
+          <AnalyticsRow
+            status={analytics.settings}
+            onEnabledChange={(enabled) =>
+              void analyticsController.commit({
+                ...analytics.settings,
+                enabled,
+              })
+            }
+          />
         </SettingsSection>
 
         <SettingsSection title="Updates">
@@ -389,8 +415,10 @@ export function GeneralPage() {
           >
             <div className="flex items-center gap-2">
               <Select
-                value={updateMode}
-                onValueChange={(v) => setUpdateMode(v as UpdateMode)}
+                value={updateMode.settings}
+                onValueChange={(value) =>
+                  void updateModeController.commit(value as UpdateMode)
+                }
               >
                 <SelectTrigger className="w-40" aria-label="Software updates">
                   <SelectValue />

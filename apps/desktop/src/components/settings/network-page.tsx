@@ -8,14 +8,11 @@ import {
 } from "@llm-space/core";
 import { Input } from "@llm-space/ui/ui/input";
 import { Separator } from "@llm-space/ui/ui/separator";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { toast } from "sonner";
 
-import {
-  detectSystemProxy,
-  getNetworkSettings,
-  setNetworkSettings,
-} from "@/client/network";
+import { SettingsFormController } from "@/app/settings/settings-form-controller";
+import { createNetworkClient } from "@/client/network";
 
 import { SettingsPage } from "./settings-page";
 import { SettingsToggleRow } from "./settings-toggle-row";
@@ -104,51 +101,37 @@ function DetectedProxy({
 }
 
 export function NetworkPage() {
-  const [settings, setSettings] = useState<NetworkSettings>(
-    DEFAULT_NETWORK_SETTINGS
+  const client = useMemo(() => createNetworkClient(), []);
+  const controller = useMemo(
+    () =>
+      new SettingsFormController<
+        NetworkSettings,
+        SystemProxyDetection | null
+      >({
+        initialSettings: DEFAULT_NETWORK_SETTINGS,
+        initialContext: null,
+        loadSettings: () => client.get(),
+        saveSettings: (settings) => client.set(settings),
+        loadContext: () => client.detectSystemProxy(),
+        notifySaveError: (error) => {
+          toast.error("Failed to save network settings", {
+            description:
+              error instanceof Error ? error.message : "Please try again.",
+          });
+        },
+      }),
+    [client]
   );
-  const [detection, setDetection] = useState<SystemProxyDetection | null>(null);
-
+  const snapshot = useSyncExternalStore(
+    controller.subscribe,
+    controller.getSnapshot,
+    controller.getSnapshot
+  );
   useEffect(() => {
-    let cancelled = false;
-    void getNetworkSettings()
-      .then((loaded) => {
-        if (!cancelled) {
-          setSettings(loaded);
-        }
-      })
-      .catch(() => {
-        // Keep defaults; a load failure is non-fatal for the form.
-      });
-    void detectSystemProxy()
-      .then((result) => {
-        if (!cancelled) {
-          setDetection(result);
-        }
-      })
-      .catch(() => {
-        // Detection is best-effort; leave it unset on failure.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const persist = useCallback(
-    async (next: NetworkSettings) => {
-      setSettings(next);
-      try {
-        const saved = await setNetworkSettings(next);
-        setSettings(saved);
-      } catch (error) {
-        toast.error("Failed to save network settings", {
-          description:
-            error instanceof Error ? error.message : "Please try again.",
-        });
-      }
-    },
-    []
-  );
+    controller.start();
+    return () => controller.stop();
+  }, [controller]);
+  const settings = snapshot.settings;
 
   return (
     <SettingsPage
@@ -162,7 +145,7 @@ export function NetworkPage() {
           hint="Connect through a proxy for model requests and other network calls."
           checked={settings.enabled}
           onCheckedChange={(next) =>
-            void persist({ ...settings, enabled: next })
+            void controller.commit({ ...settings, enabled: next })
           }
         />
 
@@ -175,10 +158,13 @@ export function NetworkPage() {
                 title="Use system proxy"
                 checked={settings.useSystemProxy}
                 onCheckedChange={(next) =>
-                  void persist({ ...settings, useSystemProxy: next })
+                  void controller.commit({
+                    ...settings,
+                    useSystemProxy: next,
+                  })
                 }
               />
-              <DetectedProxy detection={detection} />
+              <DetectedProxy detection={snapshot.context} />
             </div>
 
             {settings.useSystemProxy ? null : (
@@ -188,9 +174,9 @@ export function NetworkPage() {
                   value={settings.httpProxy}
                   placeholder="http://127.0.0.1:7890"
                   onChange={(value) =>
-                    setSettings({ ...settings, httpProxy: value })
+                    controller.update({ ...settings, httpProxy: value })
                   }
-                  onBlur={() => void persist(settings)}
+                  onBlur={() => void controller.save()}
                 />
 
                 <ProxyField
@@ -198,9 +184,9 @@ export function NetworkPage() {
                   value={settings.httpsProxy}
                   placeholder="http://127.0.0.1:7890"
                   onChange={(value) =>
-                    setSettings({ ...settings, httpsProxy: value })
+                    controller.update({ ...settings, httpsProxy: value })
                   }
-                  onBlur={() => void persist(settings)}
+                  onBlur={() => void controller.save()}
                 />
 
                 <div className="flex flex-col gap-2">
@@ -210,9 +196,12 @@ export function NetworkPage() {
                     placeholder="localhost, 127.0.0.1, .local"
                     aria-label="Bypass list"
                     onChange={(event) =>
-                      setSettings({ ...settings, noProxy: event.target.value })
+                      controller.update({
+                        ...settings,
+                        noProxy: event.target.value,
+                      })
                     }
-                    onBlur={() => void persist(settings)}
+                    onBlur={() => void controller.save()}
                   />
                   <span className="text-muted-foreground text-xs">
                     Comma-separated hosts that bypass the proxy.

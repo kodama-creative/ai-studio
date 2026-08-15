@@ -1,6 +1,7 @@
-import { analyticsClient } from "@/client/analytics";
+import { createAnalyticsClient } from "@/client/analytics";
 import type { AnalyticsEvent } from "@/shared/analytics";
 
+const analyticsClient = createAnalyticsClient();
 
 /**
  * Record an anonymous, behaviour-only analytics event from the renderer.
