@@ -30,11 +30,7 @@ import {
   textFileExists,
 } from "@/client/paths";
 import { getSearchSettings } from "@/client/search";
-import {
-  getSkillsSettings,
-  listAvailableSkills,
-  listSkills,
-} from "@/client/skills";
+import { createSkillsClient } from "@/client/skills";
 import { createToolExecutor } from "@/client/tool-execution";
 import { useCommands } from "@/commands";
 import type { SettingsTab } from "@/shared/commands";
@@ -92,6 +88,7 @@ export function DesktopHostProvider({ children }: { children: ReactNode }) {
     []
   );
   const mcp = useMemo(() => createMcpClient(), []);
+  const skills = useMemo(() => createSkillsClient(), []);
   const executeTool = useMemo(() => createToolExecutor(mcp), [mcp]);
 
   const value = useMemo<HostServices>(
@@ -100,9 +97,9 @@ export function DesktopHostProvider({ children }: { children: ReactNode }) {
       auxiliaryGeneration,
       executeTool,
       skills: {
-        getSettings: () => getSkillsSettings(),
-        listAvailable: () => listAvailableSkills(),
-        listSkills: (path) => listSkills(path),
+        getSettings: () => skills.getSettings(),
+        listAvailable: () => skills.listAvailable(),
+        listSkills: (path) => skills.list(path),
       },
       mcp: {
         listServers: () => mcp.listServers(),
@@ -163,6 +160,7 @@ export function DesktopHostProvider({ children }: { children: ReactNode }) {
       executeTool,
       mcp,
       registerCommandHandlers,
+      skills,
     ]
   );
 

@@ -24,18 +24,14 @@ import {
   Plus,
   Trash2,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
 
+import { SkillsSettingsController } from "@/app/settings/skills-settings-controller";
 import { fsReveal } from "@/client/built-in-tools";
 import {
-  addSkillsPath,
   browseForSkillsPath,
-  getSkillsSettings,
-  listSkills,
-  removeSkillsPath,
-  setAllSkillsHidden,
-  setSkillHidden,
+  createSkillsClient,
 } from "@/client/skills";
 
 import { SettingsPage } from "./settings-page";
@@ -49,120 +45,32 @@ const _isWindows =
  */
 const REVEAL_LABEL = _isWindows ? "Reveal in Explorer" : "Reveal in Finder";
 
-/** Reveal a discovery folder in the OS file manager, toasting if it's gone. */
-async function revealDiscoveryPath(path: string) {
-  try {
-    await fsReveal(path);
-  } catch (error) {
-    toast.error("Failed to reveal folder", {
-      description: error instanceof Error ? error.message : "Please try again.",
-    });
-  }
-}
-
-/** Open a skill directory in the OS file manager. */
-async function openSkillFolder(skill: SkillInfo) {
-  try {
-    await fsReveal(skill.path);
-  } catch (error) {
-    toast.error("Failed to open skill folder", {
-      description: error instanceof Error ? error.message : "Please try again.",
-    });
-  }
-}
-
 export function SkillsPage() {
-  const [settings, setSettings] = useState<SkillsSettings>({
-    discoveryPaths: [],
-  });
-  const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null);
-  // Bumped after a bulk enable/disable so the skills pane refetches.
-  const [reloadToken, setReloadToken] = useState(0);
-
-  const loadSources = useCallback(() => {
-    let cancelled = false;
-    void getSkillsSettings()
-      .then((loadedSettings) => {
-        if (!cancelled) {
-          setSettings(loadedSettings);
-        }
-      })
-      .catch(() => {
-        // A load failure is non-fatal; leave the existing sources in place.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => loadSources(), [loadSources]);
-
-  const paths = settings.discoveryPaths;
-  const sourceIds = useMemo(
-    () => paths.map((entry) => `folder:${entry.path}`),
-    [paths]
-  );
-
-  // Keep a valid selection as folders are added or removed.
-  useEffect(() => {
-    if (!selectedSourceId || !sourceIds.includes(selectedSourceId)) {
-      setSelectedSourceId(sourceIds[0] ?? null);
-    }
-  }, [selectedSourceId, sourceIds]);
-
-  const selectedPath = selectedSourceId?.startsWith("folder:")
-    ? selectedSourceId.slice("folder:".length)
-    : null;
-
-  const handleAdd = useCallback(async () => {
-    try {
-      const path = await browseForSkillsPath();
-      if (!path) {
-        return;
-      }
-      const next = await addSkillsPath(path);
-      setSettings(next);
-      setSelectedSourceId(`folder:${path}`);
-    } catch (error) {
-      toast.error("Failed to add folder", {
-        description:
-          error instanceof Error ? error.message : "Please try again.",
-      });
-    }
-  }, []);
-
-  const handleRemove = useCallback(
-    async (path: string) => {
-      try {
-        setSettings(await removeSkillsPath(path));
-      } catch (error) {
-        toast.error("Failed to remove folder", {
-          description:
-            error instanceof Error ? error.message : "Please try again.",
-        });
-      }
-    },
-    []
-  );
-
-  const handleSetAll = useCallback(
-    async (path: string, hidden: boolean) => {
-      try {
-        setSettings(await setAllSkillsHidden(path, hidden));
-        // Refetch the skills pane so its switches reflect the bulk change.
-        setReloadToken((token) => token + 1);
-      } catch (error) {
-        toast.error(
-          hidden ? "Failed to disable skills" : "Failed to enable skills",
-          {
+  const client = useMemo(() => createSkillsClient(), []);
+  const controller = useMemo(
+    () =>
+      new SkillsSettingsController({
+        client,
+        browseForPath: browseForSkillsPath,
+        revealPath: fsReveal,
+        notifyError: (title, error) => {
+          toast.error(title, {
             description:
               error instanceof Error ? error.message : "Please try again.",
-          }
-        );
-      }
-    },
-    []
+          });
+        },
+      }),
+    [client]
   );
+  const snapshot = useSyncExternalStore(
+    controller.subscribe,
+    controller.getSnapshot,
+    controller.getSnapshot
+  );
+  useEffect(() => {
+    controller.start();
+    return () => controller.stop();
+  }, [controller]);
 
   return (
     <SettingsPage
@@ -175,17 +83,23 @@ export function SkillsPage() {
       }
     >
       <PathList
-        paths={paths}
-        selectedSourceId={selectedSourceId}
-        onSelect={setSelectedSourceId}
-        onAdd={() => void handleAdd()}
-        onRemove={(path) => void handleRemove(path)}
-        onEnableAll={(path) => void handleSetAll(path, false)}
-        onDisableAll={(path) => void handleSetAll(path, true)}
+        paths={snapshot.settings.discoveryPaths}
+        selectedPath={snapshot.selectedPath}
+        loading={snapshot.loadingSettings}
+        onSelect={(path) => controller.selectPath(path)}
+        onAdd={() => void controller.addFolder()}
+        onRemove={(path) => void controller.removeFolder(path)}
+        onReveal={(path) => void controller.revealFolder(path)}
+        onEnableAll={(path) => void controller.setAllEnabled(path, true)}
+        onDisableAll={(path) => void controller.setAllEnabled(path, false)}
       />
       <PathSkills
-        key={`${selectedSourceId}:${reloadToken}`}
-        path={selectedPath}
+        path={snapshot.selectedPath}
+        skills={snapshot.skills}
+        onToggle={(name, enabled) =>
+          void controller.setSkillEnabled(name, enabled)
+        }
+        onOpenSkill={(skill) => void controller.revealSkill(skill)}
       />
     </SettingsPage>
   );
@@ -193,18 +107,22 @@ export function SkillsPage() {
 
 function PathList({
   paths,
-  selectedSourceId,
+  selectedPath,
+  loading,
   onSelect,
   onAdd,
   onRemove,
+  onReveal,
   onEnableAll,
   onDisableAll,
 }: {
   paths: SkillsSettings["discoveryPaths"];
-  selectedSourceId: string | null;
-  onSelect: (sourceId: string) => void;
+  selectedPath: string | null;
+  loading: boolean;
+  onSelect: (path: string) => void;
   onAdd: () => void;
   onRemove: (path: string) => void;
+  onReveal: (path: string) => void;
   onEnableAll: (path: string) => void;
   onDisableAll: (path: string) => void;
 }) {
@@ -217,7 +135,12 @@ function PathList({
       </span>
 
       <ScrollArea className="min-h-0 grow">
-        {paths.length === 0 ? (
+        {loading && paths.length === 0 ? (
+          <div className="text-muted-foreground flex items-center justify-center gap-2 px-2 py-6 text-xs">
+            <Loader2 className="size-3.5 animate-spin" />
+            Loading folders…
+          </div>
+        ) : paths.length === 0 ? (
           <div className="text-muted-foreground px-2 py-6 text-center text-xs text-balance">
             No folders yet. Click the &quot;Add folder&quot; button below to get
             started.
@@ -228,9 +151,10 @@ function PathList({
               <PathListItem
                 key={entry.path}
                 path={entry.path}
-                selected={`folder:${entry.path}` === selectedSourceId}
-                onSelect={() => onSelect(`folder:${entry.path}`)}
+                selected={entry.path === selectedPath}
+                onSelect={() => onSelect(entry.path)}
                 onRemove={() => onRemove(entry.path)}
+                onReveal={() => onReveal(entry.path)}
                 onEnableAll={() => onEnableAll(entry.path)}
                 onDisableAll={() => onDisableAll(entry.path)}
               />
@@ -252,6 +176,7 @@ function PathListItem({
   selected,
   onSelect,
   onRemove,
+  onReveal,
   onEnableAll,
   onDisableAll,
 }: {
@@ -259,6 +184,7 @@ function PathListItem({
   selected: boolean;
   onSelect: () => void;
   onRemove: () => void;
+  onReveal: () => void;
   onEnableAll: () => void;
   onDisableAll: () => void;
 }) {
@@ -306,7 +232,7 @@ function PathListItem({
           </span>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
-          <DropdownMenuItem onSelect={() => void revealDiscoveryPath(path)}>
+          <DropdownMenuItem onSelect={onReveal}>
             <FolderOpen />
             {REVEAL_LABEL}
           </DropdownMenuItem>
@@ -346,63 +272,18 @@ function PathListItem({
   );
 }
 
-function PathSkills({ path }: { path: string | null }) {
-  const [skills, setSkills] = useState<SkillInfo[] | null>(null);
+function PathSkills({
+  path,
+  skills,
+  onToggle,
+  onOpenSkill,
+}: {
+  path: string | null;
+  skills: readonly SkillInfo[] | null;
+  onToggle: (name: string, enabled: boolean) => void;
+  onOpenSkill: (skill: SkillInfo) => void;
+}) {
   const [listRef] = useAutoAnimation<HTMLDivElement>();
-
-  useEffect(() => {
-    if (!path) {
-      setSkills([]);
-      return;
-    }
-    let cancelled = false;
-    setSkills(null);
-    void listSkills(path)
-      .then((loaded) => {
-        if (!cancelled) {
-          setSkills(loaded);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setSkills([]);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [path]);
-
-  const handleToggle = useCallback(
-    async (name: string, enabled: boolean) => {
-      if (!path) {
-        return;
-      }
-      // Optimistically reflect the toggle.
-      setSkills((prev) =>
-        prev ? prev.map((s) => (s.name === name ? { ...s, enabled } : s)) : prev
-      );
-      try {
-        if (path) {
-          await setSkillHidden(path, name, !enabled);
-        }
-      } catch (error) {
-        // Roll back on failure.
-        setSkills((prev) =>
-          prev
-            ? prev.map((s) =>
-                s.name === name ? { ...s, enabled: !enabled } : s
-              )
-            : prev
-        );
-        toast.error("Failed to update skill", {
-          description:
-            error instanceof Error ? error.message : "Please try again.",
-        });
-      }
-    },
-    [path]
-  );
 
   const content = useMemo(() => {
     if (!path) {
@@ -435,15 +316,13 @@ function PathSkills({ path }: { path: string | null }) {
             name={skill.name}
             description={skill.description}
             checked={skill.enabled}
-            onTitleClick={() => void openSkillFolder(skill)}
-            onCheckedChange={(enabled) =>
-              void handleToggle(skill.name, enabled)
-            }
+            onTitleClick={() => onOpenSkill(skill)}
+            onCheckedChange={(enabled) => onToggle(skill.name, enabled)}
           />
         ))}
       </div>
     );
-  }, [handleToggle, listRef, path, skills]);
+  }, [listRef, onOpenSkill, onToggle, path, skills]);
 
   return (
     <div className="flex min-w-0 grow flex-col">
