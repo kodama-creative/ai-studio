@@ -27,7 +27,7 @@ import type { PaneLifecycleHost } from "./pane-lifecycle-host";
 import { settleStreamingPane } from "./settle-streaming-pane";
 import { usePaneRefreshAcknowledgement } from "./use-pane-refresh-ack";
 
-interface PlaygroundTabPaneProps {
+export interface PlaygroundTabPaneProps {
   tabId: string;
   paneId: string;
   playgroundId: string;

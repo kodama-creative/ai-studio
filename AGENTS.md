@@ -292,6 +292,7 @@ Playground/Experiment target on every request.
 - `host/` — `host-services.tsx`: the desktop `HostServices` + `ModelClient` impls (`DesktopHostProvider`, `createElectrobunModelClient`) feeding the shared `@llm-space/ui` playground.
 - `shared/` — code used by both contexts: the Electrobun envelope, commands, and one `*-rpc.ts` contract per feature.
 - `components/` — desktop-only presentation: `thread-tabs/`, `settings/`, `command-palette.tsx`, `onboard-dialog.tsx`, `feature-reminder-dialog.tsx` (the "what's new" reminder popup), and account/update/github widgets. Application providers, RPC lifecycle, mutation ordering, and teardown policy belong under `app/`, not here. **The Thread Playground, model-provider, code-editor, shadcn `ui/`, and design tokens moved to `@llm-space/ui`** — import them from there, not from `@/components`.
+  - `components/thread-tabs/` owns only generic tab chrome and pane mounting; it receives a `renderPane` adapter. The Pi-backed Playground pane, persistence, refresh acknowledgement, and run-lifecycle ownership live together under `app/playground/` and are composed by `PageWorkspace`.
 - Design tokens live in `@llm-space/ui/styles/globals.css` (Tailwind v4 + OKLch), imported once by `app/layout.tsx`. The app is dark-themed.
 
 ### Web site (GitHub Pages) — how it publishes

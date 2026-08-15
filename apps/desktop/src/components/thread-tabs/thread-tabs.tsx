@@ -1,6 +1,5 @@
 "use client";
 
-import type { Thread } from "@llm-space/core";
 import { useTheme } from "@llm-space/ui/components/theme-provider";
 import { Tooltip } from "@llm-space/ui/components/tooltip";
 import { cn } from "@llm-space/ui/lib/utils";
@@ -30,8 +29,6 @@ import {
 import { useCommands } from "@/commands";
 
 import { PaneHost } from "./pane-host";
-import type { PaneLifecycleHost } from "./pane-lifecycle-host";
-import { PlaygroundTabPane } from "./playground-tab-pane";
 import { tabLabel, type AppTab } from "./use-thread-tabs";
 
 function _getPaneKey(tab: AppTab): string {
@@ -67,10 +64,8 @@ interface ThreadTabsProps {
   reorder: (from: number, to: number) => void;
   /** Create and open a new durable Playground. */
   onNewPlayground?: () => void;
-  onPlaygroundTitleChange?: (playgroundId: string, title: string) => void;
   onToggleSidebar?: () => void;
-  lifecycleHost: PaneLifecycleHost;
-  onThreadStateChange?: (tabId: string, thread: Thread | null) => void;
+  renderPane: (tab: AppTab, active: boolean) => ReactNode;
   /** Extra content pinned at the right end of the tab strip, before "+". */
   toolbarSlot?: ReactNode;
 }
@@ -90,10 +85,8 @@ export function ThreadTabs({
   closeAll,
   reorder,
   onNewPlayground,
-  onPlaygroundTitleChange,
   onToggleSidebar,
-  lifecycleHost,
-  onThreadStateChange,
+  renderPane,
   toolbarSlot,
 }: ThreadTabsProps) {
   const { resolvedTheme } = useTheme();
@@ -211,23 +204,6 @@ export function ThreadTabs({
       if (id !== null && id === pressed) close(id);
     },
     [close]
-  );
-
-  const renderPane = useCallback(
-    (tab: AppTab, active: boolean) => (
-      <PlaygroundTabPane
-        tabId={tab.id}
-        paneId={tab.paneId}
-        playgroundId={tab.playgroundId}
-        active={active}
-        lifecycleHost={lifecycleHost}
-        refreshNonce={tab.refreshNonce ?? 0}
-        onClose={close}
-        onTitleChange={onPlaygroundTitleChange}
-        onThreadStateChange={onThreadStateChange}
-      />
-    ),
-    [close, lifecycleHost, onPlaygroundTitleChange, onThreadStateChange]
   );
 
   return (

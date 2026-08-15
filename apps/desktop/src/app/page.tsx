@@ -41,13 +41,13 @@ import {
   useThreadTabs,
   type AppTab,
 } from "@/components/thread-tabs";
-import type { PaneLifecycleHost } from "@/components/thread-tabs/pane-lifecycle-host";
 import { UpdateIndicator } from "@/components/update-indicator";
 import { Welcome } from "@/components/welcome";
 import { trackAnalytics } from "@/lib/analytics";
 import type { SettingsTab } from "@/shared/commands";
 
 import { PaneActivityTracker } from "./playground/pane-activity-tracker";
+import type { PaneLifecycleHost } from "./playground/pane-lifecycle-host";
 import {
   closeAllTabsIfAllowed,
   closeOtherTabsIfAllowed,
@@ -55,6 +55,7 @@ import {
   paneIdForTab,
   refreshTabIfAllowed,
 } from "./playground/pane-mutation-actions";
+import { PlaygroundTabPane } from "./playground/playground-tab-pane";
 import {
   PlaygroundWorkspaceController,
   type SnapshotDocument,
@@ -442,6 +443,21 @@ function PageWorkspace() {
       isPaneMutationReserved,
     ]
   );
+  const renderPlaygroundPane = useCallback(
+    (tab: AppTab, active: boolean) => (
+      <PlaygroundTabPane
+        tabId={tab.id}
+        paneId={tab.paneId}
+        playgroundId={tab.playgroundId}
+        active={active}
+        lifecycleHost={paneLifecycleHost}
+        refreshNonce={tab.refreshNonce ?? 0}
+        onClose={close}
+        onTitleChange={tabs.handlePlaygroundTitleChange}
+      />
+    ),
+    [close, paneLifecycleHost, tabs.handlePlaygroundTitleChange]
+  );
   useEffect(
     () => () => {
       refreshReservationsRef.current.forEach((release) => release());
@@ -554,9 +570,8 @@ function PageWorkspace() {
               closeAll={handleCloseAllTabs}
               reorder={reorderVisibleTabs}
               onNewPlayground={handleNewPlayground}
-              onPlaygroundTitleChange={tabs.handlePlaygroundTitleChange}
               onToggleSidebar={handleToggleSidebar}
-              lifecycleHost={paneLifecycleHost}
+              renderPane={renderPlaygroundPane}
               toolbarSlot={<UpdateIndicator />}
             />
           </ResizablePanel>
