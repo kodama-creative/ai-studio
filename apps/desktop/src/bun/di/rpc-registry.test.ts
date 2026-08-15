@@ -264,6 +264,56 @@ test("RPC Registry validates namespace implementations at startup", () => {
   );
 });
 
+test("RPC Registry best-effort disposal releases every server", async () => {
+  const disposed: string[] = [];
+  const namespace = (name: string) =>
+    defineRpcNamespace<{
+      readonly requests: { ping(): Promise<void> };
+      readonly streams: Record<never, never>;
+      readonly events: Record<never, never>;
+    }>(name, {
+      requests: { ping: true },
+      streams: {},
+      events: {},
+    });
+  const contribution: RpcContribution = {
+    registerRpc(rpc) {
+      const first = {
+        namespace: namespace("first"),
+        requests: { ping: () => Promise.resolve() },
+        streams: {},
+        dispose() {
+          disposed.push("first");
+        },
+      };
+      const second = {
+        namespace: namespace("second"),
+        requests: { ping: () => Promise.resolve() },
+        streams: {},
+        dispose() {
+          disposed.push("second");
+          throw new Error("second cleanup failed");
+        },
+      };
+      rpc.registerServer(first);
+      rpc.registerServer(second);
+    },
+  };
+  const registry = new RpcRegistry(
+    new SnapshotContributionProvider(() => [contribution]),
+    { sendStreamEvent: () => undefined, sendEvent: () => undefined }
+  );
+  registry.onStart();
+
+  const failure = await registry.dispose().then(
+    () => undefined,
+    (error: unknown) => error
+  );
+  expect(failure).toBeInstanceOf(AggregateError);
+  expect((failure as Error).message).toBe("Failed to dispose RPC Registry.");
+  expect(disposed).toEqual(["second", "first"]);
+});
+
 test("RPC Registry reports synchronous stream admission errors through the envelope", () => {
   const events: unknown[] = [];
   const registry = new RpcRegistry(

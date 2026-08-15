@@ -55,7 +55,11 @@ export class CommandRegistry implements Disposable {
       }
       this._state = "started";
     } catch (error) {
-      void this.dispose();
+      // The window scope remains the authoritative cleanup owner and will
+      // await this same idempotent Promise. Attach a rejection handler now so
+      // an asynchronous rollback failure cannot become an unhandled task while
+      // the synchronous startup error propagates to that owner.
+      void this.dispose().catch(() => undefined);
       throw error;
     }
   }
@@ -127,9 +131,17 @@ export class CommandRegistry implements Disposable {
   /** Run the idempotent asynchronous cleanup behind {@link dispose}. */
   private async _dispose(): Promise<void> {
     this._state = "disposed";
+    const errors: unknown[] = [];
     for (const registration of this._registrations.reverse()) {
-      await registration.dispose();
+      try {
+        await registration.dispose();
+      } catch (error) {
+        errors.push(error);
+      }
     }
     this._registrations.length = 0;
+    if (errors.length > 0) {
+      throw new AggregateError(errors, "Failed to dispose Command Registry.");
+    }
   }
 }

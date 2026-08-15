@@ -111,4 +111,39 @@ describe("CommandRegistry", () => {
       "async failure",
     ]);
   });
+
+  test("best-effort disposal releases every command registration", async () => {
+    const disposed: string[] = [];
+    const contribution: CommandContribution = {
+      registerCommands(commands) {
+        const first = {
+          execute: () => undefined,
+          dispose() {
+            disposed.push("first");
+          },
+        };
+        const second = {
+          execute: () => undefined,
+          dispose() {
+            disposed.push("second");
+            throw new Error("second cleanup failed");
+          },
+        };
+        commands.registerCommand("updates.check", first);
+        commands.registerCommand("shell.reportBugs", second);
+      },
+    };
+    const registry = _registry([contribution]);
+    registry.onStart();
+
+    const failure = await registry.dispose().then(
+      () => undefined,
+      (error: unknown) => error
+    );
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect((failure as Error).message).toBe(
+      "Failed to dispose Command Registry."
+    );
+    expect(disposed).toEqual(["second", "first"]);
+  });
 });
