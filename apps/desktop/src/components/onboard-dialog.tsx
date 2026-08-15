@@ -21,9 +21,9 @@ import {
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
+import { createAnalyticsClient } from "@/client/analytics";
 import { useCommands } from "@/commands";
-import { track } from "@/lib/analytics";
-
+import { trackAnalytics } from "@/lib/analytics";
 
 /**
  * First-run onboarding dialog. Shown automatically when no models are configured
@@ -38,6 +38,7 @@ export function OnboardDialog({
 }) {
   const models = useModels();
   const { executeCommand } = useCommands();
+  const analytics = useMemo(() => createAnalyticsClient(), []);
   const fetchBuiltinProviders = useFetchBuiltinProviders();
   const addProvider = useAddProvider();
   const [builtinProviders, setBuiltinProviders] = useState<
@@ -91,25 +92,28 @@ export function OnboardDialog({
   }, [builtinProviders]);
 
   const handleConfigureModels = useCallback(() => {
-    track({
+    trackAnalytics(analytics, {
       event: "onboarding_choice",
       properties: { choice: "configure_models" },
     });
     onOpenChange(false);
     executeCommand({ type: "app.openSettings", args: { tab: "models" } });
-  }, [executeCommand, onOpenChange]);
+  }, [analytics, executeCommand, onOpenChange]);
   const handleLearnMore = useCallback(() => {
-    track({ event: "onboarding_choice", properties: { choice: "learn_more" } });
+    trackAnalytics(analytics, {
+      event: "onboarding_choice",
+      properties: { choice: "learn_more" },
+    });
     executeCommand({ type: "shell.openDocument", args: {} });
-  }, [executeCommand]);
+  }, [analytics, executeCommand]);
   const handleOpenAnalyticsSettings = useCallback(() => {
-    track({
+    trackAnalytics(analytics, {
       event: "onboarding_choice",
       properties: { choice: "analytics_settings" },
     });
     onOpenChange(false);
     executeCommand({ type: "app.openSettings", args: { tab: "general" } });
-  }, [executeCommand, onOpenChange]);
+  }, [analytics, executeCommand, onOpenChange]);
 
   const handleAddProvider = useCallback(
     async (provider: ModelProviderGroup) => {

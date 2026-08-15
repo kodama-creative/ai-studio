@@ -16,8 +16,8 @@
  *
  * Every event funnels through the bun main process (`bun/analytics`), which is
  * the single, auditable network egress. Renderer-only events reach it over the
- * `captureAnalyticsEvent` RPC message; bun-side events call `analytics.capture`
- * directly.
+ * namespaced `analytics.capture` RPC request; bun-side events call
+ * `analytics.capture` directly.
  *
  * The full user-facing description of what is collected and how to opt out
  * lives in `TELEMETRY.md` at the repo root - keep it in sync with this map.

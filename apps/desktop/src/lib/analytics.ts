@@ -1,20 +1,19 @@
-import { createAnalyticsClient } from "@/client/analytics";
+import type { AnalyticsClient } from "@/client/analytics";
 import type { AnalyticsEvent } from "@/shared/analytics";
-
-const analyticsClient = createAnalyticsClient();
 
 /**
  * Record an anonymous, behaviour-only analytics event from the renderer.
  *
  * This does not send anything itself — it forwards the event to the bun main
- * process (the single, auditable telemetry egress) over a fire-and-forget RPC
- * message. Safe to call before RPC is ready and can never throw into UI code.
+ * process (the single, auditable telemetry egress) through the client owned by
+ * the calling feature. Synchronous and asynchronous failures are contained.
  * See `shared/analytics.ts` for the privacy contract.
  */
-export function track(event: AnalyticsEvent): void {
-  try {
-    void analyticsClient.capture(event);
-  } catch {
-    // Telemetry must never break the UI.
-  }
+export function trackAnalytics(
+  client: Pick<AnalyticsClient, "capture">,
+  event: AnalyticsEvent
+): void {
+  void Promise.resolve()
+    .then(() => client.capture(event))
+    .catch(() => undefined);
 }

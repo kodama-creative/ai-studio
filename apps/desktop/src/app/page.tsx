@@ -23,6 +23,7 @@ import { usePanelRef } from "react-resizable-panels";
 import { toast } from "sonner";
 
 import { createAgentProjectClient } from "@/client/agent-project-client";
+import { createAnalyticsClient } from "@/client/analytics";
 import { createPlaygroundClient } from "@/client/playground-client";
 import { createThreadSharingClient } from "@/client/share";
 import { useCommands, useRegisterCommands } from "@/commands";
@@ -50,7 +51,7 @@ import {
 import { UpdateIndicator } from "@/components/update-indicator";
 import { UpdateStatusProvider } from "@/components/update-status-provider";
 import { Welcome } from "@/components/welcome";
-import { track } from "@/lib/analytics";
+import { trackAnalytics } from "@/lib/analytics";
 import { useFullScreen } from "@/lib/use-full-screen";
 import type { SettingsTab } from "@/shared/commands";
 
@@ -151,6 +152,7 @@ function PageWorkspace() {
   const tabs = useThreadTabs({ canPruneRestoredTab });
   const playgroundClient = useMemo(() => createPlaygroundClient(), []);
   const agentProjectClient = useMemo(() => createAgentProjectClient(), []);
+  const analytics = useMemo(() => createAnalyticsClient(), []);
   const threadSharingClient = useMemo(() => createThreadSharingClient(), []);
   const seedHost = useHostServices();
   const { executeCommand } = useCommands();
@@ -245,8 +247,10 @@ function PageWorkspace() {
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
   // One event per open transition, no matter which command opened Settings.
   useEffect(() => {
-    if (settingsOpen) track({ event: "settings_opened", properties: {} });
-  }, [settingsOpen]);
+    if (settingsOpen) {
+      trackAnalytics(analytics, { event: "settings_opened", properties: {} });
+    }
+  }, [analytics, settingsOpen]);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [onboardOpen, setOnboardOpen] = useState(false);
   const [examplesOpen, setExamplesOpen] = useState(false);
