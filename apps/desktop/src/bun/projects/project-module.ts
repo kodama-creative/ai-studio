@@ -17,7 +17,10 @@ import {
 import { StudioThreadRpcServer } from "../rpc/thread-rpc-server";
 
 import type { AgentProject } from "./agent-project";
-import { ProjectRpcServer } from "./project-rpc-server";
+import {
+  ProjectSourceRpcServer,
+  StudioRpcServer,
+} from "./project-rpc-server";
 import { ProjectSandbox } from "./project-sandbox";
 
 /** Bind one Project Studio from its source and process-owned runtime managers. */
@@ -91,7 +94,8 @@ class ProjectContribution implements RpcContributionApi {
   ) {}
 
   registerRpc(rpc: RpcRegistry): void {
-    rpc.registerServer(new ProjectRpcServer(this._studio));
+    rpc.registerServer(new ProjectSourceRpcServer(this._studio));
+    rpc.registerServer(new StudioRpcServer(this._studio));
     rpc.registerServer(
       new StudioThreadRpcServer(this._studio, this._projectId)
     );

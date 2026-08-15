@@ -28,11 +28,12 @@ import {
 } from "react";
 import { toast } from "sonner";
 
-import { createRpcProjectStudioClient } from "@/client/rpc-project-studio-client";
+import { createProjectSourceClient } from "@/client/project-source-client";
+import { createStudioClient } from "@/client/studio-client";
 import { useCommands, useRegisterCommands } from "@/commands";
 import { TreeView, type TreeDataItem } from "@/components/tree-view";
 import type { AgentProjectView } from "@/shared/agent-project";
-import type { ProjectSourceNode } from "@/shared/project-studio";
+import type { ProjectSourceNode } from "@/shared/project-source-rpc";
 
 import { ProjectSourceController } from "./project/project-source-controller";
 import { ProjectThreadPane } from "./project/project-thread-pane";
@@ -53,14 +54,15 @@ type ProjectTab =
     };
 
 export function ProjectPage({ project }: { project: AgentProjectView }) {
-  const client = useMemo(() => createRpcProjectStudioClient(), []);
+  const studioClient = useMemo(() => createStudioClient(), []);
+  const sourceClient = useMemo(() => createProjectSourceClient(), []);
   const threadController = useMemo(
     () =>
       new ProjectThreadsController({
-        client,
+        client: studioClient,
         reportError: _reportError,
       }),
-    [client]
+    [studioClient]
   );
   const threadState = useSyncExternalStore(
     threadController.subscribe,
@@ -70,10 +72,10 @@ export function ProjectPage({ project }: { project: AgentProjectView }) {
   const sourceController = useMemo(
     () =>
       new ProjectSourceController({
-        client,
+        client: sourceClient,
         reportError: _reportError,
       }),
-    [client]
+    [sourceClient]
   );
   const sourceState = useSyncExternalStore(
     sourceController.subscribe,
@@ -401,7 +403,7 @@ export function ProjectPage({ project }: { project: AgentProjectView }) {
           </Empty>
         ) : (
           <ProjectThreadPane
-            client={client}
+            client={studioClient}
             controller={threadController}
             projectId={project.id}
             history={threadState.runHistory.get(visibleThread.id) ?? []}

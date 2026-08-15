@@ -5,7 +5,7 @@ import type {
 } from "@llm-space/studio";
 import type { StudioEvaluationMetadata } from "@llm-space/studio/evaluation";
 
-import type { ProjectStudioTransport } from "@/shared/project-studio";
+import type { StudioTransport } from "@/shared/studio-rpc";
 
 const EMPTY_EVALUATION_METADATA: StudioEvaluationMetadata = {
   evaluations: [],
@@ -29,7 +29,7 @@ export interface ProjectThreadsSnapshot {
 }
 
 export interface ProjectThreadsControllerOptions {
-  readonly client: ProjectStudioTransport;
+  readonly client: StudioTransport;
   readonly reportError: (title: string, error: unknown) => void;
 }
 

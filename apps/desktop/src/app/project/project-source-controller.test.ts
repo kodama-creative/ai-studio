@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import type { ProjectSourceSnapshot } from "@/shared/project-studio";
+import type { ProjectSourceSnapshot } from "@/shared/project-source-rpc";
 
 import { ProjectSourceController } from "./project-source-controller";
 

@@ -9,7 +9,7 @@ import { useCallback, useMemo, useRef } from "react";
 import { toast } from "sonner";
 
 import { SerializedPersistence } from "@/components/thread-tabs/serialized-persistence";
-import type { ProjectStudioTransport } from "@/shared/project-studio";
+import type { StudioTransport } from "@/shared/studio-rpc";
 
 import {
   createProjectThreadExecutionRuntime,
@@ -21,7 +21,7 @@ import {
 import type { ProjectThreadsController } from "./project-threads-controller";
 
 interface ProjectThreadPaneProps {
-  readonly client: ProjectStudioTransport;
+  readonly client: StudioTransport;
   readonly controller: ProjectThreadsController;
   readonly projectId: string;
   readonly history: readonly StudioRunHistoryEntry[];

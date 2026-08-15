@@ -1,8 +1,8 @@
 import type {
   ProjectSourceNode,
   ProjectSourceSnapshot,
-  ProjectStudioTransport,
-} from "@/shared/project-studio";
+  ProjectSourceTransport,
+} from "@/shared/project-source-rpc";
 
 export interface ProjectSourceControllerSnapshot {
   readonly files: readonly ProjectSourceNode[];
@@ -13,7 +13,7 @@ export interface ProjectSourceControllerSnapshot {
 
 export interface ProjectSourceControllerOptions {
   readonly client: Pick<
-    ProjectStudioTransport,
+    ProjectSourceTransport,
     "readSourceFile" | "watchSourceFiles"
   >;
   readonly reportError: (title: string, error: unknown) => void;

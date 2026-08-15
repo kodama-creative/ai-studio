@@ -18,7 +18,7 @@ import type {
 } from "@llm-space/studio/evaluation";
 import type { ExternalThreadExecutionRuntime } from "@llm-space/ui/components/thread-playground";
 
-import type { ProjectStudioTransport } from "@/shared/project-studio";
+import type { StudioTransport } from "@/shared/studio-rpc";
 import type { ThreadClient, ThreadTarget } from "@/shared/thread-rpc";
 
 import { createThreadExecutionRuntime } from "../thread-execution-runtime";
@@ -109,7 +109,7 @@ export function shouldPersistProjectThread(
 
 /** Adapts Project editor controls directly to product-owned Thread RPC. */
 export function createProjectThreadExecutionRuntime(input: {
-  readonly client: ProjectStudioTransport;
+  readonly client: StudioTransport;
   readonly threadClient?: ThreadClient;
   readonly projectId: string;
   readonly threadId: string;

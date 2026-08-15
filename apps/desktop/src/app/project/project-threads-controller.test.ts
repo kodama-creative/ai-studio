@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import type { StudioThread, StudioThreadEvent } from "@llm-space/studio";
 
-import type { ProjectStudioTransport } from "@/shared/project-studio";
+import type { StudioTransport } from "@/shared/studio-rpc";
 
 import { ProjectThreadsController } from "./project-threads-controller";
 
@@ -148,13 +148,10 @@ describe("ProjectThreadsController", () => {
 });
 
 function _client(
-  overrides: Partial<ProjectStudioTransport>
-): ProjectStudioTransport {
+  overrides: Partial<StudioTransport>
+): StudioTransport {
   const thread = _thread("thread-a", "Thread A");
   return {
-    getSourceRevision: () => Promise.resolve("source-1"),
-    listSourceFiles: () => Promise.resolve([]),
-    readSourceFile: () => Promise.resolve(""),
     listThreads: () => Promise.resolve([thread]),
     listRunHistory: () => Promise.resolve([]),
     saveRunHistory: () => Promise.resolve([]),
@@ -166,7 +163,6 @@ function _client(
     createThread: () => Promise.resolve(thread),
     loadThread: () => Promise.resolve(thread),
     saveDocument: () => Promise.resolve(thread),
-    watchSourceFiles: () => _events([]),
     events: () => _events([]),
     ...overrides,
   };

@@ -4,7 +4,7 @@ import type { Thread } from "@llm-space/core";
 import type { PiSessionSnapshot } from "@llm-space/pi-runtime";
 import type { StudioRunHistoryEntry, StudioThread } from "@llm-space/studio";
 
-import type { ProjectStudioTransport } from "@/shared/project-studio";
+import type { StudioTransport } from "@/shared/studio-rpc";
 import type { ThreadClient } from "@/shared/thread-rpc";
 
 import {
@@ -198,13 +198,10 @@ function _thread(): StudioThread {
 
 /** Supplies a minimal metadata-only Project transport. */
 function _client(
-  overrides: Partial<ProjectStudioTransport> = {}
-): ProjectStudioTransport {
+  overrides: Partial<StudioTransport> = {}
+): StudioTransport {
   const thread = _thread();
   return {
-    getSourceRevision: () => Promise.resolve("source-1"),
-    listSourceFiles: () => Promise.resolve([]),
-    readSourceFile: () => Promise.resolve(""),
     listThreads: () => Promise.resolve([thread]),
     listRunHistory: () => Promise.resolve([]),
     saveRunHistory: () => Promise.resolve([]),
@@ -216,7 +213,6 @@ function _client(
     createThread: () => Promise.resolve(thread),
     loadThread: () => Promise.resolve(thread),
     saveDocument: () => Promise.resolve(thread),
-    watchSourceFiles: () => _emptyAsyncIterable(),
     events: () => _emptyAsyncIterable(),
     ...overrides,
   };
