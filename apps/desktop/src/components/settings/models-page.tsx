@@ -104,13 +104,19 @@ import {
 import {
   Fragment,
   useEffect,
+  useLayoutEffect,
   useMemo,
+  useRef,
   useState,
   useSyncExternalStore,
 } from "react";
 import { toast } from "sonner";
 
 import { AddProviderController } from "@/app/settings/add-provider-controller";
+import {
+  ProviderMetadataController,
+  type ProviderMetadataTarget,
+} from "@/app/settings/provider-metadata-controller";
 import { runSettingsMutation } from "@/app/settings/run-settings-mutation";
 
 import { ApiKeyField } from "./api-key-field";
@@ -154,6 +160,19 @@ function runModelMutation<T>(
 
 function sortProviders(providers: ModelProviderGroup[]): ModelProviderGroup[] {
   return [...providers].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function _providerMetadataTarget(
+  provider: ModelProviderGroup | null
+): ProviderMetadataTarget | null {
+  return provider
+    ? {
+        providerId: provider.id,
+        name: provider.name,
+        api: provider.api ?? DEFAULT_CUSTOM_PROVIDER_API,
+        icon: provider.icon ?? "",
+      }
+    : null;
 }
 
 export function ModelsPage() {
@@ -543,7 +562,6 @@ function ProviderEditor({ provider }: { provider: ModelProviderGroup | null }) {
   const removeProviderProfile = useRemoveProviderProfile();
   const setModelEnabled = useSetModelEnabled();
   const setAllModelsEnabled = useSetAllModelsEnabled();
-  const [iconDraft, setIconDraft] = useState(provider?.icon ?? "");
   const [selectedProfileId, setSelectedProfileId] = useState(
     provider?.profiles[0]?.id ?? ""
   );
@@ -551,8 +569,32 @@ function ProviderEditor({ provider }: { provider: ModelProviderGroup | null }) {
   const [modelView, setModelView] = useState<"all" | "enabled" | "disabled">(
     "all"
   );
-  const [apiValue, setApiValue] = useState<CustomProviderApi>(
-    DEFAULT_CUSTOM_PROVIDER_API
+  const initialMetadataTarget = useRef(
+    _providerMetadataTarget(provider)
+  ).current;
+  const metadataController = useMemo(
+    () =>
+      new ProviderMetadataController(initialMetadataTarget, {
+        updateProvider,
+        saveFailed: (field, error) => {
+          const title =
+            field === "name"
+              ? "Failed to rename provider"
+              : field === "api"
+                ? "Failed to update API type"
+                : "Failed to update provider icon";
+          toast.error(title, {
+            description:
+              error instanceof Error ? error.message : "Please try again.",
+          });
+        },
+      }),
+    [initialMetadataTarget, updateProvider]
+  );
+  const metadata = useSyncExternalStore(
+    metadataController.subscribe,
+    metadataController.getSnapshot,
+    metadataController.getSnapshot
   );
   const [modelListRef] = useAutoAnimation<HTMLDivElement>();
   const [editorOpen, setEditorOpen] = useState(false);
@@ -579,54 +621,10 @@ function ProviderEditor({ provider }: { provider: ModelProviderGroup | null }) {
     [provider]
   );
 
-  useEffect(() => {
-    setApiValue(provider?.api ?? DEFAULT_CUSTOM_PROVIDER_API);
-  }, [provider?.api, provider?.id]);
-
-  const handleNameBlur = (event: React.FocusEvent<HTMLInputElement>) => {
-    if (!provider) return;
-    const value = event.target.value.trim();
-    if (value === "" || value === provider.name) {
-      return;
-    }
-    const input = event.currentTarget;
-    runModelMutation(
-      "Failed to rename provider",
-      () => updateProvider(provider.id, { name: value }),
-      { onError: () => void (input.value = provider.name) }
-    );
-  };
-
-  const handleApiChange = (api: CustomProviderApi) => {
-    if (!provider) {
-      return;
-    }
-    const previous = apiValue;
-    setApiValue(api);
-    if (api === previous) {
-      return;
-    }
-    runModelMutation(
-      "Failed to update API type",
-      () => updateProvider(provider.id, { api }),
-      { onError: () => setApiValue(previous) }
-    );
-  };
-
-  // Persist the icon override on blur when changed. Empty ⇒ auto-resolve.
-  const handleIconBlur = () => {
-    if (!provider) return;
-    const value = iconDraft.trim();
-    const next = value === "" ? null : value;
-    const current = provider.icon ?? null;
-    if (next !== current) {
-      runModelMutation(
-        "Failed to update provider icon",
-        () => updateProvider(provider.id, { icon: next }),
-        { onError: () => setIconDraft(current ?? "") }
-      );
-    }
-  };
+  useLayoutEffect(() => {
+    metadataController.sync(_providerMetadataTarget(provider));
+  }, [metadataController, provider]);
+  useEffect(() => () => metadataController.close(), [metadataController]);
 
   if (!provider) {
     return (
@@ -684,7 +682,7 @@ function ProviderEditor({ provider }: { provider: ModelProviderGroup | null }) {
   // live API type selection.
   const usesAnthropicApi = isBuiltin
     ? provider.models.some((model) => model.api === "anthropic-messages")
-    : apiValue === "anthropic-messages";
+    : metadata.api === "anthropic-messages";
   return (
     <div className="flex min-w-0 grow flex-col">
       <ScrollArea className="min-h-0 grow">
@@ -715,19 +713,22 @@ function ProviderEditor({ provider }: { provider: ModelProviderGroup | null }) {
               <div className="flex flex-col gap-2">
                 <span className="text-sm font-medium">Provider name</span>
                 <Input
-                  defaultValue={provider.name}
+                  value={metadata.name}
                   placeholder="Custom provider"
                   aria-label="Custom provider name"
-                  onBlur={handleNameBlur}
+                  onChange={(event) =>
+                    metadataController.draft("name", event.target.value)
+                  }
+                  onBlur={() => metadataController.commit("name")}
                 />
               </div>
 
               <div className="flex flex-col gap-2">
                 <span className="text-sm font-medium">API type</span>
                 <Select
-                  value={apiValue}
+                  value={metadata.api}
                   onValueChange={(value) =>
-                    handleApiChange(value as CustomProviderApi)
+                    metadataController.selectApi(value as CustomProviderApi)
                   }
                 >
                   <SelectTrigger
@@ -757,14 +758,16 @@ function ProviderEditor({ provider }: { provider: ModelProviderGroup | null }) {
                 <ProviderAvatar
                   id={provider.id}
                   name={provider.name}
-                  icon={iconDraft.trim() || undefined}
+                  icon={metadata.icon.trim() || undefined}
                 />
                 <Input
-                  value={iconDraft}
+                  value={metadata.icon}
                   placeholder="Auto (e.g. openai, anthropic, google)"
                   aria-label={`${provider.name} icon`}
-                  onChange={(e) => setIconDraft(e.target.value)}
-                  onBlur={handleIconBlur}
+                  onChange={(event) =>
+                    metadataController.draft("icon", event.target.value)
+                  }
+                  onBlur={() => metadataController.commit("icon")}
                 />
               </div>
               <div className="text-muted-foreground text-xs">
@@ -966,7 +969,7 @@ function ProviderEditor({ provider }: { provider: ModelProviderGroup | null }) {
         onOpenChange={setEditorOpen}
         providerId={provider.id}
         profileId={selectedProfile.id}
-        providerApi={isBuiltin ? undefined : apiValue}
+        providerApi={isBuiltin ? undefined : metadata.api}
         model={editingModel}
       />
       <ConfirmDialog
