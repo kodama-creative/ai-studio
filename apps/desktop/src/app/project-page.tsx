@@ -641,6 +641,7 @@ function _ProjectThreadPlaygroundPane({
       definitionReadonly
       modelSelectionReadonly={false}
       executionRuntime={executionRuntime}
+      runChangePersistence="runtime"
       initialValue={studioThreadToPlaygroundThread(
         thread,
         history,

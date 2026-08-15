@@ -72,6 +72,7 @@ import {
   type ExternalThreadExecutionRuntime,
   type ThreadRunMetadata,
 } from "./stores";
+import type { RunChangePersistence } from "./thread-playground-events";
 import { ThreadShareButton } from "./thread-share-button";
 import { ToolListView } from "./tool/tool-list-view";
 import { useToolExecutor } from "./tool/use-tool-executor";
@@ -105,6 +106,8 @@ export interface ThreadPlaygroundProps {
   transport?: AgentTransport;
   /** Host-owned full-run execution for Studio/Work interactions. */
   executionRuntime?: ExternalThreadExecutionRuntime;
+  /** Selects who persists Thread changes emitted when a run settles. */
+  runChangePersistence?: RunChangePersistence;
   /** Keep Agent definition controls read-only while messages remain editable. */
   definitionReadonly?: boolean;
   /** Override definitionReadonly for only the provider/model selector. */
@@ -162,6 +165,7 @@ function _ThreadPlaygroundStore({
   initialValue,
   transport,
   executionRuntime,
+  runChangePersistence = "editor",
   runtimeId,
   onChange,
   onRunMetadataChange,
@@ -211,6 +215,8 @@ function _ThreadPlaygroundStore({
     onChange,
     onStreamingStart,
     onStreamingEnd,
+  }, {
+    runChangePersistence,
   });
   return (
     <ThreadStoreContext.Provider value={store}>
