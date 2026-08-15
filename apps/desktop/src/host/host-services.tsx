@@ -19,7 +19,7 @@ import {
   runUv,
   writeProjectFile,
 } from "@/client/generator";
-import { listMcpServers, listMcpTools } from "@/client/mcp";
+import { createMcpClient } from "@/client/mcp";
 import { modelsClient } from "@/client/models";
 import {
   directoryExists,
@@ -35,7 +35,7 @@ import {
   listAvailableSkills,
   listSkills,
 } from "@/client/skills";
-import { executeTool } from "@/client/tool-execution";
+import { createToolExecutor } from "@/client/tool-execution";
 import { useCommands } from "@/commands";
 import type { SettingsTab } from "@/shared/commands";
 
@@ -50,8 +50,7 @@ export function createElectrobunModelClient(): ModelClient {
     removeProvider: (providerId) => modelsClient.removeProvider(providerId),
     addProvider: (providerId) => modelsClient.addProvider(providerId),
     addCustomProvider: (input) => modelsClient.addCustomProvider(input),
-    addProviderProfile: (providerId) =>
-      modelsClient.addProfile(providerId),
+    addProviderProfile: (providerId) => modelsClient.addProfile(providerId),
     updateProviderProfile: (providerId, profileId, fields) =>
       modelsClient.updateProfile({
         providerId,
@@ -92,6 +91,8 @@ export function DesktopHostProvider({ children }: { children: ReactNode }) {
     () => createAuxiliaryGenerationClient(),
     []
   );
+  const mcp = useMemo(() => createMcpClient(), []);
+  const executeTool = useMemo(() => createToolExecutor(mcp), [mcp]);
 
   const value = useMemo<HostServices>(
     () => ({
@@ -104,8 +105,8 @@ export function DesktopHostProvider({ children }: { children: ReactNode }) {
         listSkills: (path) => listSkills(path),
       },
       mcp: {
-        listServers: () => listMcpServers(),
-        listTools: (serverId) => listMcpTools(serverId),
+        listServers: () => mcp.listServers(),
+        listTools: (serverId) => mcp.listTools(serverId),
       },
       builtinTools: {
         list: () => listBuiltInTools(),
@@ -132,12 +133,7 @@ export function DesktopHostProvider({ children }: { children: ReactNode }) {
           providerId: string,
           envNames: string[],
           options?: { profileId?: string }
-        ) =>
-          resolveGeneratorEnv(
-            providerId,
-            envNames,
-            options?.profileId
-          ),
+        ) => resolveGeneratorEnv(providerId, envNames, options?.profileId),
       },
       actions: {
         openSettings: (tab) =>
@@ -145,20 +141,29 @@ export function DesktopHostProvider({ children }: { children: ReactNode }) {
             type: "app.openSettings",
             args: { tab: tab as SettingsTab },
           }),
-        openLink: (url) => executeCommand({ type: "shell.openLink", args: { url } }),
+        openLink: (url) =>
+          executeCommand({ type: "shell.openLink", args: { url } }),
         shareThread: createDesktopShareThreadAction(executeCommand),
         openVariables: (variableName) =>
-          executeCommand({ type: "thread.openVariables", args: { variableName } }),
+          executeCommand({
+            type: "thread.openVariables",
+            args: { variableName },
+          }),
         registerOpenVariables: (handler) =>
           registerCommandHandlers({
-            "thread.openVariables": ({ variableName }) =>
-              handler(variableName),
+            "thread.openVariables": ({ variableName }) => handler(variableName),
           }),
         registerRunThread: (run) =>
           registerCommandHandlers({ "thread.run": () => run() }),
       },
     }),
-    [auxiliaryGeneration, executeCommand, registerCommandHandlers]
+    [
+      auxiliaryGeneration,
+      executeCommand,
+      executeTool,
+      mcp,
+      registerCommandHandlers,
+    ]
   );
 
   return <HostServicesProvider value={value}>{children}</HostServicesProvider>;

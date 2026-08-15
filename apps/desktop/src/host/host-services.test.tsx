@@ -74,6 +74,12 @@ class ControllableRpc {
     if (input.namespace === "generator" && input.method === "resolveEnv") {
       return { modelApiKey: "local-secret", envValues: {} };
     }
+    if (input.namespace === "mcp" && input.method === "callTool") {
+      return {
+        content: [{ type: "text", text: "tool result" }],
+        isError: true,
+      };
+    }
     return [];
   }
 }
@@ -167,5 +173,42 @@ describe("Desktop local host services", () => {
         ],
       },
     ]);
+  });
+
+  test("injects its MCP namespace client into tool execution", async () => {
+    const host = _captureHost();
+    const executeTool = host.executeTool;
+    if (executeTool === null) throw new Error("Tool execution is unavailable");
+    const result = await executeTool(
+      {
+        type: "mcp",
+        name: "mcp__local__lookup",
+        description: "Lookup",
+        parameters: { type: "object" },
+        serverId: "server-local",
+        serverName: "local",
+        toolName: "lookup",
+      },
+      { query: "value" },
+      { thread: {}, variables: {} }
+    );
+
+    expect(RPC.requests).toEqual([
+      {
+        namespace: "mcp",
+        method: "callTool",
+        args: [
+          {
+            serverId: "server-local",
+            toolName: "lookup",
+            arguments: { query: "value" },
+          },
+        ],
+      },
+    ]);
+    expect(result).toEqual({
+      content: [{ type: "text", text: "tool result" }],
+      isError: true,
+    });
   });
 });

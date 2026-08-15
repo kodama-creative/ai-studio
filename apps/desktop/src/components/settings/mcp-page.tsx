@@ -10,7 +10,6 @@ import {
   getMcpReadinessLabel,
   normalizeMcpName,
   type McpDiagnosticStep,
-  type McpServerDraft,
   type McpServerReadiness,
   type McpServerView,
   type McpToolSummary,
@@ -57,383 +56,70 @@ import {
   X,
 } from "lucide-react";
 import {
-  useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
 import { toast } from "sonner";
 import { format } from "timeago.js";
 
 import {
-  addMcpServer,
-  cancelMcpTest,
-  disconnectMcpServer,
-  listMcpServers,
-  listMcpTools,
-  removeMcpServer,
-  updateMcpServer,
-} from "@/client/mcp";
+  McpSettingsController,
+  type McpKeyValueRow,
+  type McpServerForm,
+} from "@/app/settings/mcp-settings-controller";
+import { createMcpClient } from "@/client/mcp";
 
 import { SettingsEmptyState } from "./settings-empty-state";
 import { SettingsPage } from "./settings-page";
 
-interface Row {
-  id: string;
-  key: string;
-  value: string;
-}
-
-interface ServerForm {
-  name: string;
-  useOriginalToolNames: boolean;
-  transport: McpTransportType;
-  command: string;
-  argsText: string;
-  cwd: string;
-  env: Row[];
-  url: string;
-  headers: Row[];
-}
-
-const EMPTY_FORM: ServerForm = {
-  name: "",
-  useOriginalToolNames: false,
-  transport: "stdio",
-  command: "",
-  argsText: "",
-  cwd: "",
-  env: [],
-  url: "",
-  headers: [],
-};
-
-function _formFromServer(server: McpServerView | null): ServerForm {
-  if (!server) {
-    return { ...EMPTY_FORM };
-  }
-  return {
-    name: server.name,
-    useOriginalToolNames: server.useOriginalToolNames ?? false,
-    transport: server.transport,
-    command: server.command ?? "",
-    argsText: (server.args ?? []).join("\n"),
-    cwd: server.cwd ?? "",
-    env: _rowsFromRecord(server.env),
-    url: server.url ?? "",
-    headers: _rowsFromRecord(server.headers),
-  };
-}
-
-function _draftFromForm(form: ServerForm): McpServerDraft {
-  if (form.transport === "stdio") {
-    return {
-      name: form.name,
-      useOriginalToolNames: form.useOriginalToolNames,
-      transport: "stdio",
-      command: form.command,
-      args: form.argsText
-        .split("\n")
-        .map((item) => item.trim())
-        .filter(Boolean),
-      cwd: form.cwd.trim() || null,
-      env: _recordFromRows(form.env),
-    };
-  }
-  return {
-    name: form.name,
-    useOriginalToolNames: form.useOriginalToolNames,
-    transport: form.transport,
-    url: form.url,
-    headers: _recordFromRows(form.headers),
-  };
-}
-
-function _rowsFromRecord(record: Record<string, string> | undefined): Row[] {
-  return Object.entries(record ?? {}).map(([key, value]) =>
-    _createRow(key, value)
-  );
-}
-
-function _createRow(key = "", value = ""): Row {
-  return { id: crypto.randomUUID(), key, value };
-}
-
-function _recordFromRows(rows: Row[]): Record<string, string> | undefined {
-  const result: Record<string, string> = {};
-  for (const row of rows) {
-    const key = row.key.trim();
-    if (key) {
-      result[key] = row.value;
-    }
-  }
-  return Object.keys(result).length > 0 ? result : undefined;
-}
-
-function _canCreateServer(form: ServerForm): boolean {
-  if (!normalizeMcpName(form.name)) {
-    return false;
-  }
-  if (form.transport === "stdio") {
-    return form.command.trim().length > 0;
-  }
-  try {
-    new URL(form.url);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 export function McpPage() {
-  const [servers, setServers] = useState<McpServerView[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [selectedIdBeforeCreate, setSelectedIdBeforeCreate] = useState<
-    string | null
-  >(null);
-  const [creating, setCreating] = useState(false);
-  const [form, setForm] = useState<ServerForm>(EMPTY_FORM);
-  const [formError, setFormError] = useState<string | null>(null);
-  const [tools, setTools] = useState<McpToolView[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [testingServerId, setTestingServerId] = useState<string | null>(null);
-  const [cancellingTest, setCancellingTest] = useState(false);
-  const [disconnecting, setDisconnecting] = useState(false);
+  const client = useMemo(() => createMcpClient(), []);
+  const controller = useMemo(
+    () =>
+      new McpSettingsController({
+        client,
+        notifySuccess: (title, description) =>
+          toast.success(title, { description }),
+        notifyError: (title, error) =>
+          toast.error(title, {
+            description:
+              error instanceof Error ? error.message : "Please try again.",
+          }),
+      }),
+    [client]
+  );
+  const state = useSyncExternalStore(
+    controller.subscribe,
+    controller.getSnapshot,
+    controller.getSnapshot
+  );
   const [removeOpen, setRemoveOpen] = useState(false);
-  const [dirty, setDirty] = useState(false);
-  const formRef = useRef(form);
-  const preserveFormAfterCreateRef = useRef(false);
-  const cancelRequestedRef = useRef(false);
-  formRef.current = form;
-
-  const selectedServer = useMemo(
-    () => servers.find((server) => server.id === selectedId) ?? null,
-    [selectedId, servers]
-  );
-  const normalizedName = normalizeMcpName(form.name);
-  const testing = selectedServer?.id === testingServerId;
-
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    try {
-      const next = await listMcpServers();
-      setServers(next);
-      setSelectedId((current) => {
-        if (creating) {
-          return current;
-        }
-        if (current && next.some((server) => server.id === current)) {
-          return current;
-        }
-        return next[0]?.id ?? null;
-      });
-    } catch (error) {
-      toast.error("Failed to load MCP servers", {
-        description:
-          error instanceof Error ? error.message : "Please try again.",
-      });
-    } finally {
-      setLoading(false);
-    }
-  }, [creating]);
+  const selectedServer =
+    state.servers.find((server) => server.id === state.selectedId) ?? null;
+  const normalizedName = normalizeMcpName(state.form.name);
+  const testing = selectedServer?.id === state.testingServerId;
 
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
-
-  useEffect(() => {
-    if (!creating) {
-      if (preserveFormAfterCreateRef.current) {
-        preserveFormAfterCreateRef.current = false;
-      } else {
-        setForm(_formFromServer(selectedServer));
-        setDirty(false);
-      }
-      setTools([]);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- reset form only when the selected server's id changes, not on every object update (would clobber in-progress edits)
-  }, [creating, selectedServer?.id]);
-
-  const createServer = () => {
-    setSelectedIdBeforeCreate(selectedId);
-    setCreating(true);
-    setSelectedId(null);
-    setFormError(null);
-    setForm({ ...EMPTY_FORM });
-    setDirty(false);
-    setTools([]);
-  };
-
-  const cancelCreate = () => {
-    setCreating(false);
-    setFormError(null);
-    setDirty(false);
-    setTools([]);
-    setSelectedId(
-      selectedIdBeforeCreate &&
-        servers.some((server) => server.id === selectedIdBeforeCreate)
-        ? selectedIdBeforeCreate
-        : (servers[0]?.id ?? null)
-    );
-    setSelectedIdBeforeCreate(null);
-  };
-
-  const save = useCallback(
-    async (
-      snapshot: ServerForm,
-      targetId: string | null,
-      isCreating: boolean
-    ) => {
-      setFormError(null);
-      setSaving(true);
-      try {
-        const draft = _draftFromForm(snapshot);
-        const next =
-          isCreating || !targetId
-            ? await addMcpServer(draft)
-            : await updateMcpServer(targetId, draft);
-        setServers(next);
-        const saved =
-          isCreating || !targetId
-            ? [...next]
-                .reverse()
-                .find(
-                  (server) =>
-                    server.serverName === normalizeMcpName(snapshot.name)
-                )
-            : next.find((server) => server.id === targetId);
-        const hasNewerChanges = formRef.current !== snapshot;
-        preserveFormAfterCreateRef.current = isCreating && hasNewerChanges;
-        setCreating(false);
-        setSelectedIdBeforeCreate(null);
-        setSelectedId(saved?.id ?? next[0]?.id ?? null);
-        if (!hasNewerChanges) {
-          setDirty(false);
-        }
-      } catch (error) {
-        setFormError(
-          error instanceof Error ? error.message : "Please try again."
-        );
-      } finally {
-        setSaving(false);
-      }
-    },
-    []
-  );
-
-  useEffect(() => {
-    if (
-      !dirty ||
-      saving ||
-      formError !== null ||
-      (creating && !_canCreateServer(form)) ||
-      (!creating && !selectedId)
-    ) {
-      return;
-    }
-    const timeout = window.setTimeout(() => {
-      void save(form, selectedId, creating);
-    }, 600);
-    return () => window.clearTimeout(timeout);
-  }, [creating, dirty, form, formError, save, saving, selectedId]);
-
-  const testServer = async () => {
-    if (!selectedServer) {
-      return;
-    }
-    const server = selectedServer;
-    setFormError(null);
-    cancelRequestedRef.current = false;
-    setTestingServerId(server.id);
-    try {
-      const response = await listMcpTools(server.id);
-      setTools(response.tools);
-      setServers((current) =>
-        current.map((server) =>
-          server.id === response.server.id ? response.server : server
-        )
-      );
-      toast.success("MCP server connected", {
-        description: `${response.tools.length} tool${response.tools.length === 1 ? "" : "s"} discovered`,
-      });
-    } catch (error) {
-      setTools([]);
-      if (
-        cancelRequestedRef.current ||
-        (error instanceof Error && error.message === "MCP test cancelled.")
-      ) {
-        return;
-      }
-      await refresh();
-      toast.error("Failed to connect MCP server", {
-        description:
-          error instanceof Error ? error.message : "Please try again.",
-      });
-    } finally {
-      cancelRequestedRef.current = false;
-      setTestingServerId((current) => (current === server.id ? null : current));
-    }
-  };
-
-  const cancelTest = async () => {
-    if (!testingServerId) return;
-    cancelRequestedRef.current = true;
-    setCancellingTest(true);
-    try {
-      const next = await cancelMcpTest(testingServerId);
-      setServers(next);
-      setTools([]);
-    } catch (error) {
-      cancelRequestedRef.current = false;
-      toast.error("Failed to cancel MCP test", {
-        description:
-          error instanceof Error ? error.message : "Please try again.",
-      });
-    } finally {
-      setCancellingTest(false);
-    }
-  };
-
-  const disconnectServer = async () => {
-    if (!selectedServer) {
-      return;
-    }
-    setDisconnecting(true);
-    try {
-      const next = await disconnectMcpServer(selectedServer.id);
-      setServers(next);
-      setTools([]);
-      toast.success("MCP server disconnected");
-    } catch (error) {
-      toast.error("Failed to disconnect MCP server", {
-        description:
-          error instanceof Error ? error.message : "Please try again.",
-      });
-    } finally {
-      setDisconnecting(false);
-    }
-  };
-
-  const confirmRemove = async () => {
-    if (!selectedServer) {
-      return;
-    }
-    setRemoveOpen(false);
-    try {
-      const next = await removeMcpServer(selectedServer.id);
-      setServers(next);
-      setSelectedId(next[0]?.id ?? null);
-      toast.success("MCP server removed");
-    } catch (error) {
-      toast.error("Failed to remove MCP server", {
-        description:
-          error instanceof Error ? error.message : "Please try again.",
-      });
-    }
-  };
+    controller.start();
+    return () => controller.stop();
+  }, [controller]);
+  const {
+    servers,
+    selectedId,
+    creating,
+    form,
+    formError,
+    tools,
+    loading,
+    saving,
+    testingServerId,
+    cancellingTest,
+    disconnecting,
+    dirty,
+  } = state;
 
   return (
     <SettingsPage
@@ -446,7 +132,7 @@ export function McpPage() {
           Loading MCP servers
         </div>
       ) : servers.length === 0 && !creating ? (
-        <McpEmptyState onAdd={createServer} />
+        <McpEmptyState onAdd={() => controller.beginCreate()} />
       ) : (
         <div className="flex h-full min-h-0 gap-6">
           <aside className="flex w-58 shrink-0 flex-col gap-3 border-r pr-4">
@@ -460,7 +146,7 @@ export function McpPage() {
                     type="button"
                     aria-label="Refresh MCP servers"
                     className="text-muted-foreground hover:bg-accent hover:text-foreground inline-flex size-6 items-center justify-center rounded transition-colors"
-                    onClick={() => void refresh()}
+                    onClick={() => void controller.refresh()}
                   >
                     {loading ? (
                       <Loader2 className="size-3.5 animate-spin" />
@@ -475,7 +161,7 @@ export function McpPage() {
                     aria-label="Add MCP server"
                     disabled={saving || dirty || testingServerId !== null}
                     className="text-muted-foreground hover:bg-accent hover:text-foreground inline-flex size-6 items-center justify-center rounded transition-colors disabled:pointer-events-none disabled:opacity-50"
-                    onClick={createServer}
+                    onClick={() => controller.beginCreate()}
                   >
                     <Plus className="size-4" />
                   </button>
@@ -493,11 +179,7 @@ export function McpPage() {
                       "hover:bg-accent flex min-w-0 flex-col gap-1 rounded-md px-2 py-2 text-left transition-colors disabled:pointer-events-none disabled:opacity-50",
                       selectedId === server.id && "bg-accent"
                     )}
-                    onClick={() => {
-                      setCreating(false);
-                      setFormError(null);
-                      setSelectedId(server.id);
-                    }}
+                    onClick={() => controller.select(server.id)}
                   >
                     <span className="flex min-w-0 items-center gap-2">
                       <StatusDot server={server} />
@@ -542,15 +224,11 @@ export function McpPage() {
                 disconnecting={disconnecting}
                 creating={creating}
                 tools={tools}
-                onFormChange={(nextForm) => {
-                  setFormError(null);
-                  setForm(nextForm);
-                  setDirty(true);
-                }}
-                onTest={() => void testServer()}
-                onCancelTest={() => void cancelTest()}
-                onDisconnect={() => void disconnectServer()}
-                onCancel={cancelCreate}
+                onFormChange={(nextForm) => controller.updateForm(nextForm)}
+                onTest={() => void controller.testSelected()}
+                onCancelTest={() => void controller.cancelTest()}
+                onDisconnect={() => void controller.disconnectSelected()}
+                onCancel={() => controller.cancelCreate()}
                 onRemove={() => setRemoveOpen(true)}
               />
             ) : (
@@ -572,7 +250,10 @@ export function McpPage() {
         }
         confirmLabel="Remove"
         dimBackground={false}
-        onConfirm={() => void confirmRemove()}
+        onConfirm={() => {
+          setRemoveOpen(false);
+          void controller.removeSelected();
+        }}
       />
     </SettingsPage>
   );
@@ -646,7 +327,7 @@ function ServerEditor({
   onCancel,
   onRemove,
 }: {
-  form: ServerForm;
+  form: McpServerForm;
   normalizedName: string;
   server: McpServerView | null;
   readOnly: boolean;
@@ -657,17 +338,17 @@ function ServerEditor({
   cancellingTest: boolean;
   disconnecting: boolean;
   creating: boolean;
-  tools: McpToolView[];
-  onFormChange: (form: ServerForm) => void;
+  tools: readonly McpToolView[];
+  onFormChange: (form: McpServerForm) => void;
   onTest: () => void;
   onCancelTest: () => void;
   onDisconnect: () => void;
   onCancel: () => void;
   onRemove: () => void;
 }) {
-  const patch = (partial: Partial<ServerForm>) =>
+  const patch = (partial: Partial<McpServerForm>) =>
     onFormChange({ ...form, ...partial });
-  const savedToolItems: McpToolSummary[] =
+  const savedToolItems: readonly McpToolSummary[] =
     tools.length > 0 ? tools : (server?.readiness?.tools ?? []);
   const previewServerName = normalizedName || server?.serverName || "server";
   const toolItems = savedToolItems.map((tool) => ({
@@ -762,6 +443,7 @@ function ServerEditor({
                     size="icon-sm"
                     variant="ghost"
                     aria-label="Remove MCP server"
+                    disabled={saving || dirty || testing || disconnecting}
                     onClick={onRemove}
                   >
                     <Trash2 className="size-4" />
@@ -1124,15 +806,15 @@ function KeyValueRows({
   onChange,
 }: {
   label: string;
-  rows: Row[];
+  rows: readonly McpKeyValueRow[];
   valueType?: "text" | "password";
   revealValue?: boolean;
   namePlaceholder: string;
   valuePlaceholder: string;
   readOnly?: boolean;
-  onChange: (rows: Row[]) => void;
+  onChange: (rows: readonly McpKeyValueRow[]) => void;
 }) {
-  const setRow = (index: number, row: Row) =>
+  const setRow = (index: number, row: McpKeyValueRow) =>
     onChange(rows.map((item, itemIndex) => (itemIndex === index ? row : item)));
   const removeRow = (index: number) =>
     onChange(rows.filter((_, itemIndex) => itemIndex !== index));
@@ -1187,6 +869,10 @@ function KeyValueRows({
       ) : null}
     </div>
   );
+}
+
+function _createRow(): McpKeyValueRow {
+  return { id: crypto.randomUUID(), key: "", value: "" };
 }
 
 function SecretValueInput({
