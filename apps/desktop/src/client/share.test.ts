@@ -38,7 +38,7 @@ const RPC = {
 
 await mock.module("@/lib/electrobun", () => ({ electrobun: { rpc: RPC } }));
 
-const { readShareThread, shareThread } = await import("./share");
+const { createThreadSharingClient } = await import("./share");
 
 describe("Playground snapshot sharing client", () => {
   beforeEach(() => {
@@ -46,7 +46,8 @@ describe("Playground snapshot sharing client", () => {
   });
 
   test("reads the selected Playground lane/leaf snapshot", async () => {
-    expect(await readShareThread("playground-1")).toEqual(SNAPSHOT);
+    const client = createThreadSharingClient();
+    expect(await client.read("playground-1")).toEqual(SNAPSHOT);
     expect(REQUESTS).toEqual([
       {
         namespace: "threadSharing",
@@ -57,7 +58,8 @@ describe("Playground snapshot sharing client", () => {
   });
 
   test("publishes the Playground by product identity", async () => {
-    await shareThread("playground-1", {
+    const client = createThreadSharingClient();
+    await client.publish("playground-1", {
       title: "Shared title",
       description: "Description",
     });

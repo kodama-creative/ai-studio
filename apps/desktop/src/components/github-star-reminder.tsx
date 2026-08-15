@@ -1,8 +1,8 @@
 import { cn } from "@llm-space/ui/lib/utils";
 import { XIcon } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { remindersClient } from "@/client/reminders";
+import { createRemindersClient } from "@/client/reminders";
 import { useCommands } from "@/commands";
 
 /** The repository we nudge users to star. */
@@ -21,6 +21,7 @@ const SHOW_DELAY_MS = 5000;
  * reminder for good; the top-right ✕ only dismisses this one showing.
  */
 export function GithubStarReminder() {
+  const remindersClient = useMemo(() => createRemindersClient(), []);
   const { executeCommand } = useCommands();
   // `open` keeps the card mounted; `leaving` plays the fade-out before unmount.
   const [open, setOpen] = useState(false);
@@ -41,7 +42,7 @@ export function GithubStarReminder() {
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, []);
+  }, [remindersClient]);
 
   const close = useCallback(() => setLeaving(true), []);
 
@@ -49,7 +50,7 @@ export function GithubStarReminder() {
     executeCommand({ type: "shell.openLink", args: { url: STAR_URL } });
     void remindersClient.dismissGithubStarForever();
     close();
-  }, [executeCommand, close]);
+  }, [close, executeCommand, remindersClient]);
 
   if (!open) return null;
 

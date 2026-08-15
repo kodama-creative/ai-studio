@@ -233,7 +233,7 @@ Playground/Experiment target on every request.
 
 > **GitHub calls go through the proxy.** GitHub auth (`bun/auth/`) and any future gist calls run from the **bun process** using the global `fetch`, which `NetworkSettingsManager` (`bun/network/`) routes through the user's configured proxy by writing `HTTP(S)_PROXY` onto `process.env`. Just call `fetch` — never add a bypassing custom dispatcher, or corporate/proxied users' GitHub requests will fail.
 
-- `client/` — renderer-side namespaced RPC clients. Each feature owns its client file; do not introduce cross-feature client aggregations.
+- `client/` — renderer-side namespaced RPC adapter factories. Each feature owns its client file, and the renderer composition/application/presentation owner creates and retains the adapter for its own lifetime. Do not export import-time client instances or introduce cross-feature client aggregations.
 - `host/` — `host-services.tsx`: the desktop `HostServices` + `ModelClient` impls (`DesktopHostProvider`, `createElectrobunModelClient`) feeding the shared `@llm-space/ui` playground.
 - `shared/` — code used by both contexts: the Electrobun envelope, commands, and one `*-rpc.ts` contract per feature.
 - `components/` — desktop-only UI: `thread-tabs/`, `settings/`, `command-palette.tsx`, `onboard-dialog.tsx`, `feature-reminder-dialog.tsx` (the "what's new" reminder popup), and the account/update/github widgets. **The Thread Playground, model-provider, code-editor, shadcn `ui/`, and design tokens moved to `@llm-space/ui`** — import them from there, not from `@/components`.

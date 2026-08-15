@@ -32,7 +32,7 @@ import {
   useState,
 } from "react";
 
-import { readShareThread, shareThread } from "@/client/share";
+import { createThreadSharingClient } from "@/client/share";
 import { useCommands } from "@/commands";
 import { useGithubAuth } from "@/components/github-auth-provider";
 
@@ -65,6 +65,7 @@ export function ShareThreadDialog({
 }) {
   const { state: authState, signIn } = useGithubAuth();
   const { executeCommand } = useCommands();
+  const sharingClient = useMemo(() => createThreadSharingClient(), []);
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -108,12 +109,12 @@ export function ShareThreadDialog({
     setTitle(threadTitleFromPath(path));
     void flow.prefillTitle(
       (target) =>
-        readShareThread(_playgroundId(target.path)).then(
+        sharingClient.read(_playgroundId(target.path)).then(
           (snapshot) => snapshot.thread
         ),
       setTitle
     );
-  }, [flow, open, path, targetCommit]);
+  }, [flow, open, path, sharingClient, targetCommit]);
 
   useEffect(
     () => () => {
@@ -129,7 +130,7 @@ export function ShareThreadDialog({
       void flow.publish(
         transaction,
         (snapshot) =>
-          shareThread(_playgroundId(snapshot.path), {
+          sharingClient.publish(_playgroundId(snapshot.path), {
             title: snapshot.title,
             description: snapshot.description,
           }),
@@ -149,7 +150,7 @@ export function ShareThreadDialog({
         }
       );
     },
-    [flow]
+    [flow, sharingClient]
   );
 
   const handleGenerate = useCallback(() => {

@@ -24,7 +24,7 @@ import { toast } from "sonner";
 
 import { createAgentProjectClient } from "@/client/agent-project-client";
 import { createPlaygroundClient } from "@/client/playground-client";
-import { importThreadSnapshot } from "@/client/share";
+import { createThreadSharingClient } from "@/client/share";
 import { useCommands, useRegisterCommands } from "@/commands";
 import { AccountStatus } from "@/components/account-status";
 import { FeatureReminderDialog } from "@/components/feature-reminder-dialog";
@@ -151,6 +151,7 @@ function PageWorkspace() {
   const tabs = useThreadTabs({ canPruneRestoredTab });
   const playgroundClient = useMemo(() => createPlaygroundClient(), []);
   const agentProjectClient = useMemo(() => createAgentProjectClient(), []);
+  const threadSharingClient = useMemo(() => createThreadSharingClient(), []);
   const seedHost = useHostServices();
   const { executeCommand } = useCommands();
   const models = useModels();
@@ -254,7 +255,8 @@ function PageWorkspace() {
     () =>
       new PlaygroundWorkspaceController({
         client: playgroundClient,
-        importSnapshot: importThreadSnapshot,
+        importSnapshot: (snapshot) =>
+          threadSharingClient.importSnapshot(snapshot),
         seedHost,
         refreshCatalog: () =>
           queryClient.invalidateQueries({ queryKey: ["playgrounds"] }),
@@ -273,7 +275,13 @@ function PageWorkspace() {
                 }),
           }),
       }),
-    [openPlayground, playgroundClient, queryClient, seedHost]
+    [
+      openPlayground,
+      playgroundClient,
+      queryClient,
+      seedHost,
+      threadSharingClient,
+    ]
   );
 
   // Snapshot import: a hidden picker opened by the import command plus

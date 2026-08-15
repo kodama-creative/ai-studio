@@ -2,9 +2,9 @@ import { useModels } from "@llm-space/ui/components/model-provider";
 import { Button } from "@llm-space/ui/ui/button";
 import { Dialog, DialogClose, DialogContent } from "@llm-space/ui/ui/dialog";
 import { ArrowUpRightIcon, XIcon } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { remindersClient } from "@/client/reminders";
+import { createRemindersClient } from "@/client/reminders";
 import { useCommands } from "@/commands";
 import type { FeatureReminder } from "@/shared/feature-reminders";
 
@@ -26,6 +26,7 @@ const SHOW_DELAY_MS = 800;
  * reminders simply wait for a later launch.
  */
 export function FeatureReminderDialog() {
+  const remindersClient = useMemo(() => createRemindersClient(), []);
   const models = useModels();
   const hasModels = models.length > 0;
   const { executeCommand } = useCommands();
@@ -42,7 +43,7 @@ export function FeatureReminderDialog() {
     void remindersClient.nextFeature().then((next) => {
       if (next) setReminder(next);
     });
-  }, [hasModels]);
+  }, [hasModels, remindersClient]);
 
   // Open shortly after we have a reminder so it doesn't fight first paint. Kept
   // in its own effect (keyed on the reminder) so a re-render of the fetch effect
@@ -57,7 +58,7 @@ export function FeatureReminderDialog() {
     if (reminder) {
       void remindersClient.markFeatureSeen(reminder.id);
     }
-  }, [reminder]);
+  }, [reminder, remindersClient]);
 
   const handleOpenChange = useCallback(
     (next: boolean) => {
