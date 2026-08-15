@@ -9,13 +9,13 @@ import {
 import type { RpcRegistry } from "../di/rpc-registry";
 import { PROCESS_TOKENS, WINDOW_TOKENS } from "../di/tokens";
 import type { DesktopHost } from "../host/desktop-host";
-import { PlaygroundRpcServer } from "../rpc/playground-rpc-server";
 import { PlaygroundThreadRpcServer } from "../rpc/thread-rpc-server";
 
 import {
   createDesktopPlaygroundApplication,
   type DesktopPlaygroundApplication,
 } from "./playground-application";
+import { PlaygroundRpcServer } from "./playground-rpc-server";
 
 /** Bind the process-owned Playground application host. */
 export function playgroundModule(): ContainerModule {

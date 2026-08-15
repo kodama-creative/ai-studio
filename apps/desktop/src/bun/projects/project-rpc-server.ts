@@ -8,7 +8,7 @@ import {
   type ProjectStudioStreams,
 } from "../../shared/project-studio";
 
-/** Project-window RPC implementation; delegates only through the Studio facade. */
+/** Project-owned RPC adapter; delegates only through the Studio facade. */
 export class ProjectRpcServer
   implements
     RpcServer<ProjectStudioRpc>,

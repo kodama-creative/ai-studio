@@ -1,7 +1,6 @@
 import { expect, test } from "bun:test";
 
-import type { DesktopPlaygroundApplication } from "../playgrounds/playground-application";
-
+import type { DesktopPlaygroundApplication } from "./playground-application";
 import { PlaygroundRpcServer } from "./playground-rpc-server";
 
 test("Playground RPC server exposes metadata and no execution stream", async () => {

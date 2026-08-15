@@ -4,7 +4,8 @@ import {
   type PlaygroundRequests,
   type PlaygroundRpc,
 } from "../../shared/playground-rpc";
-import type { DesktopPlaygroundApplication } from "../playgrounds/playground-application";
+
+import type { DesktopPlaygroundApplication } from "./playground-application";
 
 /** Transport-only adapter for the durable Playground application. */
 export class PlaygroundRpcServer implements RpcServer<PlaygroundRpc> {

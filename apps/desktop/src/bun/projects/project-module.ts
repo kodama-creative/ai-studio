@@ -14,10 +14,10 @@ import {
   PROJECT_WINDOW_TOKENS,
   WINDOW_TOKENS,
 } from "../di/tokens";
-import { ProjectRpcServer } from "../rpc/project-rpc-server";
 import { StudioThreadRpcServer } from "../rpc/thread-rpc-server";
 
 import type { AgentProject } from "./agent-project";
+import { ProjectRpcServer } from "./project-rpc-server";
 import { ProjectSandbox } from "./project-sandbox";
 
 /** Bind one Project Studio from its source and process-owned runtime managers. */
