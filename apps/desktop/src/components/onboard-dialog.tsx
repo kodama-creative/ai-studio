@@ -18,9 +18,15 @@ import {
   SettingsIcon,
   XIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useSyncExternalStore,
+} from "react";
 import { toast } from "sonner";
 
+import { OnboardingController } from "@/app/onboarding/onboarding-controller";
 import { createAnalyticsClient } from "@/client/analytics";
 import { useCommands } from "@/commands";
 import { trackAnalytics } from "@/lib/analytics";
@@ -41,55 +47,46 @@ export function OnboardDialog({
   const analytics = useMemo(() => createAnalyticsClient(), []);
   const fetchBuiltinProviders = useFetchBuiltinProviders();
   const addProvider = useAddProvider();
-  const [builtinProviders, setBuiltinProviders] = useState<
-    ModelProviderGroup[] | null
-  >(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [addingProviderId, setAddingProviderId] = useState<string | null>(null);
-  const [addedProviderName, setAddedProviderName] = useState<string | null>(
-    null
+  const controller = useMemo(
+    () =>
+      new OnboardingController({
+        fetchBuiltinProviders,
+        addProvider,
+        notifyProviderAdded: (providerName) =>
+          toast.success(`${providerName} is ready`),
+        notifyAddFailed: () =>
+          toast.error("Could not add provider", {
+            description: ADD_PROVIDER_ERROR_MESSAGE,
+          }),
+      }),
+    [addProvider, fetchBuiltinProviders]
+  );
+  const snapshot = useSyncExternalStore(
+    controller.subscribe,
+    controller.getSnapshot,
+    controller.getSnapshot
   );
 
   useEffect(() => {
-    if (!open || models.length > 0) {
-      return;
-    }
-
-    let cancelled = false;
-    setLoadError(null);
-    void fetchBuiltinProviders()
-      .then((providers) => {
-        if (!cancelled) {
-          setBuiltinProviders(providers);
-        }
-      })
-      .catch(() => {
-        if (cancelled) {
-          return;
-        }
-        setLoadError(PROVIDER_DISCOVERY_ERROR_MESSAGE);
-        setBuiltinProviders([]);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [fetchBuiltinProviders, models.length, open]);
+    if (open) controller.open(models.length === 0);
+    else controller.close();
+  }, [controller, models.length, open]);
+  useEffect(() => () => controller.close(), [controller]);
 
   const detectedProviders = useMemo(() => {
-    return (builtinProviders ?? [])
+    return (snapshot.builtinProviders ?? [])
       .filter((provider) => provider.apiKeyDetected)
       .sort(_sortProviderForOnboarding);
-  }, [builtinProviders]);
+  }, [snapshot.builtinProviders]);
 
   const recommendedProviders = useMemo(() => {
-    return (builtinProviders ?? [])
+    return (snapshot.builtinProviders ?? [])
       .filter((provider) =>
         ONBOARDING_RECOMMENDED_PROVIDER_IDS.has(provider.id)
       )
       .sort(_sortProviderForOnboarding)
       .slice(0, 3);
-  }, [builtinProviders]);
+  }, [snapshot.builtinProviders]);
 
   const handleConfigureModels = useCallback(() => {
     trackAnalytics(analytics, {
@@ -116,21 +113,8 @@ export function OnboardDialog({
   }, [analytics, executeCommand, onOpenChange]);
 
   const handleAddProvider = useCallback(
-    async (provider: ModelProviderGroup) => {
-      setAddingProviderId(provider.id);
-      try {
-        await addProvider(provider.id);
-        setAddedProviderName(provider.name);
-        toast.success(`${provider.name} is ready`);
-      } catch {
-        toast.error("Could not add provider", {
-          description: ADD_PROVIDER_ERROR_MESSAGE,
-        });
-      } finally {
-        setAddingProviderId(null);
-      }
-    },
-    [addProvider]
+    (provider: ModelProviderGroup) => void controller.addProvider(provider),
+    [controller]
   );
 
   const handleReady = useCallback(() => {
@@ -138,7 +122,7 @@ export function OnboardDialog({
   }, [onOpenChange]);
 
   const readyProviderName =
-    addedProviderName ?? models[0]?.name ?? models[0]?.id ?? null;
+    snapshot.addedProviderName ?? models[0]?.name ?? models[0]?.id ?? null;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -240,9 +224,15 @@ export function OnboardDialog({
               readyProviderName={readyProviderName}
               detectedProviders={detectedProviders}
               recommendedProviders={recommendedProviders}
-              loading={builtinProviders === null && models.length === 0}
-              loadError={loadError}
-              addingProviderId={addingProviderId}
+              loading={
+                snapshot.builtinProviders === null && models.length === 0
+              }
+              loadError={
+                snapshot.providerDiscoveryFailed
+                  ? PROVIDER_DISCOVERY_ERROR_MESSAGE
+                  : null
+              }
+              addingProviderId={snapshot.addingProviderId}
               onAddProvider={handleAddProvider}
               onConfigureModels={handleConfigureModels}
               onReady={handleReady}
