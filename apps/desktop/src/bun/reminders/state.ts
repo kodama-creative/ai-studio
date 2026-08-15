@@ -8,8 +8,10 @@ import {
 } from "@llm-space/core/server";
 import { z } from "zod";
 
+import type { Disposable } from "../../shared/disposable";
 import type { FeatureReminder } from "../../shared/feature-reminders";
 import { FEATURE_REMINDERS } from "../../shared/feature-reminders";
+import type { RemindersRequests } from "../../shared/reminders-rpc";
 
 /**
  * Persisted reminder state (`settings/reminders.json`). Today it backs the
@@ -35,14 +37,14 @@ interface GithubStarReminder {
   dismissedForever?: boolean;
 }
 
-interface RemindersState {
+interface RemindersDocument {
   githubStar?: GithubStarReminder;
   // Ids of one-time feature reminders the user has already been shown. Each
   // reminder pops at most once ever; see `resolveNextFeatureReminder`.
   featureRemindersSeen?: string[];
 }
 
-const RemindersStateSchema: z.ZodType<RemindersState> = z.object({
+const RemindersStateSchema: z.ZodType<RemindersDocument> = z.object({
   githubStar: z
     .object({
       openCount: z.number().optional(),
@@ -55,48 +57,14 @@ const RemindersStateSchema: z.ZodType<RemindersState> = z.object({
     .optional(),
   featureRemindersSeen: z.array(z.string()).optional(),
 });
-let stateQueue: Promise<unknown> = Promise.resolve();
 
 /** Show the star nudge at most once every 2 days. */
 const REMINDER_INTERVAL_MS = 2 * 24 * 60 * 60 * 1000;
 /** Give up (retire the reminder) after this many shows, click or no click. */
 const MAX_SHOWN_COUNT = 3;
-/** Stable for this Bun process; a real app restart receives a new id. */
-const REMINDER_LAUNCH_ID = randomUUID();
-
-async function _load(): Promise<RemindersState> {
-  return (
-    await readJsonFile(join(getSettingsDir(), "reminders.json"), {
-      schema: RemindersStateSchema,
-      recovery: "best-effort",
-      fallback: () => ({}),
-      seedMissing: false,
-    })
-  ).value;
-}
-
-function _update<T>(
-  mutate: (state: RemindersState) => { state: RemindersState; result: T }
-): Promise<T> {
-  const operation = stateQueue
-    .catch(() => undefined)
-    .then(async () => {
-      const update = mutate(await _load());
-      await atomicWriteJsonFile(
-        join(getSettingsDir(), "reminders.json"),
-        update.state
-      );
-      return update.result;
-    });
-  stateQueue = operation;
-  return operation;
-}
-
-async function _saveGithubStar(patch: GithubStarReminder): Promise<void> {
-  await _update((state) => ({
-    state: { ...state, githubStar: { ...state.githubStar, ...patch } },
-    result: undefined,
-  }));
+export interface RemindersStateOptions {
+  readonly launchId?: string;
+  readonly now?: () => number;
 }
 
 /** Whether the reminder should appear on this open (pure; no side effects). */
@@ -123,67 +91,125 @@ function _shouldShow(
  * - Later appearances are throttled to once every 2 days since the last show.
  * - Retire permanently once the user clicks through, or after 3 shows.
  */
-export async function resolveGithubStarReminder(
-  launchId: string = REMINDER_LAUNCH_ID
-): Promise<{ show: boolean }> {
-  return _update((state) => {
-    const star = state.githubStar ?? {};
-    if (star.lastResolvedLaunchId === launchId) {
-      return {
-        state,
-        result: { show: star.lastResolvedShow ?? false },
-      };
-    }
+export class RemindersState implements RemindersRequests, Disposable {
+  private readonly _launchId: string;
+  private readonly _now: () => number;
+  private _stateQueue: Promise<unknown> = Promise.resolve();
+  private _disposed = false;
 
-    const now = Date.now();
-    const openCount = (star.openCount ?? 0) + 1;
-    const show = _shouldShow(star, openCount, now);
-    const patch = show
-      ? {
-          openCount,
-          lastShownDate: now,
-          shownCount: (star.shownCount ?? 0) + 1,
-          lastResolvedLaunchId: launchId,
-          lastResolvedShow: show,
-          dismissedForever: (star.shownCount ?? 0) + 1 >= MAX_SHOWN_COUNT,
-        }
-      : {
-          openCount,
-          lastResolvedLaunchId: launchId,
-          lastResolvedShow: show,
+  constructor(
+    private readonly _filePath: string = join(
+      getSettingsDir(),
+      "reminders.json"
+    ),
+    options: RemindersStateOptions = {}
+  ) {
+    this._launchId = options.launchId ?? randomUUID();
+    this._now = options.now ?? Date.now;
+  }
+
+  async shouldShowGithubStar(): Promise<{ show: boolean }> {
+    return this._update((state) => {
+      const star = state.githubStar ?? {};
+      if (star.lastResolvedLaunchId === this._launchId) {
+        return {
+          state,
+          result: { show: star.lastResolvedShow ?? false },
         };
-    return {
-      state: { ...state, githubStar: { ...star, ...patch } },
-      result: { show },
-    };
-  });
-}
+      }
 
-/** Retire the star reminder for good (the user clicked through to GitHub). */
-export async function dismissGithubStarReminder(): Promise<void> {
-  await _saveGithubStar({ dismissedForever: true });
-}
+      const now = this._now();
+      const openCount = (star.openCount ?? 0) + 1;
+      const show = _shouldShow(star, openCount, now);
+      const patch = show
+        ? {
+            openCount,
+            lastShownDate: now,
+            shownCount: (star.shownCount ?? 0) + 1,
+            lastResolvedLaunchId: this._launchId,
+            lastResolvedShow: show,
+            dismissedForever: (star.shownCount ?? 0) + 1 >= MAX_SHOWN_COUNT,
+          }
+        : {
+            openCount,
+            lastResolvedLaunchId: this._launchId,
+            lastResolvedShow: show,
+          };
+      return {
+        state: { ...state, githubStar: { ...star, ...patch } },
+        result: { show },
+      };
+    });
+  }
 
-/**
- * The next unseen feature reminder for this launch (in `FEATURE_REMINDERS`
- * order), or `null` once all are seen. Pure read — recording is deferred to
- * `markFeatureReminderSeen` so this stays idempotent (safe to call repeatedly,
- * e.g. under a StrictMode double-invoke) and can't burn a reminder that never
- * actually got shown.
- */
-export async function getNextFeatureReminder(): Promise<FeatureReminder | null> {
-  const seen = new Set((await _load()).featureRemindersSeen ?? []);
-  return FEATURE_REMINDERS.find((reminder) => !seen.has(reminder.id)) ?? null;
-}
-
-/** Record a feature reminder as seen so it never appears again. */
-export async function markFeatureReminderSeen(id: string): Promise<void> {
-  await _update((state) => {
-    const seen = new Set(state.featureRemindersSeen ?? []);
-    seen.add(id);
-    return {
-      state: { ...state, featureRemindersSeen: [...seen] },
+  /** Retire the star reminder for good (the user clicked through to GitHub). */
+  async dismissGithubStarForever(): Promise<void> {
+    await this._update((state) => ({
+      state: {
+        ...state,
+        githubStar: { ...state.githubStar, dismissedForever: true },
+      },
       result: undefined,
-    };
-  });
+    }));
+  }
+
+  /** Return the next unseen definition without consuming it. */
+  async nextFeature(): Promise<FeatureReminder | null> {
+    const seen = new Set((await this._read()).featureRemindersSeen ?? []);
+    return FEATURE_REMINDERS.find((reminder) => !seen.has(reminder.id)) ?? null;
+  }
+
+  /** Record a feature reminder as seen so it never appears again. */
+  async markFeatureSeen(id: string): Promise<void> {
+    await this._update((state) => {
+      const seen = new Set(state.featureRemindersSeen ?? []);
+      seen.add(id);
+      return {
+        state: { ...state, featureRemindersSeen: [...seen] },
+        result: undefined,
+      };
+    });
+  }
+
+  async dispose(): Promise<void> {
+    this._disposed = true;
+    await this._stateQueue.catch(() => undefined);
+  }
+
+  private _read(): Promise<RemindersDocument> {
+    return this._enqueue(() => this._load());
+  }
+
+  private _update<T>(
+    mutate: (state: RemindersDocument) => {
+      state: RemindersDocument;
+      result: T;
+    }
+  ): Promise<T> {
+    return this._enqueue(async () => {
+      const update = mutate(await this._load());
+      await atomicWriteJsonFile(this._filePath, update.state);
+      return update.result;
+    });
+  }
+
+  private _enqueue<T>(operation: () => T | Promise<T>): Promise<T> {
+    if (this._disposed) {
+      return Promise.reject(new Error("Reminders state is disposed."));
+    }
+    const queued = this._stateQueue.catch(() => undefined).then(operation);
+    this._stateQueue = queued;
+    return queued;
+  }
+
+  private async _load(): Promise<RemindersDocument> {
+    return (
+      await readJsonFile(this._filePath, {
+        schema: RemindersStateSchema,
+        recovery: "best-effort",
+        fallback: () => ({}),
+        seedMissing: false,
+      })
+    ).value;
+  }
 }

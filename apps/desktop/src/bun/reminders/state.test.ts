@@ -3,24 +3,32 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { resolveGithubStarReminder } from "./state";
+import { RemindersState } from "./state";
 
-const ORIGINAL_HOME = process.env.LLM_SPACE_HOME;
 let testHome = "";
+let statePath = "";
+let states: RemindersState[] = [];
 
 beforeEach(async () => {
   testHome = await mkdtemp(path.join(os.tmpdir(), "llm-space-reminders-"));
-  process.env.LLM_SPACE_HOME = testHome;
+  statePath = path.join(testHome, "settings", "reminders.json");
+  states = [];
 });
 
 afterEach(async () => {
-  process.env.LLM_SPACE_HOME = ORIGINAL_HOME;
+  await Promise.all(states.map((state) => state.dispose()));
   await rm(testHome, { recursive: true, force: true });
 });
 
+function _state(launchId: string): RemindersState {
+  const state = new RemindersState(statePath, { launchId });
+  states.push(state);
+  return state;
+}
+
 async function _readGithubStarState(): Promise<Record<string, unknown>> {
   const content = await readFile(
-    path.join(testHome, "settings", "reminders.json"),
+    statePath,
     "utf8"
   );
   const parsed: unknown = JSON.parse(content);
@@ -36,10 +44,11 @@ async function _readGithubStarState(): Promise<Record<string, unknown>> {
 
 describe("resolveGithubStarReminder", () => {
   test("counts repeated renderer requests only once per app launch", async () => {
-    expect(await resolveGithubStarReminder("first-launch")).toEqual({
+    const state = _state("first-launch");
+    expect(await state.shouldShowGithubStar()).toEqual({
       show: false,
     });
-    expect(await resolveGithubStarReminder("first-launch")).toEqual({
+    expect(await state.shouldShowGithubStar()).toEqual({
       show: false,
     });
 
@@ -51,13 +60,14 @@ describe("resolveGithubStarReminder", () => {
   });
 
   test("first shows on a distinct second app launch and stays idempotent", async () => {
-    expect(await resolveGithubStarReminder("first-launch")).toEqual({
+    expect(await _state("first-launch").shouldShowGithubStar()).toEqual({
       show: false,
     });
-    expect(await resolveGithubStarReminder("second-launch")).toEqual({
+    const secondLaunch = _state("second-launch");
+    expect(await secondLaunch.shouldShowGithubStar()).toEqual({
       show: true,
     });
-    expect(await resolveGithubStarReminder("second-launch")).toEqual({
+    expect(await secondLaunch.shouldShowGithubStar()).toEqual({
       show: true,
     });
 

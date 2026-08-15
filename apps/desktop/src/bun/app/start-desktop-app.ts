@@ -51,6 +51,7 @@ import {
   FileAgentProjectCatalogStore,
   FileProjectWindowStateStore,
 } from "../projects/project-window-state";
+import { remindersModule } from "../reminders/reminders-module";
 import { getManagedSkillsDir } from "../skills/seed";
 import { UpdaterService } from "../updates";
 
@@ -182,6 +183,7 @@ async function _startDesktopApp(
   processContainer.load(appDirectoriesApplicationModule());
   processContainer.load(generatorModule());
   processContainer.load(agentProjectsModule());
+  processContainer.load(remindersModule());
   processContainer.load(threadSharingApplicationModule());
   processContainer.load(githubAccountApplicationModule());
   processContainer.load(updatesApplicationModule());

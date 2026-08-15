@@ -116,8 +116,10 @@ Stateful or orchestrating cross-cutting capabilities such as GitHub Account,
 Updates, Models, Auxiliary Generation, and Thread Sharing keep separate
 application and `*-rpc-feature.ts` modules. Transport-only features such as
 Analytics and Reminders adapt their existing manager/state owner directly in
-the RPC feature; do not add a second process singleton merely to mirror the RPC
-methods. Every feature still owns one shared RPC contract and renderer client;
+the RPC feature; Reminders state is one process-owned `RemindersState` with
+serialized file access, never module-level mutable state. Do not add a second
+process singleton merely to mirror RPC methods. Every feature still owns one
+shared RPC contract and renderer client;
 do not merge them into generic `application-services`, `application-rpc-servers`,
 `application-rpc`, or `application-rpc-clients` aggregations. Bun feature
 modules must not export import-time manager instances or let application classes
