@@ -5,7 +5,6 @@ import {
   getArkImageModelDefinitions,
   type CustomModel,
   type ModelProviderGroup,
-  type ProviderProfile,
   type SeedreamImageModelDefinition,
 } from "@llm-space/core";
 import { ConfirmDialog } from "@llm-space/ui/components/confirm-dialog";
@@ -116,6 +115,10 @@ import {
   ProviderMetadataController,
   type ProviderMetadataTarget,
 } from "@/app/settings/provider-metadata-controller";
+import {
+  ProviderProfilesController,
+  type ProviderProfilesTarget,
+} from "@/app/settings/provider-profiles-controller";
 import { runSettingsMutation } from "@/app/settings/run-settings-mutation";
 
 import {
@@ -161,6 +164,17 @@ function _providerMetadataTarget(
         name: provider.name,
         api: provider.api ?? DEFAULT_CUSTOM_PROVIDER_API,
         icon: provider.icon ?? "",
+      }
+    : null;
+}
+
+function _providerProfilesTarget(
+  provider: ModelProviderGroup | null
+): ProviderProfilesTarget | null {
+  return provider
+    ? {
+        providerId: provider.id,
+        profiles: provider.profiles.map(({ id, name }) => ({ id, name })),
       }
     : null;
 }
@@ -552,10 +566,6 @@ function ProviderEditor({ provider }: { provider: ModelProviderGroup | null }) {
   const removeProviderProfile = useRemoveProviderProfile();
   const setModelEnabled = useSetModelEnabled();
   const setAllModelsEnabled = useSetAllModelsEnabled();
-  const [selectedProfileId, setSelectedProfileId] = useState(
-    provider?.profiles[0]?.id ?? ""
-  );
-  const [removeProfileId, setRemoveProfileId] = useState<string | null>(null);
   const [modelView, setModelView] = useState<"all" | "enabled" | "disabled">(
     "all"
   );
@@ -578,13 +588,40 @@ function ProviderEditor({ provider }: { provider: ModelProviderGroup | null }) {
               error instanceof Error ? error.message : "Please try again.",
           });
         },
-      }),
+    }),
     [initialMetadataTarget, updateProvider]
+  );
+  const initialProfilesTarget = useRef(
+    _providerProfilesTarget(provider)
+  ).current;
+  const profilesController = useMemo(
+    () =>
+      new ProviderProfilesController(initialProfilesTarget, {
+        addProfile: addProviderProfile,
+        removeProfile: removeProviderProfile,
+        mutationFailed: (operation, error) => {
+          toast.error(
+            operation === "add"
+              ? "Failed to add connection profile"
+              : "Failed to remove connection profile",
+            {
+              description:
+                error instanceof Error ? error.message : "Please try again.",
+            }
+          );
+        },
+      }),
+    [addProviderProfile, initialProfilesTarget, removeProviderProfile]
   );
   const metadata = useSyncExternalStore(
     metadataController.subscribe,
     metadataController.getSnapshot,
     metadataController.getSnapshot
+  );
+  const profilesState = useSyncExternalStore(
+    profilesController.subscribe,
+    profilesController.getSnapshot,
+    profilesController.getSnapshot
   );
   const [modelListRef] = useAutoAnimation<HTMLDivElement>();
   const [editorOpen, setEditorOpen] = useState(false);
@@ -614,7 +651,11 @@ function ProviderEditor({ provider }: { provider: ModelProviderGroup | null }) {
   useLayoutEffect(() => {
     metadataController.sync(_providerMetadataTarget(provider));
   }, [metadataController, provider]);
+  useLayoutEffect(() => {
+    profilesController.sync(_providerProfilesTarget(provider));
+  }, [profilesController, provider]);
   useEffect(() => () => metadataController.close(), [metadataController]);
+  useEffect(() => () => profilesController.close(), [profilesController]);
 
   if (!provider) {
     return (
@@ -636,36 +677,13 @@ function ProviderEditor({ provider }: { provider: ModelProviderGroup | null }) {
   });
   const isBuiltin = provider.builtin === true;
   const selectedProfile =
-    provider.profiles.find((profile) => profile.id === selectedProfileId) ??
+    provider.profiles.find(
+      (profile) => profile.id === profilesState.selectedProfileId
+    ) ??
     provider.profiles[0];
   const profilePendingRemoval = provider.profiles.find(
-    (profile) => profile.id === removeProfileId
+    (profile) => profile.id === profilesState.removalCandidateId
   );
-
-  const handleAddProfile = async () => {
-    try {
-      setSelectedProfileId(await addProviderProfile(provider.id));
-    } catch (error) {
-      toast.error("Failed to add connection profile", {
-        description:
-          error instanceof Error ? error.message : "Please try again.",
-      });
-    }
-  };
-
-  const handleRemoveProfile = async (profile: ProviderProfile) => {
-    try {
-      await removeProviderProfile(provider.id, profile.id);
-      if (selectedProfile.id === profile.id) {
-        setSelectedProfileId(provider.profiles[0].id);
-      }
-    } catch (error) {
-      toast.error("Failed to remove connection profile", {
-        description:
-          error instanceof Error ? error.message : "Please try again.",
-      });
-    }
-  };
 
   // Builtin providers derive their base-URL convention from model APIs; custom
   // providers follow the live API type selection.
@@ -774,7 +792,9 @@ function ProviderEditor({ provider }: { provider: ModelProviderGroup | null }) {
 
           <Tabs
             value={selectedProfile.id}
-            onValueChange={setSelectedProfileId}
+            onValueChange={(profileId) =>
+              profilesController.select(profileId)
+            }
             className="gap-3"
           >
             <div className="flex flex-col gap-2">
@@ -795,7 +815,10 @@ function ProviderEditor({ provider }: { provider: ModelProviderGroup | null }) {
                             variant="ghost"
                             size="icon-xs"
                             aria-label={`Remove ${profile.name} connection profile`}
-                            onClick={() => setRemoveProfileId(profile.id)}
+                            disabled={profilesState.mutation !== null}
+                            onClick={() =>
+                              profilesController.requestRemove(profile.id)
+                            }
                           >
                             <X data-icon="inline-start" />
                           </Button>
@@ -810,7 +833,8 @@ function ProviderEditor({ provider }: { provider: ModelProviderGroup | null }) {
                     variant="outline"
                     size="icon"
                     aria-label="Add connection profile"
-                    onClick={() => void handleAddProfile()}
+                    disabled={profilesState.mutation !== null}
+                    onClick={() => void profilesController.add()}
                   >
                     <Plus data-icon="inline-start" />
                   </Button>
@@ -964,17 +988,13 @@ function ProviderEditor({ provider }: { provider: ModelProviderGroup | null }) {
       <ConfirmDialog
         open={profilePendingRemoval !== undefined}
         onOpenChange={(open) => {
-          if (!open) setRemoveProfileId(null);
+          if (!open) profilesController.cancelRemove();
         }}
         title={`Remove ${profilePendingRemoval?.name ?? "profile"}?`}
         description={`This permanently removes the connection profile "${profilePendingRemoval?.name ?? "profile"}" from ${provider.name}.`}
         confirmLabel="Remove"
         dimBackground={false}
-        onConfirm={() => {
-          const profile = profilePendingRemoval;
-          setRemoveProfileId(null);
-          if (profile) void handleRemoveProfile(profile);
-        }}
+        onConfirm={() => void profilesController.confirmRemove()}
       />
     </div>
   );
