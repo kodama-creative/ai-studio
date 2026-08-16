@@ -27,7 +27,6 @@ import {
   useTestModelConnection,
   useUpsertCustomImageModel,
   useUpdateProvider,
-  useUpdateProviderProfile,
 } from "@llm-space/ui/components/model-provider";
 import { ModelAvatar } from "@llm-space/ui/components/thread-playground/model-avatar";
 import { ProviderAvatar } from "@llm-space/ui/components/thread-playground/provider-avatar";
@@ -119,7 +118,6 @@ import {
 } from "@/app/settings/provider-metadata-controller";
 import { runSettingsMutation } from "@/app/settings/run-settings-mutation";
 
-import { ApiKeyField } from "./api-key-field";
 import {
   CUSTOM_PROVIDER_API_TYPES,
   DEFAULT_CUSTOM_PROVIDER_API,
@@ -127,16 +125,8 @@ import {
 } from "./custom-provider-api";
 import { ImageModelEditorDialog } from "./image-model-editor-dialog";
 import { ModelEditorDialog } from "./model-editor-dialog";
+import { ProviderProfileEditor } from "./provider-profile-editor";
 import { SettingsPage } from "./settings-page";
-
-/**
- * Base-URL guidance for the Anthropic Messages API. Its SDK appends `/v1/...`
- * to the base URL itself, so — unlike the OpenAI-style APIs, whose SDKs expect
- * the `/v1` to be part of the base URL — a `/v1` suffix here would double up
- * into `/v1/v1/...` on every request.
- */
-const ANTHROPIC_BASE_URL_HINT =
-  "The Anthropic SDK adds /v1 to the request path itself, so enter the URL without a /v1 suffix.";
 
 function runModelMutation<T>(
   title: string,
@@ -677,9 +667,8 @@ function ProviderEditor({ provider }: { provider: ModelProviderGroup | null }) {
     }
   };
 
-  // Which base-URL convention applies (see ANTHROPIC_BASE_URL_HINT): builtin
-  // providers are recognized by their models' API; custom providers follow the
-  // live API type selection.
+  // Builtin providers derive their base-URL convention from model APIs; custom
+  // providers follow the live API type selection.
   const usesAnthropicApi = isBuiltin
     ? provider.models.some((model) => model.api === "anthropic-messages")
     : metadata.api === "anthropic-messages";
@@ -841,7 +830,7 @@ function ProviderEditor({ provider }: { provider: ModelProviderGroup | null }) {
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <_ProviderProfileEditor
+                    <ProviderProfileEditor
                       provider={provider}
                       profile={profile}
                       isBuiltin={isBuiltin}
@@ -986,166 +975,6 @@ function ProviderEditor({ provider }: { provider: ModelProviderGroup | null }) {
           setRemoveProfileId(null);
           if (profile) void handleRemoveProfile(profile);
         }}
-      />
-    </div>
-  );
-}
-
-function _ProviderProfileEditor({
-  provider,
-  profile,
-  isBuiltin,
-  usesAnthropicApi,
-}: {
-  provider: ModelProviderGroup;
-  profile: ProviderProfile;
-  isBuiltin: boolean;
-  usesAnthropicApi: boolean;
-}) {
-  const updateProviderProfile = useUpdateProviderProfile();
-  const [baseUrlEnabled, setBaseUrlEnabled] = useState(
-    Boolean(profile.baseUrl)
-  );
-  const baseUrlPlaceholder = usesAnthropicApi
-    ? "https://api.example.com"
-    : "https://api.example.com/v1";
-
-  const update = (
-    fields: Parameters<ReturnType<typeof useUpdateProviderProfile>>[2]
-  ) => updateProviderProfile(provider.id, profile.id, fields);
-
-  const handleNameBlur = (event: React.FocusEvent<HTMLInputElement>) => {
-    const value = event.target.value.trim();
-    if (!value || value === profile.name) {
-      event.target.value = profile.name;
-      return;
-    }
-    const input = event.currentTarget;
-    runModelMutation(
-      "Failed to rename connection profile",
-      () => update({ name: value }),
-      { onError: () => void (input.value = profile.name) }
-    );
-  };
-
-  const handleApiKeyBlur = (event: React.FocusEvent<HTMLInputElement>) => {
-    const value = event.target.value.trim();
-    const next = value === "" ? null : value;
-    if (next !== (profile.apiKey ?? null)) {
-      runModelMutation("Failed to update API key", () =>
-        update({ apiKey: next })
-      );
-    }
-  };
-
-  const handleBaseUrlBlur = (event: React.FocusEvent<HTMLInputElement>) => {
-    const value = event.target.value.trim();
-    const next = value === "" ? null : value;
-    if (next !== (profile.baseUrl ?? null)) {
-      runModelMutation("Failed to update base URL", () =>
-        update({ baseUrl: next })
-      );
-    }
-  };
-
-  const handleBaseUrlToggle = (enabled: boolean) => {
-    setBaseUrlEnabled(enabled);
-    if (!enabled) {
-      runModelMutation(
-        "Failed to clear base URL",
-        () => update({ baseUrl: null }),
-        { onError: () => setBaseUrlEnabled(true) }
-      );
-    }
-  };
-
-  return (
-    <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-2">
-        <span className="text-sm font-medium">Profile name</span>
-        <Input
-          defaultValue={profile.name}
-          placeholder="Profile name"
-          aria-label={`${provider.name} profile name`}
-          onBlur={handleNameBlur}
-        />
-      </div>
-
-      {provider.id !== "openai-codex" ? (
-        <ApiKeyField
-          label="API key"
-          getKeyUrl={provider.websiteLink}
-          defaultValue={profile.apiKey ?? ""}
-          placeholder={`Input API Key for ${provider.name}.`}
-          aria-label={`${profile.name} API key`}
-          onBlur={handleApiKeyBlur}
-          description={
-            <div className="text-muted-foreground pl-5 text-xs">
-              <div className="list-item">
-                {
-                  'Use "${ENV_NAME}" to reference environment variables. e.g. "$OPENAI_API_KEY"'
-                }
-              </div>
-              <div className="list-item">
-                Leave it blank to use the official {provider.name} environment
-                variable
-              </div>
-            </div>
-          }
-        />
-      ) : null}
-
-      {isBuiltin ? (
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center justify-between">
-            <span className="text-sm font-medium">Custom base URL</span>
-            <Switch
-              aria-label={
-                baseUrlEnabled
-                  ? `Disable custom base URL for ${profile.name}`
-                  : `Enable custom base URL for ${profile.name}`
-              }
-              checked={baseUrlEnabled}
-              onCheckedChange={handleBaseUrlToggle}
-            />
-          </div>
-          {baseUrlEnabled ? (
-            <>
-              <Input
-                defaultValue={profile.baseUrl ?? ""}
-                placeholder={baseUrlPlaceholder}
-                aria-label={`${profile.name} custom base URL`}
-                onBlur={handleBaseUrlBlur}
-              />
-              <div className="text-muted-foreground text-xs">
-                Leave empty to use the default endpoint.
-                {usesAnthropicApi ? ` ${ANTHROPIC_BASE_URL_HINT}` : null}
-              </div>
-            </>
-          ) : null}
-        </div>
-      ) : (
-        <div className="flex flex-col gap-2">
-          <span className="text-sm font-medium">Base URL</span>
-          <Input
-            required
-            defaultValue={profile.baseUrl ?? ""}
-            placeholder={baseUrlPlaceholder}
-            aria-label={`${profile.name} base URL`}
-            onBlur={handleBaseUrlBlur}
-          />
-          {usesAnthropicApi ? (
-            <div className="text-muted-foreground text-xs">
-              {ANTHROPIC_BASE_URL_HINT}
-            </div>
-          ) : null}
-        </div>
-      )}
-
-      <_ProviderHeadersEditor
-        providerId={provider.id}
-        providerName={provider.name}
-        profile={profile}
       />
     </div>
   );
@@ -1388,106 +1217,6 @@ function _ImageModelListItem({
         />
       )}
     </Item>
-  );
-}
-
-/**
- * Key-value editor for a profile's extra HTTP headers. Rows live in local state
- * so half-typed entries survive re-renders; only rows with a non-empty name are
- * persisted, on blur or row removal.
- */
-function _ProviderHeadersEditor({
-  providerId,
-  providerName,
-  profile,
-}: {
-  providerId: string;
-  providerName: string;
-  profile: ProviderProfile;
-}) {
-  const updateProviderProfile = useUpdateProviderProfile();
-  const [rows, setRows] = useState<{ key: string; value: string }[]>(() =>
-    Object.entries(profile.headers ?? {}).map(([key, value]) => ({
-      key,
-      value,
-    }))
-  );
-
-  const setRow = (index: number, row: { key: string; value: string }) => {
-    setRows((prev) => prev.map((r, i) => (i === index ? row : r)));
-  };
-
-  // Persist the named rows when they differ from the stored headers. An empty
-  // set clears the field (stored as `null`).
-  const persist = (nextRows: { key: string; value: string }[]) => {
-    const headers: Record<string, string> = {};
-    for (const row of nextRows) {
-      const key = row.key.trim();
-      if (key !== "") headers[key] = row.value;
-    }
-    const current = profile.headers ?? {};
-    const currentKeys = Object.keys(current);
-    const same =
-      Object.keys(headers).length === currentKeys.length &&
-      currentKeys.every((key) => headers[key] === current[key]);
-    if (same) return;
-    runModelMutation("Failed to update custom headers", () =>
-      updateProviderProfile(providerId, profile.id, {
-        headers: Object.keys(headers).length > 0 ? headers : null,
-      })
-    );
-  };
-
-  const removeRow = (index: number) => {
-    const next = rows.filter((_, i) => i !== index);
-    setRows(next);
-    persist(next);
-  };
-
-  return (
-    <div className="flex flex-col gap-2">
-      <span className="text-sm font-medium">Custom headers</span>
-      {rows.map((row, index) => (
-        <div key={index} className="flex items-center gap-2">
-          <Input
-            value={row.key}
-            placeholder="X-Header-Name"
-            aria-label={`${providerName} header ${index + 1} name`}
-            onChange={(e) => setRow(index, { ...row, key: e.target.value })}
-            onBlur={() => persist(rows)}
-          />
-          <Input
-            value={row.value}
-            placeholder="Value"
-            aria-label={`${providerName} header ${index + 1} value`}
-            onChange={(e) => setRow(index, { ...row, value: e.target.value })}
-            onBlur={() => persist(rows)}
-          />
-          <Tooltip content="Remove header">
-            <button
-              type="button"
-              aria-label={`Remove header ${index + 1}`}
-              onClick={() => removeRow(index)}
-              className="text-muted-foreground hover:bg-accent hover:text-foreground inline-flex size-6 shrink-0 items-center justify-center rounded transition-colors"
-            >
-              <Trash2 className="size-4" />
-            </button>
-          </Tooltip>
-        </div>
-      ))}
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        className="self-start"
-        onClick={() => setRows((prev) => [...prev, { key: "", value: "" }])}
-      >
-        <Plus /> Add header
-      </Button>
-      <div className="text-muted-foreground text-xs">
-        Sent with every request made through this profile.
-      </div>
-    </div>
   );
 }
 
