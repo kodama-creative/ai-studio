@@ -24,7 +24,7 @@ import { AccountPage } from "./account-page";
 import { ExperimentalPage } from "./experimental-page";
 import { GeneralPage } from "./general-page";
 import { McpPage } from "./mcp-page";
-import { ModelsPage } from "./models-page";
+import { ModelsPage } from "./models/models-page";
 import { NetworkPage } from "./network-page";
 import { SearchPage } from "./search-page";
 import { SkillsPage } from "./skills-page";

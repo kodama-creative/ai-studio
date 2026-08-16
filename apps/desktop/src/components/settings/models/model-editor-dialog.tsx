@@ -35,7 +35,7 @@ import {
 } from "react";
 import { toast } from "sonner";
 
-import { CustomModelEditorController } from "@/app/settings/custom-model-editor-controller";
+import { CustomModelEditorController } from "@/app/settings/models/custom-model-editor-controller";
 
 import {
   CUSTOM_PROVIDER_API_TYPES,

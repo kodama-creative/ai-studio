@@ -2,7 +2,7 @@ import type { ModelProviderGroup } from "@llm-space/core";
 
 export type ProviderMetadataApi = NonNullable<ModelProviderGroup["api"]>;
 export type ProviderMetadataTextField = "name" | "icon";
-type ProviderMetadataField = ProviderMetadataTextField | "api";
+export type ProviderMetadataField = ProviderMetadataTextField | "api";
 
 export interface ProviderMetadataTarget {
   readonly providerId: string;

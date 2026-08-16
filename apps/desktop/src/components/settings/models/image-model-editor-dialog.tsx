@@ -35,7 +35,7 @@ import {
 } from "react";
 import { toast } from "sonner";
 
-import { ImageModelEditorController } from "@/app/settings/image-model-editor-controller";
+import { ImageModelEditorController } from "@/app/settings/models/image-model-editor-controller";
 
 interface ImageModelFormState {
   id: string;

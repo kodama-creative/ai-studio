@@ -4,28 +4,18 @@ import type {
   ModelProviderGroup,
   ProviderProfile,
 } from "@llm-space/core";
-import { useUpdateProviderProfile } from "@llm-space/ui/components/model-provider";
 import { Tooltip } from "@llm-space/ui/components/tooltip";
 import { Button } from "@llm-space/ui/ui/button";
 import { Input } from "@llm-space/ui/ui/input";
 import { Switch } from "@llm-space/ui/ui/switch";
 import { Plus, Trash2 } from "lucide-react";
-import {
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useSyncExternalStore,
-} from "react";
-import { toast } from "sonner";
+import { useSyncExternalStore } from "react";
 
 import {
   ProviderProfileController,
-  type ProviderProfileField,
-  type ProviderProfileTarget,
-} from "@/app/settings/provider-profile-controller";
+} from "@/app/settings/models/provider-profile-controller";
 
-import { ApiKeyField } from "./api-key-field";
+import { ApiKeyField } from "../api-key-field";
 
 /**
  * Base-URL guidance for the Anthropic Messages API. Its SDK appends `/v1/...`
@@ -35,65 +25,23 @@ const ANTHROPIC_BASE_URL_HINT =
   "The Anthropic SDK adds /v1 to the request path itself, so enter the URL without a /v1 suffix.";
 
 export function ProviderProfileEditor({
+  controller,
   provider,
   profile,
   isBuiltin,
   usesAnthropicApi,
 }: {
+  controller: ProviderProfileController;
   provider: ModelProviderGroup;
   profile: ProviderProfile;
   isBuiltin: boolean;
   usesAnthropicApi: boolean;
 }) {
-  const updateProfile = useUpdateProviderProfile();
-  const target = useMemo<ProviderProfileTarget>(
-    () => ({
-      providerId: provider.id,
-      profile: {
-        id: profile.id,
-        name: profile.name,
-        ...(profile.apiKey === undefined ? {} : { apiKey: profile.apiKey }),
-        ...(profile.baseUrl === undefined
-          ? {}
-          : { baseUrl: profile.baseUrl }),
-        ...(profile.headers === undefined
-          ? {}
-          : { headers: profile.headers }),
-      },
-    }),
-    [
-      profile.apiKey,
-      profile.baseUrl,
-      profile.headers,
-      profile.id,
-      profile.name,
-      provider.id,
-    ]
-  );
-  const initialTarget = useRef(target).current;
-  const controller = useMemo(
-    () =>
-      new ProviderProfileController(initialTarget, {
-        updateProfile,
-        saveFailed: (field, error) => {
-          toast.error(_failureTitle(field), {
-            description:
-              error instanceof Error ? error.message : "Please try again.",
-          });
-        },
-      }),
-    [initialTarget, updateProfile]
-  );
   const snapshot = useSyncExternalStore(
     controller.subscribe,
     controller.getSnapshot,
     controller.getSnapshot
   );
-
-  useLayoutEffect(() => {
-    controller.sync(target);
-  }, [controller, target]);
-  useEffect(() => () => controller.close(), [controller]);
 
   const baseUrlPlaceholder = usesAnthropicApi
     ? "https://api.example.com"
@@ -241,17 +189,4 @@ export function ProviderProfileEditor({
       </div>
     </div>
   );
-}
-
-function _failureTitle(field: ProviderProfileField): string {
-  switch (field) {
-    case "name":
-      return "Failed to rename connection profile";
-    case "apiKey":
-      return "Failed to update API key";
-    case "baseUrl":
-      return "Failed to update base URL";
-    case "headers":
-      return "Failed to update custom headers";
-  }
 }
