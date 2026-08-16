@@ -26,7 +26,6 @@ import { Input } from "@llm-space/ui/ui/input";
 import { ScrollArea } from "@llm-space/ui/ui/scroll-area";
 import { MoreHorizontal, Search, Trash2 } from "lucide-react";
 import {
-  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -44,6 +43,7 @@ import { SettingsPage } from "../settings-page";
 
 import { AddProviderMenu } from "./add-provider-menu";
 import { ProviderEditor } from "./provider-editor";
+import { useFinalControllerDisposal } from "./use-final-controller-disposal";
 
 function sortProviders(
   providers: readonly ModelProviderGroup[]
@@ -93,7 +93,7 @@ export function ModelsPage() {
     controller.getSnapshot
   );
   useLayoutEffect(() => controller.syncCatalog(providers), [controller, providers]);
-  useEffect(() => () => controller.close(), [controller]);
+  useFinalControllerDisposal(controller);
   const selected = controller.getSelectedProvider();
   const removalCandidate = snapshot.providers.find(
     (provider) => provider.id === snapshot.removalCandidateId
