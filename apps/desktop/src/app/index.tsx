@@ -30,9 +30,9 @@ export function App() {
           Opening workspace…
         </div>
       ) : (
-        <DesktopWindowProviders>
+        <DesktopWindowProviders context={context}>
           {context.kind === "agentProject" ? (
-            <ProjectPage project={context.project} />
+            <ProjectPage />
           ) : (
             <MainWindowPage />
           )}

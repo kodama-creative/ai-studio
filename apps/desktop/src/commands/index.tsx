@@ -2,7 +2,6 @@
 
 import {
   createContext,
-  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -10,38 +9,22 @@ import {
   type ReactNode,
 } from "react";
 
-import { electrobun } from "@/lib/electrobun";
+import { RENDERER_COMMAND_REGISTRY } from "@/app/di/common-module";
+import { useInject } from "@/app/di/react";
+import type { Command, CommandType } from "@/shared/commands";
+
 import {
-  COMMAND_META,
-  type Command,
-  type CommandArgs,
-  type CommandType,
-} from "@/shared/commands";
+  type CommandHandlers,
+  RendererCommandRegistry,
+} from "./renderer-command-registry";
 
 /**
  * A per-command handler, receiving that command's typed `args`. Used both as the
  * shape callers register and (internally, type-erased) as the stored dispatch
  * target.
  */
-export type CommandHandlers = {
-  [T in CommandType]?: (args: CommandArgs<T>) => void | Promise<void>;
-};
-
 type StoredHandler = (args: unknown) => void | Promise<void>;
-
-function _executeHandler(
-  type: CommandType,
-  handler: StoredHandler,
-  args: unknown
-): void {
-  try {
-    void Promise.resolve(handler(args)).catch((error: unknown) => {
-      console.error(`Command "${type}" failed:`, error);
-    });
-  } catch (error) {
-    console.error(`Command "${type}" failed:`, error);
-  }
-}
+export type { CommandHandlers } from "./renderer-command-registry";
 
 interface CommandContextValue {
   /**
@@ -65,46 +48,16 @@ const CommandContext = createContext<CommandContextValue | null>(null);
  * sidebar) register their handlers where that state lives.
  */
 export function CommandProvider({ children }: { children: ReactNode }) {
-  const handlersRef = useRef<Map<CommandType, StoredHandler>>(new Map());
-
-  const executeCommand = useCallback((command: Command) => {
-    if (COMMAND_META[command.type].target === "bun") {
-      electrobun.rpc?.send.executeCommand(command);
-      return;
-    }
-    const handler = handlersRef.current.get(command.type);
-    if (!handler) {
-      console.warn(`No handler registered for command: ${command.type}`);
-      return;
-    }
-    _executeHandler(command.type, handler, command.args);
-  }, []);
-
-  // Native menu items and shortcuts enter through the Bun process. Owning the
-  // bridge here keeps every renderer window on the same command path instead
-  // of requiring each product page to remember transport wiring.
-  useEffect(() => {
-    const rpc = electrobun.rpc;
-    if (!rpc) return;
-    rpc.addMessageListener("executeCommand", executeCommand);
-    return () => rpc.removeMessageListener("executeCommand", executeCommand);
-  }, [executeCommand]);
-
-  const registerCommandHandlers = useCallback((handlers: CommandHandlers) => {
-    const map = handlersRef.current;
-    const entries = Object.entries(handlers) as [CommandType, StoredHandler][];
-    for (const [type, handler] of entries) map.set(type, handler);
-    return () => {
-      for (const [type, handler] of entries) {
-        // Only remove our own handler (a later registrant may have replaced it).
-        if (map.get(type) === handler) map.delete(type);
-      }
-    };
-  }, []);
+  const registry = useInject<RendererCommandRegistry>(
+    RENDERER_COMMAND_REGISTRY
+  );
 
   const value = useMemo(
-    () => ({ executeCommand, registerCommandHandlers }),
-    [executeCommand, registerCommandHandlers]
+    () => ({
+      executeCommand: registry.executeCommand,
+      registerCommandHandlers: registry.registerCommandHandlers,
+    }),
+    [registry]
   );
 
   return (

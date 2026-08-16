@@ -70,7 +70,7 @@ export class ProviderProfilesController {
 
   sync(target: ProviderProfilesTarget | null): void {
     if (target === null) {
-      this.close();
+      this.clearTarget();
       return;
     }
     if (target.providerId !== this._snapshot.providerId) {
@@ -93,7 +93,7 @@ export class ProviderProfilesController {
     });
   }
 
-  close(): void {
+  clearTarget(): void {
     if (this._snapshot.providerId === "") return;
     this._epoch += 1;
     this._profiles = [];
@@ -175,10 +175,7 @@ export class ProviderProfilesController {
   }
 
   private _begin(mutation: ProviderProfilesMutation): MutationLease | null {
-    if (
-      this._snapshot.providerId === "" ||
-      this._snapshot.mutation !== null
-    ) {
+    if (this._snapshot.providerId === "" || this._snapshot.mutation !== null) {
       return null;
     }
     const lease = {
@@ -215,8 +212,7 @@ export class ProviderProfilesController {
     if (
       snapshot.mutation === this._snapshot.mutation &&
       snapshot.providerId === this._snapshot.providerId &&
-      snapshot.removalCandidateId ===
-        this._snapshot.removalCandidateId &&
+      snapshot.removalCandidateId === this._snapshot.removalCandidateId &&
       snapshot.selectedProfileId === this._snapshot.selectedProfileId
     ) {
       return;

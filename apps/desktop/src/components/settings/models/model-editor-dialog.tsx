@@ -1,10 +1,6 @@
 "use client";
 
 import type { CustomModel } from "@llm-space/core";
-import {
-  useTestModelConnection,
-  useUpsertCustomModel,
-} from "@llm-space/ui/components/model-provider";
 import { ModelAvatar } from "@llm-space/ui/components/thread-playground/model-avatar";
 import { Button } from "@llm-space/ui/ui/button";
 import {
@@ -25,17 +21,18 @@ import {
 } from "@llm-space/ui/ui/select";
 import { Switch } from "@llm-space/ui/ui/switch";
 import { CableIcon, Loader2 } from "lucide-react";
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import { useCallback, useLayoutEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
-import { CustomModelEditorController } from "@/app/settings/models/custom-model-editor-controller";
+import {
+  CUSTOM_MODEL_EDITOR_CONTROLLER,
+  createCustomModelEditorScope,
+} from "@/app/di/model-editor-session-module";
+import {
+  RendererScopeProvider,
+  useController,
+  useRendererScope,
+} from "@/app/di/react";
 
 import {
   CUSTOM_PROVIDER_API_TYPES,
@@ -104,38 +101,57 @@ export function ModelEditorDialog({
   profileId,
   providerApi,
   model,
-}: {
+}: ModelEditorDialogProps) {
+  const parent = useRendererScope();
+  const originalModelId = model?.id;
+  const target = useMemo(
+    () => ({
+      providerId,
+      profileId,
+      ...(originalModelId === undefined ? {} : { originalModelId }),
+    }),
+    [originalModelId, profileId, providerId]
+  );
+  const scope = useMemo(
+    () => createCustomModelEditorScope(parent, target),
+    [parent, target]
+  );
+  return (
+    <RendererScopeProvider scope={scope}>
+      <ModelEditorDialogContent
+        open={open}
+        onOpenChange={onOpenChange}
+        providerId={providerId}
+        profileId={profileId}
+        providerApi={providerApi}
+        model={model}
+      />
+    </RendererScopeProvider>
+  );
+}
+
+interface ModelEditorDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   providerId: string;
   profileId: string;
   providerApi?: CustomProviderApi;
   model?: CustomModel | null;
-}) {
-  const upsertCustomModel = useUpsertCustomModel();
-  const testModelConnection = useTestModelConnection();
+}
+
+function ModelEditorDialogContent({
+  open,
+  onOpenChange,
+  providerId,
+  profileId,
+  providerApi,
+  model,
+}: ModelEditorDialogProps) {
   const [form, setForm] = useState<FormState>(() =>
     initialState(model, providerApi)
   );
-  const controller = useMemo(
-    () =>
-      new CustomModelEditorController({
-        save: upsertCustomModel,
-        test: (targetProviderId, targetProfileId, candidate) =>
-          testModelConnection(
-            targetProviderId,
-            candidate.id,
-            candidate,
-            targetProfileId
-          ),
-      }),
-    [testModelConnection, upsertCustomModel]
-  );
-  const operation = useSyncExternalStore(
-    controller.subscribe,
-    controller.getSnapshot,
-    controller.getSnapshot
-  ).operation;
+  const { controller, state } = useController(CUSTOM_MODEL_EDITOR_CONTROLLER);
+  const operation = state.operation;
 
   // Reset the form whenever the dialog opens (for a fresh create or a different
   // model to edit).
@@ -148,10 +164,9 @@ export function ModelEditorDialog({
         ...(model?.id === undefined ? {} : { originalModelId: model.id }),
       });
     } else {
-      controller.close();
+      controller.closeSession();
     }
   }, [controller, model, open, profileId, providerApi, providerId]);
-  useEffect(() => () => controller.close(), [controller]);
 
   const isEdit = Boolean(model);
 
@@ -193,7 +208,7 @@ export function ModelEditorDialog({
 
   const handleOpenChange = useCallback(
     (next: boolean) => {
-      if (!next) controller.close();
+      if (!next) controller.closeSession();
       onOpenChange(next);
     },
     [controller, onOpenChange]

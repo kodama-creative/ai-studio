@@ -55,57 +55,28 @@ import {
   Wrench,
   X,
 } from "lucide-react";
-import {
-  useEffect,
-  useMemo,
-  useState,
-  useSyncExternalStore,
-  type ReactNode,
-} from "react";
+import { useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { format } from "timeago.js";
 
+import { useController } from "@/app/di/react";
+import { MCP_SETTINGS_CONTROLLER } from "@/app/di/settings-module";
 import {
-  McpSettingsController,
   type McpKeyValueRow,
   type McpServerForm,
 } from "@/app/settings/mcp-settings-controller";
-import { createMcpClient } from "@/client/mcp";
 
 import { SettingsEmptyState } from "./settings-empty-state";
 import { SettingsPage } from "./settings-page";
 
 export function McpPage() {
-  const client = useMemo(() => createMcpClient(), []);
-  const controller = useMemo(
-    () =>
-      new McpSettingsController({
-        client,
-        notifySuccess: (title, description) =>
-          toast.success(title, { description }),
-        notifyError: (title, error) =>
-          toast.error(title, {
-            description:
-              error instanceof Error ? error.message : "Please try again.",
-          }),
-      }),
-    [client]
-  );
-  const state = useSyncExternalStore(
-    controller.subscribe,
-    controller.getSnapshot,
-    controller.getSnapshot
-  );
+  const { controller, state } = useController(MCP_SETTINGS_CONTROLLER);
   const [removeOpen, setRemoveOpen] = useState(false);
   const selectedServer =
     state.servers.find((server) => server.id === state.selectedId) ?? null;
   const normalizedName = normalizeMcpName(state.form.name);
   const testing = selectedServer?.id === state.testingServerId;
 
-  useEffect(() => {
-    controller.start();
-    return () => controller.stop();
-  }, [controller]);
   const {
     servers,
     selectedId,

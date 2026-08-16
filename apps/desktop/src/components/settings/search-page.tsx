@@ -1,10 +1,6 @@
 "use client";
 
-import {
-  DEFAULT_SEARCH_SETTINGS,
-  type SearchProviderId,
-  type SearchSettings,
-} from "@llm-space/core";
+import { type SearchProviderId } from "@llm-space/core";
 import {
   Select,
   SelectContent,
@@ -13,42 +9,17 @@ import {
   SelectValue,
 } from "@llm-space/ui/ui/select";
 import { Separator } from "@llm-space/ui/ui/separator";
-import { useEffect, useMemo, useSyncExternalStore } from "react";
-import { toast } from "sonner";
 
-import { SettingsFormController } from "@/app/settings/settings-form-controller";
-import { createSearchClient } from "@/client/search";
+import { useController } from "@/app/di/react";
+import { SEARCH_SETTINGS_CONTROLLER } from "@/app/di/settings-module";
 
 import { ApiKeyField } from "./api-key-field";
 import { SettingsPage } from "./settings-page";
 
 export function SearchPage() {
-  const client = useMemo(() => createSearchClient(), []);
-  const controller = useMemo(
-    () =>
-      new SettingsFormController<SearchSettings>({
-        initialSettings: DEFAULT_SEARCH_SETTINGS,
-        initialContext: undefined,
-        loadSettings: () => client.get(),
-        saveSettings: (settings) => client.set(settings),
-        notifySaveError: (error) => {
-          toast.error("Failed to save search settings", {
-            description:
-              error instanceof Error ? error.message : "Please try again.",
-          });
-        },
-      }),
-    [client]
+  const { controller, state: snapshot } = useController(
+    SEARCH_SETTINGS_CONTROLLER
   );
-  const snapshot = useSyncExternalStore(
-    controller.subscribe,
-    controller.getSnapshot,
-    controller.getSnapshot
-  );
-  useEffect(() => {
-    controller.start();
-    return () => controller.stop();
-  }, [controller]);
   const settings = snapshot.settings;
 
   return (

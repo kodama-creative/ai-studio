@@ -55,7 +55,7 @@ import {
   Plus,
   X,
 } from "lucide-react";
-import { useMemo, useState, useSyncExternalStore } from "react";
+import { useMemo, useState } from "react";
 
 import { ModelsSettingsController } from "@/app/settings/models/models-settings-controller";
 
@@ -64,10 +64,7 @@ import {
   type CustomProviderApi,
 } from "./custom-provider-api";
 import { ModelEditorDialog } from "./model-editor-dialog";
-import {
-  ArkImageGenerationEditor,
-  ModelListItem,
-} from "./model-inventory";
+import { ArkImageGenerationEditor, ModelListItem } from "./model-inventory";
 import { ProviderProfileEditor } from "./provider-profile-editor";
 import { runModelMutation } from "./run-model-mutation";
 
@@ -83,18 +80,11 @@ export function ProviderEditor({
   const [modelView, setModelView] = useState<"all" | "enabled" | "disabled">(
     "all"
   );
-  const metadataController = controller.metadata;
-  const profilesController = controller.profiles;
-  const metadata = useSyncExternalStore(
-    metadataController.subscribe,
-    metadataController.getSnapshot,
-    metadataController.getSnapshot
-  );
-  const profilesState = useSyncExternalStore(
-    profilesController.subscribe,
-    profilesController.getSnapshot,
-    profilesController.getSnapshot
-  );
+  const aggregate = controller.getSnapshot();
+  const metadata = aggregate.metadata;
+  const profilesState = aggregate.profiles;
+  const metadataIntents = controller.intents.metadata;
+  const profilesIntents = controller.intents.profiles;
   const [modelListRef] = useAutoAnimation<HTMLDivElement>();
   const [editorOpen, setEditorOpen] = useState(false);
   // The custom model being edited, or `null` for a fresh create.
@@ -142,8 +132,7 @@ export function ProviderEditor({
   const selectedProfile =
     provider.profiles.find(
       (profile) => profile.id === profilesState.selectedProfileId
-    ) ??
-    provider.profiles[0];
+    ) ?? provider.profiles[0];
   const profilePendingRemoval = provider.profiles.find(
     (profile) => profile.id === profilesState.removalCandidateId
   );
@@ -187,9 +176,9 @@ export function ProviderEditor({
                   placeholder="Custom provider"
                   aria-label="Custom provider name"
                   onChange={(event) =>
-                    metadataController.draft("name", event.target.value)
+                    metadataIntents.draft("name", event.target.value)
                   }
-                  onBlur={() => metadataController.commit("name")}
+                  onBlur={() => metadataIntents.commit("name")}
                 />
               </div>
 
@@ -198,7 +187,7 @@ export function ProviderEditor({
                 <Select
                   value={metadata.api}
                   onValueChange={(value) =>
-                    metadataController.selectApi(value as CustomProviderApi)
+                    metadataIntents.selectApi(value as CustomProviderApi)
                   }
                 >
                   <SelectTrigger
@@ -235,9 +224,9 @@ export function ProviderEditor({
                   placeholder="Auto (e.g. openai, anthropic, google)"
                   aria-label={`${provider.name} icon`}
                   onChange={(event) =>
-                    metadataController.draft("icon", event.target.value)
+                    metadataIntents.draft("icon", event.target.value)
                   }
-                  onBlur={() => metadataController.commit("icon")}
+                  onBlur={() => metadataIntents.commit("icon")}
                 />
               </div>
               <div className="text-muted-foreground text-xs">
@@ -255,14 +244,15 @@ export function ProviderEditor({
 
           <Tabs
             value={selectedProfile.id}
-            onValueChange={(profileId) =>
-              profilesController.select(profileId)
-            }
+            onValueChange={(profileId) => profilesIntents.select(profileId)}
             className="gap-3"
           >
             <div className="flex flex-col gap-2">
               <div className="flex min-w-0 items-center gap-2">
-                <TabsList variant="line" className="h-8! min-w-0 grow flex-row! justify-start overflow-x-auto">
+                <TabsList
+                  variant="line"
+                  className="h-8! min-w-0 grow flex-row! justify-start overflow-x-auto"
+                >
                   {provider.profiles.map((profile, index) => (
                     <div
                       key={profile.id}
@@ -280,7 +270,7 @@ export function ProviderEditor({
                             aria-label={`Remove ${profile.name} connection profile`}
                             disabled={profilesState.mutation !== null}
                             onClick={() =>
-                              profilesController.requestRemove(profile.id)
+                              profilesIntents.requestRemove(profile.id)
                             }
                           >
                             <X data-icon="inline-start" />
@@ -297,7 +287,7 @@ export function ProviderEditor({
                     size="icon"
                     aria-label="Add connection profile"
                     disabled={profilesState.mutation !== null}
-                    onClick={() => void profilesController.add()}
+                    onClick={() => void profilesIntents.add()}
                   >
                     <Plus data-icon="inline-start" />
                   </Button>
@@ -319,7 +309,8 @@ export function ProviderEditor({
                   <CardContent>
                     {profile.id === selectedProfile.id ? (
                       <ProviderProfileEditor
-                        controller={controller.profile}
+                        controller={controller}
+                        snapshot={aggregate.profile}
                         provider={provider}
                         profile={profile}
                         isBuiltin={isBuiltin}
@@ -454,13 +445,13 @@ export function ProviderEditor({
       <ConfirmDialog
         open={profilePendingRemoval !== undefined}
         onOpenChange={(open) => {
-          if (!open) profilesController.cancelRemove();
+          if (!open) profilesIntents.cancelRemove();
         }}
         title={`Remove ${profilePendingRemoval?.name ?? "profile"}?`}
         description={`This permanently removes the connection profile "${profilePendingRemoval?.name ?? "profile"}" from ${provider.name}.`}
         confirmLabel="Remove"
         dimBackground={false}
-        onConfirm={() => void profilesController.confirmRemove()}
+        onConfirm={() => void profilesIntents.confirmRemove()}
       />
     </div>
   );

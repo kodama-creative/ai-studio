@@ -56,7 +56,7 @@ describe("ImageModelEditorController", () => {
     controller.open("same");
     const oldResult = controller.save(MODEL);
 
-    controller.close();
+    controller.closeSession();
     controller.open("same");
     const newResult = controller.save(MODEL);
     oldSave.reject(new Error("late failure"));

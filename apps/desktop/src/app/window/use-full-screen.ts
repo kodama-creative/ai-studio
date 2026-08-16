@@ -1,8 +1,5 @@
-import { useEffect, useMemo, useSyncExternalStore } from "react";
-
-import { createWindowClient } from "@/client/window";
-
-import { FullScreenController } from "./full-screen-controller";
+import { FULL_SCREEN_CONTROLLER } from "@/app/di/common-module";
+import { useController } from "@/app/di/react";
 
 /**
  * Track the window's OS-level (Electrobun) fullscreen state. Seeds the initial
@@ -10,21 +7,8 @@ import { FullScreenController } from "./full-screen-controller";
  * `fullScreenChanged` messages.
  */
 export function useFullScreen(): boolean {
-  const windowClient = useMemo(() => createWindowClient(), []);
-  const controller = useMemo(
-    () => new FullScreenController(windowClient),
-    [windowClient]
-  );
-  const snapshot = useSyncExternalStore(
-    controller.subscribe,
-    controller.getSnapshot,
-    controller.getSnapshot
-  );
-
-  useEffect(() => {
-    controller.start();
-    return () => controller.stop();
-  }, [controller]);
-
-  return snapshot.fullScreen;
+  return useController(
+    FULL_SCREEN_CONTROLLER,
+    (snapshot) => snapshot.fullScreen
+  ).state;
 }

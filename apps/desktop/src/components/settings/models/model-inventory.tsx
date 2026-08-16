@@ -12,7 +12,6 @@ import {
   useSetAllImageModelsEnabled,
   useSetImageModelEnabled,
   useTestModelConnection,
-  useUpsertCustomImageModel,
 } from "@llm-space/ui/components/model-provider";
 import { ModelAvatar } from "@llm-space/ui/components/thread-playground/model-avatar";
 import { Tooltip } from "@llm-space/ui/components/tooltip";
@@ -58,7 +57,6 @@ export function ArkImageGenerationEditor({
   const setImageModelEnabled = useSetImageModelEnabled();
   const setAllImageModelsEnabled = useSetAllImageModelsEnabled();
   const removeCustomImageModel = useRemoveCustomImageModel();
-  const upsertCustomImageModel = useUpsertCustomImageModel();
   const config = provider.imageGeneration ?? {};
   const models = getArkImageModelDefinitions(config);
   const disabledModels = new Set(config.disabledModels ?? []);
@@ -96,9 +94,8 @@ export function ArkImageGenerationEditor({
 
   /** Remove one custom image model without repairing Thread tool bindings. */
   const handleDeleteCustomModel = (modelId: string) => {
-    runModelMutation(
-      "Failed to delete custom image model",
-      () => removeCustomImageModel(modelId)
+    runModelMutation("Failed to delete custom image model", () =>
+      removeCustomImageModel(modelId)
     );
   };
 
@@ -202,7 +199,6 @@ export function ArkImageGenerationEditor({
         onOpenChange={setEditorOpen}
         model={editingModel}
         existingIds={models.map((model) => model.id)}
-        onSave={upsertCustomImageModel}
       />
     </>
   );

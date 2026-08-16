@@ -3,10 +3,7 @@ import {
   useModels,
   useRefreshModels,
 } from "@llm-space/ui/components/model-provider";
-import {
-  getPromptExample,
-} from "@llm-space/ui/components/thread-playground/examples/prompts";
-import { useHostServices } from "@llm-space/ui/host";
+import { getPromptExample } from "@llm-space/ui/components/thread-playground/examples/prompts";
 import {
   LOCAL_STORAGE_KEYS,
   readLocalStorage,
@@ -17,31 +14,21 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from "@llm-space/ui/ui/resizable";
-import {
-  lazy,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import { lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePanelRef } from "react-resizable-panels";
 import { toast } from "sonner";
 
-import { GithubAuthProvider } from "@/app/account/github-auth-provider";
 import {
-  MainTabsController,
-  type AppTab,
-} from "@/app/tabs/main-tabs-controller";
-import { MainTabsLocalStorage } from "@/app/tabs/main-tabs-local-storage";
-import { useMainTabs } from "@/app/tabs/use-main-tabs";
-import { UpdateStatusProvider } from "@/app/updates/update-status-provider";
+  AGENT_PROJECT_CATALOG_CONTROLLER,
+  ANALYTICS_CLIENT,
+  MAIN_TABS_CONTROLLER,
+  PANE_ACTIVITY_TRACKER,
+  PLAYGROUND_WORKSPACE_CONTROLLER,
+} from "@/app/di/main-window-module";
+import { useController, useInject } from "@/app/di/react";
+import type { AppTab } from "@/app/tabs/main-tabs-controller";
+import { UpdateStatusSurface } from "@/app/updates/update-status-provider";
 import { useFullScreen } from "@/app/window/use-full-screen";
-import { createAgentProjectClient } from "@/client/agent-project-client";
-import { createAnalyticsClient } from "@/client/analytics";
-import { createPlaygroundClient } from "@/client/playground-client";
-import { createThreadSharingClient } from "@/client/share";
 import { useCommands, useRegisterCommands } from "@/commands";
 import { AccountStatus } from "@/components/account-status";
 import { FeatureReminderDialog } from "@/components/feature-reminder-dialog";
@@ -55,22 +42,15 @@ import { Welcome } from "@/components/welcome";
 import { trackAnalytics } from "@/lib/analytics";
 import type { SettingsTab } from "@/shared/commands";
 
-import { PaneActivityTracker } from "./playground/pane-activity-tracker";
 import type { PaneLifecycleHost } from "./playground/pane-lifecycle-host";
 import {
   closeAllTabsIfAllowed,
   closeOtherTabsIfAllowed,
   closeTabIfAllowed,
-  paneIdForTab,
   refreshTabIfAllowed,
 } from "./playground/pane-mutation-actions";
 import { PlaygroundTabPane } from "./playground/playground-tab-pane";
-import {
-  PlaygroundWorkspaceController,
-  type SnapshotDocument,
-} from "./playground/playground-workspace-controller";
-import { AgentProjectCatalogController } from "./project/agent-project-catalog-controller";
-import { RemindersProvider } from "./reminders/reminders-provider";
+import type { SnapshotDocument } from "./playground/playground-workspace-controller";
 
 // Overlay surfaces that aren't part of the first paint — settings, the command
 // palette, onboarding, and examples. Loaded lazily so their code (and heavy
@@ -104,13 +84,10 @@ const ShareThreadDialog = lazy(() =>
 
 export function MainWindowPage() {
   return (
-    <UpdateStatusProvider>
-      <GithubAuthProvider>
-        <RemindersProvider>
-          <PageWorkspace />
-        </RemindersProvider>
-      </GithubAuthProvider>
-    </UpdateStatusProvider>
+    <>
+      <PageWorkspace />
+      <UpdateStatusSurface />
+    </>
   );
 }
 
@@ -155,29 +132,9 @@ function writeSidebarSize(sizeInPixels: number): void {
 }
 
 function PageWorkspace() {
-  const paneActivityTrackerRef = useRef(new PaneActivityTracker());
-  const canPruneRestoredTab = useCallback((tab: AppTab) => {
-    const paneId = paneIdForTab(tab);
-    return (
-      !paneActivityTrackerRef.current.isPaneBusy(paneId) &&
-      !paneActivityTrackerRef.current.isMutationReserved(paneId)
-    );
-  }, []);
-  const playgroundClient = useMemo(() => createPlaygroundClient(), []);
-  const tabsController = useMemo(
-    () =>
-      new MainTabsController({
-        persistence: new MainTabsLocalStorage(),
-        playgroundExists: (playgroundId) =>
-          playgroundClient
-            .load(playgroundId)
-            .then((value) => value !== undefined),
-        canPruneRestoredTab,
-        subscribeToPruneChanges: paneActivityTrackerRef.current.subscribe,
-      }),
-    [canPruneRestoredTab, playgroundClient]
-  );
-  const tabState = useMainTabs(tabsController);
+  const paneActivityTracker = useInject(PANE_ACTIVITY_TRACKER);
+  const { controller: tabsController, state: tabState } =
+    useController(MAIN_TABS_CONTROLLER);
   const openPlayground = useCallback(
     (playgroundId: string, title: string) =>
       tabsController.dispatch({
@@ -200,31 +157,12 @@ function PageWorkspace() {
     () => tabsController.dispatch({ type: "closeAll" }),
     [tabsController]
   );
-  const agentProjectClient = useMemo(() => createAgentProjectClient(), []);
-  const agentProjectCatalogController = useMemo(
-    () =>
-      new AgentProjectCatalogController({
-        client: agentProjectClient,
-        reportError: (title, error) =>
-          toast.error(title, {
-            description:
-              error instanceof Error ? error.message : "Please try again.",
-          }),
-      }),
-    [agentProjectClient]
-  );
-  const agentProjectCatalog = useSyncExternalStore(
-    agentProjectCatalogController.subscribe,
-    agentProjectCatalogController.getSnapshot,
-    agentProjectCatalogController.getSnapshot
-  );
-  useEffect(() => {
-    agentProjectCatalogController.start();
-    return () => agentProjectCatalogController.stop();
-  }, [agentProjectCatalogController]);
-  const analytics = useMemo(() => createAnalyticsClient(), []);
-  const threadSharingClient = useMemo(() => createThreadSharingClient(), []);
-  const seedHost = useHostServices();
+  const agentProjectCatalog = useController(
+    AGENT_PROJECT_CATALOG_CONTROLLER
+  ).state;
+  const analytics = useInject(ANALYTICS_CLIENT);
+  const { controller: playgroundWorkspace, state: playgroundCatalog } =
+    useController(PLAYGROUND_WORKSPACE_CONTROLLER);
   const { executeCommand } = useCommands();
   const models = useModels();
   const refreshModels = useRefreshModels();
@@ -249,22 +187,24 @@ function PageWorkspace() {
   }, []);
   const handlePaneRunStart = useCallback(
     (paneId: string, runId: string) =>
-      paneActivityTrackerRef.current.beginRun(paneId, runId),
-    []
+      paneActivityTracker.beginRun(paneId, runId),
+    [paneActivityTracker]
   );
-  const handlePaneRunSettled = useCallback((paneId: string, runId: string) => {
-    paneActivityTrackerRef.current.settleRun(paneId, runId);
-  }, []);
+  const handlePaneRunSettled = useCallback(
+    (paneId: string, runId: string) => {
+      paneActivityTracker.settleRun(paneId, runId);
+    },
+    [paneActivityTracker]
+  );
   const handlePanePersistenceChange = useCallback(
     (paneId: string, owner: object, busy: boolean) => {
-      paneActivityTrackerRef.current.setPersistenceBusy(paneId, owner, busy);
+      paneActivityTracker.setPersistenceBusy(paneId, owner, busy);
     },
-    []
+    [paneActivityTracker]
   );
   const isPaneMutationReserved = useCallback(
-    (paneId: string) =>
-      paneActivityTrackerRef.current.isMutationReserved(paneId),
-    []
+    (paneId: string) => paneActivityTracker.isMutationReserved(paneId),
+    [paneActivityTracker]
   );
   // Collapse / expand the left side panel. The initial width is recovered from
   // localStorage once (lazy ref init) and fed straight into `defaultSize`, so
@@ -298,45 +238,6 @@ function PageWorkspace() {
   const [onboardOpen, setOnboardOpen] = useState(false);
   const [examplesOpen, setExamplesOpen] = useState(false);
   const [sharePath, setSharePath] = useState<string | null>(null);
-  const playgroundWorkspace = useMemo(
-    () =>
-      new PlaygroundWorkspaceController({
-        client: playgroundClient,
-        importSnapshot: (snapshot) =>
-          threadSharingClient.importSnapshot(snapshot),
-        seedHost,
-        openPlayground: (playground) =>
-          openPlayground(playground.id, playground.title),
-        notifySuccess: (message) => toast.success(message),
-        notifyError: (title, error) =>
-          toast.error(title, {
-            ...(error === undefined
-              ? {}
-              : {
-                  description:
-                    error instanceof Error
-                      ? error.message
-                      : "Please try again.",
-                }),
-          }),
-      }),
-    [
-      openPlayground,
-      playgroundClient,
-      seedHost,
-      threadSharingClient,
-    ]
-  );
-  const playgroundCatalog = useSyncExternalStore(
-    playgroundWorkspace.subscribe,
-    playgroundWorkspace.getSnapshot,
-    playgroundWorkspace.getSnapshot
-  );
-  useEffect(() => {
-    playgroundWorkspace.start();
-    return () => playgroundWorkspace.stop();
-  }, [playgroundWorkspace]);
-
   // Snapshot import: a hidden picker opened by the import command plus
   // page-wide OS drag-and-drop state.
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -362,7 +263,7 @@ function PageWorkspace() {
       const target = id ?? current.activeId;
       if (!target) return;
       closeTabIfAllowed({
-        tracker: paneActivityTrackerRef.current,
+        tracker: paneActivityTracker,
         tabs: current.tabs,
         targetId: target,
         onBlocked: () => showPaneBusy("closing this tab"),
@@ -374,7 +275,7 @@ function PageWorkspace() {
       const target = id ?? current.activeId;
       if (!target) return;
       closeOtherTabsIfAllowed({
-        tracker: paneActivityTrackerRef.current,
+        tracker: paneActivityTracker,
         tabs: current.tabs,
         keepId: target,
         onBlocked: () => showPaneBusy("closing other tabs"),
@@ -384,7 +285,7 @@ function PageWorkspace() {
     "tabs.closeAll": () => {
       const current = tabsController.getSnapshot();
       closeAllTabsIfAllowed({
-        tracker: paneActivityTrackerRef.current,
+        tracker: paneActivityTracker,
         tabs: current.tabs,
         onBlocked: () => showPaneBusy("closing all tabs"),
         closeAll,
@@ -456,7 +357,7 @@ function PageWorkspace() {
       const tab = current.tabs.find((candidate) => candidate.id === id);
       if (!tab) return;
       const reservation = refreshTabIfAllowed({
-        tracker: paneActivityTrackerRef.current,
+        tracker: paneActivityTracker,
         tabs: current.tabs,
         targetId: tab.id,
         onBlocked: () => showPaneBusy("refreshing this tab"),
@@ -470,7 +371,7 @@ function PageWorkspace() {
         );
       }
     },
-    [showPaneBusy, tabsController]
+    [paneActivityTracker, showPaneBusy, tabsController]
   );
   const handlePaneRefreshSettled = useCallback((paneId: string) => {
     const release = refreshReservationsRef.current.get(paneId);
@@ -490,7 +391,7 @@ function PageWorkspace() {
   const paneLifecycleHost = useMemo<PaneLifecycleHost>(
     () => ({
       isMutationReserved: isPaneMutationReserved,
-      subscribeToActivityChanges: paneActivityTrackerRef.current.subscribe,
+      subscribeToActivityChanges: paneActivityTracker.subscribe,
       onPersistenceChange: handlePanePersistenceChange,
       onRefreshSettled: handlePaneRefreshSettled,
       onRunSettled: handlePaneRunSettled,
@@ -502,6 +403,7 @@ function PageWorkspace() {
       handlePaneRunSettled,
       handlePaneRunStart,
       isPaneMutationReserved,
+      paneActivityTracker,
     ]
   );
   const renderPlaygroundPane = useCallback(

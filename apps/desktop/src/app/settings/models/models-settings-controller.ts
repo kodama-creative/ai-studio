@@ -1,27 +1,31 @@
-import type {
-  ModelProviderGroup,
-  ProviderProfilePatch,
-} from "@llm-space/core";
+import type { ModelProviderGroup, ProviderProfilePatch } from "@llm-space/core";
 
 import {
   AddProviderController,
+  type AddProviderChoice,
   type AddProviderControllerOptions,
+  type AddProviderSnapshot,
 } from "./add-provider-controller";
 import {
   ProviderMetadataController,
   type ProviderMetadataControllerOptions,
   type ProviderMetadataField,
+  type ProviderMetadataSnapshot,
+  type ProviderMetadataTextField,
   type ProviderMetadataTarget,
 } from "./provider-metadata-controller";
 import {
   ProviderProfileController,
   type ProviderProfileField,
+  type ProviderProfileSnapshot,
+  type ProviderProfileTextField,
   type ProviderProfileTarget,
 } from "./provider-profile-controller";
 import {
   ProviderProfilesController,
   type ProviderProfilesControllerOptions,
   type ProviderProfilesOperation,
+  type ProviderProfilesSnapshot,
   type ProviderProfilesTarget,
 } from "./provider-profiles-controller";
 
@@ -48,6 +52,13 @@ export type ModelsSettingsFailure =
     };
 
 export interface ModelsSettingsControllerOptions {
+  readonly catalog?: {
+    readonly read: () => readonly ModelProviderGroup[];
+    readonly subscribe: (listener: () => void) => () => void;
+  };
+  readonly subscribeProviderAdded?: (
+    listener: (providerId: string) => void
+  ) => () => void;
   readonly fetchBuiltinProviders: AddProviderControllerOptions["fetchBuiltinProviders"];
   readonly addBuiltinProvider: AddProviderControllerOptions["addBuiltinProvider"];
   readonly addCustomProvider: AddProviderControllerOptions["addCustomProvider"];
@@ -71,6 +82,17 @@ export interface ModelsSettingsSnapshot {
   readonly selectedProviderId: string | null;
   readonly removalCandidateId: string | null;
   readonly removingProviderId: string | null;
+  readonly addProvider: AddProviderSnapshot;
+  readonly metadata: ProviderMetadataSnapshot;
+  readonly profiles: ProviderProfilesSnapshot;
+  readonly profile: ProviderProfileSnapshot;
+}
+
+export interface ModelsSettingsChildren {
+  readonly addProvider: AddProviderController;
+  readonly metadata: ProviderMetadataController;
+  readonly profiles: ProviderProfilesController;
+  readonly profile: ProviderProfileController;
 }
 
 interface RemovalLease {
@@ -85,6 +107,33 @@ const EMPTY_SNAPSHOT: ModelsSettingsSnapshot = {
   selectedProviderId: null,
   removalCandidateId: null,
   removingProviderId: null,
+  addProvider: {
+    open: false,
+    builtinProviders: null,
+    discoveryFailed: false,
+    addingProviderId: null,
+  },
+  metadata: {
+    providerId: "",
+    name: "",
+    api: "openai-completions",
+    icon: "",
+  },
+  profiles: {
+    mutation: null,
+    providerId: "",
+    removalCandidateId: null,
+    selectedProfileId: "",
+  },
+  profile: {
+    providerId: "",
+    profileId: "",
+    name: "",
+    apiKey: "",
+    baseUrl: "",
+    baseUrlEnabled: false,
+    headers: [],
+  },
 };
 
 /**
@@ -96,61 +145,64 @@ const EMPTY_SNAPSHOT: ModelsSettingsSnapshot = {
  * catalog. It has no React, Electrobun or toast dependency.
  */
 export class ModelsSettingsController {
-  readonly addProvider: AddProviderController;
-  readonly metadata: ProviderMetadataController;
-  readonly profiles: ProviderProfilesController;
-  readonly profile: ProviderProfileController;
-
   private readonly _listeners = new Set<Listener>();
-  private readonly _unsubscribeProfiles: () => void;
-  private _closed = false;
+  private readonly _addProvider: AddProviderController;
+  private readonly _metadata: ProviderMetadataController;
+  private readonly _profiles: ProviderProfilesController;
+  private readonly _profile: ProviderProfileController;
+  private _unsubscribeChildren: (() => void)[] = [];
+  private _unsubscribeCatalog: (() => void) | null = null;
+  private _unsubscribeProviderAdded: (() => void) | null = null;
+  private _unsubscribeProfiles: (() => void) | null = null;
+  private _started = false;
   private _epoch = 0;
   private _pendingSelectionId: string | null = null;
   private _snapshot: ModelsSettingsSnapshot = EMPTY_SNAPSHOT;
 
+  readonly intents = {
+    addProvider: {
+      setOpen: (open: boolean) => this._addProvider.setOpen(open),
+      choose: (choice: AddProviderChoice) => this._addProvider.choose(choice),
+    },
+    metadata: {
+      draft: (field: ProviderMetadataTextField, value: string) =>
+        this._metadata.draft(field, value),
+      commit: (field: ProviderMetadataTextField) =>
+        this._metadata.commit(field),
+      selectApi: (api: ProviderMetadataSnapshot["api"]) =>
+        this._metadata.selectApi(api),
+    },
+    profiles: {
+      select: (profileId: string) => this._profiles.select(profileId),
+      requestRemove: (profileId: string) =>
+        this._profiles.requestRemove(profileId),
+      cancelRemove: () => this._profiles.cancelRemove(),
+      add: () => this._profiles.add(),
+      confirmRemove: () => this._profiles.confirmRemove(),
+    },
+    profile: {
+      draft: (field: ProviderProfileTextField, value: string) =>
+        this._profile.draft(field, value),
+      commit: (field: ProviderProfileTextField) => this._profile.commit(field),
+      setBaseUrlEnabled: (enabled: boolean) =>
+        this._profile.setBaseUrlEnabled(enabled),
+      editHeader: (rowId: string, field: "key" | "value", value: string) =>
+        this._profile.editHeader(rowId, field, value),
+      commitHeaders: () => this._profile.commitHeaders(),
+      removeHeader: (rowId: string) => this._profile.removeHeader(rowId),
+      addHeader: () => this._profile.addHeader(),
+    },
+  } as const;
+
   constructor(
     providers: readonly ModelProviderGroup[],
-    private readonly _options: ModelsSettingsControllerOptions
+    private readonly _options: ModelsSettingsControllerOptions,
+    children: ModelsSettingsChildren
   ) {
-    this.addProvider = new AddProviderController({
-      fetchBuiltinProviders: _options.fetchBuiltinProviders,
-      addBuiltinProvider: _options.addBuiltinProvider,
-      addCustomProvider: _options.addCustomProvider,
-      providerAdded: (providerId) => this._providerAdded(providerId),
-      addFailed: (providerName, error) =>
-        _options.mutationFailed(
-          { operation: "add-provider", providerName },
-          error
-        ),
-    });
-    this.metadata = new ProviderMetadataController(null, {
-      updateProvider: _options.updateProvider,
-      saveFailed: (field, error) =>
-        _options.mutationFailed(
-          { operation: "save-provider-metadata", field },
-          error
-        ),
-    });
-    this.profiles = new ProviderProfilesController(null, {
-      addProfile: _options.addProviderProfile,
-      removeProfile: _options.removeProviderProfile,
-      mutationFailed: (mutation, error) =>
-        _options.mutationFailed(
-          { operation: "mutate-provider-profiles", mutation },
-          error
-        ),
-    });
-    this.profile = new ProviderProfileController(null, {
-      updateProfile: _options.updateProviderProfile,
-      saveFailed: (field, error) =>
-        _options.mutationFailed(
-          { operation: "save-provider-profile", field },
-          error
-        ),
-    });
-    this._unsubscribeProfiles = this.profiles.subscribe(() => {
-      this._syncSelectedProfile();
-    });
+    this._addProvider = children.addProvider;
+    this._metadata = children.metadata;
+    this._profiles = children.profiles;
+    this._profile = children.profile;
     this.syncCatalog(providers);
   }
 
@@ -160,6 +212,55 @@ export class ModelsSettingsController {
     this._listeners.add(listener);
     return () => this._listeners.delete(listener);
   };
+
+  start(): void {
+    if (this._started) return;
+    this._started = true;
+    this._epoch += 1;
+    this._unsubscribeProfiles = this._profiles.subscribe(() => {
+      this._syncSelectedProfile();
+    });
+    this._unsubscribeChildren = [
+      this._addProvider.subscribe(this._publishChildren),
+      this._metadata.subscribe(this._publishChildren),
+      this._profiles.subscribe(this._publishChildren),
+      this._profile.subscribe(this._publishChildren),
+    ];
+    if (this._options.catalog) {
+      this._unsubscribeCatalog = this._options.catalog.subscribe(() => {
+        this.syncCatalog(this._options.catalog?.read() ?? []);
+      });
+      this.syncCatalog(this._options.catalog.read());
+    } else {
+      this._syncFocusedControllers();
+    }
+    this._unsubscribeProviderAdded =
+      this._options.subscribeProviderAdded?.(this._providerAdded) ?? null;
+  }
+
+  stop(): void {
+    if (!this._started) return;
+    this._started = false;
+    this._epoch += 1;
+    this._unsubscribeCatalog?.();
+    this._unsubscribeCatalog = null;
+    this._unsubscribeProviderAdded?.();
+    this._unsubscribeProviderAdded = null;
+    this._unsubscribeProfiles?.();
+    this._unsubscribeProfiles = null;
+    for (const unsubscribe of this._unsubscribeChildren) unsubscribe();
+    this._unsubscribeChildren = [];
+    this._addProvider.setOpen(false);
+    this._metadata.clearTarget();
+    this._profiles.clearTarget();
+    this._profile.clearTarget();
+    this._pendingSelectionId = null;
+    this._setSnapshot({
+      ...this._snapshot,
+      removalCandidateId: null,
+      removingProviderId: null,
+    });
+  }
 
   getSelectedProvider(): ModelProviderGroup | null {
     return (
@@ -171,7 +272,6 @@ export class ModelsSettingsController {
 
   /** Synchronize the authoritative ModelCatalogController projection. */
   syncCatalog(providers: readonly ModelProviderGroup[]): void {
-    if (this._closed) return;
     const providerIds = new Set(providers.map((provider) => provider.id));
     const removalTargetDisappeared =
       this._snapshot.removingProviderId !== null &&
@@ -208,7 +308,7 @@ export class ModelsSettingsController {
 
   selectProvider(providerId: string): void {
     if (
-      this._closed ||
+      !this._started ||
       providerId === this._snapshot.selectedProviderId ||
       !this._snapshot.providers.some((provider) => provider.id === providerId)
     ) {
@@ -224,7 +324,7 @@ export class ModelsSettingsController {
 
   requestRemoveProvider(providerId: string): void {
     if (
-      this._closed ||
+      !this._started ||
       this._snapshot.removingProviderId !== null ||
       !this._snapshot.providers.some((provider) => provider.id === providerId)
     ) {
@@ -249,7 +349,7 @@ export class ModelsSettingsController {
   async confirmRemoveProvider(): Promise<void> {
     const providerId = this._snapshot.removalCandidateId;
     if (
-      this._closed ||
+      !this._started ||
       providerId === null ||
       this._snapshot.removingProviderId !== null
     ) {
@@ -278,71 +378,76 @@ export class ModelsSettingsController {
     }
   }
 
-  close(): void {
-    if (this._closed) return;
-    this._closed = true;
-    this._epoch += 1;
-    this._unsubscribeProfiles();
-    this.addProvider.setOpen(false);
-    this.metadata.close();
-    this.profiles.close();
-    this.profile.close();
-    this._pendingSelectionId = null;
-    this._setSnapshot(EMPTY_SNAPSHOT);
-    this._listeners.clear();
-  }
-
-  private _providerAdded(providerId: string): void {
-    if (this._closed) return;
+  private readonly _providerAdded = (providerId: string): void => {
+    if (!this._started) return;
     this._pendingSelectionId = providerId;
     if (
       this._snapshot.providers.some((provider) => provider.id === providerId)
     ) {
       this.selectProvider(providerId);
     }
-  }
+  };
 
   private _syncFocusedControllers(): void {
     const provider = this.getSelectedProvider();
-    this.metadata.sync(_metadataTarget(provider));
-    this.profiles.sync(_profilesTarget(provider));
+    this._metadata.sync(_metadataTarget(provider));
+    this._profiles.sync(_profilesTarget(provider));
     this._syncSelectedProfile();
   }
 
   private _syncSelectedProfile(): void {
-    if (this._closed) return;
+    if (!this._started) return;
     const provider = this.getSelectedProvider();
     const profile = provider?.profiles.find(
       (candidate) =>
-        candidate.id === this.profiles.getSnapshot().selectedProfileId
+        candidate.id === this._profiles.getSnapshot().selectedProfileId
     );
     const target: ProviderProfileTarget | null =
       provider && profile ? { providerId: provider.id, profile } : null;
-    this.profile.sync(target);
+    this._profile.sync(target);
   }
 
   private _isCurrentRemoval(lease: RemovalLease): boolean {
     return (
-      !this._closed &&
+      this._started &&
       lease.epoch === this._epoch &&
       this._snapshot.removingProviderId === lease.providerId
     );
   }
 
-  private _setSnapshot(snapshot: ModelsSettingsSnapshot): void {
-    if (_sameSnapshot(snapshot, this._snapshot)) return;
-    this._snapshot = snapshot;
+  private _setSnapshot(
+    snapshot: Pick<
+      ModelsSettingsSnapshot,
+      | "providers"
+      | "selectedProviderId"
+      | "removalCandidateId"
+      | "removingProviderId"
+    > &
+      Partial<ModelsSettingsSnapshot>
+  ): void {
+    const composed: ModelsSettingsSnapshot = {
+      ...snapshot,
+      addProvider: this._addProvider.getSnapshot(),
+      metadata: this._metadata.getSnapshot(),
+      profiles: this._profiles.getSnapshot(),
+      profile: this._profile.getSnapshot(),
+    };
+    if (_sameSnapshot(composed, this._snapshot)) return;
+    this._snapshot = composed;
     for (const listener of this._listeners) listener();
   }
+
+  private readonly _publishChildren = (): void => {
+    this._setSnapshot(this._snapshot);
+  };
 }
 
 function _firstProviderId(
   providers: readonly ModelProviderGroup[]
 ): string | null {
   return (
-    [...providers].sort((left, right) =>
-      left.name.localeCompare(right.name)
-    )[0]?.id ?? null
+    [...providers].sort((left, right) => left.name.localeCompare(right.name))[0]
+      ?.id ?? null
   );
 }
 
@@ -378,6 +483,10 @@ function _sameSnapshot(
     left.providers === right.providers &&
     left.selectedProviderId === right.selectedProviderId &&
     left.removalCandidateId === right.removalCandidateId &&
-    left.removingProviderId === right.removingProviderId
+    left.removingProviderId === right.removingProviderId &&
+    left.addProvider === right.addProvider &&
+    left.metadata === right.metadata &&
+    left.profiles === right.profiles &&
+    left.profile === right.profile
   );
 }

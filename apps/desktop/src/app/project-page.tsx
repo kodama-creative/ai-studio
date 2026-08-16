@@ -18,40 +18,25 @@ import {
   PlusIcon,
   XIcon,
 } from "lucide-react";
-import {
-  useEffect,
-  useMemo,
-  useState,
-  useSyncExternalStore,
-} from "react";
-import { toast } from "sonner";
+import { useMemo, useState } from "react";
 
-import { createProjectSourceClient } from "@/client/project-source-client";
-import { createStudioClient } from "@/client/studio-client";
+import {
+  AGENT_PROJECT_VIEW,
+  PROJECT_WORKSPACE_CONTROLLER,
+  STUDIO_CLIENT,
+} from "@/app/di/project-window-module";
+import { useController, useInject } from "@/app/di/react";
 import { useCommands, useRegisterCommands } from "@/commands";
 import { TreeView, type TreeDataItem } from "@/components/tree-view";
-import type { AgentProjectView } from "@/shared/agent-project";
 import type { ProjectSourceNode } from "@/shared/project-source-rpc";
 
 import { ProjectThreadPane } from "./project/project-thread-pane";
-import { ProjectWorkspaceController } from "./project/project-workspace-controller";
 
-export function ProjectPage({ project }: { project: AgentProjectView }) {
-  const studioClient = useMemo(() => createStudioClient(), []);
-  const sourceClient = useMemo(() => createProjectSourceClient(), []);
-  const workspace = useMemo(
-    () =>
-      new ProjectWorkspaceController({
-        studioClient,
-        sourceClient,
-        reportError: _reportError,
-      }),
-    [sourceClient, studioClient]
-  );
-  const workspaceState = useSyncExternalStore(
-    workspace.subscribe,
-    workspace.getSnapshot,
-    workspace.getSnapshot
+export function ProjectPage() {
+  const project = useInject(AGENT_PROJECT_VIEW);
+  const studioClient = useInject(STUDIO_CLIENT);
+  const { controller: workspace, state: workspaceState } = useController(
+    PROJECT_WORKSPACE_CONTROLLER
   );
   const threadState = workspaceState.threads;
   const sourceState = workspaceState.source;
@@ -76,13 +61,6 @@ export function ProjectPage({ project }: { project: AgentProjectView }) {
     "project.forkThread": ({ threadId, checkpointId }) =>
       workspace.forkThread(threadId, checkpointId),
   });
-
-  useEffect(() => {
-    workspace.start();
-    return () => {
-      workspace.stop();
-    };
-  }, [workspace]);
 
   const sourceTree = useMemo<TreeDataItem[]>(
     () =>
@@ -303,12 +281,4 @@ function _sourceTreeItems(
           onClick: () => toggleDirectory(node.path),
         }),
   }));
-}
-
-function _errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-function _reportError(title: string, error: unknown): void {
-  toast.error(title, { description: _errorMessage(error) });
 }

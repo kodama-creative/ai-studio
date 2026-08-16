@@ -19,15 +19,12 @@ import {
   PopoverTrigger,
 } from "@llm-space/ui/ui/popover";
 import { ExternalLink, Loader2, Plus } from "lucide-react";
-import {
-  Fragment,
-  useEffect,
-  useMemo,
-  useSyncExternalStore,
-  type ReactNode,
-} from "react";
+import { Fragment, useMemo, type ReactNode } from "react";
 
-import type { AddProviderController } from "@/app/settings/models/add-provider-controller";
+import type {
+  ModelsSettingsController,
+  ModelsSettingsSnapshot,
+} from "@/app/settings/models/models-settings-controller";
 
 const RECOMMENDED_PROVIDER_IDS = new Set([
   "ark",
@@ -42,17 +39,14 @@ const RECOMMENDED_PROVIDER_IDS = new Set([
 /** Presentation adapter for the aggregate-owned Add Provider session. */
 export function AddProviderMenu({
   controller,
+  snapshot,
   configured,
 }: {
-  controller: AddProviderController;
+  controller: ModelsSettingsController;
+  snapshot: ModelsSettingsSnapshot["addProvider"];
   configured: readonly ModelProviderGroup[];
 }) {
-  const snapshot = useSyncExternalStore(
-    controller.subscribe,
-    controller.getSnapshot,
-    controller.getSnapshot
-  );
-  useEffect(() => () => controller.setOpen(false), [controller]);
+  const intents = controller.intents.addProvider;
 
   const configuredIds = useMemo(
     () => new Set(configured.map((provider) => provider.id)),
@@ -85,8 +79,8 @@ export function AddProviderMenu({
             </div>
             <div className="flex gap-1 pl-1">
               {discovered.length}{" "}
-              {discovered.length === 1 ? "provider" : "providers"} discovered
-              in your environment
+              {discovered.length === 1 ? "provider" : "providers"} discovered in
+              your environment
             </div>
           </div>
         ),
@@ -107,7 +101,7 @@ export function AddProviderMenu({
   }, [configuredIds, snapshot.builtinProviders]);
 
   return (
-    <Popover open={snapshot.open} onOpenChange={controller.setOpen} modal>
+    <Popover open={snapshot.open} onOpenChange={intents.setOpen} modal>
       <PopoverTrigger asChild>
         <Button variant="outline" className="w-full">
           <Plus />
@@ -123,7 +117,7 @@ export function AddProviderMenu({
               <CommandItem
                 value="Add custom provider"
                 disabled={snapshot.addingProviderId !== null}
-                onSelect={() => void controller.choose({ type: "custom" })}
+                onSelect={() => void intents.choose({ type: "custom" })}
               >
                 <ProviderAvatar id="custom-provider" name="Custom provider" />
                 <span className="line-clamp-1 grow">Add custom provider</span>
@@ -157,7 +151,7 @@ export function AddProviderMenu({
                       value={`${provider.name} ${provider.id}`}
                       disabled={snapshot.addingProviderId !== null}
                       onSelect={() =>
-                        void controller.choose({ type: "builtin", provider })
+                        void intents.choose({ type: "builtin", provider })
                       }
                     >
                       <ProviderAvatar

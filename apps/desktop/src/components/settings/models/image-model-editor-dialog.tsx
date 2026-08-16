@@ -25,17 +25,18 @@ import {
 } from "@llm-space/ui/ui/select";
 import { Switch } from "@llm-space/ui/ui/switch";
 import { Loader2 } from "lucide-react";
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import { useCallback, useLayoutEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
-import { ImageModelEditorController } from "@/app/settings/models/image-model-editor-controller";
+import {
+  createImageModelEditorScope,
+  IMAGE_MODEL_EDITOR_CONTROLLER,
+} from "@/app/di/model-editor-session-module";
+import {
+  RendererScopeProvider,
+  useController,
+  useRendererScope,
+} from "@/app/di/react";
 
 interface ImageModelFormState {
   id: string;
@@ -72,39 +73,51 @@ export function ImageModelEditorDialog({
   onOpenChange,
   model,
   existingIds,
-  onSave,
-}: {
+}: ImageModelEditorDialogProps) {
+  const parent = useRendererScope();
+  const scope = useMemo(
+    () => createImageModelEditorScope(parent, model?.id),
+    [model?.id, parent]
+  );
+  return (
+    <RendererScopeProvider scope={scope}>
+      <ImageModelEditorDialogContent
+        open={open}
+        onOpenChange={onOpenChange}
+        model={model}
+        existingIds={existingIds}
+      />
+    </RendererScopeProvider>
+  );
+}
+
+interface ImageModelEditorDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   model?: SeedreamImageModelDefinition | null;
   existingIds: readonly string[];
-  onSave: (
-    model: SeedreamImageModelDefinition,
-    originalId?: string
-  ) => Promise<void>;
-}) {
+}
+
+function ImageModelEditorDialogContent({
+  open,
+  onOpenChange,
+  model,
+  existingIds,
+}: ImageModelEditorDialogProps) {
   const [form, setForm] = useState<ImageModelFormState>(() =>
     _initialState(model)
   );
-  const controller = useMemo(
-    () => new ImageModelEditorController({ save: onSave }),
-    [onSave]
-  );
-  const operation = useSyncExternalStore(
-    controller.subscribe,
-    controller.getSnapshot,
-    controller.getSnapshot
-  ).operation;
+  const { controller, state } = useController(IMAGE_MODEL_EDITOR_CONTROLLER);
+  const operation = state.operation;
 
   useLayoutEffect(() => {
     if (open) {
       setForm(_initialState(model));
       controller.open(model?.id);
     } else {
-      controller.close();
+      controller.closeSession();
     }
   }, [controller, model, open]);
-  useEffect(() => () => controller.close(), [controller]);
 
   const id = form.id.trim();
   const duplicateId = existingIds.some(
@@ -135,7 +148,7 @@ export function ImageModelEditorDialog({
   /** Persist a trimmed definition; provider credentials remain shared. */
   const handleOpenChange = useCallback(
     (next: boolean) => {
-      if (!next) controller.close();
+      if (!next) controller.closeSession();
       onOpenChange(next);
     },
     [controller, onOpenChange]

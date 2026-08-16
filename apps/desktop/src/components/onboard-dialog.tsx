@@ -1,11 +1,7 @@
 "use client";
 
 import type { ModelProviderGroup } from "@llm-space/core";
-import {
-  useAddProvider,
-  useFetchBuiltinProviders,
-  useModels,
-} from "@llm-space/ui/components/model-provider";
+import { useModels } from "@llm-space/ui/components/model-provider";
 import { ProviderAvatar } from "@llm-space/ui/components/thread-playground/provider-avatar";
 import { cn } from "@llm-space/ui/lib/utils";
 import { Button } from "@llm-space/ui/ui/button";
@@ -18,16 +14,19 @@ import {
   SettingsIcon,
   XIcon,
 } from "lucide-react";
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useSyncExternalStore,
-} from "react";
-import { toast } from "sonner";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 
-import { OnboardingController } from "@/app/onboarding/onboarding-controller";
-import { createAnalyticsClient } from "@/client/analytics";
+import { ANALYTICS_CLIENT } from "@/app/di/main-window-module";
+import {
+  createOnboardingSessionScope,
+  ONBOARDING_CONTROLLER,
+} from "@/app/di/onboarding-session-module";
+import {
+  RendererScopeProvider,
+  useController,
+  useInject,
+  useRendererScope,
+} from "@/app/di/react";
 import { useCommands } from "@/commands";
 import { trackAnalytics } from "@/lib/analytics";
 
@@ -42,36 +41,36 @@ export function OnboardDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const parent = useRendererScope();
+  const models = useModels();
+  const needsDiscovery = useRef(models.length === 0).current;
+  const scope = useMemo(
+    () => createOnboardingSessionScope(parent, needsDiscovery),
+    [needsDiscovery, parent]
+  );
+  return (
+    <RendererScopeProvider scope={scope}>
+      <OnboardDialogContent open={open} onOpenChange={onOpenChange} />
+    </RendererScopeProvider>
+  );
+}
+
+function OnboardDialogContent({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
   const models = useModels();
   const { executeCommand } = useCommands();
-  const analytics = useMemo(() => createAnalyticsClient(), []);
-  const fetchBuiltinProviders = useFetchBuiltinProviders();
-  const addProvider = useAddProvider();
-  const controller = useMemo(
-    () =>
-      new OnboardingController({
-        fetchBuiltinProviders,
-        addProvider,
-        notifyProviderAdded: (providerName) =>
-          toast.success(`${providerName} is ready`),
-        notifyAddFailed: () =>
-          toast.error("Could not add provider", {
-            description: ADD_PROVIDER_ERROR_MESSAGE,
-          }),
-      }),
-    [addProvider, fetchBuiltinProviders]
-  );
-  const snapshot = useSyncExternalStore(
-    controller.subscribe,
-    controller.getSnapshot,
-    controller.getSnapshot
-  );
+  const analytics = useInject(ANALYTICS_CLIENT);
+  const { controller, state: snapshot } = useController(ONBOARDING_CONTROLLER);
 
   useEffect(() => {
     if (open) controller.open(models.length === 0);
     else controller.close();
   }, [controller, models.length, open]);
-  useEffect(() => () => controller.close(), [controller]);
 
   const detectedProviders = useMemo(() => {
     return (snapshot.builtinProviders ?? [])
@@ -141,7 +140,7 @@ export function OnboardDialog({
             src="/images/onboard.png"
             alt=""
             aria-hidden="true"
-            className="pointer-events-none absolute inset-0 size-full select-none object-cover"
+            className="pointer-events-none absolute inset-0 size-full object-cover select-none"
           />
           <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(90deg,rgba(3,7,8,0.96)_0%,rgba(3,7,8,0.82)_27%,rgba(3,7,8,0.28)_46%,transparent_62%)]" />
           <div className="pointer-events-none absolute inset-y-0 left-0 w-[72%] bg-[linear-gradient(0deg,rgba(3,7,8,0.98)_0%,rgba(3,7,8,0.78)_20%,rgba(3,7,8,0.14)_46%,transparent_66%)] [mask-image:linear-gradient(90deg,#000_0%,#000_72%,transparent_100%)]" />
@@ -261,8 +260,6 @@ const ONBOARDING_RECOMMENDED_PROVIDER_IDS = new Set([
 
 const PROVIDER_DISCOVERY_ERROR_MESSAGE =
   "Provider check did not finish. Open model settings to continue.";
-
-const ADD_PROVIDER_ERROR_MESSAGE = "Open model settings and try again.";
 
 /** Sort discovered providers so the lowest-friction local options appear first. */
 function _sortProviderForOnboarding(

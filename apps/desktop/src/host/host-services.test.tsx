@@ -95,6 +95,9 @@ await mock.module("@/lib/electrobun", () => ({ electrobun: { rpc: RPC } }));
 const { CommandProvider } = await import("@/commands");
 const { DesktopHostProvider } = await import("./host-services");
 const { useHostServices } = await import("@llm-space/ui/host");
+const { rendererCommonModule } = await import("@/app/di/common-module");
+const { RendererScope } = await import("@/app/di/lifecycle");
+const { RendererScopeProvider } = await import("@/app/di/react");
 
 function _captureHost(): HostServices {
   let captured: HostServices | null = null;
@@ -102,12 +105,15 @@ function _captureHost(): HostServices {
     captured = useHostServices();
     return null;
   }
+  const scope = new RendererScope({ modules: [rendererCommonModule()] });
   renderToStaticMarkup(
-    <CommandProvider>
-      <DesktopHostProvider>
-        <CaptureHost />
-      </DesktopHostProvider>
-    </CommandProvider>
+    <RendererScopeProvider scope={scope}>
+      <CommandProvider>
+        <DesktopHostProvider>
+          <CaptureHost />
+        </DesktopHostProvider>
+      </CommandProvider>
+    </RendererScopeProvider>
   );
   if (!captured) throw new Error("Desktop host was not rendered");
   return captured;
@@ -173,9 +179,7 @@ describe("Desktop local host services", () => {
       {
         namespace: "generator",
         method: "resolveEnv",
-        args: [
-          { providerId: "local-provider", envNames: ["SEARCH_KEY"] },
-        ],
+        args: [{ providerId: "local-provider", envNames: ["SEARCH_KEY"] }],
       },
     ]);
   });

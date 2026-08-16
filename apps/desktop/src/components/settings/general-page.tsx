@@ -27,24 +27,18 @@ import {
   SelectValue,
 } from "@llm-space/ui/ui/select";
 import { Switch } from "@llm-space/ui/ui/switch";
-import {
-  useEffect,
-  useMemo,
-  useSyncExternalStore,
-  type ReactNode,
-} from "react";
+import { useMemo, type ReactNode } from "react";
 import { toast } from "sonner";
 
-import { runSettingsMutation } from "@/app/settings/run-settings-mutation";
-import { SettingsFormController } from "@/app/settings/settings-form-controller";
-import { createAnalyticsClient } from "@/client/analytics";
-import { createUpdatesClient } from "@/client/updates";
-import { useCommands } from "@/commands";
+import { useController } from "@/app/di/react";
 import {
-  DEFAULT_ANALYTICS_SETTINGS,
-  type AnalyticsStatus,
-} from "@/shared/analytics";
-import { DEFAULT_UPDATE_MODE, type UpdateMode } from "@/shared/updates";
+  ANALYTICS_SETTINGS_CONTROLLER,
+  UPDATE_MODE_SETTINGS_CONTROLLER,
+} from "@/app/di/settings-module";
+import { runSettingsMutation } from "@/app/settings/run-settings-mutation";
+import { useCommands } from "@/commands";
+import type { AnalyticsStatus } from "@/shared/analytics";
+import type { UpdateMode } from "@/shared/updates";
 
 import { PrimaryColorPicker } from "./primary-color-picker";
 import { SettingsPage } from "./settings-page";
@@ -157,8 +151,7 @@ function DefaultModelSelect() {
 
   function _reportDefaultModelError(error: unknown): void {
     toast.error("Failed to update default model", {
-      description:
-        error instanceof Error ? error.message : "Please try again.",
+      description: error instanceof Error ? error.message : "Please try again.",
     });
   }
 
@@ -236,61 +229,12 @@ export function GeneralPage() {
   const { theme, setTheme } = useTheme();
   const { executeCommand } = useCommands();
   const { fidelity, setFidelity } = useRenderingFidelity();
-  const analyticsClient = useMemo(() => createAnalyticsClient(), []);
-  const updatesClient = useMemo(() => createUpdatesClient(), []);
-  const analyticsController = useMemo(
-    () =>
-      new SettingsFormController<AnalyticsStatus>({
-        initialSettings: { ...DEFAULT_ANALYTICS_SETTINGS, available: true },
-        initialContext: undefined,
-        loadSettings: () => analyticsClient.getSettings(),
-        saveSettings: (status) => analyticsClient.setEnabled(status.enabled),
-        notifySaveError: (error) => {
-          toast.error("Failed to update analytics setting", {
-            description:
-              error instanceof Error ? error.message : "Please try again.",
-          });
-        },
-      }),
-    [analyticsClient]
+  const { controller: analyticsController, state: analytics } = useController(
+    ANALYTICS_SETTINGS_CONTROLLER
   );
-  const updateModeController = useMemo(
-    () =>
-      new SettingsFormController<UpdateMode>({
-        initialSettings: DEFAULT_UPDATE_MODE,
-        initialContext: undefined,
-        loadSettings: () => updatesClient.getMode(),
-        saveSettings: async (mode) => {
-          await updatesClient.setMode(mode);
-          return mode;
-        },
-        notifySaveError: (error) => {
-          toast.error("Failed to update software update setting", {
-            description:
-              error instanceof Error ? error.message : "Please try again.",
-          });
-        },
-      }),
-    [updatesClient]
+  const { controller: updateModeController, state: updateMode } = useController(
+    UPDATE_MODE_SETTINGS_CONTROLLER
   );
-  const analytics = useSyncExternalStore(
-    analyticsController.subscribe,
-    analyticsController.getSnapshot,
-    analyticsController.getSnapshot
-  );
-  const updateMode = useSyncExternalStore(
-    updateModeController.subscribe,
-    updateModeController.getSnapshot,
-    updateModeController.getSnapshot
-  );
-  useEffect(() => {
-    analyticsController.start();
-    updateModeController.start();
-    return () => {
-      updateModeController.stop();
-      analyticsController.stop();
-    };
-  }, [analyticsController, updateModeController]);
   const {
     primaryColor,
     resetPrimaryColor,

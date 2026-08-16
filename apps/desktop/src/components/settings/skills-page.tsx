@@ -24,13 +24,10 @@ import {
   Plus,
   Trash2,
 } from "lucide-react";
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { toast } from "sonner";
+import { useMemo, useState } from "react";
 
-import { SkillsSettingsController } from "@/app/settings/skills-settings-controller";
-import { createNativeDialogsClient } from "@/client/native-dialogs";
-import { createNativeFilesClient } from "@/client/native-files";
-import { createSkillsClient } from "@/client/skills";
+import { useController } from "@/app/di/react";
+import { SKILLS_SETTINGS_CONTROLLER } from "@/app/di/settings-module";
 
 import { SettingsPage } from "./settings-page";
 
@@ -44,33 +41,9 @@ const _isWindows =
 const REVEAL_LABEL = _isWindows ? "Reveal in Explorer" : "Reveal in Finder";
 
 export function SkillsPage() {
-  const client = useMemo(() => createSkillsClient(), []);
-  const dialogs = useMemo(() => createNativeDialogsClient(), []);
-  const nativeFiles = useMemo(() => createNativeFilesClient(), []);
-  const controller = useMemo(
-    () =>
-      new SkillsSettingsController({
-        client,
-        browseForPath: () => dialogs.pickDirectory(),
-        revealPath: (path) => nativeFiles.reveal(path),
-        notifyError: (title, error) => {
-          toast.error(title, {
-            description:
-              error instanceof Error ? error.message : "Please try again.",
-          });
-        },
-      }),
-    [client, dialogs, nativeFiles]
+  const { controller, state: snapshot } = useController(
+    SKILLS_SETTINGS_CONTROLLER
   );
-  const snapshot = useSyncExternalStore(
-    controller.subscribe,
-    controller.getSnapshot,
-    controller.getSnapshot
-  );
-  useEffect(() => {
-    controller.start();
-    return () => controller.stop();
-  }, [controller]);
 
   return (
     <SettingsPage
@@ -327,9 +300,7 @@ function PathSkills({
   return (
     <div className="flex min-w-0 grow flex-col">
       <ScrollArea className="min-h-0 grow">
-        <div className="flex flex-col gap-2 pr-4 pl-6">
-          {content}
-        </div>
+        <div className="flex flex-col gap-2 pr-4 pl-6">{content}</div>
       </ScrollArea>
     </div>
   );

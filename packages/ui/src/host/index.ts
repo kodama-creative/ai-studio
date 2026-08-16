@@ -1,4 +1,8 @@
 export { HostServicesProvider, useHostServices } from "./host-services";
+export {
+  ModelCatalogController,
+  type ModelCatalogSnapshot,
+} from "./model-catalog-controller";
 export { createShareThreadAction } from "./share-action";
 export type {
   BuiltinToolsHost,

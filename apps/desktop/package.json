@@ -32,6 +32,7 @@
     "cmdk": "^1.1.1",
     "codemirror": "^6.0.2",
     "electrobun": "^1.18.1",
+    "eventemitter3": "^5.0.4",
     "inversify": "^8.2.3",
     "lucide-react": "^1.28.0",
     "posthog-node": "^5.48.0",
@@ -42,11 +43,13 @@
     "shadcn": "^4.12.0",
     "sonner": "^2.0.7",
     "timeago.js": "^4.0.2",
+    "use-sync-external-store": "^1.6.0",
     "zod": "catalog:"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.3",
     "@types/three": "^0.165.0",
+    "@types/use-sync-external-store": "^1.5.0",
     "@vitejs/plugin-react": "^6.0.5",
     "autoprefixer": "^10.4.20",
     "concurrently": "^9.1.0",

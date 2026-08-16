@@ -1,19 +1,16 @@
 "use client";
 
-import type {
-  ModelProviderGroup,
-  ProviderProfile,
-} from "@llm-space/core";
+import type { ModelProviderGroup, ProviderProfile } from "@llm-space/core";
 import { Tooltip } from "@llm-space/ui/components/tooltip";
 import { Button } from "@llm-space/ui/ui/button";
 import { Input } from "@llm-space/ui/ui/input";
 import { Switch } from "@llm-space/ui/ui/switch";
 import { Plus, Trash2 } from "lucide-react";
-import { useSyncExternalStore } from "react";
 
-import {
-  ProviderProfileController,
-} from "@/app/settings/models/provider-profile-controller";
+import type {
+  ModelsSettingsController,
+  ModelsSettingsSnapshot,
+} from "@/app/settings/models/models-settings-controller";
 
 import { ApiKeyField } from "../api-key-field";
 
@@ -26,22 +23,20 @@ const ANTHROPIC_BASE_URL_HINT =
 
 export function ProviderProfileEditor({
   controller,
+  snapshot,
   provider,
   profile,
   isBuiltin,
   usesAnthropicApi,
 }: {
-  controller: ProviderProfileController;
+  controller: ModelsSettingsController;
+  snapshot: ModelsSettingsSnapshot["profile"];
   provider: ModelProviderGroup;
   profile: ProviderProfile;
   isBuiltin: boolean;
   usesAnthropicApi: boolean;
 }) {
-  const snapshot = useSyncExternalStore(
-    controller.subscribe,
-    controller.getSnapshot,
-    controller.getSnapshot
-  );
+  const intents = controller.intents.profile;
 
   const baseUrlPlaceholder = usesAnthropicApi
     ? "https://api.example.com"
@@ -55,8 +50,8 @@ export function ProviderProfileEditor({
           value={snapshot.name}
           placeholder="Profile name"
           aria-label={`${provider.name} profile name`}
-          onChange={(event) => controller.draft("name", event.target.value)}
-          onBlur={() => controller.commit("name")}
+          onChange={(event) => intents.draft("name", event.target.value)}
+          onBlur={() => intents.commit("name")}
         />
       </div>
 
@@ -67,8 +62,8 @@ export function ProviderProfileEditor({
           value={snapshot.apiKey}
           placeholder={`Input API Key for ${provider.name}.`}
           aria-label={`${profile.name} API key`}
-          onChange={(event) => controller.draft("apiKey", event.target.value)}
-          onBlur={() => controller.commit("apiKey")}
+          onChange={(event) => intents.draft("apiKey", event.target.value)}
+          onBlur={() => intents.commit("apiKey")}
           description={
             <div className="text-muted-foreground pl-5 text-xs">
               <div className="list-item">
@@ -96,9 +91,7 @@ export function ProviderProfileEditor({
                   : `Enable custom base URL for ${profile.name}`
               }
               checked={snapshot.baseUrlEnabled}
-              onCheckedChange={(enabled) =>
-                controller.setBaseUrlEnabled(enabled)
-              }
+              onCheckedChange={(enabled) => intents.setBaseUrlEnabled(enabled)}
             />
           </div>
           {snapshot.baseUrlEnabled ? (
@@ -108,9 +101,9 @@ export function ProviderProfileEditor({
                 placeholder={baseUrlPlaceholder}
                 aria-label={`${profile.name} custom base URL`}
                 onChange={(event) =>
-                  controller.draft("baseUrl", event.target.value)
+                  intents.draft("baseUrl", event.target.value)
                 }
-                onBlur={() => controller.commit("baseUrl")}
+                onBlur={() => intents.commit("baseUrl")}
               />
               <div className="text-muted-foreground text-xs">
                 Leave empty to use the default endpoint.
@@ -127,10 +120,8 @@ export function ProviderProfileEditor({
             value={snapshot.baseUrl}
             placeholder={baseUrlPlaceholder}
             aria-label={`${profile.name} base URL`}
-            onChange={(event) =>
-              controller.draft("baseUrl", event.target.value)
-            }
-            onBlur={() => controller.commit("baseUrl")}
+            onChange={(event) => intents.draft("baseUrl", event.target.value)}
+            onBlur={() => intents.commit("baseUrl")}
           />
           {usesAnthropicApi ? (
             <div className="text-muted-foreground text-xs">
@@ -149,24 +140,24 @@ export function ProviderProfileEditor({
               placeholder="X-Header-Name"
               aria-label={`${provider.name} header ${index + 1} name`}
               onChange={(event) =>
-                controller.editHeader(row.id, "key", event.target.value)
+                intents.editHeader(row.id, "key", event.target.value)
               }
-              onBlur={() => controller.commitHeaders()}
+              onBlur={() => intents.commitHeaders()}
             />
             <Input
               value={row.value}
               placeholder="Value"
               aria-label={`${provider.name} header ${index + 1} value`}
               onChange={(event) =>
-                controller.editHeader(row.id, "value", event.target.value)
+                intents.editHeader(row.id, "value", event.target.value)
               }
-              onBlur={() => controller.commitHeaders()}
+              onBlur={() => intents.commitHeaders()}
             />
             <Tooltip content="Remove header">
               <button
                 type="button"
                 aria-label={`Remove header ${index + 1}`}
-                onClick={() => controller.removeHeader(row.id)}
+                onClick={() => intents.removeHeader(row.id)}
                 className="text-muted-foreground hover:bg-accent hover:text-foreground inline-flex size-6 shrink-0 items-center justify-center rounded transition-colors"
               >
                 <Trash2 className="size-4" />
@@ -179,7 +170,7 @@ export function ProviderProfileEditor({
           variant="ghost"
           size="sm"
           className="self-start"
-          onClick={() => controller.addHeader()}
+          onClick={() => intents.addHeader()}
         >
           <Plus /> Add header
         </Button>

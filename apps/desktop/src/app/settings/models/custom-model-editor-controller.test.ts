@@ -35,7 +35,7 @@ describe("CustomModelEditorController", () => {
     controller.open(_target("old"));
     const staleResult = controller.save(MODEL);
 
-    controller.close();
+    controller.closeSession();
     controller.open(_target("new"));
     const currentResult = controller.test(MODEL);
     oldSave.resolve();
@@ -53,7 +53,7 @@ describe("CustomModelEditorController", () => {
     controller.open(_target("old"));
     const staleResult = controller.save(MODEL);
 
-    controller.close();
+    controller.closeSession();
     save.reject(new Error("late failure"));
 
     expect(await staleResult).toEqual({ type: "ignored" });

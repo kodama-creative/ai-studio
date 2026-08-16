@@ -22,6 +22,7 @@ describe("RemindersController", () => {
         dismissGithubStarForever: () => Promise.reject(failure),
       })
     );
+    readController.start();
 
     await readController.requestFeature();
     await readController.requestGithubStar();
@@ -37,6 +38,7 @@ describe("RemindersController", () => {
         markFeatureSeen: () => Promise.reject(failure),
       })
     );
+    writeController.start();
     await writeController.requestFeature();
     await writeController.markFeatureSeen();
   });
@@ -66,6 +68,7 @@ describe("RemindersController", () => {
         },
       })
     );
+    controller.start();
 
     await Promise.all([
       controller.requestFeature(),
@@ -92,21 +95,32 @@ describe("RemindersController", () => {
     });
   });
 
-  test("ignores reads that finish after disposal", async () => {
-    let resolve!: (feature: FeatureReminder | null) => void;
-    const feature = new Promise<FeatureReminder | null>((next) => {
-      resolve = next;
-    });
+  test("ignores reads that finish after stop and can restart", async () => {
+    const stale = _deferred<FeatureReminder | null>();
+    const current = _deferred<FeatureReminder | null>();
+    let reads = 0;
     const controller = new RemindersController(
-      _requests({ nextFeature: () => feature })
+      _requests({
+        nextFeature: () => {
+          reads += 1;
+          return reads === 1 ? stale.promise : current.promise;
+        },
+      })
     );
+    controller.start();
 
+    const obsolete = controller.requestFeature();
+    controller.stop();
+    controller.start();
     const pending = controller.requestFeature();
-    controller.dispose();
-    resolve(FEATURE);
-    await pending;
+    stale.resolve(FEATURE);
+    await obsolete;
 
     expect(controller.getSnapshot().feature).toBeNull();
+    const currentFeature = { ...FEATURE, title: "Current reminder" };
+    current.resolve(currentFeature);
+    await pending;
+    expect(controller.getSnapshot().feature).toBe(currentFeature);
   });
 });
 
@@ -120,4 +134,12 @@ function _requests(
     markFeatureSeen: () => Promise.resolve(),
     ...overrides,
   };
+}
+
+function _deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((nextResolve) => {
+    resolve = nextResolve;
+  });
+  return { promise, resolve };
 }

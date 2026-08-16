@@ -33,12 +33,13 @@ import {
 } from "react";
 
 import { useGithubAuth } from "@/app/account/github-auth-provider";
+import { THREAD_SHARING_CLIENT } from "@/app/di/main-window-module";
+import { useInject } from "@/app/di/react";
 import {
   prepareShareThreadDialogCommit,
   ShareThreadDialogFlow,
   type ShareThreadTransaction,
 } from "@/app/thread-sharing/share-thread-dialog-flow";
-import { createThreadSharingClient } from "@/client/share";
 import { useCommands } from "@/commands";
 
 type ShareStatus = "idle" | "awaitingAuth" | "generating" | "success" | "error";
@@ -64,7 +65,7 @@ export function ShareThreadDialog({
 }) {
   const { state: authState, signIn } = useGithubAuth();
   const { executeCommand } = useCommands();
-  const sharingClient = useMemo(() => createThreadSharingClient(), []);
+  const sharingClient = useInject(THREAD_SHARING_CLIENT);
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -108,9 +109,9 @@ export function ShareThreadDialog({
     setTitle(threadTitleFromPath(path));
     void flow.prefillTitle(
       (target) =>
-        sharingClient.read(_playgroundId(target.path)).then(
-          (snapshot) => snapshot.thread
-        ),
+        sharingClient
+          .read(_playgroundId(target.path))
+          .then((snapshot) => snapshot.thread),
       setTitle
     );
   }, [flow, open, path, sharingClient, targetCommit]);
@@ -239,7 +240,7 @@ export function ShareThreadDialog({
           <div className="relative overflow-hidden border-b">
             <div
               aria-hidden="true"
-              className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,var(--border)_1px,transparent_1px),linear-gradient(to_bottom,var(--border)_1px,transparent_1px)] bg-[size:30px_30px] opacity-20 [mask-image:radial-gradient(circle_at_78%_50%,black,transparent_64%)]"
+              className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,var(--border)_1px,transparent_1px),linear-gradient(to_bottom,var(--border)_1px,transparent_1px)] [mask-image:radial-gradient(circle_at_78%_50%,black,transparent_64%)] bg-[size:30px_30px] opacity-20"
             />
             <div
               aria-hidden="true"
@@ -272,7 +273,10 @@ export function ShareThreadDialog({
               copied={copied}
               onCopy={handleCopy}
               onOpen={() =>
-                executeCommand({ type: "shell.openLink", args: { url: shareUrl } })
+                executeCommand({
+                  type: "shell.openLink",
+                  args: { url: shareUrl },
+                })
               }
             />
           ) : (
@@ -315,7 +319,7 @@ export function ShareThreadDialog({
             </div>
           )}
 
-          <DialogFooter className="border-t bg-background/80 px-6 py-4 backdrop-blur-xl">
+          <DialogFooter className="bg-background/80 border-t px-6 py-4 backdrop-blur-xl">
             {status === "success" ? (
               <Button onClick={() => handleOpenChange(false)}>Done</Button>
             ) : (
@@ -465,7 +469,7 @@ function ShareSuccess({
             {hasHiddenUrlTail ? (
               <span
                 aria-hidden="true"
-                className="from-transparent via-background/80 to-background pointer-events-none absolute inset-y-0 right-0 w-20 rounded-r-md bg-gradient-to-r"
+                className="via-background/80 to-background pointer-events-none absolute inset-y-0 right-0 w-20 rounded-r-md bg-gradient-to-r from-transparent"
               />
             ) : null}
           </div>
@@ -475,11 +479,7 @@ function ShareSuccess({
             onClick={onCopy}
             className="shrink-0 cursor-pointer"
           >
-            {copied ? (
-              <CheckIcon className="text-emerald-500" />
-            ) : (
-              <CopyIcon />
-            )}
+            {copied ? <CheckIcon className="text-emerald-500" /> : <CopyIcon />}
             {copied ? "Copied" : "Copy"}
           </Button>
         </div>

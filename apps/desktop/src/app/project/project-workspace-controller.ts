@@ -1,8 +1,5 @@
 import type { StudioThread } from "@llm-space/studio";
 
-import type { ProjectSourceTransport } from "@/shared/project-source-rpc";
-import type { StudioTransport } from "@/shared/studio-rpc";
-
 import {
   ProjectSourceController,
   type ProjectSourceControllerSnapshot,
@@ -33,15 +30,6 @@ export interface ProjectWorkspaceSnapshot {
   readonly source: ProjectSourceControllerSnapshot;
 }
 
-export interface ProjectWorkspaceControllerOptions {
-  readonly studioClient: StudioTransport;
-  readonly sourceClient: Pick<
-    ProjectSourceTransport,
-    "readSourceFile" | "watchSourceFiles"
-  >;
-  readonly reportError: (title: string, error: unknown) => void;
-}
-
 type Listener = () => void;
 
 /**
@@ -53,8 +41,6 @@ type Listener = () => void;
  */
 export class ProjectWorkspaceController {
   private readonly _listeners = new Set<Listener>();
-  private readonly _source: ProjectSourceController;
-  private readonly _threads: ProjectThreadsController;
   private _activeTabId?: string;
   private _lifecycle = 0;
   private _selection = 0;
@@ -62,15 +48,10 @@ export class ProjectWorkspaceController {
   private _tabs: readonly ProjectTab[] = [];
   private _snapshot: ProjectWorkspaceSnapshot;
 
-  constructor(options: ProjectWorkspaceControllerOptions) {
-    this._threads = new ProjectThreadsController({
-      client: options.studioClient,
-      reportError: options.reportError,
-    });
-    this._source = new ProjectSourceController({
-      client: options.sourceClient,
-      reportError: options.reportError,
-    });
+  constructor(
+    private readonly _threads: ProjectThreadsController,
+    private readonly _source: ProjectSourceController
+  ) {
     this._snapshot = this._composeSnapshot();
     this._threads.subscribe(this._acceptChildSnapshot);
     this._source.subscribe(this._acceptChildSnapshot);

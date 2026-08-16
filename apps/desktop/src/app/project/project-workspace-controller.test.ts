@@ -5,12 +5,14 @@ import type { StudioThread } from "@llm-space/studio";
 import type { ProjectSourceTransport } from "@/shared/project-source-rpc";
 import type { StudioTransport } from "@/shared/studio-rpc";
 
+import { ProjectSourceController } from "./project-source-controller";
+import { ProjectThreadsController } from "./project-threads-controller";
 import { ProjectWorkspaceController } from "./project-workspace-controller";
 
 describe("ProjectWorkspaceController", () => {
   test("owns initial Thread selection, tab fallback, and projected titles", async () => {
     const initial = _thread("thread-a", "Initial");
-    const controller = new ProjectWorkspaceController({
+    const controller = _workspace({
       studioClient: _studioClient({
         listThreads: () => Promise.resolve([initial]),
         loadThread: () => Promise.resolve(initial),
@@ -41,7 +43,7 @@ describe("ProjectWorkspaceController", () => {
 
   test("a stale Thread open cannot steal focus from a newer source selection", async () => {
     const pendingThread = _deferred<StudioThread>();
-    const controller = new ProjectWorkspaceController({
+    const controller = _workspace({
       studioClient: _studioClient({
         listThreads: () => Promise.resolve([]),
         loadThread: () => pendingThread.promise,
@@ -76,7 +78,7 @@ describe("ProjectWorkspaceController", () => {
   test("a stale source open cannot steal focus from a newer Thread selection", async () => {
     const pendingSource = _deferred<string>();
     const thread = _thread("thread-a", "Thread A");
-    const controller = new ProjectWorkspaceController({
+    const controller = _workspace({
       studioClient: _studioClient({
         listThreads: () => Promise.resolve([]),
         loadThread: () => Promise.resolve(thread),
@@ -108,6 +110,23 @@ describe("ProjectWorkspaceController", () => {
     controller.stop();
   });
 });
+
+function _workspace(options: {
+  studioClient: StudioTransport;
+  sourceClient: ProjectSourceTransport;
+  reportError: (title: string, error: unknown) => void;
+}): ProjectWorkspaceController {
+  return new ProjectWorkspaceController(
+    new ProjectThreadsController({
+      client: options.studioClient,
+      reportError: options.reportError,
+    }),
+    new ProjectSourceController({
+      client: options.sourceClient,
+      reportError: options.reportError,
+    })
+  );
+}
 
 function _studioClient(
   overrides: Partial<StudioTransport> = {}

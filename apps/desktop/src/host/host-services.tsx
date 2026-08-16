@@ -1,78 +1,26 @@
 "use client";
 
-import {
-  HostServicesProvider,
-  type HostServices,
-  type ModelClient,
-} from "@llm-space/ui/host";
+import { HostServicesProvider, type HostServices } from "@llm-space/ui/host";
 import { useMemo, type ReactNode } from "react";
 
-import { createAppDirectoriesClient } from "@/client/app-directories";
-import { createAuxiliaryGenerationClient } from "@/client/auxiliary-generation-client";
-import { createBuiltinToolsClient } from "@/client/built-in-tools";
-import { createGeneratorClient } from "@/client/generator";
-import { createMcpClient } from "@/client/mcp";
-import { createModelsClient } from "@/client/models";
-import { createNativeDialogsClient } from "@/client/native-dialogs";
-import { createNativeFilesClient } from "@/client/native-files";
-import { createPromptFilesClient } from "@/client/prompt-files";
-import { createSearchClient } from "@/client/search";
-import { createSkillsClient } from "@/client/skills";
+import {
+  APP_DIRECTORIES_CLIENT,
+  AUXILIARY_GENERATION_CLIENT,
+  BUILTIN_TOOLS_CLIENT,
+  GENERATOR_CLIENT,
+  MCP_CLIENT,
+  NATIVE_DIALOGS_CLIENT,
+  NATIVE_FILES_CLIENT,
+  PROMPT_FILES_CLIENT,
+  SEARCH_CLIENT,
+  SKILLS_CLIENT,
+} from "@/app/di/common-module";
+import { useInject } from "@/app/di/react";
 import { createToolExecutor } from "@/client/tool-execution";
 import { useCommands } from "@/commands";
 import type { SettingsTab } from "@/shared/commands";
-import type { ModelsRequests } from "@/shared/models-rpc";
 
 import { createDesktopShareThreadAction } from "./share-thread-action";
-/** The desktop {@link ModelClient}, backed by Electrobun RPC. */
-export function createElectrobunModelClient(
-  modelsClient: ModelsRequests = createModelsClient()
-): ModelClient {
-  return {
-    availableModels: () => modelsClient.list(),
-    builtinProviders: () => modelsClient.listBuiltin(),
-    getDefaultModel: () => modelsClient.getDefault(),
-    setDefaultModel: (model) => modelsClient.setDefault(model),
-    removeProvider: (providerId) => modelsClient.removeProvider(providerId),
-    addProvider: (providerId) => modelsClient.addProvider(providerId),
-    addCustomProvider: (input) => modelsClient.addCustomProvider(input),
-    addProviderProfile: (providerId) => modelsClient.addProfile(providerId),
-    updateProviderProfile: (providerId, profileId, fields) =>
-      modelsClient.updateProfile({
-        providerId,
-        profileId,
-        ...fields,
-      }),
-    removeProviderProfile: (providerId, profileId) =>
-      modelsClient.removeProfile(providerId, profileId),
-    updateProvider: (providerId, fields) =>
-      modelsClient.updateProvider({ providerId, ...fields }),
-    setModelEnabled: (providerId, modelId, enabled) =>
-      modelsClient.setEnabled(providerId, modelId, enabled),
-    setAllModelsEnabled: (providerId, enabled) =>
-      modelsClient.setAllEnabled(providerId, enabled),
-    testModelConnection: async (providerId, modelId, candidate, profileId) => {
-      await modelsClient.testConnection({
-        providerId,
-        profileId,
-        modelId,
-        candidate,
-      });
-    },
-    removeCustomModel: (providerId, modelId) =>
-      modelsClient.removeCustom(providerId, modelId),
-    upsertCustomModel: (providerId, model, originalId) =>
-      modelsClient.upsertCustom(providerId, model, originalId),
-    setImageModelEnabled: (modelId, enabled) =>
-      modelsClient.setImageEnabled(modelId, enabled),
-    setAllImageModelsEnabled: (enabled) =>
-      modelsClient.setAllImagesEnabled(enabled),
-    removeCustomImageModel: (modelId) =>
-      modelsClient.removeCustomImage(modelId),
-    upsertCustomImageModel: (model, originalId) =>
-      modelsClient.upsertCustomImage(model, originalId),
-  };
-}
 
 /**
  * Provides the desktop {@link HostServices} to the shared Thread Playground:
@@ -81,19 +29,16 @@ export function createElectrobunModelClient(
  */
 export function DesktopHostProvider({ children }: { children: ReactNode }) {
   const { executeCommand, registerCommandHandlers } = useCommands();
-  const auxiliaryGeneration = useMemo(
-    () => createAuxiliaryGenerationClient(),
-    []
-  );
-  const appDirectories = useMemo(() => createAppDirectoriesClient(), []);
-  const builtinTools = useMemo(() => createBuiltinToolsClient(), []);
-  const dialogs = useMemo(() => createNativeDialogsClient(), []);
-  const generator = useMemo(() => createGeneratorClient(), []);
-  const mcp = useMemo(() => createMcpClient(), []);
-  const nativeFiles = useMemo(() => createNativeFilesClient(), []);
-  const promptFiles = useMemo(() => createPromptFilesClient(), []);
-  const search = useMemo(() => createSearchClient(), []);
-  const skills = useMemo(() => createSkillsClient(), []);
+  const auxiliaryGeneration = useInject(AUXILIARY_GENERATION_CLIENT);
+  const appDirectories = useInject(APP_DIRECTORIES_CLIENT);
+  const builtinTools = useInject(BUILTIN_TOOLS_CLIENT);
+  const dialogs = useInject(NATIVE_DIALOGS_CLIENT);
+  const generator = useInject(GENERATOR_CLIENT);
+  const mcp = useInject(MCP_CLIENT);
+  const nativeFiles = useInject(NATIVE_FILES_CLIENT);
+  const promptFiles = useInject(PROMPT_FILES_CLIENT);
+  const search = useInject(SEARCH_CLIENT);
+  const skills = useInject(SKILLS_CLIENT);
   const executeTool = useMemo(
     () => createToolExecutor(mcp, builtinTools),
     [builtinTools, mcp]

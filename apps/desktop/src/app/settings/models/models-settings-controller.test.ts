@@ -1,15 +1,16 @@
 import { describe, expect, test } from "bun:test";
 
-import type {
-  ModelProviderGroup,
-  ProviderProfile,
-} from "@llm-space/core";
+import type { ModelProviderGroup, ProviderProfile } from "@llm-space/core";
 
+import { AddProviderController } from "./add-provider-controller";
 import {
   ModelsSettingsController,
   type ModelsSettingsControllerOptions,
   type ModelsSettingsFailure,
 } from "./models-settings-controller";
+import { ProviderMetadataController } from "./provider-metadata-controller";
+import { ProviderProfileController } from "./provider-profile-controller";
+import { ProviderProfilesController } from "./provider-profiles-controller";
 
 describe("ModelsSettingsController", () => {
   test("owns provider selection and deterministic catalog fallback", () => {
@@ -24,9 +25,9 @@ describe("ModelsSettingsController", () => {
 
     controller.syncCatalog([]);
     expect(controller.getSnapshot().selectedProviderId).toBeNull();
-    expect(controller.metadata.getSnapshot().providerId).toBe("");
-    expect(controller.profiles.getSnapshot().providerId).toBe("");
-    expect(controller.profile.getSnapshot().profileId).toBe("");
+    expect(controller.getSnapshot().metadata.providerId).toBe("");
+    expect(controller.getSnapshot().profiles.providerId).toBe("");
+    expect(controller.getSnapshot().profile.profileId).toBe("");
   });
 
   test("retargets every child controller with provider and profile selection", () => {
@@ -37,28 +38,26 @@ describe("ModelsSettingsController", () => {
     const bravo = _provider("bravo", [_profile("bravo-default")]);
     const controller = _controller([alpha, bravo]);
 
-    expect(controller.metadata.getSnapshot().providerId).toBe("alpha");
-    expect(controller.profiles.getSnapshot().selectedProfileId).toBe(
-      "default"
-    );
-    expect(controller.profile.getSnapshot().profileId).toBe("default");
+    expect(controller.getSnapshot().metadata.providerId).toBe("alpha");
+    expect(controller.getSnapshot().profiles.selectedProfileId).toBe("default");
+    expect(controller.getSnapshot().profile.profileId).toBe("default");
 
-    controller.profiles.select("secondary");
-    expect(controller.profile.getSnapshot().profileId).toBe("secondary");
+    controller.intents.profiles.select("secondary");
+    expect(controller.getSnapshot().profile.profileId).toBe("secondary");
 
     controller.selectProvider("bravo");
-    expect(controller.metadata.getSnapshot().providerId).toBe("bravo");
-    expect(controller.profiles.getSnapshot().providerId).toBe("bravo");
-    expect(controller.profile.getSnapshot().profileId).toBe("bravo-default");
+    expect(controller.getSnapshot().metadata.providerId).toBe("bravo");
+    expect(controller.getSnapshot().profiles.providerId).toBe("bravo");
+    expect(controller.getSnapshot().profile.profileId).toBe("bravo-default");
   });
 
   test("selects an added provider after its catalog projection arrives", async () => {
     const controller = _controller([_provider("alpha")], {
       addCustomProvider: () => Promise.resolve("custom-id"),
     });
-    controller.addProvider.setOpen(true);
+    controller.intents.addProvider.setOpen(true);
 
-    await controller.addProvider.choose({ type: "custom" });
+    await controller.intents.addProvider.choose({ type: "custom" });
     expect(controller.getSnapshot().selectedProviderId).toBe("alpha");
 
     controller.syncCatalog([_provider("alpha"), _provider("custom-id")]);
@@ -68,15 +67,12 @@ describe("ModelsSettingsController", () => {
   test("admits only one provider removal and falls back after success", async () => {
     const removal = _deferred<void>();
     const calls: string[] = [];
-    const controller = _controller(
-      [_provider("alpha"), _provider("bravo")],
-      {
-        removeProvider: (providerId) => {
-          calls.push(providerId);
-          return removal.promise;
-        },
-      }
-    );
+    const controller = _controller([_provider("alpha"), _provider("bravo")], {
+      removeProvider: (providerId) => {
+        calls.push(providerId);
+        return removal.promise;
+      },
+    });
     controller.selectProvider("bravo");
     controller.requestRemoveProvider("bravo");
 
@@ -97,13 +93,10 @@ describe("ModelsSettingsController", () => {
   test("invalidates a removal when its authoritative target disappears", async () => {
     const removal = _deferred<void>();
     const failures: ModelsSettingsFailure[] = [];
-    const controller = _controller(
-      [_provider("alpha"), _provider("bravo")],
-      {
-        removeProvider: () => removal.promise,
-        mutationFailed: (failure) => failures.push(failure),
-      }
-    );
+    const controller = _controller([_provider("alpha"), _provider("bravo")], {
+      removeProvider: () => removal.promise,
+      mutationFailed: (failure) => failures.push(failure),
+    });
     controller.requestRemoveProvider("bravo");
     const obsolete = controller.confirmRemoveProvider();
 
@@ -129,23 +122,29 @@ describe("ModelsSettingsController", () => {
     });
     controller.requestRemoveProvider("alpha");
     const removing = controller.confirmRemoveProvider();
-    controller.profile.draft("name", "Draft");
-    controller.profile.commit("name");
+    controller.intents.profile.draft("name", "Draft");
+    controller.intents.profile.commit("name");
 
-    controller.close();
+    controller.stop();
     removal.reject(new Error("obsolete removal"));
     profileSave.reject(new Error("obsolete save"));
     await Promise.all([removing, profileSave.promise.catch(() => undefined)]);
     await Promise.resolve();
 
     expect(failures).toEqual([]);
-    expect(controller.getSnapshot()).toEqual({
-      providers: [],
-      selectedProviderId: null,
+    const stopped = controller.getSnapshot();
+    expect({
+      providers: stopped.providers,
+      selectedProviderId: stopped.selectedProviderId,
+      removalCandidateId: stopped.removalCandidateId,
+      removingProviderId: stopped.removingProviderId,
+    }).toEqual({
+      providers: [_provider("alpha")],
+      selectedProviderId: "alpha",
       removalCandidateId: null,
       removingProviderId: null,
     });
-    expect(controller.profile.getSnapshot().profileId).toBe("");
+    expect(controller.getSnapshot().profile.profileId).toBe("");
   });
 
   test("reports current provider removal failures and releases admission", async () => {
@@ -169,7 +168,8 @@ function _controller(
   providers: ModelProviderGroup[],
   overrides: Partial<ModelsSettingsControllerOptions> = {}
 ): ModelsSettingsController {
-  return new ModelsSettingsController(providers, {
+  let providerAdded: (providerId: string) => void = () => undefined;
+  const options: ModelsSettingsControllerOptions = {
     fetchBuiltinProviders: () => Promise.resolve([]),
     addBuiltinProvider: () => Promise.resolve(),
     addCustomProvider: () => Promise.resolve("custom-id"),
@@ -179,8 +179,54 @@ function _controller(
     removeProviderProfile: () => Promise.resolve(),
     updateProviderProfile: () => Promise.resolve(),
     mutationFailed: () => undefined,
+    subscribeProviderAdded: (listener) => {
+      providerAdded = listener;
+      return () => {
+        providerAdded = () => undefined;
+      };
+    },
     ...overrides,
+  };
+  const controller = new ModelsSettingsController(providers, options, {
+    addProvider: new AddProviderController({
+      fetchBuiltinProviders: options.fetchBuiltinProviders,
+      addBuiltinProvider: options.addBuiltinProvider,
+      addCustomProvider: options.addCustomProvider,
+      providerAdded: (providerId) => providerAdded(providerId),
+      addFailed: (providerName, error) =>
+        options.mutationFailed(
+          { operation: "add-provider", providerName },
+          error
+        ),
+    }),
+    metadata: new ProviderMetadataController(null, {
+      updateProvider: options.updateProvider,
+      saveFailed: (field, error) =>
+        options.mutationFailed(
+          { operation: "save-provider-metadata", field },
+          error
+        ),
+    }),
+    profiles: new ProviderProfilesController(null, {
+      addProfile: options.addProviderProfile,
+      removeProfile: options.removeProviderProfile,
+      mutationFailed: (mutation, error) =>
+        options.mutationFailed(
+          { operation: "mutate-provider-profiles", mutation },
+          error
+        ),
+    }),
+    profile: new ProviderProfileController(null, {
+      updateProfile: options.updateProviderProfile,
+      saveFailed: (field, error) =>
+        options.mutationFailed(
+          { operation: "save-provider-profile", field },
+          error
+        ),
+    }),
   });
+  controller.start();
+  return controller;
 }
 
 function _provider(

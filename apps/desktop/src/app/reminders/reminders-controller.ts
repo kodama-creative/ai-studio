@@ -15,7 +15,8 @@ export interface RemindersSnapshot {
  */
 export class RemindersController {
   private readonly _listeners = new Set<Listener>();
-  private _active = true;
+  private _active = false;
+  private _lifecycle = 0;
   private _dismissGithubStarRequest: Promise<void> | null = null;
   private _featureRequest: Promise<void> | null = null;
   private _githubStarRequest: Promise<void> | null = null;
@@ -34,11 +35,29 @@ export class RemindersController {
     return () => this._listeners.delete(listener);
   };
 
+  start(): void {
+    if (this._active) return;
+    this._active = true;
+    this._lifecycle += 1;
+  }
+
+  stop(): void {
+    if (!this._active) return;
+    this._active = false;
+    this._lifecycle += 1;
+    this._dismissGithubStarRequest = null;
+    this._featureRequest = null;
+    this._githubStarRequest = null;
+    this._markFeatureSeenRequest = null;
+  }
+
   requestFeature(): Promise<void> {
+    if (!this._active) return Promise.resolve();
     if (this._featureRequest !== null) return this._featureRequest;
+    const lifecycle = this._lifecycle;
     this._featureRequest = this._settle(async () => {
       const feature = await this._requests.nextFeature();
-      if (this._active && feature !== null) {
+      if (this._isCurrent(lifecycle) && feature !== null) {
         this._publish({ ...this._snapshot, feature });
       }
     });
@@ -46,10 +65,12 @@ export class RemindersController {
   }
 
   requestGithubStar(): Promise<void> {
+    if (!this._active) return Promise.resolve();
     if (this._githubStarRequest !== null) return this._githubStarRequest;
+    const lifecycle = this._lifecycle;
     this._githubStarRequest = this._settle(async () => {
       const result = await this._requests.shouldShowGithubStar();
-      if (this._active && result.show) {
+      if (this._isCurrent(lifecycle) && result.show) {
         this._publish({ ...this._snapshot, showGithubStar: true });
       }
     });
@@ -57,6 +78,7 @@ export class RemindersController {
   }
 
   markFeatureSeen(): Promise<void> {
+    if (!this._active) return Promise.resolve();
     if (this._snapshot.feature === null) return Promise.resolve();
     if (this._markFeatureSeenRequest !== null) {
       return this._markFeatureSeenRequest;
@@ -69,6 +91,7 @@ export class RemindersController {
   }
 
   dismissGithubStarForever(): Promise<void> {
+    if (!this._active) return Promise.resolve();
     if (this._dismissGithubStarRequest !== null) {
       return this._dismissGithubStarRequest;
     }
@@ -78,17 +101,16 @@ export class RemindersController {
     return this._dismissGithubStarRequest;
   }
 
-  dispose(): void {
-    this._active = false;
-    this._listeners.clear();
-  }
-
   private async _settle(run: () => Promise<void>): Promise<void> {
     try {
       await run();
     } catch {
       // Passive reminders are optional and have no actionable error UI.
     }
+  }
+
+  private _isCurrent(lifecycle: number): boolean {
+    return this._active && this._lifecycle === lifecycle;
   }
 
   private _publish(snapshot: RemindersSnapshot): void {

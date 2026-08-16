@@ -17,7 +17,10 @@ import {
   SlidersHorizontal,
   Sparkles,
 } from "lucide-react";
+import { useMemo } from "react";
 
+import { RendererScopeProvider, useRendererScope } from "@/app/di/react";
+import { createSettingsScope } from "@/app/di/settings-module";
 import type { SettingsTab } from "@/shared/commands";
 
 import { AccountPage } from "./account-page";
@@ -95,12 +98,34 @@ export function SettingsDialog({
   onOpenChange,
   tab,
   onTabChange,
-}: {
+}: SettingsDialogProps) {
+  const parent = useRendererScope();
+  const scope = useMemo(() => createSettingsScope(parent), [parent]);
+  return (
+    <RendererScopeProvider scope={scope}>
+      <SettingsDialogContent
+        open={open}
+        onOpenChange={onOpenChange}
+        tab={tab}
+        onTabChange={onTabChange}
+      />
+    </RendererScopeProvider>
+  );
+}
+
+interface SettingsDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   tab: SettingsTab;
   onTabChange: (tab: SettingsTab) => void;
-}) {
+}
+
+function SettingsDialogContent({
+  open,
+  onOpenChange,
+  tab,
+  onTabChange,
+}: SettingsDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
@@ -124,11 +149,7 @@ export function SettingsDialog({
             </header>
             <TabsList className="h-fit w-full flex-col gap-0 bg-transparent p-0">
               {PAGE_GROUPS.map((group) => (
-                <div
-                  key={group}
-                  className="mb-4 w-full"
-                  role="presentation"
-                >
+                <div key={group} className="mb-4 w-full" role="presentation">
                   <div className="text-muted-foreground/70 dark:text-muted-foreground/50 px-2 pb-1 text-[10px] font-medium">
                     {group}
                   </div>
@@ -138,7 +159,7 @@ export function SettingsDialog({
                         <TabsTrigger
                           key={value}
                           value={value}
-                          className="data-active:border-primary/25 data-active:bg-primary/10 data-active:text-primary data-active:hover:text-primary w-full pl-5 dark:data-active:border-input dark:data-active:bg-input/30 dark:data-active:text-foreground dark:data-active:hover:text-foreground"
+                          className="data-active:border-primary/25 data-active:bg-primary/10 data-active:text-primary data-active:hover:text-primary dark:data-active:border-input dark:data-active:bg-input/30 dark:data-active:text-foreground dark:data-active:hover:text-foreground w-full pl-5"
                         >
                           <Icon />
                           {label}
@@ -154,7 +175,7 @@ export function SettingsDialog({
                     <TabsTrigger
                       key={value}
                       value={value}
-                      className="data-active:border-primary/25 data-active:bg-primary/10 data-active:text-primary data-active:hover:text-primary w-full dark:data-active:border-input dark:data-active:bg-input/30 dark:data-active:text-foreground dark:data-active:hover:text-foreground"
+                      className="data-active:border-primary/25 data-active:bg-primary/10 data-active:text-primary data-active:hover:text-primary dark:data-active:border-input dark:data-active:bg-input/30 dark:data-active:text-foreground dark:data-active:hover:text-foreground w-full"
                     >
                       <Icon />
                       {label}

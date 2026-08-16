@@ -22,10 +22,7 @@ export interface ProviderMetadataControllerOptions {
       readonly icon?: string | null;
     }
   ) => Promise<void>;
-  readonly saveFailed: (
-    field: ProviderMetadataField,
-    error: unknown
-  ) => void;
+  readonly saveFailed: (field: ProviderMetadataField, error: unknown) => void;
 }
 
 interface FieldIntent {
@@ -86,7 +83,7 @@ export class ProviderMetadataController {
   /** Apply a new authoritative catalog projection without erasing live Drafts. */
   sync(target: ProviderMetadataTarget | null): void {
     if (target === null) {
-      this.close();
+      this.clearTarget();
       return;
     }
     if (target.providerId !== this._snapshot.providerId) {
@@ -105,7 +102,7 @@ export class ProviderMetadataController {
   }
 
   /** Invalidate every queued/in-flight result owned by this editor. */
-  close(): void {
+  clearTarget(): void {
     if (this._snapshot.providerId === "") return;
     this._epoch += 1;
     this._tail = Promise.resolve();

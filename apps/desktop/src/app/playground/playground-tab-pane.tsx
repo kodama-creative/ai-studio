@@ -16,12 +16,13 @@ import {
 } from "react";
 import { toast } from "sonner";
 
+import { PLAYGROUND_CLIENT } from "@/app/di/main-window-module";
+import { useInject } from "@/app/di/react";
 import {
   createPlaygroundThreadExecutionRuntime,
   playgroundToEditorThread,
 } from "@/app/playground-thread-adapter";
 import { SerializedPersistence } from "@/app/thread/serialized-persistence";
-import { createPlaygroundClient } from "@/client/playground-client";
 
 import type { PaneLifecycleHost } from "./pane-lifecycle-host";
 import { settleStreamingPane } from "./settle-streaming-pane";
@@ -54,7 +55,7 @@ function _PlaygroundTabPane({
   onThreadStateChange,
 }: PlaygroundTabPaneProps) {
   const queryClient = useQueryClient();
-  const client = useMemo(() => createPlaygroundClient(), []);
+  const client = useInject(PLAYGROUND_CLIENT);
   const queryKey = useMemo(
     () => ["playground", playgroundId] as const,
     [playgroundId]
@@ -307,6 +308,9 @@ function _PlaygroundTabPane({
     () => lifecycleHost.isMutationReserved(paneId),
     [lifecycleHost, paneId]
   );
+  // PaneLifecycleHost is a narrow, per-pane external-store port supplied by the
+  // DI-owned workspace. It is not a controller: keeping the tracker behind this
+  // port lets the pane remain independent of the main-window container.
   const mutationReserved = useSyncExternalStore(
     lifecycleHost.subscribeToActivityChanges,
     getMutationReserved,

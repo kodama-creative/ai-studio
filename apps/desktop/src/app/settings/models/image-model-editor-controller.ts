@@ -32,7 +32,10 @@ export class ImageModelEditorController {
   private _originalModelId: string | null | undefined = null;
   private _snapshot: ImageModelEditorSnapshot = IDLE_SNAPSHOT;
 
-  constructor(private readonly _options: ImageModelEditorControllerOptions) {}
+  constructor(
+    private readonly _options: ImageModelEditorControllerOptions,
+    private readonly _initialOriginalModelId: string | undefined = undefined
+  ) {}
 
   readonly getSnapshot = (): ImageModelEditorSnapshot => this._snapshot;
 
@@ -40,6 +43,14 @@ export class ImageModelEditorController {
     this._listeners.add(listener);
     return () => this._listeners.delete(listener);
   };
+
+  start(): void {
+    this.open(this._initialOriginalModelId);
+  }
+
+  stop(): void {
+    this.closeSession();
+  }
 
   /** Start a create/edit session; `undefined` identifies a fresh model. */
   open(originalModelId?: string): void {
@@ -55,7 +66,7 @@ export class ImageModelEditorController {
   }
 
   /** Invalidate current effects immediately on every dialog close path. */
-  close(): void {
+  closeSession(): void {
     if (this._originalModelId === null) return;
     this._epoch += 1;
     this._originalModelId = null;

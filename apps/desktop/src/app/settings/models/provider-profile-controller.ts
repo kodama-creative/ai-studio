@@ -1,17 +1,7 @@
-import type {
-  ProviderProfile,
-  ProviderProfilePatch,
-} from "@llm-space/core";
+import type { ProviderProfile, ProviderProfilePatch } from "@llm-space/core";
 
-export type ProviderProfileField =
-  | "name"
-  | "apiKey"
-  | "baseUrl"
-  | "headers";
-export type ProviderProfileTextField = Exclude<
-  ProviderProfileField,
-  "headers"
->;
+export type ProviderProfileField = "name" | "apiKey" | "baseUrl" | "headers";
+export type ProviderProfileTextField = Exclude<ProviderProfileField, "headers">;
 
 export interface ProviderHeaderRow {
   readonly id: string;
@@ -117,7 +107,7 @@ export class ProviderProfileController {
   /** Apply a catalog projection without erasing live or failed Drafts. */
   sync(target: ProviderProfileTarget | null): void {
     if (target === null) {
-      this.close();
+      this.clearTarget();
       return;
     }
     if (
@@ -150,18 +140,14 @@ export class ProviderProfileController {
         baseUrlEnabled: nextAuthoritative.baseUrl.length > 0,
       };
     }
-    if (
-      headersChanged &&
-      !this._hasPending("headers") &&
-      !this._headersDirty
-    ) {
+    if (headersChanged && !this._hasPending("headers") && !this._headersDirty) {
       next = { ...next, headers: this._rows(nextAuthoritative.headers) };
     }
     this._setSnapshot(next);
   }
 
   /** Invalidate every queued/in-flight result owned by this editor. */
-  close(): void {
+  clearTarget(): void {
     if (this._snapshot.profileId === "") return;
     this._epoch += 1;
     this._tail = Promise.resolve();
@@ -205,8 +191,7 @@ export class ProviderProfileController {
       field,
       displayValue,
       patch: {
-        [field]:
-          field === "name" || displayValue !== "" ? displayValue : null,
+        [field]: field === "name" || displayValue !== "" ? displayValue : null,
       },
     });
   }
@@ -251,11 +236,7 @@ export class ProviderProfileController {
     });
   }
 
-  editHeader(
-    rowId: string,
-    field: "key" | "value",
-    value: string
-  ): void {
+  editHeader(rowId: string, field: "key" | "value", value: string): void {
     if (this._snapshot.profileId === "") return;
     const headers = this._snapshot.headers.map((row) =>
       row.id === rowId ? { ...row, [field]: value } : row

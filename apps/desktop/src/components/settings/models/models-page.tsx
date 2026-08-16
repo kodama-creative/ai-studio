@@ -2,17 +2,6 @@
 
 import type { ModelProviderGroup } from "@llm-space/core";
 import { ConfirmDialog } from "@llm-space/ui/components/confirm-dialog";
-import {
-  useAddCustomProvider,
-  useAddProvider,
-  useAddProviderProfile,
-  useFetchBuiltinProviders,
-  useModels,
-  useRemoveProvider,
-  useRemoveProviderProfile,
-  useUpdateProvider,
-  useUpdateProviderProfile,
-} from "@llm-space/ui/components/model-provider";
 import { ProviderAvatar } from "@llm-space/ui/components/thread-playground/provider-avatar";
 import { useAutoAnimation } from "@llm-space/ui/lib/use-auto-animation";
 import { cn } from "@llm-space/ui/lib/utils";
@@ -25,25 +14,16 @@ import {
 import { Input } from "@llm-space/ui/ui/input";
 import { ScrollArea } from "@llm-space/ui/ui/scroll-area";
 import { MoreHorizontal, Search, Trash2 } from "lucide-react";
-import {
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
-import { toast } from "sonner";
+import { useMemo, useState } from "react";
 
-import {
-  ModelsSettingsController,
-  type ModelsSettingsFailure,
-} from "@/app/settings/models/models-settings-controller";
+import { useController } from "@/app/di/react";
+import { MODELS_SETTINGS_CONTROLLER } from "@/app/di/settings-module";
+import { ModelsSettingsController } from "@/app/settings/models/models-settings-controller";
 
 import { SettingsPage } from "../settings-page";
 
 import { AddProviderMenu } from "./add-provider-menu";
 import { ProviderEditor } from "./provider-editor";
-import { useFinalControllerDisposal } from "./use-final-controller-disposal";
 
 function sortProviders(
   providers: readonly ModelProviderGroup[]
@@ -52,48 +32,9 @@ function sortProviders(
 }
 
 export function ModelsPage() {
-  const providers = useModels();
-  const fetchBuiltinProviders = useFetchBuiltinProviders();
-  const addBuiltinProvider = useAddProvider();
-  const addCustomProvider = useAddCustomProvider();
-  const removeProvider = useRemoveProvider();
-  const updateProvider = useUpdateProvider();
-  const addProviderProfile = useAddProviderProfile();
-  const removeProviderProfile = useRemoveProviderProfile();
-  const updateProviderProfile = useUpdateProviderProfile();
-  const initialProviders = useRef(providers).current;
-  const controller = useMemo(
-    () =>
-      new ModelsSettingsController(initialProviders, {
-        fetchBuiltinProviders,
-        addBuiltinProvider,
-        addCustomProvider: () => addCustomProvider("Custom provider", ""),
-        removeProvider,
-        updateProvider,
-        addProviderProfile,
-        removeProviderProfile,
-        updateProviderProfile,
-        mutationFailed: _showModelsSettingsFailure,
-      }),
-    [
-      addBuiltinProvider,
-      addCustomProvider,
-      addProviderProfile,
-      fetchBuiltinProviders,
-      initialProviders,
-      removeProvider,
-      removeProviderProfile,
-      updateProvider,
-      updateProviderProfile,
-    ]
+  const { controller, state: snapshot } = useController(
+    MODELS_SETTINGS_CONTROLLER
   );
-  const snapshot = useSyncExternalStore(
-    controller.subscribe,
-    controller.getSnapshot,
-    controller.getSnapshot
-  );
-  useLayoutEffect(() => controller.syncCatalog(providers), [controller, providers]);
-  useFinalControllerDisposal(controller);
   const selected = controller.getSelectedProvider();
   const removalCandidate = snapshot.providers.find(
     (provider) => provider.id === snapshot.removalCandidateId
@@ -124,41 +65,6 @@ export function ModelsPage() {
       />
     </SettingsPage>
   );
-}
-
-function _showModelsSettingsFailure(
-  failure: ModelsSettingsFailure,
-  error: unknown
-): void {
-  let title: string;
-  switch (failure.operation) {
-    case "add-provider":
-      title = `Failed to add ${failure.providerName}`;
-      break;
-    case "remove-provider":
-      title = "Failed to remove provider";
-      break;
-    case "save-provider-metadata":
-      title =
-        failure.field === "name"
-          ? "Failed to rename provider"
-          : failure.field === "api"
-            ? "Failed to update API type"
-            : "Failed to update provider icon";
-      break;
-    case "mutate-provider-profiles":
-      title =
-        failure.mutation === "add"
-          ? "Failed to add connection profile"
-          : "Failed to remove connection profile";
-      break;
-    case "save-provider-profile":
-      title = _profileFailureTitle(failure.field);
-      break;
-  }
-  toast.error(title, {
-    description: error instanceof Error ? error.message : "Please try again.",
-  });
 }
 
 function ProviderList({
@@ -223,7 +129,11 @@ function ProviderList({
         )}
       </ScrollArea>
 
-      <AddProviderMenu controller={controller.addProvider} configured={providers} />
+      <AddProviderMenu
+        controller={controller}
+        snapshot={controller.getSnapshot().addProvider}
+        configured={providers}
+      />
     </div>
   );
 }
@@ -266,49 +176,30 @@ function ProviderListItem({
       <span className="line-clamp-1 grow">{provider.name}</span>
 
       <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
-          <DropdownMenuTrigger asChild>
-            <span
-              role="button"
-              tabIndex={0}
-              aria-label={`${provider.name} provider actions`}
-              title={`${provider.name} provider actions`}
-              className={cn(
-                "text-muted-foreground hover:bg-accent hover:text-foreground inline-flex size-5 shrink-0 items-center justify-center rounded",
-                menuOpen
-                  ? "opacity-100"
-                  : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-              )}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <MoreHorizontal className="size-4" />
-            </span>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
-            <DropdownMenuItem
-              variant="destructive"
-              onSelect={onRemove}
-            >
-              <Trash2 />
-              Remove {provider.name}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
+        <DropdownMenuTrigger asChild>
+          <span
+            role="button"
+            tabIndex={0}
+            aria-label={`${provider.name} provider actions`}
+            title={`${provider.name} provider actions`}
+            className={cn(
+              "text-muted-foreground hover:bg-accent hover:text-foreground inline-flex size-5 shrink-0 items-center justify-center rounded",
+              menuOpen
+                ? "opacity-100"
+                : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+            )}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <MoreHorizontal className="size-4" />
+          </span>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+          <DropdownMenuItem variant="destructive" onSelect={onRemove}>
+            <Trash2 />
+            Remove {provider.name}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
       </DropdownMenu>
-
     </div>
   );
-}
-
-function _profileFailureTitle(
-  field: Extract<ModelsSettingsFailure, { operation: "save-provider-profile" }>["field"]
-): string {
-  switch (field) {
-    case "name":
-      return "Failed to rename connection profile";
-    case "apiKey":
-      return "Failed to update API key";
-    case "baseUrl":
-      return "Failed to update base URL";
-    case "headers":
-      return "Failed to update custom headers";
-  }
 }

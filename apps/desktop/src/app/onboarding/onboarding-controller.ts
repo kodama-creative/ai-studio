@@ -11,7 +11,7 @@ export interface OnboardingControllerOptions {
   readonly fetchBuiltinProviders: () => Promise<ModelProviderGroup[]>;
   readonly addProvider: (providerId: string) => Promise<void>;
   readonly notifyProviderAdded: (providerName: string) => void;
-  readonly notifyAddFailed: () => void;
+  readonly notifyAddFailed: (error: unknown) => void;
 }
 
 type Listener = () => void;
@@ -32,7 +32,10 @@ export class OnboardingController {
   private _needsDiscovery = false;
   private _snapshot: OnboardingSnapshot = INITIAL_SNAPSHOT;
 
-  constructor(private readonly _options: OnboardingControllerOptions) {}
+  constructor(
+    private readonly _options: OnboardingControllerOptions,
+    private readonly _initialNeedsDiscovery = false
+  ) {}
 
   readonly getSnapshot = (): OnboardingSnapshot => this._snapshot;
 
@@ -40,6 +43,14 @@ export class OnboardingController {
     this._listeners.add(listener);
     return () => this._listeners.delete(listener);
   };
+
+  start(): void {
+    this.open(this._initialNeedsDiscovery);
+  }
+
+  stop(): void {
+    this.close();
+  }
 
   /** Open or update the current dialog session without restarting mutations. */
   open(needsDiscovery: boolean): void {
@@ -92,10 +103,10 @@ export class OnboardingController {
         addedProviderName: provider.name,
       });
       this._options.notifyProviderAdded(provider.name);
-    } catch {
+    } catch (error) {
       if (!this._isCurrent(lifecycle)) return;
       this._setSnapshot({ ...this._snapshot, addingProviderId: null });
-      this._options.notifyAddFailed();
+      this._options.notifyAddFailed(error);
     }
   }
 

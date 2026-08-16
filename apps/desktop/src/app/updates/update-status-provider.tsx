@@ -2,29 +2,15 @@
 
 import { Button } from "@llm-space/ui/ui/button";
 import { CheckIcon, Loader2Icon, XIcon } from "lucide-react";
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { useEffect, useLayoutEffect } from "react";
 import { toast } from "sonner";
 
-import { UpdateStatusConnection } from "@/app/updates/update-status-connection";
-import { createUpdatesClient } from "@/client/updates";
-import { useCommands } from "@/commands";
+import { RENDERER_EVENTS } from "@/app/di/common-module";
+import { UPDATE_STATUS_CONTROLLER } from "@/app/di/main-window-module";
+import { useController, useInject } from "@/app/di/react";
+import type { RendererEventEmitter } from "@/app/events/renderer-events";
 import { UpdateDialog } from "@/components/update-dialog";
-import type {
-  UpdateStatus,
-  UpdateStatusChangedPayload,
-} from "@/shared/updates";
 
-/** GitHub versioned-release page, opened from the "Updated to …" toast. */
-const RELEASE_TAG_URL = "https://github.com/deer-flow/llm-space/releases/tag";
 // The dialog only covers the quick / terminal states (checking → up-to-date /
 // error). The long, non-interactive states live bottom-right as passive cards so
 // they never block the app: a persistent "downloading" progress card that the
@@ -125,171 +111,84 @@ function _UpdateDownloadingCard({
   );
 }
 
-const UpdateStatusContext = createContext<UpdateStatusValue | null>(null);
-
-/**
- * Owns app-update UI state for the whole page. A single listener for the
- * bun-side `updateStatusChanged` messages drives three things: the manual-check
- * dialog, the passive background "ready" card, and the persistent `readyVersion`
- * (consumed by {@link UpdateIndicator}).
- *
- * - Manual checks (menu) open a dialog that morphs across every state.
- * - Background checks stay silent except the first "ready", which shows a
- *   passive card; the badge is the durable affordance and never lingers as a toast.
- * - "Continue in background" (closing the dialog mid-flow) routes later states of
- *   that same manual flow to the silent path instead of re-popping the dialog.
- */
-export function UpdateStatusProvider({ children }: { children: ReactNode }) {
-  const { executeCommand } = useCommands();
-  const updatesClient = useMemo(() => createUpdatesClient(), []);
-  const [readyVersion, setReadyVersion] = useState<string | null>(null);
-  const lastNotifiedVersion = useRef<string | null>(null);
-  // Manual "Check for Updates" flow.
-  const [manualStatus, setManualStatus] = useState<UpdateStatus | null>(null);
-  const [dialogOpen, setDialogOpen] = useState(false);
-  // Set when the user closes the manual dialog mid-flow, so later states of that
-  // same flow don't re-open it (respecting "Continue in background").
-  const dismissedRef = useRef(false);
-
-  const restart = useCallback(
-    () => executeCommand({ type: "updates.applyAndRestart", args: {} }),
-    [executeCommand]
-  );
-  const recheck = useCallback(
-    () => executeCommand({ type: "updates.check", args: {} }),
-    [executeCommand]
-  );
-  const handleDialogOpenChange = useCallback((open: boolean) => {
-    setDialogOpen(open);
-    if (!open) dismissedRef.current = true;
-  }, []);
-
-  const handleStatus = useCallback(
-    ({ status, manual }: UpdateStatusChangedPayload) => {
-      // Keep the persistent badge in sync no matter how the check started.
-      if (status.state === "ready") {
-        setReadyVersion(status.version);
-      } else if (status.state === "up-to-date") {
-        // No update available now — clear any stale "ready" badge/card.
-        setReadyVersion(null);
-        lastNotifiedVersion.current = null;
-      }
-
-      switch (status.state) {
-        // Quick / terminal states → the dialog (manual checks only). A fresh
-        // "checking" starts a new session; a dialog the user closed mid-flow
-        // stays closed for the rest of that flow.
-        case "checking":
-        case "up-to-date":
-        case "error": {
-          if (status.state !== "checking") toast.dismiss(DOWNLOADING_TOAST_ID);
-          if (status.state === "checking") dismissedRef.current = false;
-          if (manual && !dismissedRef.current) {
-            setManualStatus(status);
-            setDialogOpen(true);
-          }
-          return;
+/** React projection for update dialogs and event-driven passive cards. */
+export function UpdateStatusSurface() {
+  const { controller, state } = useController(UPDATE_STATUS_CONTROLLER);
+  const events = useInject<RendererEventEmitter>(RENDERER_EVENTS);
+  useLayoutEffect(() => {
+    const downloading = (version: string) => {
+      toast.custom(
+        (id) => (
+          <_UpdateDownloadingCard
+            version={version}
+            onDismiss={() => toast.dismiss(id)}
+          />
+        ),
+        {
+          id: DOWNLOADING_TOAST_ID,
+          position: UPDATE_TOAST_POSITION,
+          duration: Infinity,
         }
-        // Long, non-interactive → hand off to the non-blocking corner and close
-        // the check dialog. Background downloads stay fully silent.
-        case "downloading": {
-          setDialogOpen(false);
-          if (manual) {
-            toast.custom(
-              (id) => (
-                <_UpdateDownloadingCard
-                  version={status.version}
-                  onDismiss={() => toast.dismiss(id)}
-                />
-              ),
-              {
-                id: DOWNLOADING_TOAST_ID,
-                position: UPDATE_TOAST_POSITION,
-                duration: Infinity,
-              }
-            );
-          }
-          return;
+      );
+    };
+    const ready = (version: string) => {
+      toast.dismiss(DOWNLOADING_TOAST_ID);
+      toast.custom(
+        (id) => (
+          <_UpdateReadyCard
+            version={version}
+            onRestart={controller.restart}
+            onDismiss={() => toast.dismiss(id)}
+          />
+        ),
+        {
+          id: READY_TOAST_ID,
+          position: UPDATE_TOAST_POSITION,
+          duration: READY_TOAST_DURATION_MS,
         }
-        // Downloaded → replace the progress card with the actionable ready card
-        // (plus the badge). Manual always re-announces; background only the first
-        // time for a given version.
-        case "ready": {
-          toast.dismiss(DOWNLOADING_TOAST_ID);
-          setDialogOpen(false);
-          const alreadyAnnounced =
-            lastNotifiedVersion.current === status.version;
-          if (!manual && alreadyAnnounced) return;
-          lastNotifiedVersion.current = status.version;
-          toast.custom(
-            (id) => (
-              <_UpdateReadyCard
-                version={status.version}
-                onRestart={restart}
-                onDismiss={() => toast.dismiss(id)}
-              />
-            ),
-            {
-              id: READY_TOAST_ID,
-              position: UPDATE_TOAST_POSITION,
-              duration: READY_TOAST_DURATION_MS,
-            }
-          );
-          return;
-        }
-      }
-    },
-    [restart]
-  );
-  const handleInstalledVersion = useCallback(
-    (version: string) => {
+      );
+    };
+    const installed = (version: string) => {
       toast.success(`Updated to v${version}`, {
         action: {
           label: "Release notes",
-          onClick: () =>
-            executeCommand({
-              type: "shell.openLink",
-              args: { url: `${RELEASE_TAG_URL}/v${version}` },
-            }),
+          onClick: () => controller.openReleaseNotes(version),
         },
       });
-    },
-    [executeCommand]
-  );
-  const connection = useMemo(
-    () =>
-      new UpdateStatusConnection({
-        subscribeStatus: (listener) =>
-          updatesClient.on("statusChanged", listener),
-        takeInstalledVersion: () => updatesClient.takeInstalledVersion(),
-        onStatus: handleStatus,
-        onInstalledVersion: handleInstalledVersion,
-      }),
-    [handleInstalledVersion, handleStatus, updatesClient]
-  );
-  useEffect(() => {
-    connection.start();
-    return () => connection.stop();
-  }, [connection]);
+    };
+    events.on("updates:downloading", downloading);
+    events.on("updates:ready", ready);
+    events.on("updates:installed", installed);
+    return () => {
+      events.off("updates:downloading", downloading);
+      events.off("updates:ready", ready);
+      events.off("updates:installed", installed);
+    };
+  }, [controller, events]);
 
+  useEffect(() => {
+    if (
+      state.manualStatus?.state === "up-to-date" ||
+      state.manualStatus?.state === "error"
+    ) {
+      toast.dismiss(DOWNLOADING_TOAST_ID);
+    }
+  }, [state.manualStatus]);
   return (
-    <UpdateStatusContext.Provider value={{ readyVersion }}>
-      {children}
-      <UpdateDialog
-        open={dialogOpen}
-        status={manualStatus}
-        onOpenChange={handleDialogOpenChange}
-        onRestart={restart}
-        onRetry={recheck}
-      />
-    </UpdateStatusContext.Provider>
+    <UpdateDialog
+      open={state.dialogOpen}
+      status={state.manualStatus}
+      onOpenChange={controller.setDialogOpen}
+      onRestart={controller.restart}
+      onRetry={controller.recheck}
+    />
   );
 }
 
 export function useUpdateStatus(): UpdateStatusValue {
-  const ctx = useContext(UpdateStatusContext);
-  if (!ctx) {
-    throw new Error("useUpdateStatus must be used within UpdateStatusProvider");
-  }
-  return ctx;
+  const readyVersion = useController(
+    UPDATE_STATUS_CONTROLLER,
+    (snapshot) => snapshot.readyVersion
+  ).state;
+  return { readyVersion };
 }

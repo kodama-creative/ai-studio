@@ -1,18 +1,14 @@
 "use client";
 
 import {
-  DEFAULT_NETWORK_SETTINGS,
   isSupportedProxyUrl,
-  type NetworkSettings,
   type SystemProxyDetection,
 } from "@llm-space/core";
 import { Input } from "@llm-space/ui/ui/input";
 import { Separator } from "@llm-space/ui/ui/separator";
-import { useEffect, useMemo, useSyncExternalStore } from "react";
-import { toast } from "sonner";
 
-import { SettingsFormController } from "@/app/settings/settings-form-controller";
-import { createNetworkClient } from "@/client/network";
+import { useController } from "@/app/di/react";
+import { NETWORK_SETTINGS_CONTROLLER } from "@/app/di/settings-module";
 
 import { SettingsPage } from "./settings-page";
 import { SettingsToggleRow } from "./settings-toggle-row";
@@ -101,36 +97,9 @@ function DetectedProxy({
 }
 
 export function NetworkPage() {
-  const client = useMemo(() => createNetworkClient(), []);
-  const controller = useMemo(
-    () =>
-      new SettingsFormController<
-        NetworkSettings,
-        SystemProxyDetection | null
-      >({
-        initialSettings: DEFAULT_NETWORK_SETTINGS,
-        initialContext: null,
-        loadSettings: () => client.get(),
-        saveSettings: (settings) => client.set(settings),
-        loadContext: () => client.detectSystemProxy(),
-        notifySaveError: (error) => {
-          toast.error("Failed to save network settings", {
-            description:
-              error instanceof Error ? error.message : "Please try again.",
-          });
-        },
-      }),
-    [client]
+  const { controller, state: snapshot } = useController(
+    NETWORK_SETTINGS_CONTROLLER
   );
-  const snapshot = useSyncExternalStore(
-    controller.subscribe,
-    controller.getSnapshot,
-    controller.getSnapshot
-  );
-  useEffect(() => {
-    controller.start();
-    return () => controller.stop();
-  }, [controller]);
   const settings = snapshot.settings;
 
   return (

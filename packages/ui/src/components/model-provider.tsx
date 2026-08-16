@@ -100,35 +100,49 @@ export {
 
 export function ModelProvider({
   client,
+  controller: injectedController,
   children,
   fallback = null,
-}: {
-  client: ModelClient;
+}: (
+  | {
+      client: ModelClient;
+      controller?: never;
+    }
+  | {
+      client?: never;
+      controller: ModelCatalogController;
+    }
+) & {
   children: ReactNode;
   fallback?: ReactNode;
 }) {
-  const controllerRef = useRef<ModelCatalogController | null>(null);
-  if (controllerRef.current === null) {
-    controllerRef.current = new ModelCatalogController(client);
+  const ownedControllerRef = useRef<ModelCatalogController | null>(null);
+  if (injectedController === undefined && ownedControllerRef.current === null) {
+    ownedControllerRef.current = new ModelCatalogController(client);
   }
-  const controller = controllerRef.current;
+  const controller = injectedController ?? ownedControllerRef.current;
+  if (controller === null) {
+    throw new Error("ModelProvider requires a client or controller.");
+  }
   const snapshot = useSyncExternalStore(
     controller.subscribe,
     controller.getSnapshot,
     controller.getSnapshot
   );
   useLayoutEffect(() => {
-    controller.setClient(client);
-  }, [client, controller]);
+    if (injectedController === undefined) controller.setClient(client);
+  }, [client, controller, injectedController]);
   useEffect(() => {
+    if (injectedController !== undefined) return;
     controller.start();
     return () => controller.stop();
-  }, [controller]);
+  }, [controller, injectedController]);
 
   // A client change represents a runtime switch. Keep the already-mounted
   // workspace alive, but expose an empty model view until that runtime's fetch
   // completes so consumers can never observe the previous runtime's models.
-  const snapshotMatchesCommittedScope = snapshot.client === client;
+  const snapshotMatchesCommittedScope =
+    client === undefined || snapshot.client === client;
   const providers = snapshotMatchesCommittedScope
     ? snapshot.providers
     : snapshot.providers === null
@@ -167,11 +181,7 @@ export function ModelProvider({
       defaultModel,
       setDefaultModel: controller.setDefaultModel,
     };
-  }, [
-    providers,
-    controller,
-    defaultModel,
-  ]);
+  }, [providers, controller, defaultModel]);
 
   if (!contextValue) {
     return fallback;

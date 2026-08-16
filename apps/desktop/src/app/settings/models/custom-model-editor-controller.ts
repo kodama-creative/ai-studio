@@ -45,7 +45,10 @@ export class CustomModelEditorController {
   private _target: CustomModelEditorTarget | null = null;
   private _snapshot: CustomModelEditorSnapshot = IDLE_SNAPSHOT;
 
-  constructor(private readonly _options: CustomModelEditorControllerOptions) {}
+  constructor(
+    private readonly _options: CustomModelEditorControllerOptions,
+    private readonly _initialTarget?: CustomModelEditorTarget
+  ) {}
 
   readonly getSnapshot = (): CustomModelEditorSnapshot => this._snapshot;
 
@@ -53,6 +56,14 @@ export class CustomModelEditorController {
     this._listeners.add(listener);
     return () => this._listeners.delete(listener);
   };
+
+  start(): void {
+    if (this._initialTarget) this.open(this._initialTarget);
+  }
+
+  stop(): void {
+    this.closeSession();
+  }
 
   /** Start or retarget an editor session without resetting an identical owner. */
   open(target: CustomModelEditorTarget): void {
@@ -63,7 +74,7 @@ export class CustomModelEditorController {
   }
 
   /** Invalidate current effects immediately on every dialog close path. */
-  close(): void {
+  closeSession(): void {
     if (this._target === null) return;
     this._epoch += 1;
     this._target = null;
