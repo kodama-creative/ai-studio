@@ -22,7 +22,10 @@ import type {
 import { ProjectWindowStateFile } from "../projects/project-window-state";
 import type { MainWindowRPC } from "../rpc";
 
-import { DesktopWindowRuntime } from "./desktop-window-runtime";
+import {
+  type ConfigureDesktopWindowScope,
+  DesktopWindowRuntime,
+} from "./desktop-window-runtime";
 import { createAgentProjectWindow, createMainWindow } from "./window";
 
 export interface DesktopMainWindowHandle {
@@ -37,7 +40,8 @@ export class DesktopWindowFactory implements ProjectWindowAdapter {
 
   constructor(
     private readonly _process: DesktopProcessContainer,
-    private readonly _homePath: string
+    private readonly _homePath: string,
+    private readonly _configureWindowScope: ConfigureDesktopWindowScope
   ) {}
 
   /** Create the Main window inside the scope allocated by MainWindowManager. */
@@ -45,7 +49,11 @@ export class DesktopWindowFactory implements ProjectWindowAdapter {
     scope: DesktopWindowScope
   ): Promise<DesktopMainWindowHandle> {
     scope.load(playgroundWindowModule());
-    const runtime = new DesktopWindowRuntime(scope, "main");
+    const runtime = new DesktopWindowRuntime(
+      scope,
+      "main",
+      this._configureWindowScope
+    );
     const window = await createMainWindow({
       rpc: runtime.rpc,
       onCreated: (created, state) =>
@@ -75,7 +83,11 @@ export class DesktopWindowFactory implements ProjectWindowAdapter {
       scope.load(projectWindowIdentityModule(projectView));
       const closed = new Set<() => void>();
       scope.onDisposed(() => closed.forEach((listener) => listener()));
-      const runtime = new DesktopWindowRuntime(scope, "project");
+      const runtime = new DesktopWindowRuntime(
+        scope,
+        "project",
+        this._configureWindowScope
+      );
       const stateStore = await ProjectWindowStateFile.load(
         this._homePath,
         project.id

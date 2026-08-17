@@ -17,7 +17,6 @@ import {
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
 import { desktopToken } from "../di/tokens";
-import { bindWindowFeature, windowFeature } from "../di/window-feature";
 
 import type { UpdaterService } from "./index";
 
@@ -74,15 +73,5 @@ export function updatesRpcModule(): ContainerModule {
       UpdatesContribution
     );
     bind<RpcContributionApi>(RpcContribution).toService(UpdatesContribution);
-  });
-}
-
-/** Register update commands and RPC as one bundled window feature. */
-export function updatesModule(): ContainerModule {
-  return new ContainerModule(({ bind }) => {
-    bindWindowFeature(
-      bind,
-      windowFeature("updates", (scope) => scope.load(updatesRpcModule()))
-    );
   });
 }

@@ -26,7 +26,6 @@ import {
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
 import { desktopToken } from "../di/tokens";
-import { bindWindowFeature, windowFeature } from "../di/window-feature";
 
 const ZOOM_STEP = 0.1;
 
@@ -192,17 +191,5 @@ export function nativeWindowContributionsModule(): ContainerModule {
       WindowContribution
     );
     bind<RpcContributionApi>(RpcContribution).toService(WindowContribution);
-  });
-}
-
-/** Register native window commands/state as one bundled window feature. */
-export function nativeWindowModule(): ContainerModule {
-  return new ContainerModule(({ bind }) => {
-    bindWindowFeature(
-      bind,
-      windowFeature("native-window", (scope) =>
-        scope.load(nativeWindowContributionsModule())
-      )
-    );
   });
 }

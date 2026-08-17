@@ -13,7 +13,6 @@ import {
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
 import { desktopToken } from "../di/tokens";
-import { bindWindowFeature, windowFeature } from "../di/window-feature";
 
 import type { Analytics } from "./index";
 
@@ -54,15 +53,5 @@ export function analyticsRpcModule(): ContainerModule {
       )
       .inSingletonScope();
     bind<RpcContributionApi>(RpcContribution).toService(AnalyticsContribution);
-  });
-}
-
-/** Register Analytics as one bundled window feature. */
-export function analyticsModule(): ContainerModule {
-  return new ContainerModule(({ bind }) => {
-    bindWindowFeature(
-      bind,
-      windowFeature("analytics", (scope) => scope.load(analyticsRpcModule()))
-    );
   });
 }

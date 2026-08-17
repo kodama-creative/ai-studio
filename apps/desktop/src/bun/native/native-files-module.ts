@@ -13,7 +13,6 @@ import {
   type RpcContribution as RpcContributionApi,
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
-import { bindWindowFeature, windowFeature } from "../di/window-feature";
 import { revealResource } from "../fs/reveal-resource";
 import { SKILLS_MANAGER } from "../skills/skills-module";
 
@@ -58,18 +57,6 @@ export function nativeFilesRpcModule(): ContainerModule {
       .inSingletonScope();
     bind<RpcContributionApi>(RpcContribution).toService(
       NativeFilesContribution
-    );
-  });
-}
-
-/** Register native file operations as one bundled window feature. */
-export function nativeFilesModule(): ContainerModule {
-  return new ContainerModule(({ bind }) => {
-    bindWindowFeature(
-      bind,
-      windowFeature("native-files", (scope) =>
-        scope.load(nativeFilesRpcModule())
-      )
     );
   });
 }

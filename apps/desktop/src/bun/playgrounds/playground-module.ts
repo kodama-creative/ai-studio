@@ -8,7 +8,6 @@ import {
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
 import { desktopToken } from "../di/tokens";
-import { bindWindowFeature, windowFeature } from "../di/window-feature";
 import type { DesktopHost } from "../host/desktop-host";
 import { DESKTOP_HOST } from "../host/desktop-host-module";
 import { MCP_MANAGER } from "../mcp/mcp-module";
@@ -52,12 +51,6 @@ export function playgroundModule(): ContainerModule {
         });
       })
       .inSingletonScope();
-    bindWindowFeature(
-      bind,
-      windowFeature("playground", (scope, { kind }) => {
-        if (kind === "main") scope.load(playgroundContributionsModule());
-      })
-    );
   });
 }
 

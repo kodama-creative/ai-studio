@@ -96,12 +96,13 @@ callbacks, or bind raw BrowserWindow/RPC values without an actual consumer.
 
 Every native window owns one `RpcRegistry`. Window-scoped feature classes implement the same-name `RpcContribution` symbol + interface and register their server classes during `RpcRegistry.onStart()`. A named `ContributionProvider<RpcContribution>` takes one frozen snapshot after all window modules are bound; duplicate namespaces and late registration fail. The Registry owns request dispatch, stream abort, event subscriptions, and reverse-order registration cleanup. `createMainWindowRPC()` only forwards the Electrobun envelope to that Registry and never constructs business services.
 
-Bundled feature installation is DI-owned. Every process feature module
-multi-binds one stable-id `DesktopWindowFeature`; `DesktopWindowRuntime`
-resolves that ordered snapshot, installs it once for the Main or Project kind,
-then freezes the Command/RPC registries. The runtime must not import business
-feature modules directly. Duplicate feature ids and feature-attributed startup
-failures are rejected before the native window is exposed.
+Bundled window composition is explicit in the production composition root.
+`start-desktop-app.ts` owns the ordered Common/Main/Project module sets and
+injects one scope-configuration function through `DesktopWindowFactory` into
+`DesktopWindowRuntime`. The runtime invokes it once before freezing the
+Command/RPC contribution snapshots and must not import business feature modules
+directly. Do not recreate distributed process-level window feature
+multi-bindings or a catch-all `di/modules` aggregation.
 
 Project windows keep three interfaces distinct: `projectSource.*` owns source
 read/watch, `studio.*` owns Studio Thread metadata, Drafts, history,
@@ -152,10 +153,11 @@ Each native window has a child Inversify scope. Feature modules bind window
 contribution classes with `toService(...)`; one class may implement both
 `CommandContribution` and `RpcContribution` without creating two instances.
 `DesktopWindowRuntime` is the deep lifecycle module around that scope: it
-installs the DI-provided `DesktopWindowFeature` snapshot, freezes and starts
-both Registries, owns the Electrobun bridge, attaches the eventual native
-window, and disposes transports before closing the window. Callers must not
-reproduce that sequence. Concrete internal application classes use their
+applies the composition-root-provided window module configuration, freezes and
+starts both Registries, owns the Electrobun bridge, attaches the eventual
+native window, and disposes transports before closing the window. The child
+container remains the instance and lifecycle isolation boundary; callers must
+not reproduce that sequence. Concrete internal application classes use their
 constructors as DI identities; typed symbols are reserved for external values
 and actual interface seams and remain owned by the relevant feature.
 `DesktopWindowFactory` owns Main/Project native creation around that runtime,

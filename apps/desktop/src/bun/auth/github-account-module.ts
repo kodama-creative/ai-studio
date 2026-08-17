@@ -17,7 +17,6 @@ import {
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
 import { desktopToken } from "../di/tokens";
-import { bindWindowFeature, windowFeature } from "../di/window-feature";
 
 import type { GitHubAuthManager } from "./github-auth-manager";
 
@@ -75,18 +74,6 @@ export function githubAccountRpcModule(): ContainerModule {
     );
     bind<RpcContributionApi>(RpcContribution).toService(
       GithubAccountContribution
-    );
-  });
-}
-
-/** Register GitHub Account commands and RPC as one bundled window feature. */
-export function githubAccountModule(): ContainerModule {
-  return new ContainerModule(({ bind }) => {
-    bindWindowFeature(
-      bind,
-      windowFeature("github-account", (scope) =>
-        scope.load(githubAccountRpcModule())
-      )
     );
   });
 }

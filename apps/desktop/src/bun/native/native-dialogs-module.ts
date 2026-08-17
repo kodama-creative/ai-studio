@@ -17,7 +17,6 @@ import {
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
 import { desktopToken } from "../di/tokens";
-import { bindWindowFeature, windowFeature } from "../di/window-feature";
 
 import {
   importFilesWithNativePicker,
@@ -88,12 +87,6 @@ export function nativeDialogsApplicationModule(): ContainerModule {
     bind<NativeDialogsApplication>(NATIVE_DIALOGS_APPLICATION)
       .to(NativeDialogsApplication)
       .inSingletonScope();
-    bindWindowFeature(
-      bind,
-      windowFeature("native-dialogs", (scope, { commandSink }) =>
-        scope.load(nativeDialogsContributionsModule(commandSink))
-      )
-    );
   });
 }
 

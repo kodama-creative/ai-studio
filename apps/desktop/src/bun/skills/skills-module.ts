@@ -13,7 +13,6 @@ import {
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
 import { desktopToken } from "../di/tokens";
-import { bindWindowFeature, windowFeature } from "../di/window-feature";
 
 export const SKILLS_MANAGER = desktopToken<SkillsManager>("skills", "manager");
 
@@ -59,15 +58,5 @@ export function skillsRpcModule(): ContainerModule {
       )
       .inSingletonScope();
     bind<RpcContributionApi>(RpcContribution).toService(SkillsRpcContribution);
-  });
-}
-
-/** Register Skill discovery and settings RPC as one bundled window feature. */
-export function skillsModule(): ContainerModule {
-  return new ContainerModule(({ bind }) => {
-    bindWindowFeature(
-      bind,
-      windowFeature("skills", (scope) => scope.load(skillsRpcModule()))
-    );
   });
 }

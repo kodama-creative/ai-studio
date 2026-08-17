@@ -13,7 +13,6 @@ import {
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
 import { desktopToken } from "../di/tokens";
-import { bindWindowFeature, windowFeature } from "../di/window-feature";
 
 export const MCP_MANAGER = desktopToken<McpManager>("mcp", "manager");
 
@@ -57,15 +56,5 @@ export function mcpRpcModule(): ContainerModule {
       )
       .inSingletonScope();
     bind<RpcContributionApi>(RpcContribution).toService(McpRpcContribution);
-  });
-}
-
-/** Register MCP settings and tool RPC as one bundled window feature. */
-export function mcpModule(): ContainerModule {
-  return new ContainerModule(({ bind }) => {
-    bindWindowFeature(
-      bind,
-      windowFeature("mcp", (scope) => scope.load(mcpRpcModule()))
-    );
   });
 }

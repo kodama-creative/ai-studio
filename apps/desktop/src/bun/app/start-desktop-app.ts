@@ -17,69 +17,81 @@ import { resolveDeepLinkScheme } from "../../shared/deep-link-scheme";
 import { Analytics } from "../analytics";
 import {
   ANALYTICS,
-  analyticsModule,
+  analyticsRpcModule,
 } from "../analytics/analytics-module";
 import {
   GITHUB_AUTH,
-  githubAccountModule,
+  githubAccountRpcModule,
 } from "../auth/github-account-module";
 import { GitHubAuthManager } from "../auth/github-auth-manager";
 import { auxiliaryGenerationModule } from "../auxiliary-generation/auxiliary-generation-module";
+import { auxiliaryGenerationRpcModule } from "../auxiliary-generation/auxiliary-generation-rpc-feature";
 import { activateWindowForDeepLink } from "../deep-link/activate-window";
 import { desktopDeepLinks } from "../deep-link/launch";
 import {
   createDesktopProcessContainer,
   type DesktopProcessContainer,
+  type DesktopWindowScope,
 } from "../di/process-container";
 import { openPath, revealInFileManager } from "../fs";
 import { DesktopHost } from "../host/desktop-host";
 import {
   DESKTOP_HOST,
-  desktopHostModule,
+  builtinToolsRpcModule,
 } from "../host/desktop-host-module";
-import { MCP_MANAGER, mcpModule } from "../mcp/mcp-module";
+import { MCP_MANAGER, mcpRpcModule } from "../mcp/mcp-module";
 import { MODEL_MANAGER, modelsModule } from "../models/models-module";
+import { modelsRpcModule } from "../models/models-rpc-feature";
 import {
   APP_HOME_PATH,
-  appDirectoriesModule,
+  appDirectoriesRpcModule,
 } from "../native/app-directories-module";
-import { nativeDialogsApplicationModule } from "../native/native-dialogs-module";
-import { nativeFilesModule } from "../native/native-files-module";
 import {
-  nativeWindowModule,
+  nativeDialogsApplicationModule,
+  nativeDialogsContributionsModule,
+} from "../native/native-dialogs-module";
+import { nativeFilesRpcModule } from "../native/native-files-module";
+import {
+  nativeWindowContributionsModule,
   WINDOW_STATE_MANAGER,
 } from "../native/native-window-module";
-import { promptFilesModule } from "../native/prompt-files-module";
-import { shellModule } from "../native/shell-module";
+import { promptFilesRpcModule } from "../native/prompt-files-module";
+import { shellCommandsModule } from "../native/shell-module";
 import {
   NETWORK_SETTINGS,
-  networkModule,
+  networkRpcModule,
 } from "../network/network-module";
 import {
   PLAYGROUND_APPLICATION,
+  playgroundContributionsModule,
   playgroundModule,
 } from "../playgrounds/playground-module";
 import {
+  agentProjectsCommandModule,
   agentProjectsModule,
+  agentProjectsRpcModule,
   PROJECT_WINDOW_MANAGER,
 } from "../projects/agent-projects-module";
+import { projectContributionsModule } from "../projects/project-module";
 import { ProjectWindowManager } from "../projects/project-window-manager";
 import {
   FileAgentProjectCatalogStore,
   FileProjectWindowStateStore,
 } from "../projects/project-window-state";
 import { remindersModule } from "../reminders/reminders-module";
-import { SEARCH_SETTINGS, searchModule } from "../search/search-module";
+import { remindersRpcModule } from "../reminders/reminders-rpc-feature";
+import { SEARCH_SETTINGS, searchRpcModule } from "../search/search-module";
 import { getManagedSkillsDir } from "../skills/seed";
-import { SKILLS_MANAGER, skillsModule } from "../skills/skills-module";
+import { SKILLS_MANAGER, skillsRpcModule } from "../skills/skills-module";
 import {
   GIST_THREAD_READER,
   GIST_THREAD_WRITER,
   threadSharingModule,
 } from "../thread-sharing/thread-sharing-module";
+import { threadSharingRpcModule } from "../thread-sharing/thread-sharing-rpc-feature";
 import { UpdaterService } from "../updates";
 import { UpdatesState } from "../updates/state";
-import { UPDATER, updatesModule } from "../updates/updates-module";
+import { UPDATER, updatesRpcModule } from "../updates/updates-module";
 
 import { DesktopLaunchController } from "./desktop-launch-controller";
 import {
@@ -87,10 +99,43 @@ import {
   DesktopLifecycle,
 } from "./desktop-lifecycle";
 import { DesktopWindowFactory } from "./desktop-window-factory";
+import type { DesktopWindowCompositionContext } from "./desktop-window-runtime";
 import { MainWindowManager } from "./main-window-manager";
 import { registerMenuActions } from "./menu";
 import { createShutdownCoordinator } from "./shutdown-coordinator";
 import { WindowStateManager } from "./window-state";
+
+/** Install the explicit Common/Main/Project module set into one child scope. */
+export function configureDesktopWindowScope(
+  scope: DesktopWindowScope,
+  { kind, commandSink }: DesktopWindowCompositionContext
+): void {
+  scope.load(threadSharingRpcModule());
+  scope.load(githubAccountRpcModule());
+  scope.load(updatesRpcModule());
+  scope.load(remindersRpcModule());
+  scope.load(analyticsRpcModule());
+  scope.load(agentProjectsCommandModule());
+  scope.load(nativeDialogsContributionsModule(commandSink));
+  scope.load(nativeFilesRpcModule());
+  scope.load(appDirectoriesRpcModule());
+  scope.load(nativeWindowContributionsModule());
+  scope.load(shellCommandsModule());
+  scope.load(auxiliaryGenerationRpcModule());
+  scope.load(modelsRpcModule());
+  scope.load(promptFilesRpcModule());
+  scope.load(mcpRpcModule());
+  scope.load(builtinToolsRpcModule());
+  scope.load(searchRpcModule());
+  scope.load(networkRpcModule());
+  scope.load(skillsRpcModule());
+  if (kind === "main") {
+    scope.load(agentProjectsRpcModule());
+    scope.load(playgroundContributionsModule());
+  } else {
+    scope.load(projectContributionsModule());
+  }
+}
 
 /** Build and start the production Bun object graph. */
 export async function startDesktopApp(): Promise<DesktopAppRuntime> {
@@ -166,7 +211,8 @@ async function _startDesktopApp(
   processLifecycle.defer("window state", () => windowStates.flush());
   const windowFactory = new DesktopWindowFactory(
     processContainer,
-    homePath
+    homePath,
+    configureDesktopWindowScope
   );
   const projectWindows = new ProjectWindowManager({
     state: new FileProjectWindowStateStore(homePath),
@@ -190,24 +236,11 @@ async function _startDesktopApp(
   processContainer.bindConstant(UPDATER, updater);
   processContainer.bindConstant(WINDOW_STATE_MANAGER, windowStates);
   processContainer.load(threadSharingModule());
-  processContainer.load(githubAccountModule());
-  processContainer.load(updatesModule());
   processContainer.load(remindersModule());
-  processContainer.load(analyticsModule());
   processContainer.load(agentProjectsModule());
   processContainer.load(nativeDialogsApplicationModule());
-  processContainer.load(nativeFilesModule());
-  processContainer.load(appDirectoriesModule());
-  processContainer.load(nativeWindowModule());
-  processContainer.load(shellModule());
   processContainer.load(auxiliaryGenerationModule());
   processContainer.load(modelsModule());
-  processContainer.load(promptFilesModule());
-  processContainer.load(mcpModule());
-  processContainer.load(desktopHostModule());
-  processContainer.load(searchModule());
-  processContainer.load(networkModule());
-  processContainer.load(skillsModule());
   processContainer.load(playgroundModule());
   // Resolve the lazy application root through DI so its Disposable lifecycle
   // is adopted by the process scope before any window can request it.

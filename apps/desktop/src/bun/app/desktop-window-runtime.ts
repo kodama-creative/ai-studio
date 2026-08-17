@@ -4,11 +4,6 @@ import type { Command } from "../../shared/commands";
 import { CommandRegistry, type CommandSink } from "../di/command-registry";
 import type { DesktopWindowScope } from "../di/process-container";
 import { RpcRegistry, type RpcEventSink } from "../di/rpc-registry";
-import {
-  type DesktopWindowKind,
-  DesktopWindowFeatures,
-  WindowFeature,
-} from "../di/window-feature";
 import { windowRegistryModule } from "../di/window-registry-module";
 import {
   type NativeWindowStateBinding,
@@ -20,6 +15,18 @@ import {
   type MainWindowRPC,
   type MainWindowRPCController,
 } from "../rpc";
+
+export type DesktopWindowKind = "main" | "project";
+
+export interface DesktopWindowCompositionContext {
+  readonly kind: DesktopWindowKind;
+  readonly commandSink: CommandSink;
+}
+
+export type ConfigureDesktopWindowScope = (
+  scope: DesktopWindowScope,
+  context: DesktopWindowCompositionContext
+) => void;
 
 /**
  * Own one window's DI contributions, transport registries, RPC bridge, and
@@ -36,7 +43,8 @@ export class DesktopWindowRuntime {
 
   constructor(
     private readonly _scope: DesktopWindowScope,
-    private readonly _kind: DesktopWindowKind
+    private readonly _kind: DesktopWindowKind,
+    configureScope: ConfigureDesktopWindowScope
   ) {
     const rpcBridge: { current?: MainWindowRPC } = {};
     const requireRpcBridge = (): MainWindowRPC => {
@@ -56,7 +64,9 @@ export class DesktopWindowRuntime {
         requireRpcBridge().send.rpcNamespaceEvent(event),
     };
 
-    new DesktopWindowFeatures(_scope.getAll(WindowFeature)).install(_scope, {
+    // The production composition root decides which modules belong to this
+    // window. The child scope remains the instance and lifecycle boundary.
+    configureScope(_scope, {
       kind: _kind,
       commandSink,
     });

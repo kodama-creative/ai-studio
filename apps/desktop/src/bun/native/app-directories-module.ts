@@ -12,7 +12,6 @@ import {
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
 import { desktopToken } from "../di/tokens";
-import { bindWindowFeature, windowFeature } from "../di/window-feature";
 import { ensureRootDir } from "../fs/ensure-root-dir";
 
 export const APP_HOME_PATH = desktopToken<string>("app-directories", "home");
@@ -55,18 +54,6 @@ export function appDirectoriesRpcModule(): ContainerModule {
       .inSingletonScope();
     bind<RpcContributionApi>(RpcContribution).toService(
       AppDirectoriesContribution
-    );
-  });
-}
-
-/** Register app-owned directory operations as one bundled window feature. */
-export function appDirectoriesModule(): ContainerModule {
-  return new ContainerModule(({ bind }) => {
-    bindWindowFeature(
-      bind,
-      windowFeature("app-directories", (scope) =>
-        scope.load(appDirectoriesRpcModule())
-      )
     );
   });
 }

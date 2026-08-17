@@ -5,12 +5,10 @@ import type {
 import { ContainerModule, type ResolutionContext } from "inversify";
 
 import { desktopToken } from "../di/tokens";
-import { bindWindowFeature, windowFeature } from "../di/window-feature";
 import { ModelsApplication } from "../models/models-application";
 import { PLAYGROUND_APPLICATION } from "../playgrounds/playground-module";
 
 import { ThreadSharingApplication } from "./thread-sharing-application";
-import { threadSharingRpcModule } from "./thread-sharing-rpc-feature";
 
 export const GIST_THREAD_READER = desktopToken<GistThreadReader>(
   "thread-sharing",
@@ -21,7 +19,7 @@ export const GIST_THREAD_WRITER = desktopToken<GistThreadWriter>(
   "gist-writer"
 );
 
-/** Bind process-scoped Thread Sharing use cases and its window adapter. */
+/** Bind process-scoped Thread Sharing use cases. */
 export function threadSharingModule(): ContainerModule {
   return new ContainerModule(({ bind }) => {
     bind(ThreadSharingApplication)
@@ -35,11 +33,5 @@ export function threadSharingModule(): ContainerModule {
           )
       )
       .inSingletonScope();
-    bindWindowFeature(
-      bind,
-      windowFeature("thread-sharing", (scope) =>
-        scope.load(threadSharingRpcModule())
-      )
-    );
   });
 }

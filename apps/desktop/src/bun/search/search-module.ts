@@ -13,7 +13,6 @@ import {
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
 import { desktopToken } from "../di/tokens";
-import { bindWindowFeature, windowFeature } from "../di/window-feature";
 
 export const SEARCH_SETTINGS = desktopToken<SearchSettingsManager>(
   "search",
@@ -54,15 +53,5 @@ export function searchRpcModule(): ContainerModule {
       )
       .inSingletonScope();
     bind<RpcContributionApi>(RpcContribution).toService(SearchRpcContribution);
-  });
-}
-
-/** Register search settings RPC as one bundled window feature. */
-export function searchModule(): ContainerModule {
-  return new ContainerModule(({ bind }) => {
-    bindWindowFeature(
-      bind,
-      windowFeature("search", (scope) => scope.load(searchRpcModule()))
-    );
   });
 }

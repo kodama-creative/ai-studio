@@ -13,7 +13,6 @@ import {
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
 import { desktopToken } from "../di/tokens";
-import { bindWindowFeature, windowFeature } from "../di/window-feature";
 
 export const NETWORK_SETTINGS = desktopToken<NetworkSettingsManager>(
   "network",
@@ -55,15 +54,5 @@ export function networkRpcModule(): ContainerModule {
       )
       .inSingletonScope();
     bind<RpcContributionApi>(RpcContribution).toService(NetworkRpcContribution);
-  });
-}
-
-/** Register network settings RPC as one bundled window feature. */
-export function networkModule(): ContainerModule {
-  return new ContainerModule(({ bind }) => {
-    bindWindowFeature(
-      bind,
-      windowFeature("network", (scope) => scope.load(networkRpcModule()))
-    );
   });
 }

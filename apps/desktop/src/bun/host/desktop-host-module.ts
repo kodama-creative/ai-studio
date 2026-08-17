@@ -13,7 +13,6 @@ import {
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
 import { desktopToken } from "../di/tokens";
-import { bindWindowFeature, windowFeature } from "../di/window-feature";
 
 import type { DesktopHost } from "./desktop-host";
 
@@ -57,18 +56,6 @@ export function builtinToolsRpcModule(): ContainerModule {
       .inSingletonScope();
     bind<RpcContributionApi>(RpcContribution).toService(
       BuiltinToolsRpcContribution
-    );
-  });
-}
-
-/** Register bundled Tool discovery/execution as one window feature. */
-export function desktopHostModule(): ContainerModule {
-  return new ContainerModule(({ bind }) => {
-    bindWindowFeature(
-      bind,
-      windowFeature("builtin-tools", (scope) =>
-        scope.load(builtinToolsRpcModule())
-      )
     );
   });
 }

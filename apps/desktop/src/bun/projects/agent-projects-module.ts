@@ -16,14 +16,12 @@ import {
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
 import { desktopToken } from "../di/tokens";
-import { bindWindowFeature, windowFeature } from "../di/window-feature";
 import { NATIVE_DIALOGS_APPLICATION } from "../native/native-dialogs-module";
 
 import {
   AgentProjectsApplication,
   type DirectoryPicker,
 } from "./agent-projects-application";
-import { projectContributionsModule } from "./project-module";
 import type { ProjectWindowManager } from "./project-window-manager";
 
 export const AGENT_PROJECTS_APPLICATION =
@@ -43,7 +41,7 @@ class AgentProjectsRpcServer implements RpcServer<AgentProjectsRpc> {
   }
 }
 
-/** Register main-window Agent Project use cases and RPC transport. */
+/** Bind the process-scoped Agent Project use cases. */
 export function agentProjectsModule(): ContainerModule {
   return new ContainerModule(({ bind }) => {
     bind<AgentProjectsApplication>(AGENT_PROJECTS_APPLICATION)
@@ -55,13 +53,6 @@ export function agentProjectsModule(): ContainerModule {
           )
       )
       .inSingletonScope();
-    bindWindowFeature(
-      bind,
-      windowFeature("agent-projects", (scope, { kind }) => {
-        scope.load(agentProjectsContributionsModule(kind === "main"));
-        if (kind === "project") scope.load(projectContributionsModule());
-      })
-    );
   });
 }
 
@@ -85,10 +76,8 @@ class AgentProjectsRpcContribution implements RpcContributionApi {
   }
 }
 
-/** Bind window-owned Agent Project adapters without exposing the DI scope. */
-export function agentProjectsContributionsModule(
-  includeRpc: boolean
-): ContainerModule {
+/** Bind the Agent Project opener command for every desktop window. */
+export function agentProjectsCommandModule(): ContainerModule {
   return new ContainerModule(({ bind }) => {
     bind(AgentProjectsCommandContribution)
       .toDynamicValue(
@@ -101,18 +90,22 @@ export function agentProjectsContributionsModule(
     bind<CommandContributionApi>(CommandContribution).toService(
       AgentProjectsCommandContribution
     );
-    if (includeRpc) {
-      bind(AgentProjectsRpcContribution)
-        .toDynamicValue(
-          (context) =>
-            new AgentProjectsRpcContribution(
-              context.get(AGENT_PROJECTS_APPLICATION)
-            )
-        )
-        .inSingletonScope();
-      bind<RpcContributionApi>(RpcContribution).toService(
-        AgentProjectsRpcContribution
-      );
-    }
+  });
+}
+
+/** Bind the Agent Project catalog RPC exposed only by the Main window. */
+export function agentProjectsRpcModule(): ContainerModule {
+  return new ContainerModule(({ bind }) => {
+    bind(AgentProjectsRpcContribution)
+      .toDynamicValue(
+        (context) =>
+          new AgentProjectsRpcContribution(
+            context.get(AGENT_PROJECTS_APPLICATION)
+          )
+      )
+      .inSingletonScope();
+    bind<RpcContributionApi>(RpcContribution).toService(
+      AgentProjectsRpcContribution
+    );
   });
 }

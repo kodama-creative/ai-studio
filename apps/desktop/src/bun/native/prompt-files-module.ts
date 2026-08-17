@@ -15,7 +15,6 @@ import {
   type RpcContribution as RpcContributionApi,
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
-import { bindWindowFeature, windowFeature } from "../di/window-feature";
 
 class PromptFilesRpcServer implements RpcServer<PromptFilesRpc> {
   readonly namespace = PROMPT_FILES_RPC;
@@ -39,18 +38,6 @@ export function promptFilesRpcModule(): ContainerModule {
     bind(PromptFilesRpcContribution).toSelf().inSingletonScope();
     bind<RpcContributionApi>(RpcContribution).toService(
       PromptFilesRpcContribution
-    );
-  });
-}
-
-/** Register Prompt file imports as one bundled window feature. */
-export function promptFilesModule(): ContainerModule {
-  return new ContainerModule(({ bind }) => {
-    bindWindowFeature(
-      bind,
-      windowFeature("prompt-files", (scope) =>
-        scope.load(promptFilesRpcModule())
-      )
     );
   });
 }
