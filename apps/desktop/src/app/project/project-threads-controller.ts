@@ -4,8 +4,11 @@ import type {
   StudioThreadEventData,
 } from "@llm-space/studio";
 import type { StudioEvaluationMetadata } from "@llm-space/studio/evaluation";
+import { inject, injectable } from "inversify";
 
-import type { StudioTransport } from "@/shared/studio-rpc";
+import { STUDIO_SERVICE, type StudioTransport } from "@/shared/studio-rpc";
+
+import { RendererNotificationService } from "../notifications/renderer-notification-service";
 
 const EMPTY_EVALUATION_METADATA: StudioEvaluationMetadata = {
   evaluations: [],
@@ -28,11 +31,6 @@ export interface ProjectThreadsSnapshot {
   readonly openError?: string;
 }
 
-export interface ProjectThreadsControllerOptions {
-  readonly client: StudioTransport;
-  readonly reportError: (title: string, error: unknown) => void;
-}
-
 type Listener = () => void;
 
 /**
@@ -42,6 +40,7 @@ type Listener = () => void;
  * own lifecycle, and never coordinate event cursors, stale opens, or stream
  * cancellation themselves.
  */
+@injectable()
 export class ProjectThreadsController {
   private readonly _listeners = new Set<Listener>();
   private readonly _lastSequences = new Map<string, number>();
@@ -57,7 +56,11 @@ export class ProjectThreadsController {
     loading: true,
   };
 
-  constructor(private readonly _options: ProjectThreadsControllerOptions) {}
+  constructor(
+    @inject(STUDIO_SERVICE) private readonly _studio: StudioTransport,
+    @inject(RendererNotificationService)
+    private readonly _notifications: RendererNotificationService
+  ) {}
 
   readonly getSnapshot = (): ProjectThreadsSnapshot => this._snapshot;
 
@@ -73,7 +76,7 @@ export class ProjectThreadsController {
     this._started = true;
     this._setSnapshot({ ...this._snapshot, loading: true });
     try {
-      const threads = await this._options.client.listThreads();
+      const threads = await this._studio.listThreads();
       if (!this._isCurrentOpen(lifecycle, selection)) return undefined;
       const first = threads[0];
       this._setSnapshot({
@@ -92,7 +95,7 @@ export class ProjectThreadsController {
         : await this._open(first.id, lifecycle);
     } catch (error) {
       if (this._isCurrentOpen(lifecycle, selection)) {
-        this._options.reportError("Unable to load Project Threads", error);
+        this._notifications.error("Unable to load Project Threads", error);
       }
       return undefined;
     } finally {
@@ -125,7 +128,7 @@ export class ProjectThreadsController {
     const mutation = ++this._mutationRequest;
     const selection = this._openRequest;
     try {
-      const thread = await this._options.client.createThread();
+      const thread = await this._studio.createThread();
       if (!this._isCurrentMutation(lifecycle, mutation, selection)) {
         return undefined;
       }
@@ -138,7 +141,7 @@ export class ProjectThreadsController {
       return thread;
     } catch (error) {
       if (this._isCurrentMutation(lifecycle, mutation, selection)) {
-        this._options.reportError("Unable to create Thread", error);
+        this._notifications.error("Unable to create Thread", error);
       }
       return undefined;
     }
@@ -154,7 +157,7 @@ export class ProjectThreadsController {
     const mutation = ++this._mutationRequest;
     const selection = this._openRequest;
     try {
-      const fork = await this._options.client.forkThread(threadId, {
+      const fork = await this._studio.forkThread(threadId, {
         ...(entryId === undefined ? {} : { entryId }),
       });
       if (!this._isCurrentMutation(lifecycle, mutation, selection)) {
@@ -167,7 +170,7 @@ export class ProjectThreadsController {
       return await this._open(fork.id, this._lifecycle);
     } catch (error) {
       if (this._isCurrentMutation(lifecycle, mutation, selection)) {
-        this._options.reportError("Unable to fork Thread", error);
+        this._notifications.error("Unable to fork Thread", error);
       }
       return undefined;
     }
@@ -177,7 +180,7 @@ export class ProjectThreadsController {
   async refresh(): Promise<void> {
     if (!this._started) return;
     const lifecycle = this._lifecycle;
-    const threads = await this._options.client.listThreads();
+    const threads = await this._studio.listThreads();
     if (!this._isCurrentLifecycle(lifecycle)) return;
     const activeThread = this._snapshot.activeThread;
     this._setSnapshot({
@@ -233,7 +236,7 @@ export class ProjectThreadsController {
         openingThreadId: undefined,
         openError: message,
       });
-      this._options.reportError("Unable to open Thread", error);
+      this._notifications.error("Unable to open Thread", error);
       return undefined;
     }
   }
@@ -282,7 +285,7 @@ export class ProjectThreadsController {
     this._eventSubscription = controller;
     void (async () => {
       try {
-        for await (const item of this._options.client.events(threadId, {
+        for await (const item of this._studio.events(threadId, {
           afterSequence: this._lastSequences.get(threadId),
           signal: controller.signal,
         })) {
@@ -295,7 +298,7 @@ export class ProjectThreadsController {
             const [[thread, history, evaluationMetadata], threads] =
               await Promise.all([
                 this._loadThreadData(threadId),
-                this._options.client.listThreads(),
+                this._studio.listThreads(),
               ]);
             if (!this._isCurrentOpen(lifecycle, request)) return;
             if (thread === undefined) {
@@ -312,7 +315,7 @@ export class ProjectThreadsController {
         }
       } catch (error) {
         if (!controller.signal.aborted && this._isCurrentLifecycle(lifecycle)) {
-          this._options.reportError("Studio Thread stream failed", error);
+          this._notifications.error("Studio Thread stream failed", error);
         }
       }
     })();
@@ -325,9 +328,9 @@ export class ProjectThreadsController {
 
   private _loadThreadData(threadId: string) {
     return Promise.all([
-      this._options.client.loadThread(threadId),
-      this._options.client.listRunHistory(threadId),
-      this._options.client.listEvaluationMetadata(threadId),
+      this._studio.loadThread(threadId),
+      this._studio.listRunHistory(threadId),
+      this._studio.listEvaluationMetadata(threadId),
     ] as const);
   }
 

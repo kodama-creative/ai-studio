@@ -1,54 +1,33 @@
-import { ContainerModule, type ResolutionContext } from "inversify";
+import { Container, ContainerModule } from "inversify";
 
 import {
+  CUSTOM_MODEL_EDITOR_TARGET,
   CustomModelEditorController,
   type CustomModelEditorTarget,
 } from "../settings/models/custom-model-editor-controller";
-import { ImageModelEditorController } from "../settings/models/image-model-editor-controller";
+import {
+  IMAGE_MODEL_EDITOR_TARGET,
+  ImageModelEditorController,
+} from "../settings/models/image-model-editor-controller";
 
-import { MODEL_CATALOG_CONTROLLER } from "./common-module";
-import { RENDERER_LIFECYCLE_CONTRIBUTION, RendererScope } from "./lifecycle";
-import { rendererToken, resolveRenderer } from "./tokens";
+import {
+  createRendererSessionContainer,
+  RENDERER_LIFECYCLE_CONTRIBUTION,
+  RENDERER_SESSION_APPLICATION,
+  RendererApplication,
+} from "./lifecycle";
 
-export const CUSTOM_MODEL_EDITOR_TARGET =
-  rendererToken<CustomModelEditorTarget>("model-editor", "custom-model-target");
-export const CUSTOM_MODEL_EDITOR_CONTROLLER =
-  rendererToken<CustomModelEditorController>(
-    "model-editor",
-    "custom-model-controller"
-  );
-export const IMAGE_MODEL_EDITOR_TARGET = rendererToken<{
-  readonly originalModelId?: string;
-}>("model-editor", "image-model-target");
-export const IMAGE_MODEL_EDITOR_CONTROLLER =
-  rendererToken<ImageModelEditorController>(
-    "model-editor",
-    "image-model-controller"
-  );
+export const CUSTOM_MODEL_EDITOR_CONTROLLER = CustomModelEditorController;
+export const IMAGE_MODEL_EDITOR_CONTROLLER = ImageModelEditorController;
 
 function customModelEditorModule(
   target: CustomModelEditorTarget
 ): ContainerModule {
   return new ContainerModule(({ bind }) => {
+    bind(RendererApplication).toSelf().inSingletonScope();
+    bind(RENDERER_SESSION_APPLICATION).toService(RendererApplication);
     bind(CUSTOM_MODEL_EDITOR_TARGET).toConstantValue(target);
-    bind(CUSTOM_MODEL_EDITOR_CONTROLLER)
-      .toDynamicValue((context: ResolutionContext) => {
-        const catalog = resolveRenderer(context, MODEL_CATALOG_CONTROLLER);
-        return new CustomModelEditorController(
-          {
-            save: catalog.upsertCustomModel,
-            test: (providerId, profileId, candidate) =>
-              catalog.testModelConnection(
-                providerId,
-                candidate.id,
-                candidate,
-                profileId
-              ),
-          },
-          resolveRenderer(context, CUSTOM_MODEL_EDITOR_TARGET)
-        );
-      })
-      .inSingletonScope();
+    bind(CustomModelEditorController).toSelf().inSingletonScope();
     bind(RENDERER_LIFECYCLE_CONTRIBUTION).toService(
       CUSTOM_MODEL_EDITOR_CONTROLLER
     );
@@ -57,39 +36,30 @@ function customModelEditorModule(
 
 function imageModelEditorModule(originalModelId?: string): ContainerModule {
   return new ContainerModule(({ bind }) => {
+    bind(RendererApplication).toSelf().inSingletonScope();
+    bind(RENDERER_SESSION_APPLICATION).toService(RendererApplication);
     bind(IMAGE_MODEL_EDITOR_TARGET).toConstantValue({ originalModelId });
-    bind(IMAGE_MODEL_EDITOR_CONTROLLER)
-      .toDynamicValue((context: ResolutionContext) => {
-        const catalog = resolveRenderer(context, MODEL_CATALOG_CONTROLLER);
-        const target = resolveRenderer(context, IMAGE_MODEL_EDITOR_TARGET);
-        return new ImageModelEditorController(
-          { save: catalog.upsertCustomImageModel },
-          target.originalModelId
-        );
-      })
-      .inSingletonScope();
+    bind(ImageModelEditorController).toSelf().inSingletonScope();
     bind(RENDERER_LIFECYCLE_CONTRIBUTION).toService(
       IMAGE_MODEL_EDITOR_CONTROLLER
     );
   });
 }
 
-export function createCustomModelEditorScope(
-  parent: RendererScope,
+export function createCustomModelEditorContainer(
+  parent: Container,
   target: CustomModelEditorTarget
-): RendererScope {
-  return new RendererScope({
-    parent,
-    modules: [customModelEditorModule(target)],
-  });
+): Container {
+  return createRendererSessionContainer(parent, [
+    customModelEditorModule(target),
+  ]);
 }
 
-export function createImageModelEditorScope(
-  parent: RendererScope,
+export function createImageModelEditorContainer(
+  parent: Container,
   originalModelId?: string
-): RendererScope {
-  return new RendererScope({
-    parent,
-    modules: [imageModelEditorModule(originalModelId)],
-  });
+): Container {
+  return createRendererSessionContainer(parent, [
+    imageModelEditorModule(originalModelId),
+  ]);
 }

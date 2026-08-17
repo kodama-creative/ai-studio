@@ -1,7 +1,10 @@
-import type { RendererEventEmitter } from "@/app/events/renderer-events";
-import type { RendererCommandRegistry } from "@/commands/renderer-command-registry";
+import { inject, injectable } from "inversify";
+
+import { COMMAND_SERVICE, type CommandService } from "@/commands/command-service";
+import { Emitter } from "@/shared/event";
 import type { UpdateStatusChangedPayload } from "@/shared/updates";
 import type { UpdateStatus } from "@/shared/updates";
+import { UPDATES_SERVICE } from "@/shared/updates-rpc";
 
 import { UpdateStatusConnection } from "./update-status-connection";
 
@@ -10,6 +13,11 @@ export interface UpdateStatusSnapshot {
   readonly manualStatus: UpdateStatus | null;
   readonly dialogOpen: boolean;
 }
+
+export type UpdateStatusNotice =
+  | { readonly type: "downloading"; readonly version: string }
+  | { readonly type: "ready"; readonly version: string }
+  | { readonly type: "installed"; readonly version: string };
 
 interface UpdatesClient {
   on(
@@ -20,7 +28,9 @@ interface UpdatesClient {
 }
 
 /** Owns update status precedence and the manual-check workflow. */
+@injectable()
 export class UpdateStatusController {
+  private readonly _didNotify = new Emitter<UpdateStatusNotice>();
   private readonly _listeners = new Set<() => void>();
   private readonly _connection: UpdateStatusConnection;
   private _dismissed = false;
@@ -32,18 +42,22 @@ export class UpdateStatusController {
   };
 
   constructor(
+    @inject(UPDATES_SERVICE)
     client: UpdatesClient,
-    private readonly _commands: RendererCommandRegistry,
-    private readonly _events: RendererEventEmitter
+    @inject(COMMAND_SERVICE)
+    private readonly _commands: CommandService
   ) {
     this._connection = new UpdateStatusConnection({
       subscribeStatus: (listener) => client.on("statusChanged", listener),
       takeInstalledVersion: () => client.takeInstalledVersion(),
       onStatus: this._handleStatus,
       onInstalledVersion: (version) =>
-        this._events.emit("updates:installed", version),
+        this._didNotify.fire({ type: "installed", version }),
     });
   }
+
+  /** UI notice facts emitted after the update state projection commits. */
+  readonly onDidNotify = this._didNotify.event;
 
   readonly getSnapshot = (): UpdateStatusSnapshot => this._snapshot;
 
@@ -114,7 +128,9 @@ export class UpdateStatusController {
       }
       case "downloading": {
         this._setSnapshot({ ...snapshot, dialogOpen: false });
-        if (manual) this._events.emit("updates:downloading", status.version);
+        if (manual) {
+          this._didNotify.fire({ type: "downloading", version: status.version });
+        }
         return;
       }
       case "ready": {
@@ -122,7 +138,7 @@ export class UpdateStatusController {
         const alreadyAnnounced = this._lastNotifiedVersion === status.version;
         if (!manual && alreadyAnnounced) return;
         this._lastNotifiedVersion = status.version;
-        this._events.emit("updates:ready", status.version);
+        this._didNotify.fire({ type: "ready", version: status.version });
         return;
       }
     }

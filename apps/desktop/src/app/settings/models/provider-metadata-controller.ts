@@ -1,4 +1,10 @@
 import type { ModelProviderGroup } from "@llm-space/core";
+import { inject, injectable } from "inversify";
+
+import { DesktopModelCatalogController } from "../../models/desktop-model-catalog-controller";
+import { RendererNotificationService } from "../../notifications/renderer-notification-service";
+
+import { reportModelMutationFailure } from "./model-notifications";
 
 export type ProviderMetadataApi = NonNullable<ModelProviderGroup["api"]>;
 export type ProviderMetadataTextField = "name" | "icon";
@@ -13,18 +19,6 @@ export interface ProviderMetadataTarget {
 
 export interface ProviderMetadataSnapshot extends ProviderMetadataTarget {}
 
-export interface ProviderMetadataControllerOptions {
-  readonly updateProvider: (
-    providerId: string,
-    fields: {
-      readonly name?: string;
-      readonly api?: ProviderMetadataApi;
-      readonly icon?: string | null;
-    }
-  ) => Promise<void>;
-  readonly saveFailed: (field: ProviderMetadataField, error: unknown) => void;
-}
-
 interface FieldIntent {
   readonly epoch: number;
   readonly field: ProviderMetadataField;
@@ -32,7 +26,7 @@ interface FieldIntent {
   readonly providerId: string;
   readonly displayValue: string;
   readonly patch: Parameters<
-    ProviderMetadataControllerOptions["updateProvider"]
+    DesktopModelCatalogController["updateProvider"]
   >[1];
 }
 
@@ -52,7 +46,16 @@ const EMPTY_SNAPSHOT: ProviderMetadataSnapshot = {
  * the failing intent is still latest. Retargeting invalidates queued work and
  * every result from the previous provider.
  */
+@injectable()
 export class ProviderMetadataController {
+  private readonly _catalog: Pick<
+    DesktopModelCatalogController,
+    "updateProvider"
+  >;
+  private readonly _notifications: Pick<
+    RendererNotificationService,
+    "error"
+  >;
   private readonly _listeners = new Set<Listener>();
   private readonly _dirty = new Set<ProviderMetadataTextField>();
   private readonly _latestGeneration = new Map<ProviderMetadataField, number>();
@@ -64,13 +67,13 @@ export class ProviderMetadataController {
   private _tail = Promise.resolve();
 
   constructor(
-    target: ProviderMetadataTarget | null,
-    private readonly _options: ProviderMetadataControllerOptions
+    @inject(DesktopModelCatalogController)
+    catalog: Pick<DesktopModelCatalogController, "updateProvider">,
+    @inject(RendererNotificationService)
+    notifications: Pick<RendererNotificationService, "error">
   ) {
-    if (target) {
-      this._authoritative = { ...target };
-      this._snapshot = { ...target };
-    }
+    this._catalog = catalog;
+    this._notifications = notifications;
   }
 
   readonly getSnapshot = (): ProviderMetadataSnapshot => this._snapshot;
@@ -188,7 +191,7 @@ export class ProviderMetadataController {
     const previous = this._tail;
     const pending = previous.then(async () => {
       if (!this._isCurrentTarget(operation)) return;
-      await this._options.updateProvider(operation.providerId, operation.patch);
+      await this._catalog.updateProvider(operation.providerId, operation.patch);
     });
     this._tail = pending.then(
       () => undefined,
@@ -225,7 +228,11 @@ export class ProviderMetadataController {
         [intent.field]: this._authoritative[intent.field],
       });
     }
-    this._options.saveFailed(intent.field, error);
+    reportModelMutationFailure(
+      this._notifications,
+      { operation: "save-provider-metadata", field: intent.field },
+      error
+    );
   }
 
   private _shouldProjectSettlement(intent: FieldIntent): boolean {

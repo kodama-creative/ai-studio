@@ -3,20 +3,37 @@
 import { HostServicesProvider, type HostServices } from "@llm-space/ui/host";
 import { useMemo, type ReactNode } from "react";
 
-import {
-  APP_DIRECTORIES_CLIENT,
-  AUXILIARY_GENERATION_CLIENT,
-  BUILTIN_TOOLS_CLIENT,
-  MCP_CLIENT,
-  NATIVE_DIALOGS_CLIENT,
-  NATIVE_FILES_CLIENT,
-  PROMPT_FILES_CLIENT,
-  SKILLS_CLIENT,
-} from "@/app/di/common-module";
 import { useInject } from "@/app/di/react";
-import { createToolExecutor } from "@/client/tool-execution";
 import { useCommands } from "@/commands";
+import { createToolExecutor } from "@/host/tool-execution";
+import {
+  APP_DIRECTORIES_SERVICE,
+  type AppDirectoriesRequests,
+} from "@/shared/app-directories-rpc";
+import {
+  AUXILIARY_GENERATION_SERVICE,
+  type AuxiliaryGenerationRpc,
+} from "@/shared/auxiliary-generation-rpc";
+import {
+  BUILTIN_TOOLS_SERVICE,
+  type BuiltinToolsRequests,
+} from "@/shared/builtin-tools-rpc";
 import type { SettingsTab } from "@/shared/commands";
+import { MCP_SERVICE, type McpRequests } from "@/shared/mcp-rpc";
+import type { RpcClient } from "@/shared/namespaced-rpc";
+import {
+  NATIVE_DIALOGS_SERVICE,
+  type NativeDialogsRequests,
+} from "@/shared/native-dialogs-rpc";
+import {
+  NATIVE_FILES_SERVICE,
+  type NativeFilesRequests,
+} from "@/shared/native-files-rpc";
+import {
+  PROMPT_FILES_SERVICE,
+  type PromptFilesRequests,
+} from "@/shared/prompt-files-rpc";
+import { SKILLS_SERVICE, type SkillsRequests } from "@/shared/skills-rpc";
 
 import { createDesktopShareThreadAction } from "./share-thread-action";
 
@@ -27,14 +44,18 @@ import { createDesktopShareThreadAction } from "./share-thread-action";
  */
 export function DesktopHostProvider({ children }: { children: ReactNode }) {
   const { executeCommand, registerCommandHandlers } = useCommands();
-  const auxiliaryGeneration = useInject(AUXILIARY_GENERATION_CLIENT);
-  const appDirectories = useInject(APP_DIRECTORIES_CLIENT);
-  const builtinTools = useInject(BUILTIN_TOOLS_CLIENT);
-  const dialogs = useInject(NATIVE_DIALOGS_CLIENT);
-  const mcp = useInject(MCP_CLIENT);
-  const nativeFiles = useInject(NATIVE_FILES_CLIENT);
-  const promptFiles = useInject(PROMPT_FILES_CLIENT);
-  const skills = useInject(SKILLS_CLIENT);
+  const auxiliaryGeneration = useInject<RpcClient<AuxiliaryGenerationRpc>>(
+    AUXILIARY_GENERATION_SERVICE
+  );
+  const appDirectories = useInject<AppDirectoriesRequests>(
+    APP_DIRECTORIES_SERVICE
+  );
+  const builtinTools = useInject<BuiltinToolsRequests>(BUILTIN_TOOLS_SERVICE);
+  const dialogs = useInject<NativeDialogsRequests>(NATIVE_DIALOGS_SERVICE);
+  const mcp = useInject<McpRequests>(MCP_SERVICE);
+  const nativeFiles = useInject<NativeFilesRequests>(NATIVE_FILES_SERVICE);
+  const promptFiles = useInject<PromptFilesRequests>(PROMPT_FILES_SERVICE);
+  const skills = useInject<SkillsRequests>(SKILLS_SERVICE);
   const executeTool = useMemo(
     () => createToolExecutor(mcp, builtinTools),
     [builtinTools, mcp]

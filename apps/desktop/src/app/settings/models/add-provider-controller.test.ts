@@ -2,10 +2,14 @@ import { describe, expect, test } from "bun:test";
 
 import type { ModelProviderGroup } from "@llm-space/core";
 
-import {
-  AddProviderController,
-  type AddProviderControllerOptions,
-} from "./add-provider-controller";
+import { AddProviderController } from "./add-provider-controller";
+
+interface TestOptions {
+  readonly fetchBuiltinProviders: () => Promise<ModelProviderGroup[]>;
+  readonly addBuiltinProvider: (providerId: string) => Promise<void>;
+  readonly addCustomProvider: () => Promise<string>;
+  readonly addFailed: (title: string, error: unknown) => void;
+}
 
 describe("AddProviderController", () => {
   test("ignores discovery completed after close", async () => {
@@ -68,8 +72,8 @@ describe("AddProviderController", () => {
         additions.push(providerId);
         return addition.promise;
       },
-      providerAdded: (providerId) => selections.push(providerId),
     });
+    controller.onDidAddProvider((providerId) => selections.push(providerId));
     controller.setOpen(true);
 
     const first = controller.choose({
@@ -94,8 +98,8 @@ describe("AddProviderController", () => {
     const selections: string[] = [];
     const controller = _controller({
       addCustomProvider: () => Promise.resolve("custom-id"),
-      providerAdded: (providerId) => selections.push(providerId),
     });
+    controller.onDidAddProvider((providerId) => selections.push(providerId));
     controller.setOpen(true);
 
     await controller.choose({ type: "custom" });
@@ -113,8 +117,8 @@ describe("AddProviderController", () => {
         additions.push(providerId);
         return addition.promise;
       },
-      providerAdded: (providerId) => selections.push(providerId),
     });
+    controller.onDidAddProvider((providerId) => selections.push(providerId));
     controller.setOpen(true);
     const pending = controller.choose({
       type: "builtin",
@@ -138,7 +142,7 @@ describe("AddProviderController", () => {
   });
 
   test("reports a current add failure and allows retry", async () => {
-    const failures: { name: string; error: unknown }[] = [];
+    const failures: { title: string; error: unknown }[] = [];
     let additions = 0;
     const controller = _controller({
       addBuiltinProvider: () => {
@@ -147,7 +151,7 @@ describe("AddProviderController", () => {
           ? Promise.reject(new Error("denied"))
           : Promise.resolve();
       },
-      addFailed: (name, error) => failures.push({ name, error }),
+      addFailed: (title, error) => failures.push({ title, error }),
     });
     controller.setOpen(true);
 
@@ -155,7 +159,7 @@ describe("AddProviderController", () => {
       type: "builtin",
       provider: _provider("alpha"),
     });
-    expect(failures[0]?.name).toBe("alpha");
+    expect(failures[0]?.title).toBe("Failed to add alpha");
     expect(controller.getSnapshot().open).toBe(true);
     expect(controller.getSnapshot().addingProviderId).toBeNull();
 
@@ -168,16 +172,25 @@ describe("AddProviderController", () => {
 });
 
 function _controller(
-  overrides: Partial<AddProviderControllerOptions> = {}
+  overrides: Partial<TestOptions> = {}
 ): AddProviderController {
-  return new AddProviderController({
+  const options: TestOptions = {
     fetchBuiltinProviders: () => Promise.resolve([]),
     addBuiltinProvider: () => Promise.resolve(),
     addCustomProvider: () => Promise.resolve("custom-id"),
-    providerAdded: () => undefined,
     addFailed: () => undefined,
     ...overrides,
-  });
+  };
+  return new AddProviderController(
+    {
+      builtinProviders: options.fetchBuiltinProviders,
+      addProvider: options.addBuiltinProvider,
+      addCustomProvider: async () => options.addCustomProvider(),
+    },
+    {
+      error: options.addFailed,
+    }
+  );
 }
 
 function _provider(id: string): ModelProviderGroup {

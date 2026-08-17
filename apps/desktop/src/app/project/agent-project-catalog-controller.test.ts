@@ -1,12 +1,17 @@
 import { describe, expect, test } from "bun:test";
 
-import type { AgentProjectsEvents } from "@/shared/agent-project-rpc";
+import type {
+  AgentProjectsEvents,
+  AgentProjectsRpc,
+} from "@/shared/agent-project-rpc";
 import { EventHub } from "@/shared/event-hub";
+import type { RpcClient } from "@/shared/namespaced-rpc";
 
-import {
-  AgentProjectCatalogController,
-  type AgentProjectCatalogControllerOptions,
-} from "./agent-project-catalog-controller";
+import type { RendererNotificationService } from "../notifications/renderer-notification-service";
+
+import { AgentProjectCatalogController } from "./agent-project-catalog-controller";
+
+type ProjectClient = Pick<RpcClient<AgentProjectsRpc>, "list" | "on">;
 
 describe("AgentProjectCatalogController", () => {
   test("subscribes before reading and keeps the newest changed-event result", async () => {
@@ -15,7 +20,7 @@ describe("AgentProjectCatalogController", () => {
     const order: string[] = [];
     let reads = 0;
     const errors: string[] = [];
-    const client: AgentProjectCatalogControllerOptions["client"] = {
+    const client: ProjectClient = {
       list: () => {
         reads += 1;
         order.push(`list:${reads}`);
@@ -28,11 +33,12 @@ describe("AgentProjectCatalogController", () => {
         return events.subscribe(event, listener);
       },
     };
-    const controller = new AgentProjectCatalogController({
+    const controller = new AgentProjectCatalogController(
       client,
-      reportError: (title, error) =>
-        errors.push(`${title}:${String(error)}`),
-    });
+      _notifications((title, error) =>
+        errors.push(`${title}:${String(error)}`)
+      )
+    );
 
     controller.start();
     expect(order).toEqual([
@@ -64,15 +70,15 @@ describe("AgentProjectCatalogController", () => {
   test("ignores a list response completed after stop", async () => {
     const events = new EventHub<AgentProjectsEvents>();
     const pending = _deferred<readonly ReturnType<typeof _project>[]>();
-    const controller = new AgentProjectCatalogController({
-      client: {
+    const controller = new AgentProjectCatalogController(
+      {
         list: () => pending.promise,
         on: (event, listener) => events.subscribe(event, listener),
       },
-      reportError: (title, error) => {
+      _notifications((title, error) => {
         throw new Error(`${title}: ${String(error)}`);
-      },
-    });
+      })
+    );
 
     controller.start();
     controller.stop();
@@ -86,8 +92,8 @@ describe("AgentProjectCatalogController", () => {
     const retained = new Map<string, (...args: never[]) => void>();
     let reads = 0;
     const errors: string[] = [];
-    const controller = new AgentProjectCatalogController({
-      client: {
+    const controller = new AgentProjectCatalogController(
+      {
         list: () => {
           reads += 1;
           return Promise.resolve([_project(`read-${reads}`)]);
@@ -97,8 +103,8 @@ describe("AgentProjectCatalogController", () => {
           return { dispose: () => Promise.resolve() };
         },
       },
-      reportError: (title) => errors.push(title),
-    });
+      _notifications((title) => errors.push(title))
+    );
 
     controller.start();
     const staleChanged = retained.get("changed")!;
@@ -118,8 +124,8 @@ describe("AgentProjectCatalogController", () => {
   test("cleans up earlier subscriptions when a later subscription fails", () => {
     const disposed: string[] = [];
     const errors: string[] = [];
-    const controller = new AgentProjectCatalogController({
-      client: {
+    const controller = new AgentProjectCatalogController(
+      {
         list: () => Promise.resolve([]),
         on: (event) => {
           if (event === "openFailed") throw new Error("subscribe failed");
@@ -130,9 +136,10 @@ describe("AgentProjectCatalogController", () => {
           };
         },
       },
-      reportError: (title, error) =>
-        errors.push(`${title}:${String(error)}`),
-    });
+      _notifications((title, error) =>
+        errors.push(`${title}:${String(error)}`)
+      )
+    );
 
     controller.start();
 
@@ -143,6 +150,12 @@ describe("AgentProjectCatalogController", () => {
     ]);
   });
 });
+
+function _notifications(
+  reportError: (title: string, error?: unknown) => void
+): RendererNotificationService {
+  return { error: reportError } as RendererNotificationService;
+}
 
 function _project(id: string) {
   return {

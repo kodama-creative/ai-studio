@@ -4,6 +4,13 @@ import type { SeedreamImageModelDefinition } from "@llm-space/core";
 
 import { ImageModelEditorController } from "./image-model-editor-controller";
 
+interface TestOptions {
+  readonly save: (
+    model: SeedreamImageModelDefinition,
+    originalModelId?: string
+  ) => Promise<void>;
+}
+
 describe("ImageModelEditorController", () => {
   test("contains a failed save and keeps the current session retryable", async () => {
     let attempts = 0;
@@ -75,15 +82,15 @@ const MODEL: SeedreamImageModelDefinition = {
   defaultSize: "2K",
 };
 
-function _controller(
-  overrides: Partial<
-    ConstructorParameters<typeof ImageModelEditorController>[0]
-  > = {}
-) {
-  return new ImageModelEditorController({
+function _controller(overrides: Partial<TestOptions> = {}) {
+  const options: TestOptions = {
     save: () => Promise.resolve(),
     ...overrides,
-  });
+  };
+  return new ImageModelEditorController(
+    { upsertCustomImageModel: options.save },
+    {}
+  );
 }
 
 function _deferred<T>() {

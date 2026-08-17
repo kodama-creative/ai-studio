@@ -2,9 +2,7 @@ import { basename } from "node:path";
 
 import { Utils } from "electrobun/bun";
 
-import type { Command, ImportFilePayload } from "../../shared/commands";
-
-type SendCommand = (command: Command) => void;
+import type { ImportFilePayload } from "../../shared/commands";
 
 function _normalizeSelectedPaths(paths: string[]): string[] {
   return paths.map((path) => path.trim()).filter(Boolean);
@@ -22,8 +20,7 @@ async function _readImportFile(path: string): Promise<ImportFilePayload> {
  * parsing/writing so imports use the same model normalization as drag/drop.
  */
 export async function importFilesWithNativePicker(
-  sendCommand: SendCommand
-) {
+): Promise<readonly ImportFilePayload[]> {
   const paths = _normalizeSelectedPaths(
     await Utils.openFileDialog({
       startingFolder: Utils.paths.documents,
@@ -33,25 +30,16 @@ export async function importFilesWithNativePicker(
       allowsMultipleSelection: true,
     })
   );
-  if (paths.length === 0) return;
+  if (paths.length === 0) return [];
 
-  const files = await Promise.all(paths.map((path) => _readImportFile(path)));
-  sendCommand({
-    type: "playground.importFiles",
-    args: { files },
-  });
+  return Promise.all(paths.map((path) => _readImportFile(path)));
 }
 
 /**
  * Native clipboard import entrypoint. Clipboard access belongs to the bun side;
  * the renderer still owns parsing/writing through the regular file-import path.
  */
-export function importTextFromClipboard(sendCommand: SendCommand) {
+export function importTextFromClipboard(): readonly ImportFilePayload[] {
   const text = Utils.clipboardReadText();
-  sendCommand({
-    type: "playground.importFiles",
-    args: {
-      files: [{ name: "clipboard.json", text: text ?? "" }],
-    },
-  });
+  return [{ name: "clipboard.json", text: text ?? "" }];
 }

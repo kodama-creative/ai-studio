@@ -1,80 +1,41 @@
-import { ContainerModule, type ResolutionContext } from "inversify";
+import { ContainerModule } from "inversify";
 
-import { createProjectSourceClient } from "@/client/project-source-client";
-import { createStudioClient } from "@/client/studio-client";
 import type { AgentProjectView } from "@/shared/agent-project";
-import type { ProjectSourceTransport } from "@/shared/project-source-rpc";
-import type { StudioTransport } from "@/shared/studio-rpc";
+import {
+  createRpcClient,
+  type RpcClient,
+  type RpcClientTransport,
+} from "@/shared/namespaced-rpc";
+import {
+  PROJECT_SOURCE_RPC,
+  PROJECT_SOURCE_SERVICE,
+  type ProjectSourceRpc,
+} from "@/shared/project-source-rpc";
+import { STUDIO_RPC, STUDIO_SERVICE, type StudioRpc } from "@/shared/studio-rpc";
 
 import { ProjectSourceController } from "../project/project-source-controller";
 import { ProjectThreadsController } from "../project/project-threads-controller";
 import { ProjectWorkspaceController } from "../project/project-workspace-controller";
 
-import { RENDERER_EVENTS } from "./common-module";
 import { RENDERER_LIFECYCLE_CONTRIBUTION } from "./lifecycle";
-import { rendererToken, resolveRenderer } from "./tokens";
-
-export const AGENT_PROJECT_VIEW = rendererToken<AgentProjectView>(
-  "project",
-  "view"
-);
-export const STUDIO_CLIENT = rendererToken<StudioTransport>(
-  "project",
-  "studio-client"
-);
-export const PROJECT_SOURCE_CLIENT = rendererToken<ProjectSourceTransport>(
-  "project",
-  "source-client"
-);
-export const PROJECT_WORKSPACE_CONTROLLER =
-  rendererToken<ProjectWorkspaceController>("project", "workspace-controller");
-const PROJECT_THREADS_CONTROLLER = rendererToken<ProjectThreadsController>(
-  "project",
-  "threads-controller"
-);
-const PROJECT_SOURCE_CONTROLLER = rendererToken<ProjectSourceController>(
-  "project",
-  "source-controller"
-);
-
+export const AGENT_PROJECT_VIEW = Symbol("AgentProjectView");
 export function rendererProjectWindowModule(
-  project: AgentProjectView
+  project: AgentProjectView,
+  transport: RpcClientTransport
 ): ContainerModule {
   return new ContainerModule(({ bind }) => {
-    bind(AGENT_PROJECT_VIEW).toConstantValue(project);
-    bind(STUDIO_CLIENT).toConstantValue(createStudioClient());
-    bind(PROJECT_SOURCE_CLIENT).toConstantValue(createProjectSourceClient());
-    bind(PROJECT_THREADS_CONTROLLER)
-      .toDynamicValue((context: ResolutionContext) => {
-        const events = resolveRenderer(context, RENDERER_EVENTS);
-        return new ProjectThreadsController({
-          client: resolveRenderer(context, STUDIO_CLIENT),
-          reportError: (title, error) =>
-            events.emit("notification:error", title, error),
-        });
-      })
-      .inSingletonScope();
-    bind(PROJECT_SOURCE_CONTROLLER)
-      .toDynamicValue((context: ResolutionContext) => {
-        const events = resolveRenderer(context, RENDERER_EVENTS);
-        return new ProjectSourceController({
-          client: resolveRenderer(context, PROJECT_SOURCE_CLIENT),
-          reportError: (title, error) =>
-            events.emit("notification:error", title, error),
-        });
-      })
-      .inSingletonScope();
-    bind(PROJECT_WORKSPACE_CONTROLLER)
-      .toDynamicValue(
-        (context: ResolutionContext) =>
-          new ProjectWorkspaceController(
-            resolveRenderer(context, PROJECT_THREADS_CONTROLLER),
-            resolveRenderer(context, PROJECT_SOURCE_CONTROLLER)
-          )
-      )
-      .inSingletonScope();
+    bind<AgentProjectView>(AGENT_PROJECT_VIEW).toConstantValue(project);
+    bind<RpcClient<StudioRpc>>(STUDIO_SERVICE).toConstantValue(
+      createRpcClient(STUDIO_RPC, transport)
+    );
+    bind<RpcClient<ProjectSourceRpc>>(PROJECT_SOURCE_SERVICE).toConstantValue(
+      createRpcClient(PROJECT_SOURCE_RPC, transport)
+    );
+    bind(ProjectThreadsController).toSelf().inSingletonScope();
+    bind(ProjectSourceController).toSelf().inSingletonScope();
+    bind(ProjectWorkspaceController).toSelf().inSingletonScope();
     bind(RENDERER_LIFECYCLE_CONTRIBUTION).toService(
-      PROJECT_WORKSPACE_CONTROLLER
+      ProjectWorkspaceController
     );
   });
 }

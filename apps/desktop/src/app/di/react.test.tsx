@@ -2,13 +2,22 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
 import EventEmitter from "eventemitter3";
-import { ContainerModule } from "inversify";
-import { act, StrictMode, useLayoutEffect } from "react";
+import { Container, type ServiceIdentifier } from "inversify";
+import { act, StrictMode, useLayoutEffect, useMemo } from "react";
 import { createRoot, type Root } from "react-dom/client";
 
-import { RENDERER_LIFECYCLE_CONTRIBUTION, RendererScope } from "./lifecycle";
-import { RendererScopeProvider, useController, useInject } from "./react";
-import { rendererToken } from "./tokens";
+import {
+  disposeRendererContainer,
+  RENDERER_LIFECYCLE_CONTRIBUTION,
+  RENDERER_SESSION_APPLICATION,
+  RendererApplication,
+} from "./lifecycle";
+import {
+  RendererContainerProvider,
+  RendererSessionContainerProvider,
+  useController,
+  useInject,
+} from "./react";
 
 interface Snapshot {
   readonly ignored: number;
@@ -42,11 +51,10 @@ class TestController {
   }
 }
 
-const TEST_CONTROLLER = rendererToken<TestController>("test", "controller");
-const TEST_EVENTS = rendererToken<EventEmitter<{ started: [] }>>(
-  "test",
-  "events"
-);
+const TEST_CONTROLLER: ServiceIdentifier<TestController> =
+  Symbol("TestController");
+const TEST_EVENTS: ServiceIdentifier<EventEmitter<{ started: [] }>> =
+  Symbol("TestEvents");
 const ORIGINAL_DOCUMENT = globalThis.document;
 const ORIGINAL_HTML_ELEMENT = globalThis.HTMLElement;
 const ORIGINAL_IFRAME_ELEMENT = globalThis.HTMLIFrameElement;
@@ -65,16 +73,13 @@ afterEach(() => {
 });
 
 describe("renderer DI React hooks", () => {
-  test("StrictMode restarts the scope and selector updates only when selected state changes", () => {
+  test("StrictMode does not restart the renderer Application", async () => {
     const controller = new TestController();
-    const scope = new RendererScope({
-      modules: [
-        new ContainerModule(({ bind }) => {
-          bind(TEST_CONTROLLER).toConstantValue(controller);
-          bind(RENDERER_LIFECYCLE_CONTRIBUTION).toService(TEST_CONTROLLER);
-        }),
-      ],
-    });
+    const container = new Container();
+    container.bind(TEST_CONTROLLER).toConstantValue(controller);
+    container.bind(RENDERER_LIFECYCLE_CONTRIBUTION).toService(TEST_CONTROLLER);
+    container.bind(RendererApplication).toSelf().inSingletonScope();
+    container.get(RendererApplication).start();
     const renders: number[] = [];
 
     function Probe() {
@@ -90,16 +95,16 @@ describe("renderer DI React hooks", () => {
     act(() => {
       activeRoot?.render(
         <StrictMode>
-          <RendererScopeProvider scope={scope}>
+          <RendererContainerProvider container={container}>
             <Probe />
-          </RendererScopeProvider>
+          </RendererContainerProvider>
         </StrictMode>
       );
     });
 
     expect({ starts: controller.starts, stops: controller.stops }).toEqual({
-      starts: 2,
-      stops: 1,
+      starts: 1,
+      stops: 0,
     });
     const renderCount = renders.length;
 
@@ -117,25 +122,18 @@ describe("renderer DI React hooks", () => {
     act(() => activeRoot?.unmount());
     activeRoot = null;
     expect({ starts: controller.starts, stops: controller.stops }).toEqual({
-      starts: 2,
-      stops: 2,
+      starts: 1,
+      stops: 0,
     });
+    await disposeRendererContainer(container);
+    expect(controller.stops).toBe(1);
   });
 
-  test("child layout listeners observe events emitted during scope startup", () => {
+  test("hooks resolve values from the bootstrap-owned Container", () => {
     const events = new EventEmitter<{ started: [] }>();
     const received: string[] = [];
-    const scope = new RendererScope({
-      modules: [
-        new ContainerModule(({ bind }) => {
-          bind(TEST_EVENTS).toConstantValue(events);
-          bind(RENDERER_LIFECYCLE_CONTRIBUTION).toConstantValue({
-            start: () => events.emit("started"),
-            stop: () => undefined,
-          });
-        }),
-      ],
-    });
+    const container = new Container();
+    container.bind(TEST_EVENTS).toConstantValue(events);
 
     function Probe() {
       const injectedEvents = useInject(TEST_EVENTS);
@@ -153,14 +151,112 @@ describe("renderer DI React hooks", () => {
     act(() => {
       activeRoot?.render(
         <StrictMode>
-          <RendererScopeProvider scope={scope}>
+          <RendererContainerProvider container={container}>
             <Probe />
-          </RendererScopeProvider>
+          </RendererContainerProvider>
         </StrictMode>
       );
     });
 
-    expect(received).toEqual(["started", "started"]);
+    void act(() => events.emit("started"));
+    expect(received).toEqual(["started"]);
+  });
+
+  test("replacing a session Container disposes the replaced child only", async () => {
+    const firstController = new TestController();
+    const secondController = new TestController();
+    const createSession = (controller: TestController) => {
+      const container = new Container();
+      container.bind(TEST_CONTROLLER).toConstantValue(controller);
+      container
+        .bind(RENDERER_LIFECYCLE_CONTRIBUTION)
+        .toService(TEST_CONTROLLER);
+      container.bind(RendererApplication).toSelf().inSingletonScope();
+      container
+        .bind(RENDERER_SESSION_APPLICATION)
+        .toService(RendererApplication);
+      return container;
+    };
+    const first = createSession(firstController);
+    const second = createSession(secondController);
+
+    activeRoot = _createRoot();
+    act(() => {
+      activeRoot?.render(
+        <StrictMode>
+          <RendererSessionContainerProvider container={first}>
+            {null}
+          </RendererSessionContainerProvider>
+        </StrictMode>
+      );
+    });
+    act(() => {
+      activeRoot?.render(
+        <StrictMode>
+          <RendererSessionContainerProvider container={second}>
+            {null}
+          </RendererSessionContainerProvider>
+        </StrictMode>
+      );
+    });
+    await act(() => Promise.resolve());
+
+    expect({
+      first: { starts: firstController.starts, stops: firstController.stops },
+      second: {
+        starts: secondController.starts,
+        stops: secondController.stops,
+      },
+    }).toEqual({
+      first: { starts: 1, stops: 1 },
+      second: { starts: 1, stops: 0 },
+    });
+
+    act(() => activeRoot?.unmount());
+    activeRoot = null;
+    await act(() => Promise.resolve());
+    expect(secondController.stops).toBe(1);
+  });
+
+  test("closing and reopening an interaction creates a fresh session", async () => {
+    const controllers: TestController[] = [];
+    const createSession = () => {
+      const controller = new TestController();
+      controllers.push(controller);
+      const container = new Container();
+      container.bind(TEST_CONTROLLER).toConstantValue(controller);
+      container
+        .bind(RENDERER_LIFECYCLE_CONTRIBUTION)
+        .toService(TEST_CONTROLLER);
+      container.bind(RendererApplication).toSelf().inSingletonScope();
+      container
+        .bind(RENDERER_SESSION_APPLICATION)
+        .toService(RendererApplication);
+      return container;
+    };
+    function OpenSession() {
+      const container = useMemo(createSession, []);
+      return (
+        <RendererSessionContainerProvider container={container}>
+          {null}
+        </RendererSessionContainerProvider>
+      );
+    }
+
+    activeRoot = _createRoot();
+    act(() => activeRoot?.render(<OpenSession />));
+    act(() => activeRoot?.render(null));
+    await act(() => Promise.resolve());
+    act(() => activeRoot?.render(<OpenSession />));
+
+    expect(controllers).toHaveLength(2);
+    expect({
+      first: { starts: controllers[0]?.starts, stops: controllers[0]?.stops },
+      second: { starts: controllers[1]?.starts, stops: controllers[1]?.stops },
+    }).toEqual({
+      first: { starts: 1, stops: 1 },
+      second: { starts: 1, stops: 0 },
+    });
   });
 });
 

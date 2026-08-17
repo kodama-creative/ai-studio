@@ -8,6 +8,8 @@ import type {
 import { defineRpcNamespace } from "./namespaced-rpc";
 import type { RequestRpcShape } from "./rpc-shape";
 
+export const MCP_SERVICE = Symbol("McpService");
+
 export interface McpRequests {
   listServers(): Promise<McpServerView[]>;
   addServer(server: McpServerDraft): Promise<McpServerView[]>;

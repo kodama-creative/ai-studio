@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
+import type { CommandService } from "@/commands/command-service";
 import type { GithubAuthState } from "@/shared/auth";
+import type { GithubAccountRpc } from "@/shared/github-account-rpc";
+import type { RpcClient } from "@/shared/namespaced-rpc";
+
+import type { RendererNotificationService } from "../notifications/renderer-notification-service";
 
 import { GithubAuthController } from "./github-auth-controller";
 
@@ -9,16 +14,17 @@ describe("GithubAuthController", () => {
     const initial = _deferred<GithubAuthState>();
     const errors: string[] = [];
     let publish!: (state: GithubAuthState) => void;
-    const controller = new GithubAuthController({
+    const controller = new GithubAuthController(
+      {
       getState: () => initial.promise,
-      subscribeChanged: (listener) => {
+      on: (_event, listener) => {
         publish = listener;
         return { dispose: () => undefined };
       },
-      login: () => undefined,
-      logout: () => undefined,
-      notifyError: (message) => errors.push(message),
-    });
+      },
+      _commands(),
+      _notifications((message) => errors.push(message))
+    );
 
     controller.start();
     publish({ status: "signedOut", error: "Device flow expired" });
@@ -37,17 +43,18 @@ describe("GithubAuthController", () => {
   });
 
   test("publishes the initial read when no live transition intervenes", async () => {
-    const controller = new GithubAuthController({
+    const controller = new GithubAuthController(
+      {
       getState: () =>
         Promise.resolve({
           status: "signedIn",
           user: _user("octocat"),
         }),
-      subscribeChanged: () => ({ dispose: () => undefined }),
-      login: () => undefined,
-      logout: () => undefined,
-      notifyError: () => undefined,
-    });
+      on: () => ({ dispose: () => undefined }),
+      } as Pick<RpcClient<GithubAccountRpc>, "getState" | "on">,
+      _commands(),
+      _notifications()
+    );
 
     controller.start();
     await _eventually(() => controller.getSnapshot().status, "signedIn");
@@ -62,16 +69,17 @@ describe("GithubAuthController", () => {
     const commands: string[] = [];
     let publish!: (state: GithubAuthState) => void;
     let disposed = 0;
-    const controller = new GithubAuthController({
+    const controller = new GithubAuthController(
+      {
       getState: () => new Promise(() => undefined),
-      subscribeChanged: (listener) => {
+      on: (_event, listener) => {
         publish = listener;
         return { dispose: () => void (disposed += 1) };
       },
-      login: () => commands.push("login"),
-      logout: () => commands.push("logout"),
-      notifyError: () => undefined,
-    });
+      },
+      _commands((type) => commands.push(type.replace("githubAccount.", ""))),
+      _notifications()
+    );
 
     controller.start();
     controller.signIn();
@@ -84,6 +92,21 @@ describe("GithubAuthController", () => {
     expect(controller.getSnapshot()).toEqual({ status: "signedOut" });
   });
 });
+
+function _commands(
+  execute: (type: string) => void = () => undefined
+): CommandService {
+  return {
+    executeCommand: ({ type }: { type: string }) => execute(type),
+    registerCommandHandlers: () => () => undefined,
+  };
+}
+
+function _notifications(
+  notifyError: (message: string) => void = () => undefined
+): RendererNotificationService {
+  return { error: notifyError } as RendererNotificationService;
+}
 
 function _deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;

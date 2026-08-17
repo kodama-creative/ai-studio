@@ -1,11 +1,6 @@
 import { mock } from "bun:test";
 
 const events: string[] = [];
-const disposeProcess = mock(() => {
-  events.push("process:dispose");
-  return Promise.resolve();
-});
-
 await mock.module("../env/hydrate", () => ({
   hydrateShellEnv: () => events.push("hydrate"),
 }));
@@ -20,15 +15,6 @@ await mock.module("../workspace/seed", () => {
 await mock.module("../skills/seed", () => {
   events.push("skills:import");
   return { seedSkills: () => events.push("skills:seed") };
-});
-await mock.module("../di/process-container", () => {
-  events.push("process:import");
-  return {
-    createDesktopProcessContainer: () => {
-      events.push("process:create");
-      return { dispose: disposeProcess };
-    },
-  };
 });
 await mock.module("./desktop-lifecycle", () => {
   events.push("lifecycle:import");
@@ -54,6 +40,22 @@ await mock.module("./desktop-lifecycle", () => {
 });
 await mock.module("inversify", () => {
   events.push("composition:import");
+  return {
+    Container: class {
+      constructor() {
+        events.push("container:create");
+      }
+
+      unbindAllAsync(): Promise<void> {
+        events.push("container:unbind");
+        return Promise.resolve();
+      }
+    },
+    ContainerModule: class {},
+  };
+});
+await mock.module("@llm-space/core/server", () => {
+  events.push("core:import");
   throw new Error("startup failed");
 });
 
@@ -75,18 +77,12 @@ const expected = [
   "workspace:seed",
   "skills:import",
   "skills:seed",
-  "process:import",
   "lifecycle:import",
-  "process:create",
   "composition:import",
-  "lifecycle:create",
-  "lifecycle:defer",
-  "lifecycle:stop",
-  "process:dispose",
+  "container:create",
+  "core:import",
+  "container:unbind",
 ];
 if (JSON.stringify(events) !== JSON.stringify(expected)) {
   throw new Error(`Unexpected Desktop bootstrap order: ${events.join(", ")}`);
-}
-if (disposeProcess.mock.calls.length !== 1) {
-  throw new Error("Desktop bootstrap must dispose a failed process scope once.");
 }

@@ -2,15 +2,13 @@
 
 import { ModelProvider } from "@llm-space/ui/components/model-provider";
 import type { ModelCatalogController } from "@llm-space/ui/host";
-import { useMemo, type ReactNode } from "react";
+import type { ReactNode } from "react";
 
 import { CommandProvider } from "@/commands";
 import { DesktopHostProvider } from "@/host/host-services";
-import type { DesktopWindowContext } from "@/shared/agent-project";
 
-import { MODEL_CATALOG_CONTROLLER } from "./di/common-module";
-import { createRendererWindowScope } from "./di/create-renderer-window-scope";
-import { RendererScopeProvider, useInject } from "./di/react";
+import { useInject } from "./di/react";
+import { DesktopModelCatalogController } from "./models/desktop-model-catalog-controller";
 
 /**
  * Owns the renderer capabilities shared by every native Desktop window.
@@ -19,26 +17,21 @@ import { RendererScopeProvider, useInject } from "./di/react";
  */
 export function DesktopWindowProviders({
   children,
-  context,
 }: {
   children: ReactNode;
-  context: DesktopWindowContext;
 }) {
-  const scope = useMemo(() => createRendererWindowScope(context), [context]);
   return (
-    <RendererScopeProvider scope={scope}>
-      <CommandProvider>
-        <DesktopHostProvider>
-          <InjectedModelProvider>{children}</InjectedModelProvider>
-        </DesktopHostProvider>
-      </CommandProvider>
-    </RendererScopeProvider>
+    <CommandProvider>
+      <DesktopHostProvider>
+        <InjectedModelProvider>{children}</InjectedModelProvider>
+      </DesktopHostProvider>
+    </CommandProvider>
   );
 }
 
 function InjectedModelProvider({ children }: { children: ReactNode }) {
   const controller = useInject<ModelCatalogController>(
-    MODEL_CATALOG_CONTROLLER
+    DesktopModelCatalogController
   );
   return <ModelProvider controller={controller}>{children}</ModelProvider>;
 }

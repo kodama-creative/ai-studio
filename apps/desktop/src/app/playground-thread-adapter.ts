@@ -7,14 +7,14 @@ import {
 } from "@llm-space/studio";
 import type { ExternalThreadExecutionRuntime } from "@llm-space/ui/components/thread-playground";
 
-import type { PlaygroundClient } from "@/client/playground-client";
+import type { PlaygroundClient } from "@/shared/playground-rpc";
 import type { ThreadClient, ThreadTarget } from "@/shared/thread-rpc";
 
 import { createThreadExecutionRuntime } from "./thread-execution-runtime";
 
 export interface PlaygroundThreadRuntimeOptions {
   readonly client: PlaygroundClient;
-  readonly threadClient?: ThreadClient;
+  readonly threadClient: ThreadClient;
   readonly playgroundId: string;
   readonly getPlayground: () => Playground;
   readonly onPlayground: (playground: Playground) => void;
@@ -38,7 +38,7 @@ export function createPlaygroundThreadExecutionRuntime(
   return createThreadExecutionRuntime({
     productName: "Playground",
     target,
-    getClient: () => _threadClient(options),
+    getClient: () => Promise.resolve(options.threadClient),
     currentOperationId: () => options.getPlayground().operationId,
     async persist(thread) {
       const playground = await options.client.save(
@@ -75,12 +75,4 @@ async function _requirePlayground(
   }
   options.onPlayground(playground);
   return playground;
-}
-
-async function _threadClient(
-  options: PlaygroundThreadRuntimeOptions
-): Promise<ThreadClient> {
-  if (options.threadClient !== undefined) return options.threadClient;
-  const { createThreadClient } = await import("@/client/thread-client");
-  return createThreadClient();
 }

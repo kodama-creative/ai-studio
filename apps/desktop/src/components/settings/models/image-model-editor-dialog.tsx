@@ -29,14 +29,15 @@ import { useCallback, useLayoutEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import {
-  createImageModelEditorScope,
+  createImageModelEditorContainer,
   IMAGE_MODEL_EDITOR_CONTROLLER,
 } from "@/app/di/model-editor-session-module";
 import {
-  RendererScopeProvider,
+  RendererSessionContainerProvider,
   useController,
-  useRendererScope,
+  useRendererContainer,
 } from "@/app/di/react";
+import { useDialogSessionPresence } from "@/components/use-dialog-session-presence";
 
 interface ImageModelFormState {
   id: string;
@@ -74,20 +75,36 @@ export function ImageModelEditorDialog({
   model,
   existingIds,
 }: ImageModelEditorDialogProps) {
-  const parent = useRendererScope();
-  const scope = useMemo(
-    () => createImageModelEditorScope(parent, model?.id),
+  const parent = useRendererContainer();
+  const present = useDialogSessionPresence(open);
+  if (!present) return null;
+  return (
+    <ImageModelEditorDialogSession
+      parent={parent}
+      open={open}
+      onOpenChange={onOpenChange}
+      model={model}
+      existingIds={existingIds}
+    />
+  );
+}
+
+/** Own one fresh image-model child Container for one editor interaction. */
+function ImageModelEditorDialogSession({
+  parent,
+  ...props
+}: ImageModelEditorDialogProps & {
+  readonly parent: ReturnType<typeof useRendererContainer>;
+}) {
+  const { model } = props;
+  const container = useMemo(
+    () => createImageModelEditorContainer(parent, model?.id),
     [model?.id, parent]
   );
   return (
-    <RendererScopeProvider scope={scope}>
-      <ImageModelEditorDialogContent
-        open={open}
-        onOpenChange={onOpenChange}
-        model={model}
-        existingIds={existingIds}
-      />
-    </RendererScopeProvider>
+    <RendererSessionContainerProvider container={container}>
+      <ImageModelEditorDialogContent {...props} />
+    </RendererSessionContainerProvider>
   );
 }
 

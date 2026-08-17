@@ -1,9 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
-import type { RendererCommandRegistry } from "../../commands/renderer-command-registry";
+import type { CommandService } from "../../commands/command-service";
 import type { Command } from "../../shared/commands";
 import type { UpdateStatusChangedPayload } from "../../shared/updates";
-import { createRendererEventEmitter } from "../events/renderer-events";
 
 import { UpdateStatusController } from "./update-status-controller";
 
@@ -86,14 +85,6 @@ function _fixture() {
   let subscriptions = 0;
   const commands: Command[] = [];
   const emitted: string[] = [];
-  const events = createRendererEventEmitter();
-  events.on("updates:downloading", (version) =>
-    emitted.push(`downloading:${version}`)
-  );
-  events.on("updates:ready", (version) => emitted.push(`ready:${version}`));
-  events.on("updates:installed", (version) =>
-    emitted.push(`installed:${version}`)
-  );
   const controller = new UpdateStatusController(
     {
       on: (_event, next) => {
@@ -107,8 +98,10 @@ function _fixture() {
       executeCommand: (command: Command) => {
         commands.push(command);
       },
-    } as unknown as RendererCommandRegistry,
-    events
+    } as CommandService
+  );
+  controller.onDidNotify(({ type, version }) =>
+    emitted.push(`${type}:${version}`)
   );
   return {
     commands,

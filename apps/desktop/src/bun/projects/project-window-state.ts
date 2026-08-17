@@ -2,8 +2,10 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { WindowStateSchema, type WindowState } from "@llm-space/core/server";
+import { inject, injectable } from "inversify";
 
 import type { WindowStatePersistenceStore } from "../app/window-state";
+import { APP_HOME_PATH } from "../native/app-directories-module";
 
 import { getFileErrorCode, writePrivateJson } from "./project-file-utils";
 import type {
@@ -33,10 +35,11 @@ class FilePathListStore {
   }
 }
 
+@injectable()
 export class FileProjectWindowStateStore implements ProjectWindowStateStore {
   private readonly _store: FilePathListStore;
 
-  constructor(homePath: string) {
+  constructor(@inject(APP_HOME_PATH) homePath: string) {
     this._store = new FilePathListStore(
       join(homePath, "settings", "agent-project-windows.json")
     );
@@ -52,10 +55,11 @@ export class FileProjectWindowStateStore implements ProjectWindowStateStore {
 }
 
 /** Durable Project catalog shown in the default main window. */
+@injectable()
 export class FileAgentProjectCatalogStore implements AgentProjectCatalogStore {
   private readonly _store: FilePathListStore;
 
-  constructor(homePath: string) {
+  constructor(@inject(APP_HOME_PATH) homePath: string) {
     this._store = new FilePathListStore(
       join(homePath, "settings", "agent-projects.json")
     );

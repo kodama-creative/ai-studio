@@ -9,7 +9,6 @@ import {
   type ReactNode,
 } from "react";
 
-import { RENDERER_COMMAND_REGISTRY } from "@/app/di/common-module";
 import { useInject } from "@/app/di/react";
 import type { Command, CommandType } from "@/shared/commands";
 
@@ -48,9 +47,7 @@ const CommandContext = createContext<CommandContextValue | null>(null);
  * sidebar) register their handlers where that state lives.
  */
 export function CommandProvider({ children }: { children: ReactNode }) {
-  const registry = useInject<RendererCommandRegistry>(
-    RENDERER_COMMAND_REGISTRY
-  );
+  const registry = useInject(RendererCommandRegistry);
 
   const value = useMemo(
     () => ({

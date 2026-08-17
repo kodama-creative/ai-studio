@@ -1,16 +1,27 @@
 import {
   parsePortableThreadSnapshot,
-  type PortableThreadSnapshot,
   type Thread,
 } from "@llm-space/core";
 import type { AgentSpec, Playground } from "@llm-space/studio";
 import {
   resolveSeed,
   type PromptExample,
-  type SeedHost,
 } from "@llm-space/ui/components/thread-playground/examples/prompts";
+import { inject, injectable } from "inversify";
 
-import type { PlaygroundClient } from "@/client/playground-client";
+import {
+  PLAYGROUND_SERVICE,
+  type PlaygroundClient,
+} from "@/shared/playground-rpc";
+import {
+  THREAD_SHARING_SERVICE,
+  type ThreadSharingRequests,
+} from "@/shared/thread-sharing-rpc";
+
+import { RendererNotificationService } from "../notifications/renderer-notification-service";
+import { MainTabsController } from "../tabs/main-tabs-controller";
+
+import { DesktopSeedHost } from "./desktop-seed-host";
 
 const BLANK_AGENT_SPEC: AgentSpec = {
   schemaVersion: 1,
@@ -20,17 +31,6 @@ const BLANK_AGENT_SPEC: AgentSpec = {
 
 export interface SnapshotDocument {
   readonly text: string | (() => Promise<string>);
-}
-
-export interface PlaygroundWorkspaceControllerOptions {
-  readonly client: Pick<PlaygroundClient, "create" | "list">;
-  readonly importSnapshot: (
-    snapshot: PortableThreadSnapshot
-  ) => Promise<Playground>;
-  readonly seedHost: SeedHost;
-  readonly openPlayground: (playground: Playground) => void;
-  readonly notifySuccess: (message: string) => void;
-  readonly notifyError: (title: string, error?: unknown) => void;
 }
 
 export interface PlaygroundWorkspaceSnapshot {
@@ -45,6 +45,7 @@ type Listener = () => void;
  * behavior. Saved pane projections enter through `acceptProjection`, so list
  * presentation cannot drift from the latest durable title or metadata.
  */
+@injectable()
 export class PlaygroundWorkspaceController {
   private readonly _listeners = new Set<Listener>();
   private readonly _projections = new Map<string, Playground>();
@@ -56,7 +57,16 @@ export class PlaygroundWorkspaceController {
     loading: true,
   };
 
-  constructor(private readonly _options: PlaygroundWorkspaceControllerOptions) {}
+  constructor(
+    @inject(PLAYGROUND_SERVICE)
+    private readonly _playgrounds: Pick<PlaygroundClient, "create" | "list">,
+    @inject(THREAD_SHARING_SERVICE)
+    private readonly _sharing: Pick<ThreadSharingRequests, "importSnapshot">,
+    @inject(DesktopSeedHost) private readonly _seedHost: DesktopSeedHost,
+    @inject(MainTabsController) private readonly _tabs: MainTabsController,
+    @inject(RendererNotificationService)
+    private readonly _notifications: RendererNotificationService
+  ) {}
 
   readonly getSnapshot = (): PlaygroundWorkspaceSnapshot => this._snapshot;
 
@@ -88,7 +98,7 @@ export class PlaygroundWorkspaceController {
     const lifecycle = this._lifecycle;
     const request = ++this._request;
     try {
-      const playgrounds = await this._options.client.list();
+      const playgrounds = await this._playgrounds.list();
       if (!this._isCurrent(lifecycle, request)) return;
       this._setSnapshot({
         playgrounds: this._mergeProjections(playgrounds),
@@ -97,7 +107,7 @@ export class PlaygroundWorkspaceController {
     } catch (error) {
       if (!this._isCurrent(lifecycle, request)) return;
       this._setSnapshot({ ...this._snapshot, loading: false });
-      this._options.notifyError("Unable to refresh Playgrounds", error);
+      this._notifications.error("Unable to refresh Playgrounds", error);
     }
   }
 
@@ -123,10 +133,10 @@ export class PlaygroundWorkspaceController {
   async createFromExample(example: PromptExample): Promise<void> {
     try {
       const [instructions, tools, messages, textVariables] = await Promise.all([
-        resolveSeed(example.content, this._options.seedHost),
-        resolveSeed(example.tools, this._options.seedHost),
-        resolveSeed(example.messages, this._options.seedHost),
-        resolveSeed(example.textVariables, this._options.seedHost),
+        resolveSeed(example.content, this._seedHost),
+        resolveSeed(example.tools, this._seedHost),
+        resolveSeed(example.messages, this._seedHost),
+        resolveSeed(example.textVariables, this._seedHost),
       ]);
       await this._create({
         title: example.label,
@@ -146,7 +156,7 @@ export class PlaygroundWorkspaceController {
         messages,
       });
     } catch (error) {
-      this._options.notifyError("Unable to create Playground", error);
+      this._notifications.error("Unable to create Playground", error);
     }
   }
 
@@ -160,9 +170,9 @@ export class PlaygroundWorkspaceController {
             ? await document.text()
             : document.text;
         const snapshot = parsePortableThreadSnapshot(JSON.parse(text));
-        const playground = await this._options.importSnapshot(snapshot);
+        const playground = await this._sharing.importSnapshot(snapshot);
         this.acceptProjection(playground);
-        this._options.openPlayground(playground);
+        this._openPlayground(playground);
         imported += 1;
       } catch {
         // One malformed snapshot must not block the remaining documents.
@@ -170,12 +180,12 @@ export class PlaygroundWorkspaceController {
     }
     await this.refresh();
     if (imported === 0) {
-      this._options.notifyError(
+      this._notifications.error(
         "No valid LLM Space Thread Snapshots were selected."
       );
       return;
     }
-    this._options.notifySuccess(
+    this._notifications.success(
       `Imported ${imported} Playground${imported === 1 ? "" : "s"}`
     );
   }
@@ -186,7 +196,7 @@ export class PlaygroundWorkspaceController {
     readonly messages?: NonNullable<Thread["context"]>["messages"];
   }): Promise<void> {
     try {
-      const playground = await this._options.client.create({
+      const playground = await this._playgrounds.create({
         title: input.title,
         agentSpec: input.agentSpec ?? BLANK_AGENT_SPEC,
         conversation: {
@@ -202,10 +212,18 @@ export class PlaygroundWorkspaceController {
       });
       this.acceptProjection(playground);
       await this.refresh();
-      this._options.openPlayground(playground);
+      this._openPlayground(playground);
     } catch (error) {
-      this._options.notifyError("Unable to create Playground", error);
+      this._notifications.error("Unable to create Playground", error);
     }
+  }
+
+  private _openPlayground(playground: Playground): void {
+    this._tabs.dispatch({
+      type: "open",
+      playgroundId: playground.id,
+      title: playground.title,
+    });
   }
 
   private _mergeProjections(

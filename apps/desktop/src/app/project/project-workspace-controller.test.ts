@@ -5,6 +5,8 @@ import type { StudioThread } from "@llm-space/studio";
 import type { ProjectSourceTransport } from "@/shared/project-source-rpc";
 import type { StudioTransport } from "@/shared/studio-rpc";
 
+import type { RendererNotificationService } from "../notifications/renderer-notification-service";
+
 import { ProjectSourceController } from "./project-source-controller";
 import { ProjectThreadsController } from "./project-threads-controller";
 import { ProjectWorkspaceController } from "./project-workspace-controller";
@@ -117,15 +119,21 @@ function _workspace(options: {
   reportError: (title: string, error: unknown) => void;
 }): ProjectWorkspaceController {
   return new ProjectWorkspaceController(
-    new ProjectThreadsController({
-      client: options.studioClient,
-      reportError: options.reportError,
-    }),
-    new ProjectSourceController({
-      client: options.sourceClient,
-      reportError: options.reportError,
-    })
+    new ProjectThreadsController(
+      options.studioClient,
+      _notifications(options.reportError)
+    ),
+    new ProjectSourceController(
+      options.sourceClient,
+      _notifications(options.reportError)
+    )
   );
+}
+
+function _notifications(
+  reportError: (title: string, error: unknown) => void
+): RendererNotificationService {
+  return { error: reportError } as RendererNotificationService;
 }
 
 function _studioClient(

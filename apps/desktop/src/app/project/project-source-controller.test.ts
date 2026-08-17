@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 
 import type { ProjectSourceSnapshot } from "@/shared/project-source-rpc";
 
+import type { RendererNotificationService } from "../notifications/renderer-notification-service";
+
 import { ProjectSourceController } from "./project-source-controller";
 
 describe("ProjectSourceController", () => {
@@ -10,16 +12,16 @@ describe("ProjectSourceController", () => {
     const signals: AbortSignal[] = [];
     let content = "first";
     const errors: string[] = [];
-    const controller = new ProjectSourceController({
-      client: {
+    const controller = new ProjectSourceController(
+      {
         readSourceFile: () => Promise.resolve(content),
         watchSourceFiles: ({ signal } = {}) => {
           if (signal) signals.push(signal);
           return source.iterable;
         },
       },
-      reportError: (title) => errors.push(title),
-    });
+      _notifications((title) => errors.push(title))
+    );
 
     controller.start();
     source.push(_snapshot("revision-1"));
@@ -63,18 +65,18 @@ describe("ProjectSourceController", () => {
     const source = _stream<ProjectSourceSnapshot>();
     const pending = _deferred<string>();
     let reads = 0;
-    const controller = new ProjectSourceController({
-      client: {
+    const controller = new ProjectSourceController(
+      {
         readSourceFile: () => {
           reads += 1;
           return pending.promise;
         },
         watchSourceFiles: () => source.iterable,
       },
-      reportError: (title, error) => {
+      _notifications((title, error) => {
         throw new Error(`${title}: ${String(error)}`);
-      },
-    });
+      })
+    );
     controller.start();
     source.push(_snapshot("revision-1"));
     await _eventually(() => controller.getSnapshot().loading, false);
@@ -94,13 +96,13 @@ describe("ProjectSourceController", () => {
     const source = _stream<ProjectSourceSnapshot>();
     const pending = _deferred<string>();
     const errors: string[] = [];
-    const controller = new ProjectSourceController({
-      client: {
+    const controller = new ProjectSourceController(
+      {
         readSourceFile: () => pending.promise,
         watchSourceFiles: () => source.iterable,
       },
-      reportError: (title) => errors.push(title),
-    });
+      _notifications((title) => errors.push(title))
+    );
     controller.start();
     source.push(_snapshot("revision-1"));
     await _eventually(() => controller.getSnapshot().loading, false);
@@ -114,6 +116,12 @@ describe("ProjectSourceController", () => {
     expect(errors).toEqual([]);
   });
 });
+
+function _notifications(
+  reportError: (title: string, error?: unknown) => void
+): RendererNotificationService {
+  return { error: reportError } as RendererNotificationService;
+}
 
 function _snapshot(revision: string): ProjectSourceSnapshot {
   return {

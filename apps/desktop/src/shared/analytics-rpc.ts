@@ -1,6 +1,8 @@
 import type { AnalyticsEvent, AnalyticsStatus } from "./analytics";
 import { defineRpcNamespace } from "./namespaced-rpc";
 
+export const ANALYTICS_SERVICE = Symbol("AnalyticsService");
+
 export interface AnalyticsRequests {
   getSettings(): Promise<AnalyticsStatus>;
   setEnabled(enabled: boolean): Promise<AnalyticsStatus>;

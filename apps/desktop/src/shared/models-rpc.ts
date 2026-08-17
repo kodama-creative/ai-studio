@@ -7,7 +7,8 @@ import type {
 } from "@llm-space/core";
 
 import { defineRpcNamespace } from "./namespaced-rpc";
-import type { RequestRpcShape } from "./rpc-shape";
+
+export const MODELS_SERVICE = Symbol("ModelsService");
 
 export interface ModelsRequests {
   list(): Promise<ModelProviderGroup[]>;
@@ -76,7 +77,15 @@ export interface ModelsRequests {
   ): Promise<ModelProviderGroup[]>;
 }
 
-export type ModelsRpc = RequestRpcShape<ModelsRequests>;
+export interface ModelsEvents {
+  changed: Record<never, never>;
+}
+
+export interface ModelsRpc {
+  readonly requests: ModelsRequests;
+  readonly streams: Record<never, never>;
+  readonly events: ModelsEvents;
+}
 
 export const MODELS_RPC = defineRpcNamespace<ModelsRpc>("models", {
   requests: {
@@ -102,5 +111,5 @@ export const MODELS_RPC = defineRpcNamespace<ModelsRpc>("models", {
     upsertCustomImage: true,
   },
   streams: {},
-  events: {},
+  events: { changed: true },
 });

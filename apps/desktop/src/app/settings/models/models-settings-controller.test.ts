@@ -1,16 +1,46 @@
 import { describe, expect, test } from "bun:test";
 
-import type { ModelProviderGroup, ProviderProfile } from "@llm-space/core";
+import type {
+  ModelProviderGroup,
+  ProviderProfile,
+  ProviderProfilePatch,
+} from "@llm-space/core";
 
 import { AddProviderController } from "./add-provider-controller";
-import {
-  ModelsSettingsController,
-  type ModelsSettingsControllerOptions,
-  type ModelsSettingsFailure,
-} from "./models-settings-controller";
+import { ModelsSettingsController } from "./models-settings-controller";
 import { ProviderMetadataController } from "./provider-metadata-controller";
 import { ProviderProfileController } from "./provider-profile-controller";
 import { ProviderProfilesController } from "./provider-profiles-controller";
+
+interface TestOptions {
+  readonly catalog?: {
+    readonly read: () => readonly ModelProviderGroup[];
+    readonly subscribe: (listener: () => void) => () => void;
+  };
+  readonly fetchBuiltinProviders: () => Promise<ModelProviderGroup[]>;
+  readonly addBuiltinProvider: (providerId: string) => Promise<void>;
+  readonly addCustomProvider: () => Promise<string>;
+  readonly removeProvider: (providerId: string) => Promise<void>;
+  readonly updateProvider: (
+    providerId: string,
+    patch: Parameters<
+      ConstructorParameters<
+        typeof ProviderMetadataController
+      >[0]["updateProvider"]
+    >[1]
+  ) => Promise<void>;
+  readonly addProviderProfile: (providerId: string) => Promise<string>;
+  readonly removeProviderProfile: (
+    providerId: string,
+    profileId: string
+  ) => Promise<void>;
+  readonly updateProviderProfile: (
+    providerId: string,
+    profileId: string,
+    patch: ProviderProfilePatch
+  ) => Promise<void>;
+  readonly mutationFailed: (title: string, error: unknown) => void;
+}
 
 describe("ModelsSettingsController", () => {
   test("owns provider selection and deterministic catalog fallback", () => {
@@ -92,7 +122,7 @@ describe("ModelsSettingsController", () => {
 
   test("invalidates a removal when its authoritative target disappears", async () => {
     const removal = _deferred<void>();
-    const failures: ModelsSettingsFailure[] = [];
+    const failures: string[] = [];
     const controller = _controller([_provider("alpha"), _provider("bravo")], {
       removeProvider: () => removal.promise,
       mutationFailed: (failure) => failures.push(failure),
@@ -114,7 +144,7 @@ describe("ModelsSettingsController", () => {
   test("close suppresses obsolete removal results and child mutations", async () => {
     const removal = _deferred<void>();
     const profileSave = _deferred<void>();
-    const failures: ModelsSettingsFailure[] = [];
+    const failures: string[] = [];
     const controller = _controller([_provider("alpha")], {
       removeProvider: () => removal.promise,
       updateProviderProfile: () => profileSave.promise,
@@ -148,7 +178,7 @@ describe("ModelsSettingsController", () => {
   });
 
   test("reports current provider removal failures and releases admission", async () => {
-    const failures: ModelsSettingsFailure[] = [];
+    const failures: string[] = [];
     const controller = _controller([_provider("alpha")], {
       removeProvider: () => Promise.reject(new Error("denied")),
       mutationFailed: (failure) => failures.push(failure),
@@ -157,19 +187,16 @@ describe("ModelsSettingsController", () => {
 
     await controller.confirmRemoveProvider();
 
-    expect(failures).toEqual([
-      { operation: "remove-provider", providerId: "alpha" },
-    ]);
+    expect(failures).toEqual(["Failed to remove provider"]);
     expect(controller.getSnapshot().removingProviderId).toBeNull();
   });
 });
 
 function _controller(
   providers: ModelProviderGroup[],
-  overrides: Partial<ModelsSettingsControllerOptions> = {}
+  overrides: Partial<TestOptions> = {}
 ): ModelsSettingsController {
-  let providerAdded: (providerId: string) => void = () => undefined;
-  const options: ModelsSettingsControllerOptions = {
+  const options: TestOptions = {
     fetchBuiltinProviders: () => Promise.resolve([]),
     addBuiltinProvider: () => Promise.resolve(),
     addCustomProvider: () => Promise.resolve("custom-id"),
@@ -179,52 +206,34 @@ function _controller(
     removeProviderProfile: () => Promise.resolve(),
     updateProviderProfile: () => Promise.resolve(),
     mutationFailed: () => undefined,
-    subscribeProviderAdded: (listener) => {
-      providerAdded = listener;
-      return () => {
-        providerAdded = () => undefined;
-      };
-    },
     ...overrides,
   };
-  const controller = new ModelsSettingsController(providers, options, {
-    addProvider: new AddProviderController({
-      fetchBuiltinProviders: options.fetchBuiltinProviders,
-      addBuiltinProvider: options.addBuiltinProvider,
-      addCustomProvider: options.addCustomProvider,
-      providerAdded: (providerId) => providerAdded(providerId),
-      addFailed: (providerName, error) =>
-        options.mutationFailed(
-          { operation: "add-provider", providerName },
-          error
-        ),
+  const catalog = {
+    getSnapshot: () => ({
+      providers: options.catalog?.read() ?? providers,
     }),
-    metadata: new ProviderMetadataController(null, {
-      updateProvider: options.updateProvider,
-      saveFailed: (field, error) =>
-        options.mutationFailed(
-          { operation: "save-provider-metadata", field },
-          error
-        ),
-    }),
-    profiles: new ProviderProfilesController(null, {
-      addProfile: options.addProviderProfile,
-      removeProfile: options.removeProviderProfile,
-      mutationFailed: (mutation, error) =>
-        options.mutationFailed(
-          { operation: "mutate-provider-profiles", mutation },
-          error
-        ),
-    }),
-    profile: new ProviderProfileController(null, {
-      updateProfile: options.updateProviderProfile,
-      saveFailed: (field, error) =>
-        options.mutationFailed(
-          { operation: "save-provider-profile", field },
-          error
-        ),
-    }),
-  });
+    subscribe: (listener: () => void) =>
+      options.catalog?.subscribe(listener) ?? (() => undefined),
+    builtinProviders: options.fetchBuiltinProviders,
+    addProvider: options.addBuiltinProvider,
+    addCustomProvider: async () => options.addCustomProvider(),
+    removeProvider: options.removeProvider,
+    updateProvider: options.updateProvider,
+    addProviderProfile: options.addProviderProfile,
+    removeProviderProfile: options.removeProviderProfile,
+    updateProviderProfile: options.updateProviderProfile,
+  };
+  const notifications = {
+    error: options.mutationFailed,
+  };
+  const controller = new ModelsSettingsController(
+    catalog,
+    notifications,
+    new AddProviderController(catalog, notifications),
+    new ProviderMetadataController(catalog, notifications),
+    new ProviderProfilesController(catalog, notifications),
+    new ProviderProfileController(catalog, notifications)
+  );
   controller.start();
   return controller;
 }

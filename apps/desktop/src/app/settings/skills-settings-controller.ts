@@ -1,4 +1,17 @@
 import type { SkillInfo, SkillsSettings } from "@llm-space/core";
+import { inject, injectable } from "inversify";
+
+import {
+  NATIVE_DIALOGS_SERVICE,
+  type NativeDialogsRequests,
+} from "@/shared/native-dialogs-rpc";
+import {
+  NATIVE_FILES_SERVICE,
+  type NativeFilesRequests,
+} from "@/shared/native-files-rpc";
+import { SKILLS_SERVICE } from "@/shared/skills-rpc";
+
+import { RendererNotificationService } from "../notifications/renderer-notification-service";
 
 const EMPTY_SETTINGS: SkillsSettings = { discoveryPaths: [] };
 
@@ -24,17 +37,15 @@ export interface SkillsSettingsSnapshot {
   readonly loadingSettings: boolean;
 }
 
-export interface SkillsSettingsControllerOptions {
-  readonly client: SkillsSettingsClient;
-  readonly browseForPath: () => Promise<string | null>;
-  readonly revealPath: (path: string) => Promise<void>;
-  readonly notifyError: (title: string, error: unknown) => void;
-}
-
 type Listener = () => void;
 
 /** Owns Skills Settings selection, RPC ordering, and optimistic mutations. */
+@injectable()
 export class SkillsSettingsController {
+  private readonly _client: SkillsSettingsClient;
+  private readonly _dialogs: Pick<NativeDialogsRequests, "pickDirectory">;
+  private readonly _files: Pick<NativeFilesRequests, "reveal">;
+  private readonly _notifications: Pick<RendererNotificationService, "error">;
   private readonly _listeners = new Set<Listener>();
   private readonly _committedSkillState = new Map<string, boolean>();
   private readonly _skillRevisions = new Map<string, number>();
@@ -50,7 +61,21 @@ export class SkillsSettingsController {
   };
   private _started = false;
 
-  constructor(private readonly _options: SkillsSettingsControllerOptions) {}
+  constructor(
+    @inject(SKILLS_SERVICE)
+    client: SkillsSettingsClient,
+    @inject(NATIVE_DIALOGS_SERVICE)
+    dialogs: Pick<NativeDialogsRequests, "pickDirectory">,
+    @inject(NATIVE_FILES_SERVICE)
+    files: Pick<NativeFilesRequests, "reveal">,
+    @inject(RendererNotificationService)
+    notifications: Pick<RendererNotificationService, "error">
+  ) {
+    this._client = client;
+    this._dialogs = dialogs;
+    this._files = files;
+    this._notifications = notifications;
+  }
 
   readonly getSnapshot = (): SkillsSettingsSnapshot => this._snapshot;
 
@@ -82,7 +107,7 @@ export class SkillsSettingsController {
     const request = ++this._settingsRequest;
     this._set({ ...this._snapshot, loadingSettings: true });
     try {
-      const settings = await this._options.client.getSettings();
+      const settings = await this._client.getSettings();
       if (!this._isCurrent(lifecycle) || request !== this._settingsRequest)
         return;
       this._applySettings(settings, this._snapshot.selectedPath, true);
@@ -111,18 +136,18 @@ export class SkillsSettingsController {
     this._requireStarted();
     const lifecycle = this._lifecycle;
     try {
-      const path = await this._options.browseForPath();
+      const path = await this._dialogs.pickDirectory();
       if (!this._isCurrent(lifecycle) || path === null) return;
       await this._enqueueMutation(async () => {
         if (!this._isCurrent(lifecycle)) return;
         this._settingsRequest += 1;
-        const settings = await this._options.client.addPath(path);
+        const settings = await this._client.addPath(path);
         if (!this._isCurrent(lifecycle)) return;
         this._applySettings(settings, path, true);
       });
     } catch (error) {
       if (this._isCurrent(lifecycle)) {
-        this._options.notifyError("Failed to add folder", error);
+        this._notifications.error("Failed to add folder", error);
       }
     }
   }
@@ -134,13 +159,13 @@ export class SkillsSettingsController {
       await this._enqueueMutation(async () => {
         if (!this._isCurrent(lifecycle)) return;
         this._settingsRequest += 1;
-        const settings = await this._options.client.removePath(path);
+        const settings = await this._client.removePath(path);
         if (!this._isCurrent(lifecycle)) return;
         this._applySettings(settings);
       });
     } catch (error) {
       if (this._isCurrent(lifecycle)) {
-        this._options.notifyError("Failed to remove folder", error);
+        this._notifications.error("Failed to remove folder", error);
       }
     }
   }
@@ -152,7 +177,7 @@ export class SkillsSettingsController {
       await this._enqueueMutation(async () => {
         if (!this._isCurrent(lifecycle)) return;
         this._settingsRequest += 1;
-        const settings = await this._options.client.setAllHidden(path, !enabled);
+        const settings = await this._client.setAllHidden(path, !enabled);
         if (!this._isCurrent(lifecycle)) return;
         this._applySettings(
           settings,
@@ -162,7 +187,7 @@ export class SkillsSettingsController {
       });
     } catch (error) {
       if (this._isCurrent(lifecycle)) {
-        this._options.notifyError(
+        this._notifications.error(
           enabled ? "Failed to enable skills" : "Failed to disable skills",
           error
         );
@@ -174,7 +199,8 @@ export class SkillsSettingsController {
     this._requireStarted();
     const path = this._snapshot.selectedPath;
     const skill = this._snapshot.skills?.find((item) => item.name === name);
-    if (path === null || skill === undefined || skill.enabled === enabled) return;
+    if (path === null || skill === undefined || skill.enabled === enabled)
+      return;
     const lifecycle = this._lifecycle;
     const key = `${path}\0${name}`;
     if (!this._committedSkillState.has(key)) {
@@ -187,7 +213,7 @@ export class SkillsSettingsController {
     try {
       await this._enqueueMutation(async () => {
         if (!this._isCurrent(lifecycle)) return;
-        const settings = await this._options.client.setHidden({
+        const settings = await this._client.setHidden({
           path,
           skillName: name,
           hidden: !enabled,
@@ -204,7 +230,7 @@ export class SkillsSettingsController {
           name,
           this._committedSkillState.get(key) ?? skill.enabled
         );
-        this._options.notifyError("Failed to update skill", error);
+        this._notifications.error("Failed to update skill", error);
       }
     }
   }
@@ -221,9 +247,9 @@ export class SkillsSettingsController {
     this._requireStarted();
     const lifecycle = this._lifecycle;
     try {
-      await this._options.revealPath(path);
+      await this._files.reveal(path);
     } catch (error) {
-      if (this._isCurrent(lifecycle)) this._options.notifyError(title, error);
+      if (this._isCurrent(lifecycle)) this._notifications.error(title, error);
     }
   }
 
@@ -256,7 +282,7 @@ export class SkillsSettingsController {
     const request = ++this._skillsRequest;
     this._set({ ...this._snapshot, skills: null });
     try {
-      const skills = await this._options.client.list(path);
+      const skills = await this._client.list(path);
       if (
         this._isCurrent(lifecycle) &&
         request === this._skillsRequest &&

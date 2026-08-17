@@ -15,95 +15,110 @@ export async function bootstrapDesktopApp(): Promise<void> {
   const { getManagedSkillsDir, seedSkills } = await import("../skills/seed");
   seedSkills();
 
-  const { createDesktopProcessContainer } = await import(
-    "../di/process-container"
-  );
   const { DesktopLifecycle } = await import("./desktop-lifecycle");
-  const processContainer = createDesktopProcessContainer();
+  let desktopContainer: import("inversify").Container | undefined;
+  let stopProcess: (() => Promise<void>) | undefined;
 
   try {
-    const { ContainerModule } = await import("inversify");
+    const { Container, ContainerModule } = await import("inversify");
+    desktopContainer = new Container();
     const { getLlmSpaceHomePath } = await import("@llm-space/core/server");
-    const { GistThreadReader, GistThreadWriter } = await import(
-      "@llm-space/core/storage"
-    );
+    const { GistThreadReader, GistThreadWriter } =
+      await import("@llm-space/core/storage");
     const { McpManager } = await import("@llm-space/runtime/mcp");
-    const { createConfiguredArkImageGenerator, ModelManager } = await import(
-      "@llm-space/runtime/models"
-    );
-    const { NetworkSettingsManager } = await import(
-      "@llm-space/runtime/network"
-    );
-    const { SearchSettingsManager } = await import(
-      "@llm-space/runtime/search"
-    );
+    const { createConfiguredArkImageGenerator, ModelManager } =
+      await import("@llm-space/runtime/models");
+    const { NetworkSettingsManager } =
+      await import("@llm-space/runtime/network");
+    const { SearchSettingsManager } = await import("@llm-space/runtime/search");
     const { SkillsManager } = await import("@llm-space/runtime/skills");
-    const { createBuiltInToolsModule } = await import(
-      "@llm-space/runtime/tools/built-in"
-    );
-    const { Utils } = await import("electrobun/bun");
-    const { resolveDeepLinkScheme } = await import(
-      "../../shared/deep-link-scheme"
-    );
+    const { createBuiltInToolsModule } =
+      await import("@llm-space/runtime/tools/built-in");
+    const electrobun = await import("electrobun/bun");
+    const { app } = electrobun;
+    const { resolveDeepLinkScheme } =
+      await import("../../shared/deep-link-scheme");
     const { Analytics } = await import("../analytics");
     const { ANALYTICS } = await import("../analytics/analytics-module");
     const { GITHUB_AUTH } = await import("../auth/github-account-module");
     const { GitHubAuthManager } = await import("../auth/github-auth-manager");
-    const { auxiliaryGenerationModule } = await import(
-      "../auxiliary-generation/auxiliary-generation-module"
-    );
-    const { activateWindowForDeepLink } = await import(
-      "../deep-link/activate-window"
-    );
+    const { auxiliaryGenerationModule } =
+      await import("../auxiliary-generation/auxiliary-generation-module");
     const { openPath, revealInFileManager } = await import("../fs");
     const { DesktopHost } = await import("../host/desktop-host");
     const { DESKTOP_HOST } = await import("../host/desktop-host-module");
     const { MCP_MANAGER } = await import("../mcp/mcp-module");
-    const { MODEL_MANAGER, modelsModule } = await import(
-      "../models/models-module"
-    );
+    const { modelsModule } = await import("../models/models-module");
     const { APP_HOME_PATH } = await import("../native/app-directories-module");
-    const { nativeDialogsApplicationModule } = await import(
-      "../native/native-dialogs-module"
-    );
-    const { WINDOW_STATE_MANAGER } = await import(
-      "../native/native-window-module"
-    );
+    const { nativeDialogsApplicationModule } =
+      await import("../native/native-dialogs-module");
+    const { WINDOW_STATE_MANAGER } =
+      await import("../native/native-window-module");
     const { NETWORK_SETTINGS } = await import("../network/network-module");
+    const { playgroundModule } =
+      await import("../playgrounds/playground-module");
+    const { agentProjectsModule } =
+      await import("../projects/agent-projects-module");
     const {
-      PLAYGROUND_APPLICATION,
-      playgroundModule,
-    } = await import("../playgrounds/playground-module");
-    const {
-      agentProjectsModule,
-      PROJECT_WINDOW_MANAGER,
-    } = await import("../projects/agent-projects-module");
-    const { ProjectWindowManager } = await import(
-      "../projects/project-window-manager"
-    );
+      AGENT_PROJECT_LOADER,
+      AGENT_PROJECT_CATALOG_STORE,
+      PROJECT_WINDOW_STATE_STORE,
+      ProjectWindowManager,
+    } = await import("../projects/project-window-manager");
     const { FileAgentProjectCatalogStore, FileProjectWindowStateStore } =
       await import("../projects/project-window-state");
+    const { openAgentProject } = await import("../projects/agent-project");
     const { remindersModule } = await import("../reminders/reminders-module");
+    const { REMINDERS_STATE_FILE } = await import("../reminders/state");
     const { SEARCH_SETTINGS } = await import("../search/search-module");
     const { SKILLS_MANAGER } = await import("../skills/skills-module");
-    const {
-      GIST_THREAD_READER,
-      GIST_THREAD_WRITER,
-      threadSharingModule,
-    } = await import("../thread-sharing/thread-sharing-module");
+    const { GIST_THREAD_READER, GIST_THREAD_WRITER, threadSharingModule } =
+      await import("../thread-sharing/thread-sharing-module");
     const { UpdaterService } = await import("../updates");
     const { UpdatesState } = await import("../updates/state");
     const { UPDATER } = await import("../updates/updates-module");
     const { DesktopApp } = await import("./desktop-app");
-    const { DesktopLaunchController } = await import(
-      "./desktop-launch-controller"
-    );
-    const { DesktopWindowFactory } = await import("./desktop-window-factory");
+    const {
+      DESKTOP_DEEP_LINK_SCHEME,
+      DESKTOP_DEEP_LINK_SOURCE,
+      DESKTOP_LAUNCH_ERROR_REPORTER,
+      DESKTOP_LAUNCH_TARGETS,
+      DesktopLaunchService,
+    } = await import("./desktop-launch-service");
+    const {
+      DESKTOP_CONTAINER,
+      DESKTOP_WINDOW_COMPOSITION,
+      DesktopWindowFactory,
+    } = await import("./desktop-window-factory");
+    const { DESKTOP_WINDOW_COMMAND_ROUTER } =
+      await import("./desktop-window-command-router");
+    const { WINDOW_CONTAINER_FACTORY } =
+      await import("./window-container-factory");
+    const { DesktopLaunchErrorReporterService } =
+      await import("./desktop-launch-error-reporter");
+    const { DesktopLaunchTargetService } =
+      await import("./desktop-launch-targets");
     const { MainWindowManager } = await import("./main-window-manager");
+    const { registerMenuActions } = await import("./menu");
+    const { createShutdownCoordinator } =
+      await import("./shutdown-coordinator");
     const { WindowStateManager } = await import("./window-state");
 
     const processLifecycle = new DesktopLifecycle();
-    processContainer.onDispose(() => processLifecycle.stop());
+    let stopProcessPromise: Promise<void> | undefined;
+    stopProcess = () => {
+      stopProcessPromise ??= (async () => {
+        await processLifecycle.stop();
+        await desktopContainer?.unbindAllAsync();
+      })();
+      return stopProcessPromise;
+    };
+    const bindConstant = <T>(
+      token: import("inversify").ServiceIdentifier<T>,
+      value: T
+    ): void => {
+      desktopContainer!.bind(token).toConstantValue(value);
+    };
     const homePath = getLlmSpaceHomePath();
     const workspacePath = path.join(homePath, "workspace");
     const analytics = new Analytics();
@@ -140,7 +155,8 @@ export async function bootstrapDesktopApp(): Promise<void> {
     // Construct the auth EventHub only after fallible host startup, then keep
     // every remaining process resource inside the container cleanup window.
     const githubAuth = new GitHubAuthManager();
-    processContainer.bindConstant(GITHUB_AUTH, githubAuth);
+    processLifecycle.defer("GitHub authentication", () => githubAuth.dispose());
+    bindConstant(GITHUB_AUTH, githubAuth);
     const gistWriter = new GistThreadWriter({
       getToken: () => githubAuth.getAccessToken(),
     });
@@ -155,200 +171,194 @@ export async function bootstrapDesktopApp(): Promise<void> {
     processLifecycle.defer("window state", () => windowStates.flush());
 
     // Process service registrations precede every window and application root.
-    processContainer.bindConstant(ANALYTICS, analytics);
-    processContainer.bindConstant(APP_HOME_PATH, homePath);
-    processContainer.bindConstant(DESKTOP_HOST, host);
-    processContainer.bindConstant(GIST_THREAD_READER, gistReader);
-    processContainer.bindConstant(GIST_THREAD_WRITER, gistWriter);
-    processContainer.bindConstant(MCP_MANAGER, mcpManager);
-    processContainer.bindConstant(MODEL_MANAGER, modelManager);
-    processContainer.bindConstant(NETWORK_SETTINGS, networkSettings);
-    processContainer.bindConstant(SEARCH_SETTINGS, searchSettings);
-    processContainer.bindConstant(SKILLS_MANAGER, skillsManager);
-    processContainer.bindConstant(UPDATER, updater);
-    processContainer.bindConstant(WINDOW_STATE_MANAGER, windowStates);
-    processContainer.load(threadSharingModule());
-    processContainer.load(remindersModule());
-    processContainer.load(agentProjectsModule());
-    processContainer.load(nativeDialogsApplicationModule());
-    processContainer.load(auxiliaryGenerationModule());
-    processContainer.load(modelsModule());
-    processContainer.load(playgroundModule());
-    // Eager adoption prevents a window from becoming the first owner of it.
-    processContainer.get(PLAYGROUND_APPLICATION);
-
-    const windowComposition = await createDesktopWindowScopeComposition();
-
-    const windowFactory = new DesktopWindowFactory(
-      processContainer,
-      homePath,
-      windowComposition
+    bindConstant(ANALYTICS, analytics);
+    bindConstant(APP_HOME_PATH, homePath);
+    bindConstant(DESKTOP_HOST, host);
+    bindConstant(GIST_THREAD_READER, gistReader);
+    bindConstant(GIST_THREAD_WRITER, gistWriter);
+    bindConstant(MCP_MANAGER, mcpManager);
+    bindConstant(ModelManager, modelManager);
+    bindConstant(NETWORK_SETTINGS, networkSettings);
+    bindConstant(SEARCH_SETTINGS, searchSettings);
+    bindConstant(SKILLS_MANAGER, skillsManager);
+    bindConstant(UPDATER, updater);
+    bindConstant(WINDOW_STATE_MANAGER, windowStates);
+    bindConstant(
+      REMINDERS_STATE_FILE,
+      path.join(homePath, "settings", "reminders.json")
     );
-    const projectWindows = new ProjectWindowManager({
-      state: new FileProjectWindowStateStore(homePath),
-      catalog: new FileAgentProjectCatalogStore(homePath),
-      windows: windowFactory,
-    });
-    const mainWindows = new MainWindowManager(processContainer, (scope) =>
-      windowFactory.createMain(scope)
-    );
+    desktopContainer.load(threadSharingModule());
+    desktopContainer.load(remindersModule());
+    desktopContainer.load(agentProjectsModule());
+    desktopContainer.load(nativeDialogsApplicationModule());
+    desktopContainer.load(auxiliaryGenerationModule());
+    desktopContainer.load(modelsModule());
+    desktopContainer.load(playgroundModule());
+
+    const windowComposition = await createDesktopWindowComposition();
+
     const deepLinkScheme = resolveDeepLinkScheme(
       process.env.LLM_SPACE_DEEP_LINK_SCHEME
     );
-    const launch = new DesktopLaunchController({
-      deepLinks: desktopDeepLinks,
-      scheme: deepLinkScheme,
-      targets: {
-        async openMain(url) {
-          const main = await mainWindows.open();
-          if (url !== undefined) {
-            activateWindowForDeepLink(main.window, url, deepLinkScheme);
-          }
-        },
-        openProject: (rootPath) => projectWindows.openProject(rootPath),
-      },
-      onOpenError(error) {
-        console.error("Failed to handle deep link:", error);
-        Utils.showNotification({
-          title: "Unable to Open Agent Project",
-          body: error.message,
-        });
-      },
-    });
-
-    processContainer.bindConstant(PROJECT_WINDOW_MANAGER, projectWindows);
-    processContainer.bindConstant(DesktopWindowFactory, windowFactory);
-    processContainer.bindConstant(MainWindowManager, mainWindows);
-    processContainer.bindConstant(DesktopLaunchController, launch);
+    bindConstant(DESKTOP_DEEP_LINK_SOURCE, desktopDeepLinks);
+    bindConstant(DESKTOP_DEEP_LINK_SCHEME, deepLinkScheme);
+    bindConstant(DESKTOP_CONTAINER, desktopContainer);
+    bindConstant(DESKTOP_WINDOW_COMPOSITION, windowComposition);
+    desktopContainer.bind(DesktopWindowFactory).toSelf().inSingletonScope();
+    desktopContainer
+      .bind(WINDOW_CONTAINER_FACTORY)
+      .toService(DesktopWindowFactory);
+    desktopContainer
+      .bind(DESKTOP_WINDOW_COMMAND_ROUTER)
+      .toService(DesktopWindowFactory);
+    desktopContainer
+      .bind(FileProjectWindowStateStore)
+      .toSelf()
+      .inSingletonScope();
+    desktopContainer
+      .bind(PROJECT_WINDOW_STATE_STORE)
+      .toService(FileProjectWindowStateStore);
+    desktopContainer
+      .bind(FileAgentProjectCatalogStore)
+      .toSelf()
+      .inSingletonScope();
+    desktopContainer
+      .bind(AGENT_PROJECT_CATALOG_STORE)
+      .toService(FileAgentProjectCatalogStore);
+    bindConstant(AGENT_PROJECT_LOADER, { open: openAgentProject });
+    desktopContainer.bind(ProjectWindowManager).toSelf().inSingletonScope();
+    desktopContainer.bind(MainWindowManager).toSelf().inSingletonScope();
+    desktopContainer
+      .bind(DesktopLaunchTargetService)
+      .toSelf()
+      .inSingletonScope();
+    desktopContainer
+      .bind(DESKTOP_LAUNCH_TARGETS)
+      .toService(DesktopLaunchTargetService);
+    desktopContainer
+      .bind(DesktopLaunchErrorReporterService)
+      .toSelf()
+      .inSingletonScope();
+    desktopContainer
+      .bind(DESKTOP_LAUNCH_ERROR_REPORTER)
+      .toService(DesktopLaunchErrorReporterService);
+    desktopContainer.bind(DesktopLaunchService).toSelf().inSingletonScope();
 
     // DesktopApp is deliberately the final registration and lifecycle root.
-    processContainer.load(
+    desktopContainer.load(
       new ContainerModule(({ bind }) => {
-        bind(DesktopApp)
-          .toDynamicValue(
-            (context) =>
-              new DesktopApp({
-                analytics: context.get(ANALYTICS),
-                updater: context.get(UPDATER),
-                launch: context.get(DesktopLaunchController),
-                mainWindows: context.get<typeof mainWindows>(MainWindowManager),
-                projectWindows: context.get(PROJECT_WINDOW_MANAGER),
-                windowFactory: context.get(DesktopWindowFactory),
-                stopProcess: () => processContainer.dispose(),
-              })
-          )
-          .inSingletonScope();
+        bind(DesktopApp).toSelf().inSingletonScope();
       })
     );
-    await processContainer.get(DesktopApp).start();
-  } catch (error) {
-    const startupFailure = new DesktopLifecycle();
-    startupFailure.defer("desktop process scope after startup failure", () =>
-      processContainer.dispose()
+    const desktopApp = desktopContainer.get(DesktopApp);
+    const stopDesktop = async (): Promise<void> => {
+      await desktopApp.stop();
+      await stopProcess!();
+    };
+    registerMenuActions(
+      () => desktopApp.currentMainWindow(),
+      (command, window) => desktopApp.executeCommand(command, window)
     );
-    await startupFailure.stop();
+    const handleBeforeQuit = createShutdownCoordinator({
+      quit: () => app.quit(),
+      stop: stopDesktop,
+    });
+    electrobun.default.events.on("before-quit", (event) =>
+      handleBeforeQuit(
+        event as import("./shutdown-coordinator").BeforeQuitEvent
+      )
+    );
+    electrobun.default.events.on("reopen", () => {
+      desktopApp.reopen();
+    });
+    await desktopApp.start();
+  } catch (error) {
+    if (stopProcess !== undefined) {
+      await stopProcess();
+    } else {
+      await desktopContainer?.unbindAllAsync();
+    }
     throw error;
   }
 }
 
-/** Load and return every production window-scope registration stage. */
-export async function createDesktopWindowScopeComposition(): Promise<
-  import("./desktop-window-factory").DesktopWindowScopeComposition
+/** Load and return every production child-Container registration stage. */
+export async function createDesktopWindowComposition(): Promise<
+  import("./desktop-window-factory").DesktopWindowComposition
 > {
-  const { analyticsRpcModule } = await import(
-    "../analytics/analytics-module"
-  );
-  const { githubAccountRpcModule } = await import(
-    "../auth/github-account-module"
-  );
-  const { auxiliaryGenerationRpcModule } = await import(
-    "../auxiliary-generation/auxiliary-generation-rpc-feature"
-  );
+  const { analyticsRpcModule } = await import("../analytics/analytics-module");
+  const { githubAccountRpcModule } =
+    await import("../auth/github-account-module");
+  const { auxiliaryGenerationRpcModule } =
+    await import("../auxiliary-generation/auxiliary-generation-rpc-feature");
   const { builtinToolsRpcModule } = await import("../host/desktop-host-module");
-  const { windowRegistryModule } = await import(
-    "../di/window-registry-module"
-  );
+  const { windowRegistryModule } = await import("../di/window-registry-module");
   const { mcpRpcModule } = await import("../mcp/mcp-module");
   const { modelsRpcModule } = await import("../models/models-rpc-feature");
-  const { appDirectoriesRpcModule } = await import(
-    "../native/app-directories-module"
-  );
-  const { nativeDialogsContributionsModule } = await import(
-    "../native/native-dialogs-module"
-  );
-  const { nativeFilesRpcModule } = await import("../native/native-files-module");
-  const { nativeWindowContributionsModule } = await import(
-    "../native/native-window-module"
-  );
-  const { promptFilesRpcModule } = await import(
-    "../native/prompt-files-module"
-  );
-  const { shellCommandsModule } = await import("../native/shell-module");
+  const { appDirectoriesRpcModule } =
+    await import("../native/app-directories-module");
+  const { nativeDialogsContributionsModule } =
+    await import("../native/native-dialogs-module");
+  const { nativeFilesRpcModule } =
+    await import("../native/native-files-module");
+  const { nativeWindowContributionsModule } =
+    await import("../native/native-window-module");
+  const { promptFilesRpcModule } =
+    await import("../native/prompt-files-module");
+  const { shellRpcModule } = await import("../native/shell-module");
   const { networkRpcModule } = await import("../network/network-module");
   const { playgroundContributionsModule, playgroundWindowModule } =
     await import("../playgrounds/playground-module");
-  const { agentProjectsCommandModule, agentProjectsRpcModule } = await import(
-    "../projects/agent-projects-module"
-  );
-  const {
-    projectContributionsModule,
-    projectWindowIdentityModule,
-    projectWindowModule,
-  } = await import("../projects/project-module");
-  const { remindersRpcModule } = await import(
-    "../reminders/reminders-rpc-feature"
-  );
+  const { agentProjectsRpcModule } =
+    await import("../projects/agent-projects-module");
+  const { projectContributionsModule, projectWindowModule } =
+    await import("../projects/project-module");
+  const { remindersRpcModule } =
+    await import("../reminders/reminders-rpc-feature");
   const { searchRpcModule } = await import("../search/search-module");
   const { skillsRpcModule } = await import("../skills/skills-module");
-  const { threadSharingRpcModule } = await import(
-    "../thread-sharing/thread-sharing-rpc-feature"
-  );
+  const { threadSharingRpcModule } =
+    await import("../thread-sharing/thread-sharing-rpc-feature");
   const { updatesRpcModule } = await import("../updates/updates-module");
 
   return {
     /** Register Main identity before its runtime contributions resolve. */
-    configureMainIdentity(scope): void {
-      scope.load(playgroundWindowModule());
+    configureMainIdentity(container): void {
+      container.load(playgroundWindowModule());
     },
 
     /** Register Project source services before Studio is resolved. */
-    configureProjectSource(scope, project): void {
-      scope.load(projectWindowModule({ source: project }));
-    },
-
-    /** Register immutable Project identity after Studio source resolution. */
-    configureProjectIdentity(scope, projectView): void {
-      scope.load(projectWindowIdentityModule(projectView));
+    configureProjectSource(container, project): void {
+      container.load(projectWindowModule({ source: project }));
     },
 
     /** Register business contributions and infrastructure before snapshots. */
-    configureRuntime(scope, { kind, commandSink, rpcEventSink }): void {
-      scope.load(threadSharingRpcModule());
-      scope.load(githubAccountRpcModule());
-      scope.load(updatesRpcModule());
-      scope.load(remindersRpcModule());
-      scope.load(analyticsRpcModule());
-      scope.load(agentProjectsCommandModule());
-      scope.load(nativeDialogsContributionsModule(commandSink));
-      scope.load(nativeFilesRpcModule());
-      scope.load(appDirectoriesRpcModule());
-      scope.load(nativeWindowContributionsModule());
-      scope.load(shellCommandsModule());
-      scope.load(auxiliaryGenerationRpcModule());
-      scope.load(modelsRpcModule());
-      scope.load(promptFilesRpcModule());
-      scope.load(mcpRpcModule());
-      scope.load(builtinToolsRpcModule());
-      scope.load(searchRpcModule());
-      scope.load(networkRpcModule());
-      scope.load(skillsRpcModule());
+    configureRuntime(container, { kind, rpcEventSink }): void {
+      container.load(threadSharingRpcModule());
+      container.load(githubAccountRpcModule());
+      container.load(updatesRpcModule());
+      container.load(remindersRpcModule());
+      container.load(analyticsRpcModule());
+      container.load(agentProjectsRpcModule());
+      container.load(nativeDialogsContributionsModule());
+      container.load(nativeFilesRpcModule());
+      container.load(appDirectoriesRpcModule());
+      container.load(nativeWindowContributionsModule());
+      container.load(shellRpcModule());
+      container.load(auxiliaryGenerationRpcModule());
+      container.load(modelsRpcModule());
+      container.load(promptFilesRpcModule());
+      container.load(mcpRpcModule());
+      container.load(builtinToolsRpcModule());
+      container.load(searchRpcModule());
+      container.load(networkRpcModule());
+      container.load(skillsRpcModule());
       if (kind === "main") {
-        scope.load(agentProjectsRpcModule());
-        scope.load(playgroundContributionsModule());
+        container.load(playgroundContributionsModule());
       } else {
-        scope.load(projectContributionsModule());
+        container.load(projectContributionsModule());
       }
-      scope.load(windowRegistryModule(scope, { commandSink, rpcEventSink }));
+      container.load(windowRegistryModule({ rpcEventSink }));
     },
   };
 }

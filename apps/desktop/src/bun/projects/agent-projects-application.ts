@@ -1,3 +1,5 @@
+import { inject, injectable } from "inversify";
+
 import type {
   AgentProjectsEvents,
   AgentProjectsRequests,
@@ -5,13 +7,16 @@ import type {
 import type { Disposable } from "../../shared/disposable";
 import { EventHub } from "../../shared/event-hub";
 
-import type { ProjectWindowManager } from "./project-window-manager";
+import { ProjectWindowManager } from "./project-window-manager";
+
+export const DirectoryPicker = Symbol("DirectoryPicker");
 
 export interface DirectoryPicker {
   pickDirectory(): Promise<string | null>;
 }
 
 /** Main-window use cases for cataloging and opening Agent Project windows. */
+@injectable()
 export class AgentProjectsApplication
   implements AgentProjectsRequests, Disposable
 {
@@ -19,15 +24,16 @@ export class AgentProjectsApplication
   private readonly _catalogSubscription: Disposable;
 
   constructor(
+    @inject(ProjectWindowManager)
     private readonly _projects: Pick<
       ProjectWindowManager,
-      "events" | "listProjects" | "openProject"
+      "onDidChange" | "listProjects" | "openProject"
     >,
+    @inject(DirectoryPicker)
     private readonly _dialogs: DirectoryPicker
   ) {
-    this._catalogSubscription = this._projects.events.subscribe(
-      "catalogChanged",
-      () => this.events.publish("changed", {})
+    this._catalogSubscription = this._projects.onDidChange(() =>
+      this.events.publish("changed", {})
     );
   }
 

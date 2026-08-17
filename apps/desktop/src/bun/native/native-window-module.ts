@@ -1,5 +1,5 @@
 import type { BrowserWindow } from "electrobun/bun";
-import { ContainerModule } from "inversify";
+import { ContainerModule, inject, injectable } from "inversify";
 
 import type { DesktopWindowContext } from "../../shared/agent-project";
 import type { Disposable } from "../../shared/disposable";
@@ -16,16 +16,10 @@ import type {
   WindowStatePersistenceStore,
 } from "../app/window-state";
 import {
-  CommandContribution,
-  type CommandContribution as CommandContributionApi,
-} from "../di/command-contribution";
-import type { CommandRegistry } from "../di/command-registry";
-import {
   RpcContribution,
   type RpcContribution as RpcContributionApi,
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
-import { desktopToken } from "../di/tokens";
 
 const ZOOM_STEP = 0.1;
 
@@ -33,14 +27,9 @@ function _clampZoom(zoom: number): number {
   return Math.min(3, Math.max(0.3, zoom));
 }
 
-export const WINDOW_APPLICATION =
-  desktopToken<WindowApplication>("window", "application");
-export const WINDOW_CONTEXT =
-  desktopToken<DesktopWindowContext>("window", "context");
-export const WINDOW_STATE_MANAGER = desktopToken<WindowStateManager>(
-  "window",
-  "state-manager"
-);
+export const WINDOW_APPLICATION = Symbol("WindowApplication");
+export const WINDOW_CONTEXT_PROVIDER = Symbol("WindowContextProvider");
+export const WINDOW_STATE_MANAGER = Symbol("WindowStateManager");
 
 export interface NativeWindowStateBinding {
   readonly store: WindowStatePersistenceStore;
@@ -49,12 +38,19 @@ export interface NativeWindowStateBinding {
   readonly zoom?: number;
 }
 
+export interface WindowContextProvider {
+  getWindowContext(): DesktopWindowContext;
+}
+
+@injectable()
 export class WindowApplication implements WindowRequests, Disposable {
   readonly events = new EventHub<WindowEvents>();
   private _window: BrowserWindow | undefined;
 
   constructor(
-    private readonly _context: DesktopWindowContext,
+    @inject(WINDOW_CONTEXT_PROVIDER)
+    private readonly _context: WindowContextProvider,
+    @inject(WINDOW_STATE_MANAGER)
     private readonly _windowStates: WindowStateManager
   ) {}
 
@@ -72,29 +68,34 @@ export class WindowApplication implements WindowRequests, Disposable {
   }
 
   getContext() {
-    return Promise.resolve(this._context);
+    return Promise.resolve(this._context.getWindowContext());
   }
 
-  toggleMaximized() {
+  toggleMaximized(): Promise<void> {
     const window = this._requireWindow();
     if (window.isMaximized()) window.unmaximize();
     else window.maximize();
+    return Promise.resolve();
   }
 
-  zoomIn(): void {
+  zoomIn(): Promise<void> {
     this._changeZoom(ZOOM_STEP);
+    return Promise.resolve();
   }
 
-  zoomOut(): void {
+  zoomOut(): Promise<void> {
     this._changeZoom(-ZOOM_STEP);
+    return Promise.resolve();
   }
 
-  resetZoom(): void {
+  resetZoom(): Promise<void> {
     this._setZoom(1);
+    return Promise.resolve();
   }
 
-  reload(): void {
+  reload(): Promise<void> {
     this._requireWindow().webview?.executeJavascript("location.reload()");
+    return Promise.resolve();
   }
 
   getFullscreenState() {
@@ -139,31 +140,17 @@ class WindowRpcServer implements RpcServer<WindowRpc> {
   }
 }
 
-class WindowContribution implements CommandContributionApi, RpcContributionApi {
-  constructor(private readonly _application: WindowApplication) {}
+@injectable()
+class WindowContribution implements RpcContributionApi {
+  constructor(
+    @inject(WINDOW_APPLICATION)
+    private readonly _application: WindowApplication
+  ) {}
 
   registerRpc(rpc: RpcRegistry): void {
     rpc.registerServer(
       new WindowRpcServer(this._application, this._application.events)
     );
-  }
-
-  registerCommands(commands: CommandRegistry): void {
-    commands.registerCommand("window.toggleMaximized", {
-      execute: () => this._application.toggleMaximized(),
-    });
-    commands.registerCommand("window.zoomIn", {
-      execute: () => this._application.zoomIn(),
-    });
-    commands.registerCommand("window.zoomOut", {
-      execute: () => this._application.zoomOut(),
-    });
-    commands.registerCommand("window.resetZoom", {
-      execute: () => this._application.resetZoom(),
-    });
-    commands.registerCommand("window.reload", {
-      execute: () => this._application.reload(),
-    });
   }
 }
 
@@ -171,25 +158,10 @@ class WindowContribution implements CommandContributionApi, RpcContributionApi {
 export function nativeWindowContributionsModule(): ContainerModule {
   return new ContainerModule(({ bind }) => {
     bind<WindowApplication>(WINDOW_APPLICATION)
-      .toDynamicValue(
-        (context) =>
-          new WindowApplication(
-            context.get(WINDOW_CONTEXT),
-            context.get(WINDOW_STATE_MANAGER)
-          )
-      )
-      .inSingletonScope();
-    bind(WindowContribution)
-      .toDynamicValue(
-        (context) =>
-          new WindowContribution(
-            context.get(WINDOW_APPLICATION)
-          )
-      )
-      .inSingletonScope();
-    bind<CommandContributionApi>(CommandContribution).toService(
-      WindowContribution
-    );
+      .to(WindowApplication)
+      .inSingletonScope()
+      .onDeactivation((application) => application.dispose());
+    bind(WindowContribution).toSelf().inSingletonScope();
     bind<RpcContributionApi>(RpcContribution).toService(WindowContribution);
   });
 }

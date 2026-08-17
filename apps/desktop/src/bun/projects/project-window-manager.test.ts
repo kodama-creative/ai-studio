@@ -11,11 +11,21 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { openAgentProject } from "./agent-project";
 import {
+  type AgentProjectCatalogStore,
+  type ProjectWindowStateStore,
   ProjectWindowManager,
   type ProjectWindowAdapter,
   type ProjectWindowHandle,
 } from "./project-window-manager";
+
+interface TestOptions {
+  readonly windows: ProjectWindowAdapter;
+  readonly state?: ProjectWindowStateStore;
+  readonly catalog?: AgentProjectCatalogStore;
+  readonly openProject?: typeof openAgentProject;
+}
 
 const ROOTS: string[] = [];
 
@@ -30,7 +40,7 @@ test("opening an agent project creates its Studio state directory and one window
   const homePath = await mkdtemp(join(tmpdir(), "llm-space-agent-home-"));
   ROOTS.push(homePath);
   const opened: string[] = [];
-  const manager = new ProjectWindowManager({
+  const manager = _manager({
     windows: _windows(opened),
     openProject: (path) =>
       import("./agent-project").then(({ openAgentProject }) =>
@@ -50,7 +60,7 @@ test("opening the same canonical project activates its existing window", async (
   const root = await _project("same");
   const opened: string[] = [];
   let activations = 0;
-  const manager = new ProjectWindowManager({
+  const manager = _manager({
     windows: _windows(opened, () => {
       activations += 1;
     }),
@@ -71,7 +81,7 @@ test("concurrent opens of one canonical project share the in-flight window", asy
   const createGate = new Promise<void>((resolve) => {
     finishCreate = resolve;
   });
-  const manager = new ProjectWindowManager({
+  const manager = _manager({
     windows: {
       async create() {
         creations += 1;
@@ -81,6 +91,7 @@ test("concurrent opens of one canonical project share the in-flight window", asy
             activations += 1;
           },
           close: () => undefined,
+          onDidClose: _emptyEvent,
         };
       },
     },
@@ -101,7 +112,7 @@ test("different projects remain isolated and close together", async () => {
   const beta = await _project("beta");
   const opened: string[] = [];
   const closed: string[] = [];
-  const manager = new ProjectWindowManager({
+  const manager = _manager({
     windows: _windows(opened, undefined, (root) => closed.push(root)),
   });
 
@@ -118,7 +129,7 @@ test("concurrent project opens serialize durable catalog mutations", async () =>
   const beta = await _project("beta-catalog");
   let paths: readonly string[] = [];
   let saves = 0;
-  const manager = new ProjectWindowManager({
+  const manager = _manager({
     catalog: {
       load: async () => {
         await Bun.sleep(1);
@@ -143,7 +154,7 @@ test("opened projects remain in the main-window catalog after their windows clos
   const root = await _project("catalog");
   let paths: readonly string[] = [];
   let notifyClosed: (() => void) | undefined;
-  const manager = new ProjectWindowManager({
+  const manager = _manager({
     catalog: {
       load: () => Promise.resolve(paths),
       save: (next) => {
@@ -156,14 +167,15 @@ test("opened projects remain in the main-window catalog after their windows clos
         Promise.resolve({
           activate: () => undefined,
           close: () => notifyClosed?.(),
-          onClosed: (listener) => {
+          onDidClose: (listener) => {
             notifyClosed = listener;
+            return { dispose: () => undefined };
           },
         }),
     },
   });
   let catalogChanges = 0;
-  manager.events.subscribe("catalogChanged", () => {
+  manager.onDidChange(() => {
     catalogChanges += 1;
   });
 
@@ -182,7 +194,7 @@ test("shutdown keeps open project paths available for the next restore", async (
   const root = await _project("restore");
   const saved: string[][] = [];
   let notifyClosed: (() => void) | undefined;
-  const manager = new ProjectWindowManager({
+  const manager = _manager({
     state: {
       load: () => Promise.resolve([]),
       save: (paths) => {
@@ -195,8 +207,9 @@ test("shutdown keeps open project paths available for the next restore", async (
         Promise.resolve({
           activate: () => undefined,
           close: () => notifyClosed?.(),
-          onClosed: (listener) => {
+          onDidClose: (listener) => {
             notifyClosed = listener;
+            return { dispose: () => undefined };
           },
         }),
     },
@@ -220,6 +233,21 @@ async function _project(name: string): Promise<string> {
   return realpath(root);
 }
 
+function _manager(options: TestOptions): ProjectWindowManager {
+  return new ProjectWindowManager(
+    options.windows,
+    options.state ?? {
+      load: () => Promise.resolve([]),
+      save: () => Promise.resolve(),
+    },
+    options.catalog ?? {
+      load: () => Promise.resolve([]),
+      save: () => Promise.resolve(),
+    },
+    { open: options.openProject ?? openAgentProject }
+  );
+}
+
 function _windows(
   opened: string[],
   activate: (() => void) | undefined = undefined,
@@ -231,7 +259,12 @@ function _windows(
       return Promise.resolve({
         activate: activate ?? (() => undefined),
         close: () => close?.(project.rootPath),
+        onDidClose: _emptyEvent,
       });
     },
   };
+}
+
+function _emptyEvent(): { dispose(): void } {
+  return { dispose: () => undefined };
 }

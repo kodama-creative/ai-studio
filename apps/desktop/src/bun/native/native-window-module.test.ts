@@ -19,7 +19,7 @@ test("WindowApplication requires exactly one attached native window", async () =
     isFullScreen: () => false,
   } as BrowserWindow;
   const application = new WindowApplication(
-    { kind: "playground" },
+    { getWindowContext: () => ({ kind: "playground" }) },
     { attach: () => undefined } as unknown as WindowStateManager
   );
 
@@ -38,7 +38,7 @@ test("WindowApplication requires exactly one attached native window", async () =
   );
 });
 
-test("WindowApplication owns native window commands and zoom persistence", () => {
+test("WindowApplication owns native window commands and zoom persistence", async () => {
   let maximized = false;
   let zoom = 1;
   const scripts: string[] = [];
@@ -70,20 +70,20 @@ test("WindowApplication owns native window commands and zoom persistence", () =>
     },
   } as unknown as WindowStateManager;
   const application = new WindowApplication(
-    { kind: "playground" },
+    { getWindowContext: () => ({ kind: "playground" }) },
     windowStates
   );
   application.attach(window, STATE_BINDING);
 
-  application.toggleMaximized();
+  await application.toggleMaximized();
   expect(maximized).toBe(true);
-  application.toggleMaximized();
+  await application.toggleMaximized();
   expect(maximized).toBe(false);
 
-  application.zoomIn();
-  application.zoomOut();
-  application.resetZoom();
-  application.reload();
+  await application.zoomIn();
+  await application.zoomOut();
+  await application.resetZoom();
+  await application.reload();
 
   expect(savedZooms).toEqual([1.1, 1, 1]);
   expect(zoom).toBe(1);
@@ -108,7 +108,7 @@ test("WindowApplication owns window-state attachment and fullscreen events", () 
     },
   } as WindowStateManager;
   const application = new WindowApplication(
-    { kind: "playground" },
+    { getWindowContext: () => ({ kind: "playground" }) },
     windowStates
   );
   const fullScreenEvents: boolean[] = [];
@@ -144,7 +144,7 @@ test("WindowApplication remains unattached when window-state attachment fails", 
     },
   } as unknown as WindowStateManager;
   const application = new WindowApplication(
-    { kind: "playground" },
+    { getWindowContext: () => ({ kind: "playground" }) },
     windowStates
   );
 

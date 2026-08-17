@@ -3,6 +3,8 @@ import type { Playground } from "@llm-space/studio";
 
 import { defineRpcNamespace } from "./namespaced-rpc";
 
+export const THREAD_SHARING_SERVICE = Symbol("ThreadSharingService");
+
 export interface ThreadSharingRequests {
   read(playgroundId: string): Promise<PortableThreadSnapshot>;
   publish(

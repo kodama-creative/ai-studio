@@ -33,7 +33,6 @@ import {
 } from "react";
 
 import { useGithubAuth } from "@/app/account/github-auth-provider";
-import { THREAD_SHARING_CLIENT } from "@/app/di/main-window-module";
 import { useInject } from "@/app/di/react";
 import {
   prepareShareThreadDialogCommit,
@@ -41,6 +40,10 @@ import {
   type ShareThreadTransaction,
 } from "@/app/thread-sharing/share-thread-dialog-flow";
 import { useCommands } from "@/commands";
+import {
+  THREAD_SHARING_SERVICE,
+  type ThreadSharingRequests,
+} from "@/shared/thread-sharing-rpc";
 
 type ShareStatus = "idle" | "awaitingAuth" | "generating" | "success" | "error";
 
@@ -65,7 +68,9 @@ export function ShareThreadDialog({
 }) {
   const { state: authState, signIn } = useGithubAuth();
   const { executeCommand } = useCommands();
-  const sharingClient = useInject(THREAD_SHARING_CLIENT);
+  const sharingClient = useInject<ThreadSharingRequests>(
+    THREAD_SHARING_SERVICE
+  );
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");

@@ -1,4 +1,4 @@
-import { ContainerModule } from "inversify";
+import { ContainerModule, inject, injectable } from "inversify";
 
 import type { AnalyticsEvent } from "../../shared/analytics";
 import {
@@ -6,52 +6,42 @@ import {
   type AnalyticsRequests,
   type AnalyticsRpc,
 } from "../../shared/analytics-rpc";
-import type { RpcServer } from "../../shared/namespaced-rpc";
 import {
   RpcContribution,
   type RpcContribution as RpcContributionApi,
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
-import { desktopToken } from "../di/tokens";
 
 import type { Analytics } from "./index";
 
-export const ANALYTICS = desktopToken<Analytics>("analytics", "analytics");
+export const ANALYTICS = Symbol("Analytics");
 
-class AnalyticsRpcServer implements RpcServer<AnalyticsRpc> {
-  readonly namespace = ANALYTICS_RPC;
-  readonly streams = {};
-  readonly requests: AnalyticsRequests;
+@injectable()
+class AnalyticsContribution implements RpcContributionApi {
+  constructor(@inject(ANALYTICS) private readonly _analytics: Analytics) {}
 
-  constructor(analytics: Analytics) {
-    this.requests = {
-      getSettings: () => Promise.resolve(analytics.getSettings()),
-      setEnabled: (enabled) => Promise.resolve(analytics.setEnabled(enabled)),
+  registerRpc(rpc: RpcRegistry): void {
+    const requests: AnalyticsRequests = {
+      getSettings: () => Promise.resolve(this._analytics.getSettings()),
+      setEnabled: (enabled) =>
+        Promise.resolve(this._analytics.setEnabled(enabled)),
       capture: (input: AnalyticsEvent) => {
-        analytics.capture(input.event, input.properties);
+        this._analytics.capture(input.event, input.properties);
         return Promise.resolve();
       },
     };
-  }
-}
-
-class AnalyticsContribution implements RpcContributionApi {
-  constructor(private readonly _analytics: Analytics) {}
-
-  registerRpc(rpc: RpcRegistry): void {
-    rpc.registerServer(new AnalyticsRpcServer(this._analytics));
+    rpc.registerServer({
+      namespace: ANALYTICS_RPC,
+      requests,
+      streams: {},
+    } satisfies import("../../shared/namespaced-rpc").RpcServer<AnalyticsRpc>);
   }
 }
 
 /** Bind analytics RPC as one window contribution. */
 export function analyticsRpcModule(): ContainerModule {
   return new ContainerModule(({ bind }) => {
-    bind(AnalyticsContribution)
-      .toDynamicValue(
-        (context) =>
-          new AnalyticsContribution(context.get(ANALYTICS))
-      )
-      .inSingletonScope();
+    bind(AnalyticsContribution).toSelf().inSingletonScope();
     bind<RpcContributionApi>(RpcContribution).toService(AnalyticsContribution);
   });
 }

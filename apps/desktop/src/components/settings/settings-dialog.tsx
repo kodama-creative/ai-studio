@@ -19,8 +19,12 @@ import {
 } from "lucide-react";
 import { useMemo } from "react";
 
-import { RendererScopeProvider, useRendererScope } from "@/app/di/react";
-import { createSettingsScope } from "@/app/di/settings-module";
+import {
+  RendererSessionContainerProvider,
+  useRendererContainer,
+} from "@/app/di/react";
+import { createSettingsContainer } from "@/app/di/settings-module";
+import { useDialogSessionPresence } from "@/components/use-dialog-session-presence";
 import type { SettingsTab } from "@/shared/commands";
 
 import { AccountPage } from "./account-page";
@@ -99,17 +103,32 @@ export function SettingsDialog({
   tab,
   onTabChange,
 }: SettingsDialogProps) {
-  const parent = useRendererScope();
-  const scope = useMemo(() => createSettingsScope(parent), [parent]);
+  const parent = useRendererContainer();
+  const present = useDialogSessionPresence(open);
+  if (!present) return null;
   return (
-    <RendererScopeProvider scope={scope}>
-      <SettingsDialogContent
-        open={open}
-        onOpenChange={onOpenChange}
-        tab={tab}
-        onTabChange={onTabChange}
-      />
-    </RendererScopeProvider>
+    <SettingsDialogSession
+      parent={parent}
+      open={open}
+      onOpenChange={onOpenChange}
+      tab={tab}
+      onTabChange={onTabChange}
+    />
+  );
+}
+
+/** Own one fresh Settings child Container for exactly one open interaction. */
+function SettingsDialogSession({
+  parent,
+  ...props
+}: SettingsDialogProps & {
+  readonly parent: ReturnType<typeof useRendererContainer>;
+}) {
+  const container = useMemo(() => createSettingsContainer(parent), [parent]);
+  return (
+    <RendererSessionContainerProvider container={container}>
+      <SettingsDialogContent {...props} />
+    </RendererSessionContainerProvider>
   );
 }
 

@@ -1,8 +1,7 @@
 import type { BrowserWindow } from "electrobun/bun";
+import { inject, injectable } from "inversify";
 
 import type { Command } from "../../shared/commands";
-import { CommandRegistry, type CommandSink } from "../di/command-registry";
-import type { DesktopWindowScope } from "../di/process-container";
 import { RpcRegistry, type RpcEventSink } from "../di/rpc-registry";
 import {
   type NativeWindowStateBinding,
@@ -17,71 +16,52 @@ import {
 
 export type DesktopWindowKind = "main" | "project";
 
-export interface DesktopWindowCompositionContext {
-  readonly kind: DesktopWindowKind;
-  readonly commandSink: CommandSink;
-  readonly rpcEventSink: RpcEventSink;
+export const DESKTOP_WINDOW_KIND = Symbol("DesktopWindowKind");
+
+/** Owner callback used when the native window initiates child disposal. */
+export const DESKTOP_WINDOW_CLOSE = Symbol("DesktopWindowClose");
+
+export interface DesktopWindowClose {
+  requestClose(): void;
 }
 
-export type ConfigureDesktopWindowScope = (
-  scope: DesktopWindowScope,
-  context: DesktopWindowCompositionContext
-) => void;
+export interface DesktopWindowCompositionContext {
+  readonly kind: DesktopWindowKind;
+  readonly rpcEventSink: RpcEventSink;
+}
 
 /**
  * Own one window's DI contributions, transport registries, RPC bridge, and
  * native-close handshake as a single lifecycle module.
  */
+@injectable()
 export class DesktopWindowRuntime {
-  private readonly _commands: CommandRegistry;
-  private readonly _rpcRegistry: RpcRegistry;
   private readonly _controller: MainWindowRPCController;
-  private readonly _windowApplication: WindowApplication;
   private _window: BrowserWindow | undefined;
   private _nativeClosed = false;
+  private _started = false;
   private _disposePromise: Promise<void> | undefined;
 
   constructor(
-    private readonly _scope: DesktopWindowScope,
-    private readonly _kind: DesktopWindowKind,
-    configureScope: ConfigureDesktopWindowScope
+    @inject(DESKTOP_WINDOW_KIND) private readonly _kind: DesktopWindowKind,
+    @inject(WINDOW_APPLICATION)
+    private readonly _windowApplication: WindowApplication,
+    @inject(RpcRegistry) private readonly _rpcRegistry: RpcRegistry,
+    @inject(DESKTOP_WINDOW_CLOSE)
+    private readonly _close: DesktopWindowClose
   ) {
-    const rpcBridge: { current?: MainWindowRPC } = {};
-    const requireRpcBridge = (): MainWindowRPC => {
-      if (rpcBridge.current === undefined) {
-        throw new Error(`RPC bridge for ${_kind} window is not ready.`);
-      }
-      return rpcBridge.current;
-    };
-    const commandSink: CommandSink = {
-      sendToWebview: (command) =>
-        requireRpcBridge().send.executeCommand(command),
-    };
-    const rpcEventSink: RpcEventSink = {
-      sendStreamEvent: (event) =>
-        requireRpcBridge().send.rpcNamespaceStreamEvent(event),
-      sendEvent: (event) =>
-        requireRpcBridge().send.rpcNamespaceEvent(event),
-    };
-
-    // The production composition root decides which modules belong to this
-    // window. The child scope remains the instance and lifecycle boundary.
-    configureScope(_scope, {
-      kind: _kind,
-      commandSink,
-      rpcEventSink,
-    });
-    this._windowApplication = _scope.get(WINDOW_APPLICATION);
-    this._commands = _scope.get(CommandRegistry);
-    this._rpcRegistry = _scope.get(RpcRegistry);
-    this._commands.onStart();
-    this._rpcRegistry.onStart();
     this._controller = createMainWindowRPC({
-      executeCommand: (command) => this._commands.execute(command),
       rpcRegistry: this._rpcRegistry,
     });
-    rpcBridge.current = this._controller.rpc;
-    _scope.onDispose(() => this.dispose());
+  }
+
+  /** Start the fixed RPC contribution snapshot before native creation. */
+  start(): void {
+    if (this._started) {
+      throw new Error(`Desktop ${this._kind} window runtime is already started.`);
+    }
+    this._rpcRegistry.onStart();
+    this._started = true;
   }
 
   /** Electrobun bridge passed to the native window factory. */
@@ -91,25 +71,23 @@ export class DesktopWindowRuntime {
 
   /** Finish window binding after the native factory returns its BrowserWindow. */
   attach(window: BrowserWindow, state: NativeWindowStateBinding): void {
+    if (!this._started) {
+      throw new Error(`Desktop ${this._kind} window runtime is not started.`);
+    }
     if (this._window !== undefined) {
       throw new Error(`Desktop ${this._kind} window runtime is already attached.`);
     }
     this._window = window;
     window.on("close", () => {
       this._nativeClosed = true;
-      void this._scope.dispose().catch((error) => {
-        console.error(
-          `Failed to dispose window scope "${this._scope.id}":`,
-          error
-        );
-      });
+      this._close.requestClose();
     });
     this._windowApplication.attach(window, state);
   }
 
-  /** Dispatch a native menu action into this window's command registry. */
+  /** Dispatch a native menu action into the renderer-owned Command Registry. */
   execute(command: Command): void {
-    this._commands.execute(command);
+    this._controller.rpc.send.executeCommand(command);
   }
 
   /** Stop transports before closing the native window. */
@@ -120,7 +98,7 @@ export class DesktopWindowRuntime {
 
   private async _dispose(): Promise<void> {
     const errors: unknown[] = [];
-    for (const resource of [this._rpcRegistry, this._commands]) {
+    for (const resource of [this._rpcRegistry]) {
       try {
         await resource.dispose();
       } catch (error) {

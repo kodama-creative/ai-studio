@@ -1,29 +1,35 @@
-import type {
-  DesktopProcessContainer,
-  DesktopWindowScope,
-} from "../di/process-container";
+import { inject, injectable } from "inversify";
+
+import type { Event } from "../../shared/event";
+
+import { WINDOW_CONTAINER_FACTORY } from "./window-container-factory";
 
 export interface MainWindowHandle {
   activate(): void;
+  close(): Promise<void> | void;
+  readonly onDidClose: Event<void>;
+}
+
+export interface MainWindowFactory<T extends MainWindowHandle> {
+  createMain(): Promise<T>;
 }
 
 /** Owns the at-most-one Main window invariant without owning process services. */
-export class MainWindowManager<T extends MainWindowHandle> {
-  private _current:
-    | { readonly handle: T; readonly scope: DesktopWindowScope }
-    | undefined;
+@injectable()
+export class MainWindowManager<T extends MainWindowHandle = MainWindowHandle> {
+  private _current: T | undefined;
   private _opening: Promise<T> | undefined;
 
   constructor(
-    private readonly _process: DesktopProcessContainer,
-    private readonly _create: (scope: DesktopWindowScope) => Promise<T>
+    @inject(WINDOW_CONTAINER_FACTORY)
+    private readonly _factory: MainWindowFactory<T>
   ) {}
 
   /** Create Main on demand, or activate the existing window. */
   open(): Promise<T> {
     if (this._current !== undefined) {
-      this._current.handle.activate();
-      return Promise.resolve(this._current.handle);
+      this._current.activate();
+      return Promise.resolve(this._current);
     }
     if (this._opening !== undefined) {
       return this._opening.then((handle) => {
@@ -31,28 +37,15 @@ export class MainWindowManager<T extends MainWindowHandle> {
         return handle;
       });
     }
-    const scope = this._process.createWindowScope("main");
-    scope.onDisposed(() => {
-      if (this._current?.scope === scope) this._current = undefined;
-    });
-    const opening = this._create(scope)
+    const opening = this._factory
+      .createMain()
       .then((handle) => {
-        if (scope.isDisposing) {
-          throw new Error("Main window closed during creation.");
-        }
-        this._current = { handle, scope };
+        // Store first because a terminal close event may replay synchronously.
+        this._current = handle;
+        handle.onDidClose(() => {
+          if (this._current === handle) this._current = undefined;
+        });
         return handle;
-      })
-      .catch(async (error: unknown) => {
-        try {
-          await scope.dispose();
-        } catch (cleanupError) {
-          console.error(
-            "Failed to dispose Main window scope after creation failed:",
-            cleanupError
-          );
-        }
-        throw error;
       })
       .finally(() => {
         if (this._opening === opening) this._opening = undefined;
@@ -63,7 +56,7 @@ export class MainWindowManager<T extends MainWindowHandle> {
 
   /** Return Main only while its native window is alive. */
   current(): T | undefined {
-    return this._current?.handle;
+    return this._current;
   }
 
   /** Close Main without disposing any process-scoped Playground or Run. */
@@ -72,7 +65,7 @@ export class MainWindowManager<T extends MainWindowHandle> {
     if (opening !== undefined) await opening;
     const current = this._current;
     if (current === undefined) return;
-    await current.scope.dispose();
+    await current.close();
     if (this._current === current) this._current = undefined;
   }
 }

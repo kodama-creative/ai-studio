@@ -1,5 +1,6 @@
-import { FULL_SCREEN_CONTROLLER } from "@/app/di/common-module";
 import { useController } from "@/app/di/react";
+
+import { FullScreenController } from "./full-screen-controller";
 
 /**
  * Track the window's OS-level (Electrobun) fullscreen state. Seeds the initial
@@ -8,7 +9,7 @@ import { useController } from "@/app/di/react";
  */
 export function useFullScreen(): boolean {
   return useController(
-    FULL_SCREEN_CONTROLLER,
+    FullScreenController,
     (snapshot) => snapshot.fullScreen
   ).state;
 }

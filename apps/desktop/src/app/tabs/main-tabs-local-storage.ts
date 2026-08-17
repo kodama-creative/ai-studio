@@ -4,6 +4,7 @@ import {
   removeLocalStorage,
   writeLocalStorage,
 } from "@llm-space/ui/lib/local-storage";
+import { injectable } from "inversify";
 import { z } from "zod";
 
 import type {
@@ -20,6 +21,7 @@ const STORED_TABS_SCHEMA = z.array(
 );
 
 /** Browser-local adapter for Main tab restoration state. */
+@injectable()
 export class MainTabsLocalStorage implements MainTabsPersistence {
   load(): MainTabsStoredState {
     try {

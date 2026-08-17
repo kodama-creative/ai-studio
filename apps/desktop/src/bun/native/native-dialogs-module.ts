@@ -1,31 +1,22 @@
 import { Utils } from "electrobun/bun";
-import { ContainerModule } from "inversify";
+import { ContainerModule, inject, injectable } from "inversify";
 
-import type { RpcServer } from "../../shared/namespaced-rpc";
 import {
   NATIVE_DIALOGS_RPC,
   type NativeDialogsRpc,
 } from "../../shared/native-dialogs-rpc";
 import {
-  CommandContribution,
-  type CommandContribution as CommandContributionApi,
-} from "../di/command-contribution";
-import type { CommandRegistry, CommandSink } from "../di/command-registry";
-import {
   RpcContribution,
   type RpcContribution as RpcContributionApi,
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
-import { desktopToken } from "../di/tokens";
 
 import {
   importFilesWithNativePicker,
   importTextFromClipboard,
 } from "./import-files";
 
-export const NATIVE_DIALOGS_APPLICATION =
-  desktopToken<NativeDialogsApplication>("native-dialogs", "application");
-
+@injectable()
 export class NativeDialogsApplication {
   async pickFile() {
     return this._pick(false);
@@ -33,6 +24,16 @@ export class NativeDialogsApplication {
 
   async pickDirectory() {
     return this._pick(true);
+  }
+
+  /** Read selected portable snapshots while Bun owns native file access. */
+  pickImportFiles() {
+    return importFilesWithNativePicker();
+  }
+
+  /** Read clipboard text and project it as one virtual snapshot file. */
+  readClipboardImport() {
+    return Promise.resolve(importTextFromClipboard());
   }
 
   private async _pick(directory: boolean): Promise<string | null> {
@@ -46,67 +47,33 @@ export class NativeDialogsApplication {
   }
 }
 
-class NativeDialogsRpcServer implements RpcServer<NativeDialogsRpc> {
-  readonly namespace = NATIVE_DIALOGS_RPC;
-  readonly streams = {};
-
-  constructor(readonly requests: NativeDialogsApplication) {}
-}
-
-class NativeDialogsContribution
-  implements CommandContributionApi, RpcContributionApi
-{
+@injectable()
+class NativeDialogsContribution implements RpcContributionApi {
   constructor(
-    private readonly _application: NativeDialogsApplication,
-    private readonly _commandSink: CommandSink
+    @inject(NativeDialogsApplication)
+    private readonly _application: NativeDialogsApplication
   ) {}
 
   registerRpc(rpc: RpcRegistry): void {
-    rpc.registerServer(new NativeDialogsRpcServer(this._application));
-  }
-
-  registerCommands(commands: CommandRegistry): void {
-    commands.registerCommand("playground.importFiles", {
-      execute: () =>
-        importFilesWithNativePicker((next) =>
-          this._commandSink.sendToWebview(next)
-        ),
-    });
-    commands.registerCommand("playground.importFromClipboard", {
-      execute: () =>
-        importTextFromClipboard((next) =>
-          this._commandSink.sendToWebview(next)
-        ),
-    });
+    rpc.registerServer({
+      namespace: NATIVE_DIALOGS_RPC,
+      requests: this._application,
+      streams: {},
+    } satisfies import("../../shared/namespaced-rpc").RpcServer<NativeDialogsRpc>);
   }
 }
 
 /** Bind the process-owned native picker application. */
 export function nativeDialogsApplicationModule(): ContainerModule {
   return new ContainerModule(({ bind }) => {
-    bind<NativeDialogsApplication>(NATIVE_DIALOGS_APPLICATION)
-      .to(NativeDialogsApplication)
-      .inSingletonScope();
+    bind(NativeDialogsApplication).toSelf().inSingletonScope();
   });
 }
 
 /** Bind native picker RPC and import commands for one window. */
-export function nativeDialogsContributionsModule(
-  commandSink: CommandSink
-): ContainerModule {
+export function nativeDialogsContributionsModule(): ContainerModule {
   return new ContainerModule(({ bind }) => {
-    bind(NativeDialogsContribution)
-      .toDynamicValue(
-        (context) =>
-          new NativeDialogsContribution(
-            context.get(NATIVE_DIALOGS_APPLICATION),
-            commandSink
-          )
-      )
-      .inSingletonScope();
-    bind<CommandContributionApi>(CommandContribution).toService(
-      NativeDialogsContribution
-    );
+    bind(NativeDialogsContribution).toSelf().inSingletonScope();
     bind<RpcContributionApi>(RpcContribution).toService(
       NativeDialogsContribution
     );

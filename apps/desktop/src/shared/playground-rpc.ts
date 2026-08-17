@@ -6,6 +6,8 @@ import type {
 
 import { defineRpcNamespace } from "./namespaced-rpc";
 
+export const PLAYGROUND_SERVICE = Symbol("PlaygroundService");
+
 /** Shared contract for the main-window Playground application module. */
 export interface PlaygroundRpc {
   readonly requests: PlaygroundRequests;

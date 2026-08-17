@@ -1,8 +1,4 @@
-import { join } from "node:path";
-
 import { ContainerModule } from "inversify";
-
-import { APP_HOME_PATH } from "../native/app-directories-module";
 
 import { RemindersState } from "./state";
 
@@ -10,16 +6,8 @@ import { RemindersState } from "./state";
 export function remindersModule(): ContainerModule {
   return new ContainerModule(({ bind }) => {
     bind(RemindersState)
-      .toDynamicValue(
-        (context) =>
-          new RemindersState(
-            join(
-              context.get<string>(APP_HOME_PATH),
-              "settings",
-              "reminders.json"
-            )
-          )
-      )
-      .inSingletonScope();
+      .toSelf()
+      .inSingletonScope()
+      .onDeactivation((state) => state.dispose());
   });
 }

@@ -1,4 +1,12 @@
 import type { ModelProviderGroup } from "@llm-space/core";
+import { inject, injectable } from "inversify";
+
+import { Emitter } from "@/shared/event";
+
+import { DesktopModelCatalogController } from "../../models/desktop-model-catalog-controller";
+import { RendererNotificationService } from "../../notifications/renderer-notification-service";
+
+import { reportModelMutationFailure } from "./model-notifications";
 
 export type AddProviderChoice =
   | {
@@ -12,14 +20,6 @@ export interface AddProviderSnapshot {
   readonly builtinProviders: readonly ModelProviderGroup[] | null;
   readonly discoveryFailed: boolean;
   readonly addingProviderId: string | null;
-}
-
-export interface AddProviderControllerOptions {
-  readonly fetchBuiltinProviders: () => Promise<ModelProviderGroup[]>;
-  readonly addBuiltinProvider: (providerId: string) => Promise<void>;
-  readonly addCustomProvider: () => Promise<string>;
-  readonly providerAdded: (providerId: string) => void;
-  readonly addFailed: (providerName: string, error: unknown) => void;
 }
 
 type Listener = () => void;
@@ -38,7 +38,17 @@ const CLOSED_SNAPSHOT: AddProviderSnapshot = {
  * affect the session that started them, while an underlying mutation remains
  * globally exclusive until it settles so close/reopen cannot submit twice.
  */
+@injectable()
 export class AddProviderController {
+  private readonly _catalog: Pick<
+    DesktopModelCatalogController,
+    "builtinProviders" | "addProvider" | "addCustomProvider"
+  >;
+  private readonly _notifications: Pick<
+    RendererNotificationService,
+    "error"
+  >;
+  private readonly _didAddProvider = new Emitter<string>();
   private readonly _listeners = new Set<Listener>();
   private _session = 0;
   private _discoveryRequest = 0;
@@ -46,7 +56,21 @@ export class AddProviderController {
   private _mutationPending = false;
   private _snapshot: AddProviderSnapshot = CLOSED_SNAPSHOT;
 
-  constructor(private readonly _options: AddProviderControllerOptions) {}
+  /** Fact emitted after the catalog accepts a provider mutation. */
+  readonly onDidAddProvider = this._didAddProvider.event;
+
+  constructor(
+    @inject(DesktopModelCatalogController)
+    catalog: Pick<
+      DesktopModelCatalogController,
+      "builtinProviders" | "addProvider" | "addCustomProvider"
+    >,
+    @inject(RendererNotificationService)
+    notifications: Pick<RendererNotificationService, "error">
+  ) {
+    this._catalog = catalog;
+    this._notifications = notifications;
+  }
 
   readonly getSnapshot = (): AddProviderSnapshot => this._snapshot;
 
@@ -77,7 +101,8 @@ export class AddProviderController {
 
     const session = this._session;
     const request = ++this._mutationRequest;
-    const providerId = choice.type === "builtin" ? choice.provider.id : "custom";
+    const providerId =
+      choice.type === "builtin" ? choice.provider.id : "custom";
     const providerName =
       choice.type === "builtin" ? choice.provider.name : "custom provider";
     this._mutationPending = true;
@@ -87,14 +112,14 @@ export class AddProviderController {
       const addedProviderId =
         choice.type === "builtin"
           ? await this._addBuiltin(choice.provider.id)
-          : await this._options.addCustomProvider();
+          : await this._catalog.addCustomProvider("Custom provider", "");
       this._mutationPending = false;
       if (!this._isCurrentMutation(session, request)) {
         this._clearStaleMutation(providerId);
         return;
       }
       this._setSnapshot({ ...CLOSED_SNAPSHOT });
-      this._options.providerAdded(addedProviderId);
+      this._didAddProvider.fire(addedProviderId);
     } catch (error) {
       this._mutationPending = false;
       if (!this._isCurrentMutation(session, request)) {
@@ -102,12 +127,16 @@ export class AddProviderController {
         return;
       }
       this._setSnapshot({ ...this._snapshot, addingProviderId: null });
-      this._options.addFailed(providerName, error);
+      reportModelMutationFailure(
+        this._notifications,
+        { operation: "add-provider", providerName },
+        error
+      );
     }
   };
 
   private async _addBuiltin(providerId: string): Promise<string> {
-    await this._options.addBuiltinProvider(providerId);
+    await this._catalog.addProvider(providerId);
     return providerId;
   }
 
@@ -115,7 +144,7 @@ export class AddProviderController {
     const session = this._session;
     const request = ++this._discoveryRequest;
     try {
-      const builtinProviders = await this._options.fetchBuiltinProviders();
+      const builtinProviders = await this._catalog.builtinProviders();
       if (!this._isCurrentDiscovery(session, request)) return;
       this._setSnapshot({
         ...this._snapshot,

@@ -1,16 +1,14 @@
-import { EventHub } from "../../shared/event-hub";
+import { inject, injectable } from "inversify";
+
+import { Emitter, type Event } from "../../shared/event";
+import { WINDOW_CONTAINER_FACTORY } from "../app/window-container-factory";
 
 import type { AgentProject } from "./agent-project";
-import { openAgentProject } from "./agent-project";
-
-export interface ProjectWindowManagerEvents {
-  catalogChanged: Record<string, never>;
-}
 
 export interface ProjectWindowHandle {
+  readonly onDidClose: Event<void>;
   activate(): void;
   close(): Promise<void> | void;
-  onClosed?(listener: () => void): void;
 }
 
 export interface ProjectWindowAdapter {
@@ -27,17 +25,21 @@ export interface AgentProjectCatalogStore {
   save(rootPaths: readonly string[]): Promise<void>;
 }
 
-export interface ProjectWindowManagerOptions {
-  readonly windows: ProjectWindowAdapter;
-  readonly state?: ProjectWindowStateStore;
-  readonly catalog?: AgentProjectCatalogStore;
-  readonly openProject?: typeof openAgentProject;
+export interface AgentProjectLoader {
+  open(startPath: string): Promise<AgentProject>;
 }
 
+export const PROJECT_WINDOW_STATE_STORE = Symbol("ProjectWindowStateStore");
+export const AGENT_PROJECT_CATALOG_STORE = Symbol("AgentProjectCatalogStore");
+export const AGENT_PROJECT_LOADER = Symbol("AgentProjectLoader");
+
 /** Owns the one-project/one-window invariant for the desktop process. */
+@injectable()
 export class ProjectWindowManager {
-  /** Process-wide catalog mutations, independent of which adapter opened it. */
-  readonly events = new EventHub<ProjectWindowManagerEvents>();
+  private readonly _didChange = new Emitter<void>();
+
+  /** Catalog fact emitted after the durable path set commits. */
+  readonly onDidChange = this._didChange.event;
 
   private readonly _windows = new Map<
     string,
@@ -47,12 +49,19 @@ export class ProjectWindowManager {
   private _catalogMutation = Promise.resolve();
   private _closingAll = false;
 
-  constructor(private readonly _options: ProjectWindowManagerOptions) {}
+  constructor(
+    @inject(WINDOW_CONTAINER_FACTORY)
+    private readonly _windowsAdapter: ProjectWindowAdapter,
+    @inject(PROJECT_WINDOW_STATE_STORE)
+    private readonly _state: ProjectWindowStateStore,
+    @inject(AGENT_PROJECT_CATALOG_STORE)
+    private readonly _catalog: AgentProjectCatalogStore,
+    @inject(AGENT_PROJECT_LOADER)
+    private readonly _loader: AgentProjectLoader
+  ) {}
 
   async openProject(startPath: string): Promise<void> {
-    const project = await (this._options.openProject ?? openAgentProject)(
-      startPath
-    );
+    const project = await this._loader.open(startPath);
     const existing = this._windows.get(project.rootPath);
     if (existing !== undefined) {
       existing.handle.activate();
@@ -63,7 +72,7 @@ export class ProjectWindowManager {
       (await opening).activate();
       return;
     }
-    const createWindow = this._options.windows.create(project);
+    const createWindow = this._windowsAdapter.create(project);
     this._opening.set(project.rootPath, createWindow);
     let handle: ProjectWindowHandle;
     try {
@@ -73,7 +82,7 @@ export class ProjectWindowManager {
     }
     this._windows.set(project.rootPath, { project, handle });
     await this._rememberProject(project.rootPath);
-    handle.onClosed?.(() => {
+    handle.onDidClose(() => {
       this._windows.delete(project.rootPath);
       if (!this._closingAll) void this._saveOpenProjects();
     });
@@ -82,13 +91,11 @@ export class ProjectWindowManager {
 
   /** Resolve durable catalog paths into current Project metadata. */
   async listProjects(): Promise<readonly AgentProject[]> {
-    const paths = (await this._options.catalog?.load()) ?? [];
+    const paths = await this._catalog.load();
     const projects: AgentProject[] = [];
     for (const path of paths) {
       try {
-        projects.push(
-          await (this._options.openProject ?? openAgentProject)(path)
-        );
+        projects.push(await this._loader.open(path));
       } catch (error) {
         console.error(`Failed to load agent project "${path}":`, error);
       }
@@ -97,7 +104,7 @@ export class ProjectWindowManager {
   }
 
   async restoreProjects(): Promise<void> {
-    const paths = (await this._options.state?.load()) ?? [];
+    const paths = await this._state.load();
     for (const path of paths) {
       try {
         await this.openProject(path);
@@ -118,12 +125,8 @@ export class ProjectWindowManager {
   }
 
   private _saveOpenProjects(): Promise<void> {
-    return (
-      this._options.state?.save(
-        [...this._windows.keys()].sort((left, right) =>
-          left.localeCompare(right)
-        )
-      ) ?? Promise.resolve()
+    return this._state.save(
+      [...this._windows.keys()].sort((left, right) => left.localeCompare(right))
     );
   }
 
@@ -136,11 +139,10 @@ export class ProjectWindowManager {
   }
 
   private async _commitRememberedProject(rootPath: string): Promise<void> {
-    if (this._options.catalog === undefined) return;
-    const paths = new Set(await this._options.catalog.load());
+    const paths = new Set(await this._catalog.load());
     if (paths.has(rootPath)) return;
     paths.add(rootPath);
-    await this._options.catalog.save([...paths].sort());
-    this.events.publish("catalogChanged", {});
+    await this._catalog.save([...paths].sort());
+    this._didChange.fire();
   }
 }

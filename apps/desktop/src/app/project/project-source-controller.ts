@@ -1,22 +1,19 @@
+import { inject, injectable } from "inversify";
+
 import type {
   ProjectSourceNode,
   ProjectSourceSnapshot,
   ProjectSourceTransport,
 } from "@/shared/project-source-rpc";
+import { PROJECT_SOURCE_SERVICE } from "@/shared/project-source-rpc";
+
+import { RendererNotificationService } from "../notifications/renderer-notification-service";
 
 export interface ProjectSourceControllerSnapshot {
   readonly files: readonly ProjectSourceNode[];
   readonly revision?: string;
   readonly contentByPath: ReadonlyMap<string, string>;
   readonly loading: boolean;
-}
-
-export interface ProjectSourceControllerOptions {
-  readonly client: Pick<
-    ProjectSourceTransport,
-    "readSourceFile" | "watchSourceFiles"
-  >;
-  readonly reportError: (title: string, error: unknown) => void;
 }
 
 type Listener = () => void;
@@ -27,6 +24,7 @@ type Listener = () => void;
  * The source stream is authoritative and emits its initial tree. Callers only
  * express which files are open; the controller keeps those documents current.
  */
+@injectable()
 export class ProjectSourceController {
   private readonly _listeners = new Set<Listener>();
   private readonly _pendingReads = new Map<string, Promise<boolean>>();
@@ -39,7 +37,15 @@ export class ProjectSourceController {
     loading: true,
   };
 
-  constructor(private readonly _options: ProjectSourceControllerOptions) {}
+  constructor(
+    @inject(PROJECT_SOURCE_SERVICE)
+    private readonly _source: Pick<
+      ProjectSourceTransport,
+      "readSourceFile" | "watchSourceFiles"
+    >,
+    @inject(RendererNotificationService)
+    private readonly _notifications: RendererNotificationService
+  ) {}
 
   readonly getSnapshot = (): ProjectSourceControllerSnapshot => this._snapshot;
 
@@ -98,7 +104,7 @@ export class ProjectSourceController {
     controller: AbortController
   ): Promise<void> {
     try {
-      for await (const source of this._options.client.watchSourceFiles({
+      for await (const source of this._source.watchSourceFiles({
         signal: controller.signal,
       })) {
         if (!this._isCurrent(lifecycle)) return;
@@ -106,7 +112,7 @@ export class ProjectSourceController {
       }
     } catch (error) {
       if (!controller.signal.aborted && this._isCurrent(lifecycle)) {
-        this._options.reportError("Project source watch failed", error);
+        this._notifications.error("Project source watch failed", error);
       }
     } finally {
       if (this._isCurrent(lifecycle)) {
@@ -131,7 +137,7 @@ export class ProjectSourceController {
         try {
           return [
             path,
-            await this._options.client.readSourceFile(path),
+            await this._source.readSourceFile(path),
           ] as const;
         } catch {
           return undefined;
@@ -155,7 +161,7 @@ export class ProjectSourceController {
     lifecycle: number
   ): Promise<boolean> {
     try {
-      const content = await this._options.client.readSourceFile(path);
+      const content = await this._source.readSourceFile(path);
       if (!this._isCurrent(lifecycle)) return false;
       this._setSnapshot({
         ...this._snapshot,
@@ -164,7 +170,7 @@ export class ProjectSourceController {
       return true;
     } catch (error) {
       if (this._isCurrent(lifecycle)) {
-        this._options.reportError("Unable to open source file", error);
+        this._notifications.error("Unable to open source file", error);
       }
       return false;
     }

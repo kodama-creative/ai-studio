@@ -110,7 +110,7 @@ export function shouldPersistProjectThread(
 /** Adapts Project editor controls directly to product-owned Thread RPC. */
 export function createProjectThreadExecutionRuntime(input: {
   readonly client: StudioTransport;
-  readonly threadClient?: ThreadClient;
+  readonly threadClient: ThreadClient;
   readonly projectId: string;
   readonly threadId: string;
   readonly getThread: () => StudioThread;
@@ -126,7 +126,7 @@ export function createProjectThreadExecutionRuntime(input: {
   return createThreadExecutionRuntime({
     productName: "Studio",
     target,
-    getClient: () => _threadClient(input),
+    getClient: () => Promise.resolve(input.threadClient),
     currentOperationId: () => input.getThread().operationId,
     async persist(thread) {
       const saved = await input.client.saveDocument(
@@ -271,14 +271,6 @@ function _sameJson(left: unknown, right: unknown): boolean {
         _sameJson(left[key], right[key])
     )
   );
-}
-
-async function _threadClient(
-  input: Parameters<typeof createProjectThreadExecutionRuntime>[0]
-): Promise<ThreadClient> {
-  if (input.threadClient !== undefined) return input.threadClient;
-  const { createThreadClient } = await import("@/client/thread-client");
-  return createThreadClient();
 }
 
 /** Narrows arbitrary JSON-like values to plain records. */

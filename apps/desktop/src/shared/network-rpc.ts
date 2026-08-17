@@ -6,6 +6,8 @@ import type {
 import { defineRpcNamespace } from "./namespaced-rpc";
 import type { RequestRpcShape } from "./rpc-shape";
 
+export const NETWORK_SERVICE = Symbol("NetworkService");
+
 export interface NetworkRequests {
   get(): Promise<NetworkSettings>;
   set(settings: NetworkSettings): Promise<NetworkSettings>;

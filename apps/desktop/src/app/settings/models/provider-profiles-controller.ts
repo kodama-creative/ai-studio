@@ -1,4 +1,10 @@
 import type { ProviderProfile } from "@llm-space/core";
+import { inject, injectable } from "inversify";
+
+import { DesktopModelCatalogController } from "../../models/desktop-model-catalog-controller";
+import { RendererNotificationService } from "../../notifications/renderer-notification-service";
+
+import { reportModelMutationFailure } from "./model-notifications";
 
 export type ProviderProfilesMutation = "adding" | "removing";
 export type ProviderProfilesOperation = "add" | "remove";
@@ -13,18 +19,6 @@ export interface ProviderProfilesSnapshot {
   readonly providerId: string;
   readonly removalCandidateId: string | null;
   readonly selectedProfileId: string;
-}
-
-export interface ProviderProfilesControllerOptions {
-  readonly addProfile: (providerId: string) => Promise<string>;
-  readonly removeProfile: (
-    providerId: string,
-    profileId: string
-  ) => Promise<void>;
-  readonly mutationFailed: (
-    operation: ProviderProfilesOperation,
-    error: unknown
-  ) => void;
 }
 
 interface MutationLease {
@@ -48,17 +42,32 @@ const EMPTY_SNAPSHOT: ProviderProfilesSnapshot = {
  * remove share one mutation lease, while retargeting invalidates every result
  * from the previous provider.
  */
+@injectable()
 export class ProviderProfilesController {
+  private readonly _catalog: Pick<
+    DesktopModelCatalogController,
+    "addProviderProfile" | "removeProviderProfile"
+  >;
+  private readonly _notifications: Pick<
+    RendererNotificationService,
+    "error"
+  >;
   private readonly _listeners = new Set<Listener>();
   private _epoch = 0;
   private _profiles: ProviderProfilesTarget["profiles"] = [];
   private _snapshot: ProviderProfilesSnapshot = EMPTY_SNAPSHOT;
 
   constructor(
-    target: ProviderProfilesTarget | null,
-    private readonly _options: ProviderProfilesControllerOptions
+    @inject(DesktopModelCatalogController)
+    catalog: Pick<
+      DesktopModelCatalogController,
+      "addProviderProfile" | "removeProviderProfile"
+    >,
+    @inject(RendererNotificationService)
+    notifications: Pick<RendererNotificationService, "error">
   ) {
-    if (target) this._retarget(target);
+    this._catalog = catalog;
+    this._notifications = notifications;
   }
 
   readonly getSnapshot = (): ProviderProfilesSnapshot => this._snapshot;
@@ -134,7 +143,9 @@ export class ProviderProfilesController {
     const lease = this._begin("adding");
     if (!lease) return;
     try {
-      const profileId = await this._options.addProfile(lease.providerId);
+      const profileId = await this._catalog.addProviderProfile(
+        lease.providerId
+      );
       if (!this._isCurrent(lease)) return;
       this._setSnapshot({
         ...this._snapshot,
@@ -144,7 +155,11 @@ export class ProviderProfilesController {
     } catch (error) {
       if (!this._isCurrent(lease)) return;
       this._setSnapshot({ ...this._snapshot, mutation: null });
-      this._options.mutationFailed("add", error);
+      reportModelMutationFailure(
+        this._notifications,
+        { operation: "mutate-provider-profiles", mutation: "add" },
+        error
+      );
     }
   }
 
@@ -154,7 +169,7 @@ export class ProviderProfilesController {
     const lease = this._begin("removing");
     if (!lease) return;
     try {
-      await this._options.removeProfile(lease.providerId, profileId);
+      await this._catalog.removeProviderProfile(lease.providerId, profileId);
       if (!this._isCurrent(lease)) return;
       this._profiles = this._profiles.filter(
         (profile) => profile.id !== profileId
@@ -170,7 +185,11 @@ export class ProviderProfilesController {
     } catch (error) {
       if (!this._isCurrent(lease)) return;
       this._setSnapshot({ ...this._snapshot, mutation: null });
-      this._options.mutationFailed("remove", error);
+      reportModelMutationFailure(
+        this._notifications,
+        { operation: "mutate-provider-profiles", mutation: "remove" },
+        error
+      );
     }
   }
 

@@ -4,6 +4,8 @@ import type {
 
 import { defineRpcNamespace } from "./namespaced-rpc";
 
+export const PROJECT_SOURCE_SERVICE = Symbol("ProjectSourceService");
+
 /** Project source browsing owned by the Studio window, separate from Threads. */
 export interface ProjectSourceRpc {
   readonly requests: ProjectSourceRequests;

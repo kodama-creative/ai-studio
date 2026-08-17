@@ -7,6 +7,8 @@ import type {
 import { defineRpcNamespace } from "./namespaced-rpc";
 import type { RequestRpcShape } from "./rpc-shape";
 
+export const SKILLS_SERVICE = Symbol("SkillsService");
+
 export interface SkillsRequests {
   getSettings(): Promise<SkillsSettings>;
   addPath(path: string): Promise<SkillsSettings>;

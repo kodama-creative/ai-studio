@@ -1,10 +1,19 @@
 import { describe, expect, test } from "bun:test";
 
+import type { DesktopModelCatalogController } from "../../models/desktop-model-catalog-controller";
+
 import {
   ProviderMetadataController,
-  type ProviderMetadataControllerOptions,
   type ProviderMetadataTarget,
 } from "./provider-metadata-controller";
+
+interface TestOptions {
+  readonly updateProvider: (
+    providerId: string,
+    patch: Parameters<DesktopModelCatalogController["updateProvider"]>[1]
+  ) => Promise<void>;
+  readonly saveFailed: (title: string, error: unknown) => void;
+}
 
 describe("ProviderMetadataController", () => {
   test("rolls a failed latest API intent back to the last successful intent", async () => {
@@ -50,7 +59,7 @@ describe("ProviderMetadataController", () => {
     second.reject(new Error("second failed"));
     await _eventually(() => controller.getSnapshot().api, "openai-completions");
 
-    expect(failures).toEqual(["api"]);
+    expect(failures).toEqual(["Failed to update provider"]);
   });
 
   test("persists a return to the authoritative value behind an older intent", async () => {
@@ -159,13 +168,21 @@ describe("ProviderMetadataController", () => {
 });
 
 function _controller(
-  overrides: Partial<ProviderMetadataControllerOptions> = {}
+  overrides: Partial<TestOptions> = {}
 ): ProviderMetadataController {
-  return new ProviderMetadataController(_target("provider"), {
+  const options: TestOptions = {
     updateProvider: () => Promise.resolve(),
     saveFailed: () => undefined,
     ...overrides,
-  });
+  };
+  const controller = new ProviderMetadataController(
+    { updateProvider: options.updateProvider },
+    {
+      error: options.saveFailed,
+    }
+  );
+  controller.sync(_target("provider"));
+  return controller;
 }
 
 function _target(providerId: string): ProviderMetadataTarget {

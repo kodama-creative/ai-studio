@@ -26,13 +26,14 @@ import { toast } from "sonner";
 
 import {
   CUSTOM_MODEL_EDITOR_CONTROLLER,
-  createCustomModelEditorScope,
+  createCustomModelEditorContainer,
 } from "@/app/di/model-editor-session-module";
 import {
-  RendererScopeProvider,
+  RendererSessionContainerProvider,
   useController,
-  useRendererScope,
+  useRendererContainer,
 } from "@/app/di/react";
+import { useDialogSessionPresence } from "@/components/use-dialog-session-presence";
 
 import {
   CUSTOM_PROVIDER_API_TYPES,
@@ -102,7 +103,30 @@ export function ModelEditorDialog({
   providerApi,
   model,
 }: ModelEditorDialogProps) {
-  const parent = useRendererScope();
+  const parent = useRendererContainer();
+  const present = useDialogSessionPresence(open);
+  if (!present) return null;
+  return (
+    <ModelEditorDialogSession
+      parent={parent}
+      open={open}
+      onOpenChange={onOpenChange}
+      providerId={providerId}
+      profileId={profileId}
+      providerApi={providerApi}
+      model={model}
+    />
+  );
+}
+
+/** Own one fresh custom-model child Container for one editor interaction. */
+function ModelEditorDialogSession({
+  parent,
+  ...props
+}: ModelEditorDialogProps & {
+  readonly parent: ReturnType<typeof useRendererContainer>;
+}) {
+  const { providerId, profileId, model } = props;
   const originalModelId = model?.id;
   const target = useMemo(
     () => ({
@@ -112,21 +136,14 @@ export function ModelEditorDialog({
     }),
     [originalModelId, profileId, providerId]
   );
-  const scope = useMemo(
-    () => createCustomModelEditorScope(parent, target),
+  const container = useMemo(
+    () => createCustomModelEditorContainer(parent, target),
     [parent, target]
   );
   return (
-    <RendererScopeProvider scope={scope}>
-      <ModelEditorDialogContent
-        open={open}
-        onOpenChange={onOpenChange}
-        providerId={providerId}
-        profileId={profileId}
-        providerApi={providerApi}
-        model={model}
-      />
-    </RendererScopeProvider>
+    <RendererSessionContainerProvider container={container}>
+      <ModelEditorDialogContent {...props} />
+    </RendererSessionContainerProvider>
   );
 }
 

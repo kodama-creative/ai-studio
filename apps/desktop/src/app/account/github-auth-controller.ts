@@ -1,24 +1,24 @@
+import { inject, injectable } from "inversify";
+
+import { COMMAND_SERVICE, type CommandService } from "@/commands/command-service";
 import type { GithubAuthState } from "@/shared/auth";
+import {
+  GITHUB_ACCOUNT_SERVICE,
+  type GithubAccountRpc,
+} from "@/shared/github-account-rpc";
+import type { RpcClient } from "@/shared/namespaced-rpc";
 
 import { disposeBestEffort } from "../lifecycle/dispose-best-effort";
+import { RendererNotificationService } from "../notifications/renderer-notification-service";
 
 interface Subscription {
   dispose(): void | Promise<void>;
 }
 
-export interface GithubAuthControllerOptions {
-  readonly getState: () => Promise<GithubAuthState>;
-  readonly subscribeChanged: (
-    listener: (state: GithubAuthState) => void
-  ) => Subscription;
-  readonly login: () => void;
-  readonly logout: () => void;
-  readonly notifyError: (message: string) => void;
-}
-
 type Listener = () => void;
 
 /** Owns GitHub Account state precedence, subscription, and auth commands. */
+@injectable()
 export class GithubAuthController {
   private readonly _listeners = new Set<Listener>();
   private _eventRevision = 0;
@@ -27,7 +27,17 @@ export class GithubAuthController {
   private _started = false;
   private _subscription: Subscription | null = null;
 
-  constructor(private readonly _options: GithubAuthControllerOptions) {}
+  constructor(
+    @inject(GITHUB_ACCOUNT_SERVICE)
+    private readonly _account: Pick<
+      RpcClient<GithubAccountRpc>,
+      "getState" | "on"
+    >,
+    @inject(COMMAND_SERVICE)
+    private readonly _commands: CommandService,
+    @inject(RendererNotificationService)
+    private readonly _notifications: RendererNotificationService
+  ) {}
 
   readonly getSnapshot = (): GithubAuthState => this._snapshot;
 
@@ -38,12 +48,12 @@ export class GithubAuthController {
 
   readonly signIn = (): void => {
     this._requireStarted();
-    this._options.login();
+    this._commands.executeCommand({ type: "githubAccount.login", args: {} });
   };
 
   readonly signOut = (): void => {
     this._requireStarted();
-    this._options.logout();
+    this._commands.executeCommand({ type: "githubAccount.logout", args: {} });
   };
 
   start(): void {
@@ -52,12 +62,12 @@ export class GithubAuthController {
     this._lifecycle += 1;
     const lifecycle = this._lifecycle;
     const initialEventRevision = this._eventRevision;
-    this._subscription = this._options.subscribeChanged((state) => {
+    this._subscription = this._account.on("changed", (state) => {
       if (!this._isCurrent(lifecycle)) return;
       this._eventRevision += 1;
       this._publish(state);
     });
-    void this._options
+    void this._account
       .getState()
       .then((state) => {
         if (
@@ -84,7 +94,7 @@ export class GithubAuthController {
     this._snapshot = state;
     for (const listener of this._listeners) listener();
     if (state.status === "signedOut" && state.error) {
-      this._options.notifyError(state.error);
+      this._notifications.error(state.error);
     }
   }
 

@@ -1,4 +1,11 @@
 import { uuid } from "@llm-space/core";
+import { inject, injectable } from "inversify";
+
+import {
+  PLAYGROUND_SERVICE,
+  type PlaygroundClient,
+} from "@/shared/playground-rpc";
+
 
 /** One open Main-window tab backed exclusively by a durable Playground. */
 export interface PlaygroundTab {
@@ -28,6 +35,15 @@ export interface MainTabsPersistence {
   save(state: MainTabsStoredState): void;
 }
 
+export const MAIN_TABS_PERSISTENCE = Symbol("MainTabsPersistence");
+
+export const MAIN_TABS_ACTIVITY = Symbol("MainTabsActivity");
+
+export interface MainTabsActivity {
+  canPruneRestoredTab(tab: AppTab): boolean;
+  subscribe(listener: () => void): () => void;
+}
+
 export interface MainTabsSnapshot {
   readonly tabs: readonly AppTab[];
   readonly activeId: string | null;
@@ -53,13 +69,6 @@ export type MainTabsIntent =
     }
   | { readonly type: "reopenClosed" };
 
-export interface MainTabsControllerOptions {
-  readonly persistence: MainTabsPersistence;
-  readonly playgroundExists: (playgroundId: string) => Promise<boolean>;
-  readonly canPruneRestoredTab: (tab: AppTab) => boolean;
-  readonly subscribeToPruneChanges: (listener: () => void) => () => void;
-}
-
 type Listener = () => void;
 type PlaygroundExistence = "exists" | "missing" | "unknown";
 
@@ -67,6 +76,7 @@ type PlaygroundExistence = "exists" | "missing" | "unknown";
  * Owns Main-window tab identity, persistence, restoration, and close/reopen
  * ordering behind one snapshot + intent interface.
  */
+@injectable()
 export class MainTabsController {
   private readonly _listeners = new Set<Listener>();
   private readonly _closedStack: StoredPlaygroundTab[][] = [];
@@ -79,10 +89,17 @@ export class MainTabsController {
   private _pruneSubscription: (() => void) | null = null;
   private _snapshot: MainTabsSnapshot;
 
-  constructor(private readonly _options: MainTabsControllerOptions) {
+  constructor(
+    @inject(MAIN_TABS_PERSISTENCE)
+    private readonly _persistence: MainTabsPersistence,
+    @inject(PLAYGROUND_SERVICE)
+    private readonly _playgrounds: Pick<PlaygroundClient, "load">,
+    @inject(MAIN_TABS_ACTIVITY)
+    private readonly _activity: MainTabsActivity
+  ) {
     let stored: MainTabsStoredState = { tabs: [], activeId: null };
     try {
-      stored = this._options.persistence.load();
+      stored = this._persistence.load();
     } catch {
       // Tab restoration is best-effort; an unavailable browser store must not
       // prevent the Main window from opening.
@@ -106,7 +123,7 @@ export class MainTabsController {
     if (this._started) this.stop();
     this._lifecycle += 1;
     try {
-      this._pruneSubscription = this._options.subscribeToPruneChanges(() =>
+      this._pruneSubscription = this._activity.subscribe(() =>
         this._retryDeferredPruning()
       );
     } catch (error) {
@@ -301,7 +318,7 @@ export class MainTabsController {
     if (invalidPaneIds.size === 0) return;
     const tabs = this._snapshot.tabs.filter((tab) => {
       if (!invalidPaneIds.has(tab.paneId)) return true;
-      if (this._options.canPruneRestoredTab(tab)) return false;
+      if (this._activity.canPruneRestoredTab(tab)) return false;
       this._deferredInvalidPaneIds.add(tab.paneId);
       return true;
     });
@@ -319,7 +336,7 @@ export class MainTabsController {
       );
       if (tab === undefined) {
         this._deferredInvalidPaneIds.delete(paneId);
-      } else if (this._options.canPruneRestoredTab(tab)) {
+      } else if (this._activity.canPruneRestoredTab(tab)) {
         this._deferredInvalidPaneIds.delete(paneId);
         removablePaneIds.add(paneId);
       }
@@ -373,7 +390,7 @@ export class MainTabsController {
     playgroundId: string
   ): Promise<PlaygroundExistence> {
     try {
-      return (await this._options.playgroundExists(playgroundId))
+      return (await this._playgrounds.load(playgroundId)) !== undefined
         ? "exists"
         : "missing";
     } catch {
@@ -406,7 +423,7 @@ export class MainTabsController {
       activeId: _validActiveId(tabs, activeId),
     };
     try {
-      this._options.persistence.save({
+      this._persistence.save({
         tabs: tabs.map(_toStored),
         activeId: this._snapshot.activeId,
       });

@@ -2,9 +2,17 @@ import { describe, expect, test } from "bun:test";
 
 import {
   ProviderProfilesController,
-  type ProviderProfilesControllerOptions,
   type ProviderProfilesTarget,
 } from "./provider-profiles-controller";
+
+interface TestOptions {
+  readonly addProfile: (providerId: string) => Promise<string>;
+  readonly removeProfile: (
+    providerId: string,
+    profileId: string
+  ) => Promise<void>;
+  readonly mutationFailed: (title: string, error: unknown) => void;
+}
 
 describe("ProviderProfilesController", () => {
   test("admits only one add and selects the created profile", async () => {
@@ -121,20 +129,31 @@ describe("ProviderProfilesController", () => {
 
     await controller.add();
 
-    expect(failures).toEqual(["add"]);
+    expect(failures).toEqual(["Failed to update provider profiles"]);
     expect(controller.getSnapshot().mutation).toBeNull();
   });
 });
 
 function _controller(
-  overrides: Partial<ProviderProfilesControllerOptions> = {}
+  overrides: Partial<TestOptions> = {}
 ): ProviderProfilesController {
-  return new ProviderProfilesController(_target("provider"), {
+  const options: TestOptions = {
     addProfile: () => Promise.resolve("created"),
     removeProfile: () => Promise.resolve(),
     mutationFailed: () => undefined,
     ...overrides,
-  });
+  };
+  const controller = new ProviderProfilesController(
+    {
+      addProviderProfile: options.addProfile,
+      removeProviderProfile: options.removeProfile,
+    },
+    {
+      error: options.mutationFailed,
+    }
+  );
+  controller.sync(_target("provider"));
+  return controller;
 }
 
 function _target(providerId: string): ProviderProfilesTarget {

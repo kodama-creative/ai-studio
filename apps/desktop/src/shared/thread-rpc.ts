@@ -8,6 +8,8 @@ import type {
 
 import { defineRpcNamespace } from "./namespaced-rpc";
 
+export const THREAD_SERVICE = Symbol("ThreadService");
+
 /** Product identity used by the renderer without exposing a raw Pi Session. */
 export type ThreadTarget =
   | { readonly kind: "playground"; readonly playgroundId: string }

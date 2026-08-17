@@ -1,18 +1,38 @@
 import { mock } from "bun:test";
 
+import { Container } from "inversify";
+
 const events: string[] = [];
-type ConfigureScope = (
-  scope: FakeScope,
-  context: {
-    readonly kind: "main" | "project";
-    readonly commandSink: { sendToWebview(): void };
-    readonly rpcEventSink: { sendEvent(): void; sendStreamEvent(): void };
-  }
-) => void;
 type OnCreated = (window: object, state: object) => void;
 
+class ProjectService {
+  private stopped = false;
+  readonly projectView = {
+    id: "project-id",
+    name: "Project",
+    rootPath: "/tmp/project",
+    agentRoot: "/tmp/project/agent",
+    agentId: "agent",
+    generationId: "revision",
+  };
+
+  start(): void {
+    events.push("project:start");
+  }
+
+  stop(): void {
+    if (this.stopped) return;
+    this.stopped = true;
+    events.push("project:stop");
+  }
+
+  getWindowContext() {
+    return { kind: "agentProject", project: this.projectView } as const;
+  }
+}
+
 await mock.module("../projects/project-module", () => ({
-  PROJECT_STUDIO: Symbol("PROJECT_STUDIO"),
+  ProjectService,
 }));
 await mock.module("../projects/project-window-state", () => ({
   ProjectWindowStateFile: {
@@ -23,23 +43,19 @@ await mock.module("../projects/project-window-state", () => ({
   },
 }));
 await mock.module("./desktop-window-runtime", () => ({
+  DESKTOP_WINDOW_CLOSE: Symbol("DESKTOP_WINDOW_CLOSE"),
+  DESKTOP_WINDOW_KIND: Symbol("DESKTOP_WINDOW_KIND"),
   DesktopWindowRuntime: class {
     readonly rpc = {};
+    private disposed = false;
 
-    constructor(
-      scope: FakeScope,
-      kind: "main" | "project",
-      configure: ConfigureScope
-    ) {
-      events.push(`runtime:${kind}`);
-      configure(scope, {
-        kind,
-        commandSink: { sendToWebview: () => undefined },
-        rpcEventSink: {
-          sendEvent: () => undefined,
-          sendStreamEvent: () => undefined,
-        },
-      });
+    constructor() {
+      events.push("runtime:create");
+    }
+
+    /** Record explicit Registry startup from the Application root. */
+    start(): void {
+      events.push("runtime:start");
     }
 
     /** Record native attachment without constructing an Electrobun window. */
@@ -50,6 +66,13 @@ await mock.module("./desktop-window-runtime", () => ({
     /** Stub command routing; this fixture only verifies composition stages. */
     execute(): void {
       events.push("runtime:execute");
+    }
+
+    /** Record Application-owned runtime shutdown. */
+    dispose(): void {
+      if (this.disposed) return;
+      this.disposed = true;
+      events.push("runtime:dispose");
     }
   },
 }));
@@ -70,37 +93,6 @@ await mock.module("./window", () => ({
 
 const { DesktopWindowFactory } = await import("./desktop-window-factory");
 
-class FakeScope {
-  readonly id: string;
-  isDisposing = false;
-  private readonly _disposedListeners: (() => void)[] = [];
-
-  constructor(id: string) {
-    this.id = id;
-  }
-
-  /** Resolve the Studio identity between Project source and view stages. */
-  getAsync(): Promise<unknown> {
-    events.push("project:studio");
-    return Promise.resolve({
-      agent: { agentSpecId: "agent", sourceRevision: "revision" },
-    });
-  }
-
-  /** Retain factory cleanup observers for parity with a real window scope. */
-  onDisposed(listener: () => void): void {
-    this._disposedListeners.push(listener);
-  }
-
-  /** Record failed-scope cleanup and notify every observer once. */
-  dispose(): Promise<void> {
-    this.isDisposing = true;
-    events.push(`scope:dispose:${this.id}`);
-    for (const listener of this._disposedListeners) listener();
-    return Promise.resolve();
-  }
-}
-
 const project = {
   id: "project-id",
   name: "Project",
@@ -109,31 +101,26 @@ const project = {
 } as never;
 const composition = {
   configureMainIdentity: () => events.push("configure:main-identity"),
-  configureProjectSource: () => events.push("configure:project-source"),
-  configureProjectIdentity: (_scope: FakeScope, projectView: { id: string }) => {
-    if (projectView.id !== "project-id") {
-      throw new Error("Project view was not resolved before identity binding.");
-    }
-    events.push("configure:project-identity");
+  configureProjectSource: (container: Container) => {
+    events.push("configure:project-source");
+    container.bind(ProjectService).toConstantValue(new ProjectService());
   },
-  configureRuntime: (_scope: FakeScope, { kind }: { kind: string }) =>
+  configureRuntime: (_container: Container, { kind }: { kind: string }) =>
     events.push(`configure:runtime:${kind}`),
 };
-let projectScope = new FakeScope("project:project-id");
-const processContainer = {
-  createWindowScope: () => projectScope,
-} as never;
+const desktopContainer = new Container();
 const factory = new DesktopWindowFactory(
-  processContainer,
+  desktopContainer,
   "/tmp/home",
-  composition as never
+  composition
 );
 
-await factory.createMain(new FakeScope("main") as never);
+const main = await factory.createMain();
 const mainExpected = [
   "configure:main-identity",
-  "runtime:main",
   "configure:runtime:main",
+  "runtime:create",
+  "runtime:start",
   "native:main",
   "runtime:attach",
 ];
@@ -141,14 +128,31 @@ if (JSON.stringify(events) !== JSON.stringify(mainExpected)) {
   throw new Error(`Unexpected Main composition: ${events.join(", ")}`);
 }
 
+let closeNotifications = 0;
+main.onDidClose(() => {
+  closeNotifications += 1;
+});
+await main.close();
+if (closeNotifications !== 1) {
+  throw new Error("Main close subscribers did not observe disposal.");
+}
+let replayedCloseNotifications = 0;
+main.onDidClose(() => {
+  replayedCloseNotifications += 1;
+});
+if (replayedCloseNotifications !== 1) {
+  throw new Error("Late Main close subscribers did not observe disposal.");
+}
 events.length = 0;
-await factory.create(project);
+
+events.length = 0;
+const projectWindow = await factory.create(project);
 const projectExpected = [
   "configure:project-source",
-  "project:studio",
-  "configure:project-identity",
-  "runtime:project",
   "configure:runtime:project",
+  "runtime:create",
+  "project:start",
+  "runtime:start",
   "project:state",
   "native:project",
   "runtime:attach",
@@ -158,18 +162,21 @@ if (JSON.stringify(events) !== JSON.stringify(projectExpected)) {
 }
 
 events.length = 0;
-projectScope = new FakeScope("project:project-id");
-const failedFactory = new DesktopWindowFactory(
-  processContainer,
-  "/tmp/home",
-  {
-    ...composition,
-    configureProjectSource: () => {
-      events.push("configure:project-source");
-      throw new Error("source registration failed");
-    },
-  } as never
-);
+await projectWindow.close();
+if (
+  JSON.stringify(events) !== JSON.stringify(["runtime:dispose", "project:stop"])
+) {
+  throw new Error(`Unexpected Project shutdown: ${events.join(", ")}`);
+}
+
+events.length = 0;
+const failedFactory = new DesktopWindowFactory(desktopContainer, "/tmp/home", {
+  ...composition,
+  configureProjectSource: () => {
+    events.push("configure:project-source");
+    throw new Error("source registration failed");
+  },
+});
 try {
   await failedFactory.create(project);
   throw new Error("Project window unexpectedly survived registration failure.");
@@ -181,10 +188,7 @@ try {
     throw error;
   }
 }
-const failureExpected = [
-  "configure:project-source",
-  "scope:dispose:project:project-id",
-];
+const failureExpected = ["configure:project-source"];
 if (JSON.stringify(events) !== JSON.stringify(failureExpected)) {
   throw new Error(`Unexpected Project failure cleanup: ${events.join(", ")}`);
 }

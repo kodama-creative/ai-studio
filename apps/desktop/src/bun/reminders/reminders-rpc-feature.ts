@@ -1,6 +1,5 @@
-import { ContainerModule } from "inversify";
+import { ContainerModule, inject, injectable } from "inversify";
 
-import type { RpcServer } from "../../shared/namespaced-rpc";
 import {
   REMINDERS_RPC,
   type RemindersRpc,
@@ -12,29 +11,23 @@ import {
 import type { RpcRegistry } from "../di/rpc-registry";
 import { RemindersState } from "../reminders/state";
 
-class RemindersRpcServer implements RpcServer<RemindersRpc> {
-  readonly namespace = REMINDERS_RPC;
-  readonly streams = {};
-
-  constructor(readonly requests: RemindersState) {}
-}
-
+@injectable()
 class RemindersContribution implements RpcContributionApi {
-  constructor(private readonly _state: RemindersState) {}
+  constructor(@inject(RemindersState) private readonly _state: RemindersState) {}
 
   registerRpc(rpc: RpcRegistry): void {
-    rpc.registerServer(new RemindersRpcServer(this._state));
+    rpc.registerServer({
+      namespace: REMINDERS_RPC,
+      requests: this._state,
+      streams: {},
+    } satisfies import("../../shared/namespaced-rpc").RpcServer<RemindersRpc>);
   }
 }
 
 /** Bind the reminder feature's RPC adapter as one window contribution. */
 export function remindersRpcModule(): ContainerModule {
   return new ContainerModule(({ bind }) => {
-    bind(RemindersContribution)
-      .toDynamicValue(
-        (context) => new RemindersContribution(context.get(RemindersState))
-      )
-      .inSingletonScope();
+    bind(RemindersContribution).toSelf().inSingletonScope();
     bind<RpcContributionApi>(RpcContribution).toService(RemindersContribution);
   });
 }

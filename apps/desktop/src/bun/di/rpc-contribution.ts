@@ -12,9 +12,7 @@ export interface RpcRegistration {
 }
 
 /** Multi-binding token for window-owned RPC declarations. */
-export const RpcContribution = Symbol.for(
-  "@llm-space/desktop/rpc/contribution"
-);
+export const RpcContribution = Symbol("RpcContribution");
 
 /** Theia-style RPC declaration owned by one feature class. */
 export interface RpcContribution {

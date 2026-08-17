@@ -1,4 +1,10 @@
 import type { ProviderProfile, ProviderProfilePatch } from "@llm-space/core";
+import { inject, injectable } from "inversify";
+
+import { DesktopModelCatalogController } from "../../models/desktop-model-catalog-controller";
+import { RendererNotificationService } from "../../notifications/renderer-notification-service";
+
+import { reportModelMutationFailure } from "./model-notifications";
 
 export type ProviderProfileField = "name" | "apiKey" | "baseUrl" | "headers";
 export type ProviderProfileTextField = Exclude<ProviderProfileField, "headers">;
@@ -22,15 +28,6 @@ export interface ProviderProfileSnapshot {
   readonly baseUrl: string;
   readonly baseUrlEnabled: boolean;
   readonly headers: readonly ProviderHeaderRow[];
-}
-
-export interface ProviderProfileControllerOptions {
-  readonly updateProfile: (
-    providerId: string,
-    profileId: string,
-    patch: ProviderProfilePatch
-  ) => Promise<void>;
-  readonly saveFailed: (field: ProviderProfileField, error: unknown) => void;
 }
 
 interface AuthoritativeProfile {
@@ -76,7 +73,16 @@ const EMPTY_SNAPSHOT: ProviderProfileSnapshot = {
  * authoritative value. Header failures retain the latest Draft for retry.
  * Retargeting invalidates queued work and all prior results.
  */
+@injectable()
 export class ProviderProfileController {
+  private readonly _catalog: Pick<
+    DesktopModelCatalogController,
+    "updateProviderProfile"
+  >;
+  private readonly _notifications: Pick<
+    RendererNotificationService,
+    "error"
+  >;
   private readonly _listeners = new Set<Listener>();
   private readonly _dirty = new Set<ProviderProfileTextField>();
   private readonly _latestGeneration = new Map<ProviderProfileField, number>();
@@ -91,10 +97,13 @@ export class ProviderProfileController {
   private _tail = Promise.resolve();
 
   constructor(
-    target: ProviderProfileTarget | null,
-    private readonly _options: ProviderProfileControllerOptions
+    @inject(DesktopModelCatalogController)
+    catalog: Pick<DesktopModelCatalogController, "updateProviderProfile">,
+    @inject(RendererNotificationService)
+    notifications: Pick<RendererNotificationService, "error">
   ) {
-    if (target) this._retarget(target);
+    this._catalog = catalog;
+    this._notifications = notifications;
   }
 
   readonly getSnapshot = (): ProviderProfileSnapshot => this._snapshot;
@@ -317,7 +326,7 @@ export class ProviderProfileController {
     const previous = this._tail;
     const pending = previous.then(async () => {
       if (!this._isCurrentTarget(operation)) return;
-      await this._options.updateProfile(
+      await this._catalog.updateProviderProfile(
         operation.providerId,
         operation.profileId,
         operation.patch
@@ -381,7 +390,11 @@ export class ProviderProfileController {
         baseUrlEnabled,
       });
     }
-    this._options.saveFailed(intent.field, error);
+    reportModelMutationFailure(
+      this._notifications,
+      { operation: "save-provider-profile", field: intent.field },
+      error
+    );
   }
 
   private _rows(

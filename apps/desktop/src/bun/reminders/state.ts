@@ -6,6 +6,7 @@ import {
   getSettingsDir,
   readJsonFile,
 } from "@llm-space/core/server";
+import { inject, injectable, unmanaged } from "inversify";
 import { z } from "zod";
 
 import type { Disposable } from "../../shared/disposable";
@@ -67,6 +68,8 @@ export interface RemindersStateOptions {
   readonly now?: () => number;
 }
 
+export const REMINDERS_STATE_FILE = Symbol("RemindersStateFile");
+
 /** Whether the reminder should appear on this open (pure; no side effects). */
 function _shouldShow(
   star: GithubStarReminder,
@@ -91,6 +94,7 @@ function _shouldShow(
  * - Later appearances are throttled to once every 2 days since the last show.
  * - Retire permanently once the user clicks through, or after 3 shows.
  */
+@injectable()
 export class RemindersState implements RemindersRequests, Disposable {
   private readonly _launchId: string;
   private readonly _now: () => number;
@@ -98,10 +102,12 @@ export class RemindersState implements RemindersRequests, Disposable {
   private _disposed = false;
 
   constructor(
+    @inject(REMINDERS_STATE_FILE)
     private readonly _filePath: string = join(
       getSettingsDir(),
       "reminders.json"
     ),
+    @unmanaged()
     options: RemindersStateOptions = {}
   ) {
     this._launchId = options.launchId ?? randomUUID();

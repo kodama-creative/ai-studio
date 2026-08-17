@@ -27,7 +27,6 @@ export interface DesktopRPCType {
       rpcNamespaceStreamSubscribe: NamespacedRpcStreamSubscribe;
       rpcNamespaceStreamUnsubscribe: NamespacedRpcStreamUnsubscribe;
       rpcNamespaceRequestCancel: NamespacedRpcRequestCancel;
-      executeCommand: Command;
     };
   }>;
   webview: RPCSchema<{

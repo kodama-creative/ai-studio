@@ -1,7 +1,6 @@
-import type { ModelManager } from "@llm-space/runtime/models";
-import type { SkillsManager } from "@llm-space/runtime/skills";
+import { ModelManager } from "@llm-space/runtime/models";
 import { createStudio, type Studio } from "@llm-space/studio/server";
-import { ContainerModule, type ResolutionContext } from "inversify";
+import { ContainerModule, inject, injectable, preDestroy } from "inversify";
 
 import type { AgentProjectView } from "../../shared/agent-project";
 import {
@@ -10,32 +9,108 @@ import {
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
 import {
-  desktopToken,
-} from "../di/tokens";
-import { MODEL_MANAGER } from "../models/models-module";
-import { WINDOW_CONTEXT } from "../native/native-window-module";
-import { SKILLS_MANAGER } from "../skills/skills-module";
+  WINDOW_CONTEXT_PROVIDER,
+  type WindowContextProvider,
+} from "../native/native-window-module";
 import { StudioThreadRpcServer } from "../thread/thread-rpc-server";
 
 import type { AgentProject } from "./agent-project";
-import {
-  ProjectSourceRpcServer,
-  StudioRpcServer,
-} from "./project-rpc-server";
+import { PROJECT_SOURCE } from "./project-identifiers";
+import { ProjectSourceRpcServer, StudioRpcServer } from "./project-rpc-server";
 import { ProjectSandbox } from "./project-sandbox";
+import { ProjectSkillService } from "./project-skill-service";
 
-export const PROJECT_SOURCE = desktopToken<AgentProject>(
-  "project-window",
-  "source"
-);
-export const PROJECT_VIEW = desktopToken<AgentProjectView>(
-  "project-window",
-  "project"
-);
-export const PROJECT_STUDIO = desktopToken<Studio>(
-  "project-window",
-  "studio"
-);
+export { PROJECT_SOURCE } from "./project-identifiers";
+
+/** Own one Project's source-derived Studio resource for the child lifetime. */
+@injectable()
+export class ProjectService implements WindowContextProvider {
+  private _startPromise: Promise<void> | undefined;
+  private _stopPromise: Promise<void> | undefined;
+  private _studio: Studio | undefined;
+  private _view: AgentProjectView | undefined;
+  private _stopped = false;
+
+  constructor(
+    @inject(PROJECT_SOURCE) private readonly _source: AgentProject,
+    @inject(ModelManager) private readonly _models: ModelManager,
+    @inject(ProjectSandbox) private readonly _sandbox: ProjectSandbox,
+    @inject(ProjectSkillService)
+    private readonly _projectSkills: ProjectSkillService
+  ) {}
+
+  /** Open Studio and derive immutable renderer identity before RPC starts. */
+  start(): Promise<void> {
+    if (this._stopped) {
+      return Promise.reject(new Error("Project Service is already stopped."));
+    }
+    this._startPromise ??= this._start();
+    return this._startPromise;
+  }
+
+  /** Return the started Studio for Project RPC contributions. */
+  get studio(): Studio {
+    if (this._studio === undefined) {
+      throw new Error("Project Service must start before Studio is used.");
+    }
+    return this._studio;
+  }
+
+  /** Return identity frozen from the source revision opened by Studio. */
+  get projectView(): AgentProjectView {
+    if (this._view === undefined) {
+      throw new Error("Project Service must start before identity is used.");
+    }
+    return this._view;
+  }
+
+  getWindowContext() {
+    return { kind: "agentProject", project: this.projectView } as const;
+  }
+
+  /** Close Studio exactly once; safe after partial startup failure. */
+  @preDestroy()
+  stop(): Promise<void> {
+    this._stopPromise ??= this._stop();
+    return this._stopPromise;
+  }
+
+  private async _start(): Promise<void> {
+    const studio = await createStudio({
+      projectRoot: this._source.rootPath,
+      dataRoot: this._source.studioStateRoot,
+      models: () => this._models.getAvailableModels(),
+      resolveConnection: ({ providerId }) =>
+        this._models.resolveConnection({ providerId }),
+      runtimeServices: {
+        sandbox: this._sandbox,
+        skills: this._projectSkills,
+      },
+    });
+    if (this._stopped) {
+      await studio.close();
+      throw new Error("Project Service stopped during startup.");
+    }
+    this._studio = studio;
+    this._view = {
+      id: this._source.id,
+      name: this._source.name,
+      rootPath: this._source.rootPath,
+      agentRoot: this._source.agentRoot,
+      agentId: studio.agent.agentSpecId,
+      generationId: studio.agent.sourceRevision,
+    };
+  }
+
+  private async _stop(): Promise<void> {
+    this._stopped = true;
+    await this._startPromise?.catch(() => undefined);
+    const studio = this._studio;
+    this._studio = undefined;
+    this._view = undefined;
+    await studio?.close();
+  }
+}
 
 /** Bind one Project Studio from its source and process-owned runtime managers. */
 export function projectWindowModule(input: {
@@ -43,75 +118,25 @@ export function projectWindowModule(input: {
 }): ContainerModule {
   return new ContainerModule(({ bind }) => {
     bind(PROJECT_SOURCE).toConstantValue(input.source);
-    bind(PROJECT_STUDIO)
-      .toDynamicValue(async (context: ResolutionContext) => {
-        const source = context.get<AgentProject>(PROJECT_SOURCE);
-        const modelManager = context.get<ModelManager>(
-          MODEL_MANAGER
-        );
-        const skillsManager = context.get<SkillsManager>(
-          SKILLS_MANAGER
-        );
-        return createStudio({
-          projectRoot: source.rootPath,
-          dataRoot: source.studioStateRoot,
-          models: () => modelManager.getAvailableModels(),
-          resolveConnection: ({ providerId }) =>
-            modelManager.resolveConnection({ providerId }),
-          runtimeServices: {
-            sandbox: new ProjectSandbox(source.rootPath),
-            skills: {
-              resolve({ identifier }) {
-                const skill = skillsManager.findSkill(identifier);
-                if (skill === null) {
-                  throw new Error(`Skill "${identifier}" is not available.`);
-                }
-                const name = skill.frontmatters.name;
-                const description = skill.frontmatters.description;
-                if (
-                  typeof name !== "string" ||
-                  typeof description !== "string"
-                ) {
-                  throw new Error(
-                    `Skill "${identifier}" has invalid frontmatter.`
-                  );
-                }
-                return { name, description, markdown: skill.content };
-              },
-            },
-          },
-        }).then((studio) =>
-          Object.assign(studio, { dispose: () => studio.close() })
-        );
-      })
-      .inSingletonScope();
+    bind(ProjectSandbox).toSelf().inSingletonScope();
+    bind(ProjectSkillService).toSelf().inSingletonScope();
+    bind(ProjectService).toSelf().inSingletonScope();
+    bind(WINDOW_CONTEXT_PROVIDER).toService(ProjectService);
   });
 }
 
-/** Bind renderer identity only after Studio reveals the loaded Agent ids. */
-export function projectWindowIdentityModule(
-  project: AgentProjectView
-): ContainerModule {
-  return new ContainerModule(({ bind }) => {
-    bind(WINDOW_CONTEXT).toConstantValue({
-      kind: "agentProject",
-      project,
-    });
-    bind(PROJECT_VIEW).toConstantValue(project);
-  });
-}
-
+@injectable()
 class ProjectContribution implements RpcContributionApi {
   constructor(
-    private readonly _studio: Studio,
-    private readonly _projectId: string
+    @inject(ProjectService) private readonly _project: ProjectService
   ) {}
 
   registerRpc(rpc: RpcRegistry): void {
-    rpc.registerServer(new ProjectSourceRpcServer(this._studio));
-    rpc.registerServer(new StudioRpcServer(this._studio));
+    const studio = this._project.studio;
+    rpc.registerServer(new ProjectSourceRpcServer(studio));
+    rpc.registerServer(new StudioRpcServer(studio));
     rpc.registerServer(
-      new StudioThreadRpcServer(this._studio, this._projectId)
+      new StudioThreadRpcServer(studio, this._project.projectView.id)
     );
   }
 }
@@ -119,15 +144,7 @@ class ProjectContribution implements RpcContributionApi {
 /** Bind Project-only Studio transport adapters in the window scope. */
 export function projectContributionsModule(): ContainerModule {
   return new ContainerModule(({ bind }) => {
-    bind(ProjectContribution)
-      .toDynamicValue(
-        (context) =>
-          new ProjectContribution(
-            context.get(PROJECT_STUDIO),
-            context.get<AgentProjectView>(PROJECT_VIEW).id
-          )
-      )
-      .inSingletonScope();
+    bind(ProjectContribution).toSelf().inSingletonScope();
     bind<RpcContributionApi>(RpcContribution).toService(ProjectContribution);
   });
 }

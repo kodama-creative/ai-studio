@@ -1,31 +1,27 @@
-import Electrobun, { app, type ElectrobunEvent } from "electrobun/bun";
+import type { BrowserWindow } from "electrobun/bun";
+import { inject, injectable } from "inversify";
 
+import type { Command } from "../../shared/commands";
 import type { Analytics } from "../analytics";
-import type { ProjectWindowManager } from "../projects/project-window-manager";
+import { ANALYTICS } from "../analytics/analytics-module";
+import { DesktopPlaygroundApplication } from "../playgrounds/playground-application";
+import { ProjectWindowManager } from "../projects/project-window-manager";
 import type { UpdaterService } from "../updates";
+import { UPDATER } from "../updates/updates-module";
 
-import type { DesktopLaunchController } from "./desktop-launch-controller";
+import { DesktopLaunchService } from "./desktop-launch-service";
 import {
   type DesktopAppRuntime,
   DesktopLifecycle,
 } from "./desktop-lifecycle";
-import type {
-  DesktopMainWindowHandle,
-  DesktopWindowFactory,
+import {
+  DESKTOP_WINDOW_COMMAND_ROUTER,
+  type DesktopWindowCommandRouter,
+} from "./desktop-window-command-router";
+import {
+  type DesktopMainWindowHandle,
 } from "./desktop-window-factory";
-import type { MainWindowManager } from "./main-window-manager";
-import { registerMenuActions } from "./menu";
-import { createShutdownCoordinator } from "./shutdown-coordinator";
-
-export interface DesktopAppOptions {
-  readonly analytics: Analytics;
-  readonly updater: UpdaterService;
-  readonly launch: DesktopLaunchController;
-  readonly mainWindows: MainWindowManager<DesktopMainWindowHandle>;
-  readonly projectWindows: ProjectWindowManager;
-  readonly windowFactory: DesktopWindowFactory;
-  readonly stopProcess: () => Promise<void>;
-}
+import { MainWindowManager } from "./main-window-manager";
 
 /**
  * Own the Desktop process lifecycle after bootstrap has composed every service.
@@ -34,17 +30,32 @@ export interface DesktopAppOptions {
  * container. Bootstrap remains the only place that knows how those
  * collaborators are registered and constructed.
  */
+@injectable()
 export class DesktopApp implements DesktopAppRuntime {
   private readonly _lifecycle = new DesktopLifecycle();
   private _started = false;
 
-  constructor(private readonly _options: DesktopAppOptions) {
+  constructor(
+    @inject(ANALYTICS) private readonly _analytics: Analytics,
+    @inject(UPDATER) private readonly _updater: UpdaterService,
+    @inject(DesktopPlaygroundApplication)
+    private readonly _playground: DesktopPlaygroundApplication,
+    @inject(DesktopLaunchService)
+    private readonly _launch: DesktopLaunchService,
+    @inject(MainWindowManager)
+    private readonly _mainWindows: MainWindowManager<DesktopMainWindowHandle>,
+    @inject(ProjectWindowManager)
+    private readonly _projectWindows: ProjectWindowManager,
+    @inject(DESKTOP_WINDOW_COMMAND_ROUTER)
+    private readonly _windowCommands: DesktopWindowCommandRouter
+  ) {
     // Registration order mirrors ownership; DesktopLifecycle stops in reverse.
-    this._lifecycle.defer("desktop process scope", _options.stopProcess);
+    this._lifecycle.defer("playground", () => this._playground.dispose());
+    this._lifecycle.defer("main window", () => this._mainWindows.close());
     this._lifecycle.defer("agent project windows", () =>
-      _options.projectWindows.closeAll()
+      this._projectWindows.closeAll()
     );
-    this._lifecycle.defer("desktop launch", () => _options.launch.dispose());
+    this._lifecycle.defer("desktop launch", () => this._launch.dispose());
   }
 
   /** Start native routing, background services, restored windows, and events. */
@@ -55,31 +66,13 @@ export class DesktopApp implements DesktopAppRuntime {
     this._started = true;
 
     try {
-      registerMenuActions(
-        () => this._options.mainWindows.current()?.window,
-        (command, window) =>
-          this._options.windowFactory.executeCommand(command, window)
-      );
-      await this._options.launch.start();
+      await this._launch.start();
 
-      this._options.analytics.capture("app_opened", {
-        isFirstOpen: this._options.analytics.isFirstRun,
+      this._analytics.capture("app_opened", {
+        isFirstOpen: this._analytics.isFirstRun,
       });
-      void this._options.updater.start();
-      await this._options.projectWindows.restoreProjects();
-
-      const handleBeforeQuit = createShutdownCoordinator({
-        quit: () => app.quit(),
-        stop: () => this.stop(),
-      });
-      Electrobun.events.on(
-        "before-quit",
-        (event: ElectrobunEvent<{}, { allow: boolean }>) =>
-          handleBeforeQuit(event)
-      );
-      Electrobun.events.on("reopen", () => {
-        this._options.launch.reopen();
-      });
+      void this._updater.start();
+      await this._projectWindows.restoreProjects();
     } catch (error) {
       await this.stop();
       throw error;
@@ -89,5 +82,20 @@ export class DesktopApp implements DesktopAppRuntime {
   /** Stop launch routing, native windows, and the process scope exactly once. */
   stop(): Promise<void> {
     return this._lifecycle.stop();
+  }
+
+  /** Route a native reopen through the already-resolved Application graph. */
+  reopen(): void {
+    this._launch.reopen();
+  }
+
+  /** Return the live Main native handle used as the default menu target. */
+  currentMainWindow(): BrowserWindow | undefined {
+    return this._mainWindows.current()?.window;
+  }
+
+  /** Forward one native menu intent to the target renderer Command Registry. */
+  executeCommand(command: Command, window: BrowserWindow): void {
+    this._windowCommands.executeCommand(command, window);
   }
 }

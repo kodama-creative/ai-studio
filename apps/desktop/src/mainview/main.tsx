@@ -13,6 +13,15 @@ import { scan } from "react-scan";
 import "@/lib/electrobun";
 
 import { App } from "../app";
+import { createRendererWindowContainer } from "../app/di/create-renderer-window-container";
+import {
+  disposeRendererContainer,
+  RendererApplication,
+} from "../app/di/lifecycle";
+import { RendererContainerProvider } from "../app/di/react";
+import { createElectrobunRpcTransport } from "../app/rpc/electrobun-rpc-transport";
+import { createRpcClient } from "../shared/namespaced-rpc";
+import { WINDOW_RPC } from "../shared/window-rpc";
 
 // Opt-in via the Experimental settings; the toggle only takes effect on the
 // next reload since react-scan must patch the reconciler before React renders.
@@ -25,8 +34,38 @@ if (
   scan({ enabled: true });
 }
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>
-);
+const root = createRoot(document.getElementById("root")!);
+
+void bootstrapRenderer().catch((error) => {
+  const message = error instanceof Error ? error.message : String(error);
+  root.render(
+    <div className="text-destructive grid size-full place-items-center p-8">
+      {message}
+    </div>
+  );
+});
+
+/** Resolve WindowContext before creating the independent renderer graph. */
+async function bootstrapRenderer(): Promise<void> {
+  const transport = createElectrobunRpcTransport();
+  const context = await createRpcClient(WINDOW_RPC, transport).getContext();
+  const container = createRendererWindowContainer(context, transport);
+  const application = container.get(RendererApplication);
+  application.start();
+  root.render(
+    <StrictMode>
+      <RendererContainerProvider container={container}>
+        <App context={context} />
+      </RendererContainerProvider>
+    </StrictMode>
+  );
+  window.addEventListener(
+    "unload",
+    () => {
+      application.prepareToStop();
+      root.unmount();
+      void disposeRendererContainer(container);
+    },
+    { once: true }
+  );
+}

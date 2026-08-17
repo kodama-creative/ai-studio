@@ -1,17 +1,16 @@
 import type { ModelProviderGroup } from "@llm-space/core";
+import { inject, injectable } from "inversify";
+
+import { DesktopModelCatalogController } from "../models/desktop-model-catalog-controller";
+import { RendererNotificationService } from "../notifications/renderer-notification-service";
+
+export const ONBOARDING_NEEDS_DISCOVERY = Symbol("OnboardingNeedsDiscovery");
 
 export interface OnboardingSnapshot {
   readonly builtinProviders: readonly ModelProviderGroup[] | null;
   readonly providerDiscoveryFailed: boolean;
   readonly addingProviderId: string | null;
   readonly addedProviderName: string | null;
-}
-
-export interface OnboardingControllerOptions {
-  readonly fetchBuiltinProviders: () => Promise<ModelProviderGroup[]>;
-  readonly addProvider: (providerId: string) => Promise<void>;
-  readonly notifyProviderAdded: (providerName: string) => void;
-  readonly notifyAddFailed: (error: unknown) => void;
 }
 
 type Listener = () => void;
@@ -24,7 +23,16 @@ const INITIAL_SNAPSHOT: OnboardingSnapshot = {
 };
 
 /** Owns one open Onboarding dialog's provider discovery and add lifecycle. */
+@injectable()
 export class OnboardingController {
+  private readonly _catalog: Pick<
+    DesktopModelCatalogController,
+    "builtinProviders" | "addProvider"
+  >;
+  private readonly _notifications: Pick<
+    RendererNotificationService,
+    "success" | "error"
+  >;
   private readonly _listeners = new Set<Listener>();
   private _lifecycle = 0;
   private _discoveryRequest = 0;
@@ -33,9 +41,25 @@ export class OnboardingController {
   private _snapshot: OnboardingSnapshot = INITIAL_SNAPSHOT;
 
   constructor(
-    private readonly _options: OnboardingControllerOptions,
-    private readonly _initialNeedsDiscovery = false
-  ) {}
+    @inject(DesktopModelCatalogController)
+    catalog: Pick<
+      DesktopModelCatalogController,
+      "builtinProviders" | "addProvider"
+    >,
+    @inject(RendererNotificationService)
+    notifications: Pick<
+      RendererNotificationService,
+      "success" | "error"
+    >,
+    @inject(ONBOARDING_NEEDS_DISCOVERY)
+    initialNeedsDiscovery = false
+  ) {
+    this._catalog = catalog;
+    this._notifications = notifications;
+    this._initialNeedsDiscovery = initialNeedsDiscovery;
+  }
+
+  private readonly _initialNeedsDiscovery: boolean;
 
   readonly getSnapshot = (): OnboardingSnapshot => this._snapshot;
 
@@ -95,18 +119,18 @@ export class OnboardingController {
       addingProviderId: provider.id,
     });
     try {
-      await this._options.addProvider(provider.id);
+      await this._catalog.addProvider(provider.id);
       if (!this._isCurrent(lifecycle)) return;
       this._setSnapshot({
         ...this._snapshot,
         addingProviderId: null,
         addedProviderName: provider.name,
       });
-      this._options.notifyProviderAdded(provider.name);
+      this._notifications.success(`${provider.name} is ready`);
     } catch (error) {
       if (!this._isCurrent(lifecycle)) return;
       this._setSnapshot({ ...this._snapshot, addingProviderId: null });
-      this._options.notifyAddFailed(error);
+      this._notifications.error("Could not add provider", error);
     }
   }
 
@@ -114,7 +138,7 @@ export class OnboardingController {
     const lifecycle = this._lifecycle;
     const request = this._discoveryRequest;
     try {
-      const builtinProviders = await this._options.fetchBuiltinProviders();
+      const builtinProviders = await this._catalog.builtinProviders();
       if (!this._isCurrentDiscovery(lifecycle, request)) return;
       this._setSnapshot({
         ...this._snapshot,

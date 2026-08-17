@@ -14,3 +14,19 @@ test("EventHub publishes typed values and disposes subscriptions", async () => {
 
   expect(values).toEqual(["first"]);
 });
+
+test("EventHub isolates and reports listener failures", () => {
+  const errors: unknown[] = [];
+  const values: string[] = [];
+  const failure = new Error("listener failed");
+  const hub = new EventHub<{ changed: string }>((error) => errors.push(error));
+  hub.subscribe("changed", () => {
+    throw failure;
+  });
+  hub.subscribe("changed", (value) => values.push(value));
+
+  hub.publish("changed", "observed");
+
+  expect(errors).toEqual([failure]);
+  expect(values).toEqual(["observed"]);
+});

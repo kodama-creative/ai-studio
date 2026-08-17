@@ -1,8 +1,11 @@
 import { expect, mock, test } from "bun:test";
 
-import { ContainerModule } from "inversify";
+import {
+  Container,
+  ContainerModule,
+  type ServiceIdentifier,
+} from "inversify";
 
-import type { CommandContribution as CommandContributionApi } from "../di/command-contribution";
 import type { RpcContribution as RpcContributionApi } from "../di/rpc-contribution";
 
 await mock.module("electrobun/bun", () => ({
@@ -28,32 +31,28 @@ const { GITHUB_AUTH } = await import("../auth/github-account-module");
 const { AuxiliaryGenerationApplication } = await import(
   "../auxiliary-generation/auxiliary-generation-application"
 );
-const { CommandContribution } = await import("../di/command-contribution");
-const { createDesktopProcessContainer } = await import(
-  "../di/process-container"
-);
 const { RpcContribution } = await import("../di/rpc-contribution");
 const { windowRegistryModule } = await import("../di/window-registry-module");
 const { DESKTOP_HOST } = await import("../host/desktop-host-module");
 const { MCP_MANAGER } = await import("../mcp/mcp-module");
-const { ModelsApplication } = await import("../models/models-application");
+const { ModelsService } = await import("../models/models-service");
 const { APP_HOME_PATH } = await import("../native/app-directories-module");
-const { NATIVE_DIALOGS_APPLICATION } = await import(
+const { NativeDialogsApplication } = await import(
   "../native/native-dialogs-module"
 );
-const { WINDOW_APPLICATION, WINDOW_CONTEXT, WINDOW_STATE_MANAGER } = await import(
-  "../native/native-window-module"
-);
+const {
+  WINDOW_APPLICATION,
+  WINDOW_CONTEXT_PROVIDER,
+  WINDOW_STATE_MANAGER,
+} = await import("../native/native-window-module");
 const { NETWORK_SETTINGS } = await import("../network/network-module");
-const { PLAYGROUND_APPLICATION } = await import(
-  "../playgrounds/playground-module"
+const { DesktopPlaygroundApplication } = await import(
+  "../playgrounds/playground-application"
 );
-const { AGENT_PROJECTS_APPLICATION } = await import(
-  "../projects/agent-projects-module"
+const { AgentProjectsApplication } = await import(
+  "../projects/agent-projects-application"
 );
-const { PROJECT_STUDIO, PROJECT_VIEW } = await import(
-  "../projects/project-module"
-);
+const { ProjectService } = await import("../projects/project-module");
 const { RemindersState } = await import("../reminders/state");
 const { SEARCH_SETTINGS } = await import("../search/search-module");
 const { SKILLS_MANAGER } = await import("../skills/skills-module");
@@ -61,87 +60,101 @@ const { ThreadSharingApplication } = await import(
   "../thread-sharing/thread-sharing-application"
 );
 const { UPDATER } = await import("../updates/updates-module");
-const { createDesktopWindowScopeComposition } = await import("./bootstrap");
-const { DesktopWindowRuntime } = await import("./desktop-window-runtime");
+const { createDesktopWindowComposition } = await import("./bootstrap");
+const {
+  DESKTOP_WINDOW_CLOSE,
+  DESKTOP_WINDOW_KIND,
+  DesktopWindowRuntime,
+} = await import("./desktop-window-runtime");
 
-test("window scope configuration completes before Registry snapshots start", async () => {
-  const process = createDesktopProcessContainer();
-  const scope = process.createWindowScope("main");
+test("window Container composition completes before Registries start", async () => {
+  const container = new Container();
   const lifecycle: string[] = [];
-
-  const runtime = new DesktopWindowRuntime(scope, "main", (windowScope, context) => {
-    lifecycle.push("configure");
-    windowScope.bindConstant(WINDOW_APPLICATION, {
-      attach: () => undefined,
-    } as never);
-    windowScope.load(
-      new ContainerModule(({ bind }) => {
-        bind(CommandContribution).toConstantValue({
-          registerCommands: () => lifecycle.push("commands"),
-        });
-        bind(RpcContribution).toConstantValue({
-          registerRpc: () => lifecycle.push("rpc"),
-        });
-      })
-    );
-    windowScope.load(windowRegistryModule(windowScope, context));
+  lifecycle.push("configure");
+  container.bind(WINDOW_APPLICATION).toConstantValue({
+    attach: () => undefined,
   });
+  container.load(
+    new ContainerModule(({ bind }) => {
+      bind(RpcContribution).toConstantValue({
+        registerRpc: () => lifecycle.push("rpc"),
+      });
+    })
+  );
+  container.load(
+    windowRegistryModule({
+      rpcEventSink: {
+        sendEvent: () => undefined,
+        sendStreamEvent: () => undefined,
+      },
+    })
+  );
+  container.bind(DESKTOP_WINDOW_KIND).toConstantValue("main");
+  container.bind(DESKTOP_WINDOW_CLOSE).toConstantValue({
+    requestClose: () => undefined,
+  });
+  container.bind(DesktopWindowRuntime).toSelf().inSingletonScope();
+  const runtime = container.get(DesktopWindowRuntime);
 
   expect(runtime.rpc).toBeDefined();
-  expect(lifecycle).toEqual(["configure", "commands", "rpc"]);
+  expect(lifecycle).toEqual(["configure"]);
+  runtime.start();
+  expect(lifecycle).toEqual(["configure", "rpc"]);
 
-  await scope.dispose();
-  await process.dispose();
+  await runtime.dispose();
+  await container.unbindAllAsync();
 });
 
 test("production composition keeps Common, Main, and Project contributions explicit", async () => {
-  const { configureRuntime: configureDesktopWindowScope } =
-    await createDesktopWindowScopeComposition();
-  const process = createDesktopProcessContainer();
-  process.bindConstant(ANALYTICS, {} as never);
-  process.bindConstant(GITHUB_AUTH, {} as never);
-  process.bindConstant(AuxiliaryGenerationApplication, {} as never);
-  process.bindConstant(DESKTOP_HOST, {} as never);
-  process.bindConstant(MCP_MANAGER, {} as never);
-  process.bindConstant(ModelsApplication, {} as never);
-  process.bindConstant(APP_HOME_PATH, "/tmp/llm-space-test");
-  process.bindConstant(NATIVE_DIALOGS_APPLICATION, {} as never);
-  process.bindConstant(NETWORK_SETTINGS, {} as never);
-  process.bindConstant(PLAYGROUND_APPLICATION, {} as never);
-  process.bindConstant(AGENT_PROJECTS_APPLICATION, {} as never);
-  process.bindConstant(RemindersState, {} as never);
-  process.bindConstant(SEARCH_SETTINGS, {} as never);
-  process.bindConstant(SKILLS_MANAGER, {} as never);
-  process.bindConstant(ThreadSharingApplication, {} as never);
-  process.bindConstant(UPDATER, {} as never);
-  process.bindConstant(WINDOW_STATE_MANAGER, {} as never);
+  const composition = await createDesktopWindowComposition();
+  const configureDesktopWindowContainer = composition.configureRuntime.bind(
+    composition
+  );
+  const desktop = new Container();
+  const bindConstant = <T>(token: ServiceIdentifier<T>, value: T) =>
+    desktop.bind(token).toConstantValue(value);
+  bindConstant(ANALYTICS, {});
+  bindConstant(GITHUB_AUTH, {});
+  bindConstant(AuxiliaryGenerationApplication, {} as never);
+  bindConstant(DESKTOP_HOST, {});
+  bindConstant(MCP_MANAGER, {});
+  bindConstant(ModelsService, {} as never);
+  bindConstant(APP_HOME_PATH, "/tmp/llm-space-test");
+  bindConstant(NativeDialogsApplication, {} as never);
+  bindConstant(NETWORK_SETTINGS, {});
+  bindConstant(DesktopPlaygroundApplication, {} as never);
+  bindConstant(AgentProjectsApplication, {} as never);
+  bindConstant(RemindersState, {} as never);
+  bindConstant(SEARCH_SETTINGS, {});
+  bindConstant(SKILLS_MANAGER, {});
+  bindConstant(ThreadSharingApplication, {} as never);
+  bindConstant(UPDATER, {});
+  bindConstant(WINDOW_STATE_MANAGER, {});
 
   const contributionNames = (kind: "main" | "project") => {
-    const scope = process.createWindowScope(kind);
-    scope.bindConstant(
-      WINDOW_CONTEXT,
-      kind === "main"
-        ? { kind: "playground" }
-        : { kind: "agentProject", project: {} as never }
-    );
+    const container = new Container({ parent: desktop });
+    container.bind(WINDOW_CONTEXT_PROVIDER).toConstantValue({
+      getWindowContext: () =>
+        kind === "main"
+          ? ({ kind: "playground" } as const)
+          : ({ kind: "agentProject", project: {} as never } as const),
+    });
     if (kind === "project") {
-      scope.bindConstant(PROJECT_STUDIO, {} as never);
-      scope.bindConstant(PROJECT_VIEW, { id: "project" } as never);
+      container.bind(ProjectService).toConstantValue({
+        studio: {},
+        projectView: { id: "project" },
+      } as unknown as InstanceType<typeof ProjectService>);
     }
-    configureDesktopWindowScope(scope, {
+    configureDesktopWindowContainer(container, {
       kind,
-      commandSink: { sendToWebview: () => undefined },
       rpcEventSink: {
         sendEvent: () => undefined,
         sendStreamEvent: () => undefined,
       },
     });
     return {
-      commands: scope
-        .getAll<CommandContributionApi>(CommandContribution)
-        .map((value) => value.constructor.name),
-      rpc: scope
-        .getAll<RpcContributionApi>(RpcContribution)
+      rpc: container
+        .getAll<RpcContributionApi>(RpcContribution, { chained: true })
         .map((value) => value.constructor.name),
     };
   };
@@ -149,21 +162,18 @@ test("production composition keeps Common, Main, and Project contributions expli
   const main = contributionNames("main");
   const project = contributionNames("project");
 
-  expect(main.commands).toEqual(project.commands);
-  expect(main.commands).toContain("AgentProjectsCommandContribution");
   expect(main.rpc).toContain("AgentProjectsRpcContribution");
   expect(main.rpc).toContain("PlaygroundContribution");
   expect(main.rpc).not.toContain("ProjectContribution");
-  expect(project.rpc).not.toContain("AgentProjectsRpcContribution");
+  expect(project.rpc).toContain("AgentProjectsRpcContribution");
   expect(project.rpc).not.toContain("PlaygroundContribution");
   expect(project.rpc).toContain("ProjectContribution");
   expect(
     main.rpc.filter(
       (name) =>
-        name !== "AgentProjectsRpcContribution" &&
         name !== "PlaygroundContribution"
     )
   ).toEqual(project.rpc.filter((name) => name !== "ProjectContribution"));
 
-  await process.dispose();
+  await desktop.unbindAllAsync();
 });

@@ -1,8 +1,12 @@
 import type { GithubAuthState } from "./auth";
 import { defineRpcNamespace } from "./namespaced-rpc";
 
+export const GITHUB_ACCOUNT_SERVICE = Symbol("GithubAccountService");
+
 export interface GithubAccountRequests {
   getState(): Promise<GithubAuthState>;
+  signIn(): Promise<void>;
+  signOut(): Promise<void>;
 }
 
 export interface GithubAccountEvents {
@@ -18,7 +22,7 @@ export interface GithubAccountRpc {
 export const GITHUB_ACCOUNT_RPC = defineRpcNamespace<GithubAccountRpc>(
   "githubAccount",
   {
-    requests: { getState: true },
+    requests: { getState: true, signIn: true, signOut: true },
     streams: {},
     events: { changed: true },
   }

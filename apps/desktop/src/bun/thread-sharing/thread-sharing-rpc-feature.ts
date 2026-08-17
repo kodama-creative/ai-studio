@@ -1,6 +1,5 @@
-import { ContainerModule } from "inversify";
+import { ContainerModule, inject, injectable } from "inversify";
 
-import type { RpcServer } from "../../shared/namespaced-rpc";
 import {
   THREAD_SHARING_RPC,
   type ThreadSharingRpc,
@@ -13,32 +12,26 @@ import type { RpcRegistry } from "../di/rpc-registry";
 
 import { ThreadSharingApplication } from "./thread-sharing-application";
 
-class ThreadSharingRpcServer implements RpcServer<ThreadSharingRpc> {
-  readonly namespace = THREAD_SHARING_RPC;
-  readonly streams = {};
-
-  constructor(readonly requests: ThreadSharingApplication) {}
-}
-
+@injectable()
 class ThreadSharingContribution implements RpcContributionApi {
-  constructor(private readonly _application: ThreadSharingApplication) {}
+  constructor(
+    @inject(ThreadSharingApplication)
+    private readonly _application: ThreadSharingApplication
+  ) {}
 
   registerRpc(rpc: RpcRegistry): void {
-    rpc.registerServer(new ThreadSharingRpcServer(this._application));
+    rpc.registerServer({
+      namespace: THREAD_SHARING_RPC,
+      requests: this._application,
+      streams: {},
+    } satisfies import("../../shared/namespaced-rpc").RpcServer<ThreadSharingRpc>);
   }
 }
 
 /** Bind thread-sharing transport as one window contribution. */
 export function threadSharingRpcModule(): ContainerModule {
   return new ContainerModule(({ bind }) => {
-    bind(ThreadSharingContribution)
-      .toDynamicValue(
-        (context) =>
-          new ThreadSharingContribution(
-            context.get(ThreadSharingApplication)
-          )
-      )
-      .inSingletonScope();
+    bind(ThreadSharingContribution).toSelf().inSingletonScope();
     bind<RpcContributionApi>(RpcContribution).toService(
       ThreadSharingContribution
     );

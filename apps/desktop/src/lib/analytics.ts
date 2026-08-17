@@ -1,5 +1,5 @@
-import type { AnalyticsClient } from "@/client/analytics";
 import type { AnalyticsEvent } from "@/shared/analytics";
+import type { AnalyticsRequests } from "@/shared/analytics-rpc";
 
 /**
  * Record an anonymous, behaviour-only analytics event from the renderer.
@@ -10,7 +10,7 @@ import type { AnalyticsEvent } from "@/shared/analytics";
  * See `shared/analytics.ts` for the privacy contract.
  */
 export function trackAnalytics(
-  client: Pick<AnalyticsClient, "capture">,
+  client: Pick<AnalyticsRequests, "capture">,
   event: AnalyticsEvent
 ): void {
   void Promise.resolve()

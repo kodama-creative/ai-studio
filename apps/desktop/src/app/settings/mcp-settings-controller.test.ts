@@ -16,20 +16,21 @@ describe("McpSettingsController", () => {
     const firstSave = _deferred<McpServerView[]>();
     const secondSave = _deferred<McpServerView[]>();
     const drafts: McpServerDraft[] = [];
-    const controller = new McpSettingsController({
-      client: _client({
+    const controller = new McpSettingsController(
+      _client({
         listServers: () => Promise.resolve([_server("server-a", "Alpha")]),
         updateServer: (_id, draft) => {
           drafts.push(draft);
           return drafts.length === 1 ? firstSave.promise : secondSave.promise;
         },
       }),
-      notifySuccess: () => undefined,
-      notifyError: (title, error) => {
-        throw new Error(`${title}: ${String(error)}`);
-      },
-      saveDelayMs: 0,
-    });
+      _notifications({
+        error: (title, error) => {
+          throw new Error(`${title}: ${String(error)}`);
+        },
+      }),
+      0
+    );
 
     controller.start();
     await _eventually(() => controller.getSnapshot().loading, false);
@@ -71,20 +72,21 @@ describe("McpSettingsController", () => {
     const added: McpServerDraft[] = [];
     const alpha = _server("server-a", "Alpha");
     const beta = _server("server-b", "Beta");
-    const controller = new McpSettingsController({
-      client: _client({
+    const controller = new McpSettingsController(
+      _client({
         listServers: () => Promise.resolve([alpha]),
         addServer: (draft) => {
           added.push(draft);
           return Promise.resolve([alpha, beta]);
         },
       }),
-      notifySuccess: () => undefined,
-      notifyError: (title, error) => {
-        throw new Error(`${title}: ${String(error)}`);
-      },
-      saveDelayMs: 0,
-    });
+      _notifications({
+        error: (title, error) => {
+          throw new Error(`${title}: ${String(error)}`);
+        },
+      }),
+      0
+    );
     controller.start();
     await _eventually(() => controller.getSnapshot().loading, false);
 
@@ -136,15 +138,17 @@ describe("McpSettingsController", () => {
     const tools = _deferred<McpServerToolsResponse>();
     const notifications: string[] = [];
     const server = _server("server-a", "Alpha");
-    const controller = new McpSettingsController({
-      client: _client({
+    const controller = new McpSettingsController(
+      _client({
         listServers: () => Promise.resolve([server]),
         listTools: () => tools.promise,
         cancelTest: () => Promise.resolve([server]),
       }),
-      notifySuccess: (title) => notifications.push(title),
-      notifyError: (title) => notifications.push(title),
-    });
+      _notifications({
+        success: (title) => notifications.push(title),
+        error: (title) => notifications.push(title),
+      })
+    );
     controller.start();
     await _eventually(() => controller.getSnapshot().loading, false);
 
@@ -169,11 +173,10 @@ describe("McpSettingsController", () => {
 
   test("ignores a refresh result completed after stop", async () => {
     const servers = _deferred<McpServerView[]>();
-    const controller = new McpSettingsController({
-      client: _client({ listServers: () => servers.promise }),
-      notifySuccess: () => undefined,
-      notifyError: () => undefined,
-    });
+    const controller = new McpSettingsController(
+      _client({ listServers: () => servers.promise }),
+      _notifications()
+    );
     controller.start();
     controller.stop();
     servers.resolve([_server("server-a", "Late")]);
@@ -195,6 +198,19 @@ function _client(
     cancelTest: () => Promise.resolve([]),
     listTools: () =>
       Promise.reject(new Error("Unexpected MCP tools request.")),
+    ...overrides,
+  };
+}
+
+function _notifications(
+  overrides: Partial<{
+    success(message: string): void;
+    error(title: string, error?: unknown): void;
+  }> = {}
+) {
+  return {
+    success: () => undefined,
+    error: () => undefined,
     ...overrides,
   };
 }

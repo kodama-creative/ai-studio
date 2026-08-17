@@ -4,6 +4,8 @@ import type { StudioThread, StudioThreadEvent } from "@llm-space/studio";
 
 import type { StudioTransport } from "@/shared/studio-rpc";
 
+import type { RendererNotificationService } from "../notifications/renderer-notification-service";
+
 import { ProjectThreadsController } from "./project-threads-controller";
 
 describe("ProjectThreadsController", () => {
@@ -23,10 +25,10 @@ describe("ProjectThreadsController", () => {
         return _untilAborted(cursor?.signal);
       },
     });
-    const controller = new ProjectThreadsController({
+    const controller = new ProjectThreadsController(
       client,
-      reportError: (title) => errors.push(title),
-    });
+      _notifications((title) => errors.push(title))
+    );
     await controller.start();
 
     const first = controller.open("thread-a");
@@ -89,12 +91,12 @@ describe("ProjectThreadsController", () => {
           : _events([]);
       },
     });
-    const controller = new ProjectThreadsController({
+    const controller = new ProjectThreadsController(
       client,
-      reportError: (title, error) => {
+      _notifications((title, error) => {
         throw new Error(`${title}: ${String(error)}`);
-      },
-    });
+      })
+    );
 
     expect(await controller.start()).toMatchObject({ id: "thread-a" });
     await _eventually(
@@ -130,10 +132,10 @@ describe("ProjectThreadsController", () => {
         return _untilAborted(cursor?.signal);
       },
     });
-    const controller = new ProjectThreadsController({
+    const controller = new ProjectThreadsController(
       client,
-      reportError: (title) => errors.push(title),
-    });
+      _notifications((title) => errors.push(title))
+    );
 
     await controller.start();
     expect(await controller.create()).toBeUndefined();
@@ -146,6 +148,12 @@ describe("ProjectThreadsController", () => {
     expect(signals[0].aborted).toBeTrue();
   });
 });
+
+function _notifications(
+  reportError: (title: string, error?: unknown) => void
+): RendererNotificationService {
+  return { error: reportError } as RendererNotificationService;
+}
 
 function _client(
   overrides: Partial<StudioTransport>

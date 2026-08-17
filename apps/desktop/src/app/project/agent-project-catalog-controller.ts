@@ -1,16 +1,19 @@
+import { inject, injectable } from "inversify";
+
 import { disposeBestEffort } from "@/app/lifecycle/dispose-best-effort";
-import type { AgentProjectClient } from "@/client/agent-project-client";
 import type { AgentProjectSummary } from "@/shared/agent-project";
+import {
+  AGENT_PROJECTS_SERVICE,
+  type AgentProjectsRpc,
+} from "@/shared/agent-project-rpc";
 import type { Disposable } from "@/shared/disposable";
+import type { RpcClient } from "@/shared/namespaced-rpc";
+
+import { RendererNotificationService } from "../notifications/renderer-notification-service";
 
 export interface AgentProjectCatalogSnapshot {
   readonly projects: readonly AgentProjectSummary[];
   readonly loading: boolean;
-}
-
-export interface AgentProjectCatalogControllerOptions {
-  readonly client: Pick<AgentProjectClient, "list" | "on">;
-  readonly reportError: (title: string, error: unknown) => void;
 }
 
 type Listener = () => void;
@@ -22,6 +25,7 @@ type Listener = () => void;
  * change starts a newer read, so no catalog mutation can disappear in the
  * list/subscribe gap or be overwritten by an older response.
  */
+@injectable()
 export class AgentProjectCatalogController {
   private readonly _listeners = new Set<Listener>();
   private _lifecycle = 0;
@@ -33,7 +37,12 @@ export class AgentProjectCatalogController {
     loading: true,
   };
 
-  constructor(private readonly _options: AgentProjectCatalogControllerOptions) {}
+  constructor(
+    @inject(AGENT_PROJECTS_SERVICE)
+    private readonly _projects: Pick<RpcClient<AgentProjectsRpc>, "list" | "on">,
+    @inject(RendererNotificationService)
+    private readonly _notifications: RendererNotificationService
+  ) {}
 
   readonly getSnapshot = (): AgentProjectCatalogSnapshot => this._snapshot;
 
@@ -51,15 +60,15 @@ export class AgentProjectCatalogController {
     const subscriptions: Disposable[] = [];
     try {
       subscriptions.push(
-        this._options.client.on("changed", () => {
+        this._projects.on("changed", () => {
           if (!this._isActiveLifecycle(lifecycle)) return;
           void this.refresh();
         })
       );
       subscriptions.push(
-        this._options.client.on("openFailed", ({ message }) => {
+        this._projects.on("openFailed", ({ message }) => {
           if (!this._isActiveLifecycle(lifecycle)) return;
-          this._options.reportError(
+          this._notifications.error(
             "Unable to open Agent Project",
             new Error(message)
           );
@@ -76,7 +85,7 @@ export class AgentProjectCatalogController {
       this._started = false;
       this._lifecycle += 1;
       this._setSnapshot({ ...this._snapshot, loading: false });
-      this._options.reportError("Unable to watch Agent Projects", error);
+      this._notifications.error("Unable to watch Agent Projects", error);
     }
   }
 
@@ -98,13 +107,13 @@ export class AgentProjectCatalogController {
     const lifecycle = this._lifecycle;
     const request = ++this._request;
     try {
-      const projects = await this._options.client.list();
+      const projects = await this._projects.list();
       if (!this._isCurrent(lifecycle, request)) return;
       this._setSnapshot({ projects, loading: false });
     } catch (error) {
       if (!this._isCurrent(lifecycle, request)) return;
       this._setSnapshot({ ...this._snapshot, loading: false });
-      this._options.reportError("Unable to refresh Agent Projects", error);
+      this._notifications.error("Unable to refresh Agent Projects", error);
     }
   }
 

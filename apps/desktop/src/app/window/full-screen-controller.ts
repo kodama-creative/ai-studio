@@ -1,5 +1,8 @@
+import { inject, injectable } from "inversify";
+
 import { disposeBestEffort } from "@/app/lifecycle/dispose-best-effort";
 import type { Disposable } from "@/shared/disposable";
+import { WINDOW_SERVICE } from "@/shared/window-rpc";
 
 export interface FullScreenClient {
   getFullscreenState(): Promise<{ fullScreen: boolean }>;
@@ -22,6 +25,7 @@ const INITIAL_SNAPSHOT: FullScreenSnapshot = { fullScreen: false };
  * subscribed before the initial read, and any event observed in that lifecycle
  * remains authoritative over a late read response.
  */
+@injectable()
 export class FullScreenController {
   private readonly _listeners = new Set<Listener>();
   private _lifecycle = 0;
@@ -29,7 +33,9 @@ export class FullScreenController {
   private _subscription: Disposable | null = null;
   private _snapshot: FullScreenSnapshot = INITIAL_SNAPSHOT;
 
-  constructor(private readonly _client: FullScreenClient) {}
+  constructor(
+    @inject(WINDOW_SERVICE) private readonly _client: FullScreenClient
+  ) {}
 
   readonly getSnapshot = (): FullScreenSnapshot => this._snapshot;
 

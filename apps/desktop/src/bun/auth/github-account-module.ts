@@ -1,77 +1,45 @@
-import { ContainerModule } from "inversify";
+import { ContainerModule, inject, injectable } from "inversify";
 
 import {
   GITHUB_ACCOUNT_RPC,
   type GithubAccountRequests,
   type GithubAccountRpc,
 } from "../../shared/github-account-rpc";
-import type { RpcServer } from "../../shared/namespaced-rpc";
-import {
-  CommandContribution,
-  type CommandContribution as CommandContributionApi,
-} from "../di/command-contribution";
-import type { CommandRegistry } from "../di/command-registry";
 import {
   RpcContribution,
   type RpcContribution as RpcContributionApi,
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
-import { desktopToken } from "../di/tokens";
 
 import type { GitHubAuthManager } from "./github-auth-manager";
 
-export const GITHUB_AUTH = desktopToken<GitHubAuthManager>(
-  "github-account",
-  "auth"
-);
+export const GITHUB_AUTH = Symbol("GitHubAuthManager");
 
-class GithubAccountRpcServer implements RpcServer<GithubAccountRpc> {
-  readonly namespace = GITHUB_ACCOUNT_RPC;
-  readonly streams = {};
-  readonly eventSource;
-  readonly requests: GithubAccountRequests;
-
-  constructor(auth: GitHubAuthManager) {
-    this.requests = {
-      getState: () => Promise.resolve(auth.getState()),
-    };
-    this.eventSource = auth.events;
-  }
-}
-
-class GithubAccountContribution
-  implements CommandContributionApi, RpcContributionApi
-{
-  constructor(private readonly _auth: GitHubAuthManager) {}
-
-  registerCommands(commands: CommandRegistry): void {
-    commands.registerCommand("githubAccount.login", {
-      execute: () => this._auth.signIn(),
-    });
-    commands.registerCommand("githubAccount.logout", {
-      execute: () => this._auth.signOut(),
-    });
-  }
+@injectable()
+class GithubAccountContribution implements RpcContributionApi {
+  constructor(
+    @inject(GITHUB_AUTH) private readonly _auth: GitHubAuthManager
+  ) {}
 
   registerRpc(rpc: RpcRegistry): void {
-    rpc.registerServer(new GithubAccountRpcServer(this._auth));
+    const requests: GithubAccountRequests = {
+      getState: () => Promise.resolve(this._auth.getState()),
+      signIn: () => this._auth.signIn(),
+      signOut: () => Promise.resolve(this._auth.signOut()),
+    };
+    rpc.registerServer({
+      namespace: GITHUB_ACCOUNT_RPC,
+      requests,
+      streams: {},
+      eventSource: this._auth.events,
+    } satisfies import("../../shared/namespaced-rpc").RpcServer<GithubAccountRpc>);
   }
 }
 
 /** Bind GitHub account commands and RPC as one shared contribution instance. */
 export function githubAccountRpcModule(): ContainerModule {
   return new ContainerModule(({ bind }) => {
-    bind(GithubAccountContribution)
-      .toDynamicValue(
-        (context) =>
-          new GithubAccountContribution(
-            context.get<GitHubAuthManager>(GITHUB_AUTH)
-          )
-      )
-      .inSingletonScope();
-    bind<CommandContributionApi>(CommandContribution).toService(
-      GithubAccountContribution
-    );
+    bind(GithubAccountContribution).toSelf().inSingletonScope();
     bind<RpcContributionApi>(RpcContribution).toService(
       GithubAccountContribution
     );

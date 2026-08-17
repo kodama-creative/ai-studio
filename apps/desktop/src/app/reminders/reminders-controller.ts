@@ -1,5 +1,10 @@
+import { inject, injectable } from "inversify";
+
 import type { FeatureReminder } from "@/shared/feature-reminders";
-import type { RemindersRequests } from "@/shared/reminders-rpc";
+import {
+  REMINDERS_SERVICE,
+  type RemindersRequests,
+} from "@/shared/reminders-rpc";
 
 type Listener = () => void;
 
@@ -13,6 +18,7 @@ export interface RemindersSnapshot {
  * best-effort: a transport failure must never become an unhandled renderer
  * rejection or interfere with the primary Playground/Studio workflows.
  */
+@injectable()
 export class RemindersController {
   private readonly _listeners = new Set<Listener>();
   private _active = false;
@@ -26,7 +32,9 @@ export class RemindersController {
     showGithubStar: false,
   };
 
-  constructor(private readonly _requests: RemindersRequests) {}
+  constructor(
+    @inject(REMINDERS_SERVICE) private readonly _requests: RemindersRequests
+  ) {}
 
   readonly getSnapshot = (): RemindersSnapshot => this._snapshot;
 

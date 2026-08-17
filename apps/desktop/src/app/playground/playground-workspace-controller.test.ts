@@ -4,10 +4,14 @@ import type { PortableThreadSnapshot } from "@llm-space/core";
 import type { Playground } from "@llm-space/studio";
 import type { PromptExample } from "@llm-space/ui/components/thread-playground/examples/prompts";
 
-import {
-  PlaygroundWorkspaceController,
-  type PlaygroundWorkspaceControllerOptions,
-} from "./playground-workspace-controller";
+import type { PlaygroundClient } from "@/shared/playground-rpc";
+
+import type { MainTabsController } from "../tabs/main-tabs-controller";
+
+import { PlaygroundWorkspaceController } from "./playground-workspace-controller";
+
+type CreatePlayground = PlaygroundClient["create"];
+type ListPlaygrounds = PlaygroundClient["list"];
 
 describe("PlaygroundWorkspaceController", () => {
   test("resolves one example and opens the created durable Playground", async () => {
@@ -128,15 +132,15 @@ describe("PlaygroundWorkspaceController", () => {
 });
 
 function _fixture(overrides: {
-  readonly create?: PlaygroundWorkspaceControllerOptions["client"]["create"];
-  readonly list?: PlaygroundWorkspaceControllerOptions["client"]["list"];
+  readonly create?: CreatePlayground;
+  readonly list?: ListPlaygrounds;
 } = {}) {
-  const created: Parameters<PlaygroundWorkspaceControllerOptions["client"]["create"]>[0][] = [];
+  const created: Parameters<CreatePlayground>[0][] = [];
   const imported: PortableThreadSnapshot[] = [];
   const events: string[] = [];
   const createdPlayground = _playground("playground-created", "Created");
-  const controller = new PlaygroundWorkspaceController({
-    client: {
+  const controller = new PlaygroundWorkspaceController(
+    {
       create:
         overrides.create ??
         ((input) => {
@@ -150,13 +154,15 @@ function _fixture(overrides: {
           return Promise.resolve([]);
         }),
     },
-    importSnapshot: (snapshot) => {
-      imported.push(snapshot);
-      return Promise.resolve(
-        _playground(`import-${snapshot.source.productId}`, "Imported")
-      );
+    {
+      importSnapshot: (snapshot) => {
+        imported.push(snapshot);
+        return Promise.resolve(
+          _playground(`import-${snapshot.source.productId}`, "Imported")
+        );
+      },
     },
-    seedHost: {
+    {
       skills: {
         getSettings: () => Promise.resolve({ discoveryPaths: [] }),
         listAvailable: () => Promise.resolve([]),
@@ -166,13 +172,21 @@ function _fixture(overrides: {
         ensureRootDir: () => Promise.resolve("/workspace"),
       },
     },
-    openPlayground: (playground) => events.push(`open:${playground.id}`),
-    notifySuccess: (message) => events.push(`success:${message}`),
-    notifyError: (title, error) =>
-      events.push(
-        `error:${title}${error instanceof Error ? `:${error.message}` : ""}`
-      ),
-  });
+    {
+      dispatch: (intent: { type: string; playgroundId?: string }) => {
+        if (intent.type === "open" && intent.playgroundId !== undefined) {
+          events.push(`open:${intent.playgroundId}`);
+        }
+      },
+    } as unknown as MainTabsController,
+    {
+      success: (message: string) => events.push(`success:${message}`),
+      error: (title: string, error?: unknown) =>
+        events.push(
+          `error:${title}${error instanceof Error ? `:${error.message}` : ""}`
+        ),
+    }
+  );
   return { controller, created, events, imported };
 }
 

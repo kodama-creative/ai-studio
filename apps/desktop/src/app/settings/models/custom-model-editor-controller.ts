@@ -1,10 +1,15 @@
 import type { CustomModel } from "@llm-space/core";
+import { inject, injectable } from "inversify";
+
+import { DesktopModelCatalogController } from "../../models/desktop-model-catalog-controller";
 
 export interface CustomModelEditorTarget {
   readonly providerId: string;
   readonly profileId: string;
   readonly originalModelId?: string;
 }
+
+export const CUSTOM_MODEL_EDITOR_TARGET = Symbol("CustomModelEditorTarget");
 
 export type CustomModelEditorOperation = "idle" | "saving" | "testing";
 
@@ -18,19 +23,6 @@ export type CustomModelEditorResult =
   | { readonly type: "failed"; readonly error: unknown }
   | { readonly type: "ignored" };
 
-export interface CustomModelEditorControllerOptions {
-  readonly save: (
-    providerId: string,
-    model: CustomModel,
-    originalModelId?: string
-  ) => Promise<void>;
-  readonly test: (
-    providerId: string,
-    profileId: string,
-    model: CustomModel
-  ) => Promise<void>;
-}
-
 type Listener = () => void;
 
 const IDLE_SNAPSHOT: CustomModelEditorSnapshot = { operation: "idle" };
@@ -39,16 +31,30 @@ const IDLE_SNAPSHOT: CustomModelEditorSnapshot = { operation: "idle" };
  * Owns one Custom Model editor session's mutually exclusive Save/Test effects.
  * Closing or changing target invalidates every in-flight result.
  */
+@injectable()
 export class CustomModelEditorController {
+  private readonly _catalog: Pick<
+    DesktopModelCatalogController,
+    "upsertCustomModel" | "testModelConnection"
+  >;
+  private readonly _initialTarget?: CustomModelEditorTarget;
   private readonly _listeners = new Set<Listener>();
   private _epoch = 0;
   private _target: CustomModelEditorTarget | null = null;
   private _snapshot: CustomModelEditorSnapshot = IDLE_SNAPSHOT;
 
   constructor(
-    private readonly _options: CustomModelEditorControllerOptions,
-    private readonly _initialTarget?: CustomModelEditorTarget
-  ) {}
+    @inject(DesktopModelCatalogController)
+    catalog: Pick<
+      DesktopModelCatalogController,
+      "upsertCustomModel" | "testModelConnection"
+    >,
+    @inject(CUSTOM_MODEL_EDITOR_TARGET)
+    initialTarget: CustomModelEditorTarget
+  ) {
+    this._catalog = catalog;
+    this._initialTarget = initialTarget;
+  }
 
   readonly getSnapshot = (): CustomModelEditorSnapshot => this._snapshot;
 
@@ -101,13 +107,18 @@ export class CustomModelEditorController {
     this._setSnapshot({ operation });
     try {
       if (operation === "saving") {
-        await this._options.save(
+        await this._catalog.upsertCustomModel(
           target.providerId,
           model,
           target.originalModelId
         );
       } else {
-        await this._options.test(target.providerId, target.profileId, model);
+        await this._catalog.testModelConnection(
+          target.providerId,
+          model.id,
+          model,
+          target.profileId
+        );
       }
     } catch (error) {
       if (!this._isCurrent(epoch, target, operation)) {

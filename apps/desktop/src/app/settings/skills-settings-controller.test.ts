@@ -17,10 +17,7 @@ describe("SkillsSettingsController", () => {
     });
 
     controller.start();
-    await _eventually(
-      () => controller.getSnapshot().skills?.[0]?.name,
-      "one"
-    );
+    await _eventually(() => controller.getSnapshot().skills?.[0]?.name, "one");
 
     expect(controller.getSnapshot()).toMatchObject({
       loadingSettings: false,
@@ -81,7 +78,9 @@ describe("SkillsSettingsController", () => {
         },
         list: (path) => {
           lists.push(path);
-          const enabled = !(path === "/beta" && lists.filter((p) => p === path).length > 1);
+          const enabled = !(
+            path === "/beta" && lists.filter((p) => p === path).length > 1
+          );
           return Promise.resolve([_skill(path, `${path}-skill`, enabled)]);
         },
       }),
@@ -101,11 +100,7 @@ describe("SkillsSettingsController", () => {
     await controller.removeFolder("/beta");
     await _eventually(() => controller.getSnapshot().selectedPath, "/alpha");
 
-    expect(mutations).toEqual([
-      "add:/beta",
-      "all:/beta:true",
-      "remove:/beta",
-    ]);
+    expect(mutations).toEqual(["add:/beta", "all:/beta:true", "remove:/beta"]);
     expect(lists).toEqual(["/alpha", "/beta", "/beta", "/alpha"]);
     expect(controller.getSnapshot().skills?.[0]?.name).toBe("/alpha-skill");
     controller.stop();
@@ -203,12 +198,12 @@ function _controller(
     notifyError?: (title: string, error: unknown) => void;
   } = {}
 ): SkillsSettingsController {
-  return new SkillsSettingsController({
-    client: options.client ?? _client(),
-    browseForPath: options.browseForPath ?? (() => Promise.resolve(null)),
-    revealPath: () => Promise.resolve(),
-    notifyError: options.notifyError ?? (() => undefined),
-  });
+  return new SkillsSettingsController(
+    options.client ?? _client(),
+    { pickDirectory: options.browseForPath ?? (() => Promise.resolve(null)) },
+    { reveal: () => Promise.resolve() },
+    { error: options.notifyError ?? (() => undefined) }
+  );
 }
 
 function _client(

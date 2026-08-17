@@ -1,15 +1,11 @@
-import type { Studio } from "@llm-space/studio/server";
 import type { BrowserWindow } from "electrobun/bun";
+import { Container, ContainerModule, inject, injectable } from "inversify";
 
-import type { AgentProjectView } from "../../shared/agent-project";
 import type { Command } from "../../shared/commands";
-import type {
-  DesktopProcessContainer,
-  DesktopWindowScope,
-} from "../di/process-container";
-import type { NativeWindowStateBinding } from "../native/native-window-module";
+import { Emitter, type Event } from "../../shared/event";
+import type { RpcEventSink } from "../di/rpc-registry";
+import { APP_HOME_PATH } from "../native/app-directories-module";
 import type { AgentProject } from "../projects/agent-project";
-import { PROJECT_STUDIO } from "../projects/project-module";
 import type {
   ProjectWindowAdapter,
   ProjectWindowHandle,
@@ -17,134 +13,295 @@ import type {
 import { ProjectWindowStateFile } from "../projects/project-window-state";
 import type { MainWindowRPC } from "../rpc";
 
+import type { DesktopWindowCommandRouter } from "./desktop-window-command-router";
 import {
-  type ConfigureDesktopWindowScope,
+  DESKTOP_WINDOW_CLOSE,
+  DESKTOP_WINDOW_KIND,
+  type DesktopWindowClose,
+  type DesktopWindowCompositionContext,
   DesktopWindowRuntime,
 } from "./desktop-window-runtime";
+import { MainWindowApplication } from "./main-window-application";
+import {
+  NATIVE_WINDOW_FACTORY,
+  type NativeWindowFactory,
+} from "./native-window-factory";
+import { ProjectWindowApplication } from "./project-window-application";
 import { createAgentProjectWindow, createMainWindow } from "./window";
+import type { DesktopWindowApplication } from "./window-application";
+import type {
+  MainWindowContainerHandle,
+  WindowContainerFactory,
+} from "./window-container-factory";
 
-export interface DesktopMainWindowHandle {
-  readonly window: BrowserWindow;
-  readonly rpc: MainWindowRPC;
-  activate(): void;
-}
+export type DesktopMainWindowHandle = MainWindowContainerHandle;
 
 /** Bootstrap-owned registrations needed across the staged window lifecycle. */
-export interface DesktopWindowScopeComposition {
-  configureMainIdentity(scope: DesktopWindowScope): void;
-  configureProjectSource(
-    scope: DesktopWindowScope,
-    project: AgentProject
+export interface DesktopWindowComposition {
+  configureMainIdentity(container: Container): void;
+  configureProjectSource(container: Container, project: AgentProject): void;
+  configureRuntime(
+    container: Container,
+    context: DesktopWindowCompositionContext
   ): void;
-  configureProjectIdentity(
-    scope: DesktopWindowScope,
-    projectView: AgentProjectView
-  ): void;
-  readonly configureRuntime: ConfigureDesktopWindowScope;
+}
+
+export const DESKTOP_CONTAINER = Symbol("DesktopContainer");
+export const DESKTOP_WINDOW_COMPOSITION = Symbol("DesktopWindowComposition");
+
+interface OwnedWindowContainer {
+  readonly container: Container;
+  readonly closed: Emitter<void>;
+  readonly onDidClose: Event<void>;
+  application?: DesktopWindowApplication;
+  dispose(): Promise<void>;
 }
 
 /** Create Main and Project native windows around one owned DI scope. */
-export class DesktopWindowFactory implements ProjectWindowAdapter {
-  private readonly _runtimes = new Map<number, DesktopWindowRuntime>();
+@injectable()
+export class DesktopWindowFactory
+  implements
+    ProjectWindowAdapter,
+    DesktopWindowCommandRouter,
+    WindowContainerFactory
+{
+  private readonly _applications = new Map<number, DesktopWindowApplication>();
 
   constructor(
-    private readonly _process: DesktopProcessContainer,
+    @inject(DESKTOP_CONTAINER)
+    private readonly _desktop: Container,
+    @inject(APP_HOME_PATH)
     private readonly _homePath: string,
-    private readonly _composition: DesktopWindowScopeComposition
+    @inject(DESKTOP_WINDOW_COMPOSITION)
+    private readonly _composition: DesktopWindowComposition
   ) {}
 
-  /** Create the Main window inside the scope allocated by MainWindowManager. */
-  async createMain(
-    scope: DesktopWindowScope
-  ): Promise<DesktopMainWindowHandle> {
-    this._composition.configureMainIdentity(scope);
-    const runtime = new DesktopWindowRuntime(
-      scope,
-      "main",
-      this._composition.configureRuntime
-    );
-    const window = await createMainWindow({
-      rpc: runtime.rpc,
-      onCreated: (created, state) =>
-        this._attach(scope, created, state, runtime),
-    });
-    return {
-      window,
-      rpc: runtime.rpc,
-      activate: () => window.activate(),
-    };
+  /** Create Main in a fresh child Container owned through native close. */
+  async createMain(): Promise<DesktopMainWindowHandle> {
+    const owned = this._createContainer("main", "main");
+    try {
+      this._composition.configureMainIdentity(owned.container);
+      const application = this._resolveMainApplication(owned);
+      const window = await application.start();
+      this._trackApplication(owned, window, application);
+      return {
+        window,
+        rpc: application.rpc,
+        onDidClose: owned.onDidClose,
+        activate: () => window.activate(),
+        close: () => owned.dispose(),
+      };
+    } catch (error) {
+      await this._cleanupFailedContainer(owned, "Main");
+      throw error;
+    }
   }
 
   /** Create an isolated Project Studio window and own creation-failure cleanup. */
   async create(project: AgentProject): Promise<ProjectWindowHandle> {
-    const scope = this._process.createWindowScope(`project:${project.id}`);
+    const owned = this._createContainer(`project:${project.id}`, "project");
     try {
-      this._composition.configureProjectSource(scope, project);
-      const studio = await scope.getAsync<Studio>(PROJECT_STUDIO);
-      const projectView: AgentProjectView = {
-        id: project.id,
-        name: project.name,
-        rootPath: project.rootPath,
-        agentRoot: project.agentRoot,
-        agentId: studio.agent.agentSpecId,
-        generationId: studio.agent.sourceRevision,
-      };
-      this._composition.configureProjectIdentity(scope, projectView);
-      const closed = new Set<() => void>();
-      scope.onDisposed(() => closed.forEach((listener) => listener()));
-      const runtime = new DesktopWindowRuntime(
-        scope,
-        "project",
-        this._composition.configureRuntime
-      );
-      const stateStore = await ProjectWindowStateFile.load(
-        this._homePath,
-        project.id
-      );
-      const window = await createAgentProjectWindow({
-        rpc: runtime.rpc,
-        project: projectView,
-        stateStore,
-        onCreated: (created, state) =>
-          this._attach(scope, created, state, runtime),
-      });
+      this._composition.configureProjectSource(owned.container, project);
+      const application = this._resolveProjectApplication(owned, project.id);
+      const window = await application.start();
+      this._trackApplication(owned, window, application);
       return {
+        onDidClose: owned.onDidClose,
         activate: () => window.activate(),
-        close: () => scope.dispose(),
-        onClosed: (listener) => closed.add(listener),
+        close: () => owned.dispose(),
       };
     } catch (error) {
-      try {
-        await scope.dispose();
-      } catch (cleanupError) {
-        console.error(
-          "Failed to dispose Agent Project scope after creation failed:",
-          cleanupError
-        );
-      }
+      await this._cleanupFailedContainer(owned, "Agent Project");
       throw error;
     }
   }
 
   /** Route a native menu command to the Registry owned by its window. */
   executeCommand(command: Command, window: BrowserWindow): void {
-    const runtime = this._runtimes.get(window.id);
-    if (runtime === undefined) {
+    const application = this._applications.get(window.id);
+    if (application === undefined) {
       throw new Error(
-        `DesktopWindowRuntime is unavailable for window ${window.id}.`
+        `Desktop window Application is unavailable for window ${window.id}.`
       );
     }
-    runtime.execute(command);
+    application.execute(command);
   }
 
-  private _attach(
-    scope: DesktopWindowScope,
+  private _trackApplication(
+    owned: OwnedWindowContainer,
     window: BrowserWindow,
-    state: NativeWindowStateBinding,
-    runtime: DesktopWindowRuntime
+    application: DesktopWindowApplication
   ): void {
-    runtime.attach(window, state);
-    this._runtimes.set(window.id, runtime);
-    scope.onDisposed(() => this._runtimes.delete(window.id));
+    this._applications.set(window.id, application);
+    owned.onDidClose(() => this._applications.delete(window.id));
+  }
+
+  /** Create one sibling child and its idempotent two-phase cleanup owner. */
+  private _createContainer(
+    id: string,
+    kind: "main" | "project"
+  ): OwnedWindowContainer {
+    const container = new Container({ parent: this._desktop });
+    const closed = new Emitter<void>();
+    let didClose = false;
+    let disposePromise: Promise<void> | undefined;
+    const owned: OwnedWindowContainer = {
+      container,
+      closed,
+      onDidClose: (listener) => {
+        // Native close may finish while Application.start() is still awaiting.
+        // Replaying this terminal fact prevents late owners retaining dead handles.
+        if (didClose) {
+          listener();
+          return { dispose: () => undefined };
+        }
+        return closed.event(listener);
+      },
+      dispose: () => {
+        disposePromise ??= (async () => {
+          const errors: unknown[] = [];
+          try {
+            await owned.application?.stop();
+          } catch (error) {
+            errors.push(error);
+          }
+          try {
+            await container.unbindAllAsync();
+          } catch (error) {
+            errors.push(error);
+          }
+          didClose = true;
+          closed.fire();
+          closed.dispose();
+          if (errors.length > 0) {
+            throw new AggregateError(
+              errors,
+              `Failed to dispose ${kind} window Container "${id}".`
+            );
+          }
+        })();
+        return disposePromise;
+      },
+    };
+    return owned;
+  }
+
+  /** Finish Common/Main composition, then resolve the sole child root. */
+  private _resolveMainApplication(
+    owned: OwnedWindowContainer
+  ): MainWindowApplication {
+    const native: NativeWindowFactory = {
+      create: (_context, rpc, attach) =>
+        createMainWindow({ rpc, onCreated: attach }),
+    };
+    const connectRpc = this._configureApplication(owned, "main", native);
+    owned.container.load(
+      new ContainerModule(({ bind }) => {
+        bind(MainWindowApplication).toSelf().inSingletonScope();
+      })
+    );
+    const application = owned.container.get(MainWindowApplication);
+    owned.application = application;
+    connectRpc(application);
+    return application;
+  }
+
+  /** Finish Common/Project composition, then resolve the sole child root. */
+  private _resolveProjectApplication(
+    owned: OwnedWindowContainer,
+    projectId: string
+  ): ProjectWindowApplication {
+    const native: NativeWindowFactory = {
+      create: async (context, rpc, attach) => {
+        if (context.kind !== "agentProject") {
+          throw new Error("Project native factory received a Main context.");
+        }
+        const stateStore = await ProjectWindowStateFile.load(
+          this._homePath,
+          projectId
+        );
+        return createAgentProjectWindow({
+          rpc,
+          project: context.project,
+          stateStore,
+          onCreated: attach,
+        });
+      },
+    };
+    const connectRpc = this._configureApplication(owned, "project", native);
+    owned.container.load(
+      new ContainerModule(({ bind }) => {
+        bind(ProjectWindowApplication).toSelf().inSingletonScope();
+      })
+    );
+    const application = owned.container.get(ProjectWindowApplication);
+    owned.application = application;
+    connectRpc(application);
+    return application;
+  }
+
+  /** Bind transport infrastructure before resolving an Application root. */
+  private _configureApplication(
+    owned: OwnedWindowContainer,
+    kind: "main" | "project",
+    native: NativeWindowFactory
+  ): (application: DesktopWindowApplication) => void {
+    const rpcBridge: { current?: MainWindowRPC } = {};
+    const requireRpc = (): MainWindowRPC => {
+      if (rpcBridge.current === undefined) {
+        throw new Error(`RPC bridge for ${kind} window is not ready.`);
+      }
+      return rpcBridge.current;
+    };
+    const rpcEventSink: RpcEventSink = {
+      sendStreamEvent: (event) =>
+        requireRpc().send.rpcNamespaceStreamEvent(event),
+      sendEvent: (event) => requireRpc().send.rpcNamespaceEvent(event),
+    };
+    this._composition.configureRuntime(owned.container, {
+      kind,
+      rpcEventSink,
+    });
+    owned.container.load(
+      new ContainerModule(({ bind }) => {
+        bind(DESKTOP_WINDOW_KIND).toConstantValue(kind);
+        bind<NativeWindowFactory>(NATIVE_WINDOW_FACTORY).toConstantValue(
+          native
+        );
+        bind<DesktopWindowClose>(DESKTOP_WINDOW_CLOSE).toConstantValue({
+          requestClose: () => {
+            void owned.dispose().catch((error) => {
+              console.error(`Failed to dispose ${kind} window:`, error);
+            });
+          },
+        });
+        bind(DesktopWindowRuntime).toSelf().inSingletonScope();
+      })
+    );
+    // The root resolves DesktopWindowRuntime as its dependency; this bridge is
+    // assigned immediately after root resolution and before start() registers
+    // event sources that may publish into the renderer transport.
+    const connectRpc = (application: DesktopWindowApplication): void => {
+      rpcBridge.current = application.rpc;
+    };
+    owned.onDidClose(() => {
+      rpcBridge.current = undefined;
+    });
+    return connectRpc;
+  }
+
+  /** Preserve the original creation error while reporting failed cleanup. */
+  private async _cleanupFailedContainer(
+    owned: OwnedWindowContainer,
+    label: string
+  ): Promise<void> {
+    try {
+      await owned.dispose();
+    } catch (cleanupError) {
+      console.error(
+        `Failed to dispose ${label} Container after creation failed:`,
+        cleanupError
+      );
+    }
   }
 }

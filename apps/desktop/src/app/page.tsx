@@ -18,15 +18,14 @@ import { lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePanelRef } from "react-resizable-panels";
 import { toast } from "sonner";
 
-import {
-  AGENT_PROJECT_CATALOG_CONTROLLER,
-  ANALYTICS_CLIENT,
-  MAIN_TABS_CONTROLLER,
-  PANE_ACTIVITY_TRACKER,
-  PLAYGROUND_WORKSPACE_CONTROLLER,
-} from "@/app/di/main-window-module";
 import { useController, useInject } from "@/app/di/react";
-import type { AppTab } from "@/app/tabs/main-tabs-controller";
+import { PaneActivityTracker } from "@/app/playground/pane-activity-tracker";
+import { PlaygroundWorkspaceController } from "@/app/playground/playground-workspace-controller";
+import { AgentProjectCatalogController } from "@/app/project/agent-project-catalog-controller";
+import {
+  MainTabsController,
+  type AppTab,
+} from "@/app/tabs/main-tabs-controller";
 import { UpdateStatusSurface } from "@/app/updates/update-status-provider";
 import { useFullScreen } from "@/app/window/use-full-screen";
 import { useCommands, useRegisterCommands } from "@/commands";
@@ -40,7 +39,15 @@ import { ThreadTabs } from "@/components/thread-tabs";
 import { UpdateIndicator } from "@/components/update-indicator";
 import { Welcome } from "@/components/welcome";
 import { trackAnalytics } from "@/lib/analytics";
+import {
+  ANALYTICS_SERVICE,
+  type AnalyticsRequests,
+} from "@/shared/analytics-rpc";
 import type { SettingsTab } from "@/shared/commands";
+import {
+  NATIVE_DIALOGS_SERVICE,
+  type NativeDialogsRequests,
+} from "@/shared/native-dialogs-rpc";
 
 import type { PaneLifecycleHost } from "./playground/pane-lifecycle-host";
 import {
@@ -132,9 +139,9 @@ function writeSidebarSize(sizeInPixels: number): void {
 }
 
 function PageWorkspace() {
-  const paneActivityTracker = useInject(PANE_ACTIVITY_TRACKER);
+  const paneActivityTracker = useInject(PaneActivityTracker);
   const { controller: tabsController, state: tabState } =
-    useController(MAIN_TABS_CONTROLLER);
+    useController(MainTabsController);
   const openPlayground = useCallback(
     (playgroundId: string, title: string) =>
       tabsController.dispatch({
@@ -158,11 +165,12 @@ function PageWorkspace() {
     [tabsController]
   );
   const agentProjectCatalog = useController(
-    AGENT_PROJECT_CATALOG_CONTROLLER
+    AgentProjectCatalogController
   ).state;
-  const analytics = useInject(ANALYTICS_CLIENT);
+  const analytics = useInject<AnalyticsRequests>(ANALYTICS_SERVICE);
+  const nativeDialogs = useInject<NativeDialogsRequests>(NATIVE_DIALOGS_SERVICE);
   const { controller: playgroundWorkspace, state: playgroundCatalog } =
-    useController(PLAYGROUND_WORKSPACE_CONTROLLER);
+    useController(PlaygroundWorkspaceController);
   const { executeCommand } = useCommands();
   const models = useModels();
   const refreshModels = useRefreshModels();
@@ -238,9 +246,8 @@ function PageWorkspace() {
   const [onboardOpen, setOnboardOpen] = useState(false);
   const [examplesOpen, setExamplesOpen] = useState(false);
   const [sharePath, setSharePath] = useState<string | null>(null);
-  // Snapshot import: a hidden picker opened by the import command plus
-  // page-wide OS drag-and-drop state.
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  // Snapshot import uses the native picker; page-wide drag-and-drop remains
+  // renderer-owned because the browser already supplies those File objects.
   const dragDepthRef = useRef(0);
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const handleImportFiles = useCallback(
@@ -309,12 +316,13 @@ function PageWorkspace() {
     "app.openCommandPalette": () => setCommandPaletteOpen(true),
     "app.openOnboard": () => setOnboardOpen(true),
     "playground.openExamples": () => setExamplesOpen(true),
-    "playground.importFiles": ({ files }) => {
+    "playground.importFiles": async ({ files }) => {
       if (files) {
         void handleImportFiles(files);
         return;
       }
-      fileInputRef.current?.click();
+      const selected = await nativeDialogs.pickImportFiles();
+      if (selected.length > 0) void handleImportFiles(selected);
     },
     "thread.share": ({ path }) => {
       if (path !== undefined) {
@@ -471,21 +479,6 @@ function PageWorkspace() {
         void handleImportFiles(e.dataTransfer.files);
       }}
     >
-      <input
-        ref={fileInputRef}
-        type="file"
-        multiple
-        accept=".json,.jsonl,application/json,application/x-ndjson"
-        aria-label="Import thread files"
-        className="hidden"
-        onChange={(e) => {
-          const files = e.target.files;
-          if (files?.length) {
-            void handleImportFiles(files);
-          }
-          e.target.value = "";
-        }}
-      />
       <main className="min-h-0 grow">
         <ResizablePanelGroup>
           <ResizablePanel

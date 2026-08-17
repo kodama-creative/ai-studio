@@ -14,21 +14,26 @@ import {
   SettingsIcon,
   XIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 
-import { ANALYTICS_CLIENT } from "@/app/di/main-window-module";
 import {
-  createOnboardingSessionScope,
+  createOnboardingSessionContainer,
   ONBOARDING_CONTROLLER,
 } from "@/app/di/onboarding-session-module";
 import {
-  RendererScopeProvider,
+  RendererSessionContainerProvider,
   useController,
   useInject,
-  useRendererScope,
+  useRendererContainer,
 } from "@/app/di/react";
 import { useCommands } from "@/commands";
 import { trackAnalytics } from "@/lib/analytics";
+import {
+  ANALYTICS_SERVICE,
+  type AnalyticsRequests,
+} from "@/shared/analytics-rpc";
+
+import { useDialogSessionPresence } from "./use-dialog-session-presence";
 
 /**
  * First-run onboarding dialog. Shown automatically when no models are configured
@@ -41,17 +46,40 @@ export function OnboardDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const parent = useRendererScope();
+  const parent = useRendererContainer();
   const models = useModels();
-  const needsDiscovery = useRef(models.length === 0).current;
-  const scope = useMemo(
-    () => createOnboardingSessionScope(parent, needsDiscovery),
+  const present = useDialogSessionPresence(open);
+  if (!present) return null;
+  return (
+    <OnboardDialogSession
+      parent={parent}
+      needsDiscovery={models.length === 0}
+      open={open}
+      onOpenChange={onOpenChange}
+    />
+  );
+}
+
+/** Own one fresh Onboarding child Container for exactly one open interaction. */
+function OnboardDialogSession({
+  parent,
+  needsDiscovery,
+  open,
+  onOpenChange,
+}: {
+  readonly parent: ReturnType<typeof useRendererContainer>;
+  readonly needsDiscovery: boolean;
+  readonly open: boolean;
+  readonly onOpenChange: (open: boolean) => void;
+}) {
+  const container = useMemo(
+    () => createOnboardingSessionContainer(parent, needsDiscovery),
     [needsDiscovery, parent]
   );
   return (
-    <RendererScopeProvider scope={scope}>
+    <RendererSessionContainerProvider container={container}>
       <OnboardDialogContent open={open} onOpenChange={onOpenChange} />
-    </RendererScopeProvider>
+    </RendererSessionContainerProvider>
   );
 }
 
@@ -64,7 +92,7 @@ function OnboardDialogContent({
 }) {
   const models = useModels();
   const { executeCommand } = useCommands();
-  const analytics = useInject(ANALYTICS_CLIENT);
+  const analytics = useInject<AnalyticsRequests>(ANALYTICS_SERVICE);
   const { controller, state: snapshot } = useController(ONBOARDING_CONTROLLER);
 
   useEffect(() => {

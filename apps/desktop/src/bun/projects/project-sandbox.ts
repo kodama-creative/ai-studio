@@ -7,10 +7,19 @@ import type {
   SandboxRunOptions,
   SandboxSession,
 } from "@llm-space/agent/sandbox";
+import { inject, injectable } from "inversify";
+
+import type { AgentProject } from "./agent-project";
+import { PROJECT_SOURCE } from "./project-identifiers";
 
 /** Local sandbox adapter whose filesystem and default cwd are one project. */
+@injectable()
 export class ProjectSandbox implements SandboxSession, SandboxService {
-  constructor(private readonly _rootPath: string) {}
+  private readonly _rootPath: string;
+
+  constructor(@inject(PROJECT_SOURCE) source: AgentProject) {
+    this._rootPath = source.rootPath;
+  }
 
   /** Studio deliberately exposes the checked-out Project as its debug sandbox. */
   getOrCreate(): Promise<SandboxSession> {

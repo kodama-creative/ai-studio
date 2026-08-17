@@ -16,13 +16,14 @@ import {
 } from "react";
 import { toast } from "sonner";
 
-import { PLAYGROUND_CLIENT } from "@/app/di/main-window-module";
 import { useInject } from "@/app/di/react";
 import {
   createPlaygroundThreadExecutionRuntime,
   playgroundToEditorThread,
 } from "@/app/playground-thread-adapter";
 import { SerializedPersistence } from "@/app/thread/serialized-persistence";
+import { PLAYGROUND_SERVICE, type PlaygroundClient } from "@/shared/playground-rpc";
+import { THREAD_SERVICE, type ThreadRequests } from "@/shared/thread-rpc";
 
 import type { PaneLifecycleHost } from "./pane-lifecycle-host";
 import { settleStreamingPane } from "./settle-streaming-pane";
@@ -55,7 +56,8 @@ function _PlaygroundTabPane({
   onThreadStateChange,
 }: PlaygroundTabPaneProps) {
   const queryClient = useQueryClient();
-  const client = useInject(PLAYGROUND_CLIENT);
+  const client = useInject<PlaygroundClient>(PLAYGROUND_SERVICE);
+  const threadService = useInject<ThreadRequests>(THREAD_SERVICE);
   const queryKey = useMemo(
     () => ["playground", playgroundId] as const,
     [playgroundId]
@@ -207,6 +209,7 @@ function _PlaygroundTabPane({
     () =>
       createPlaygroundThreadExecutionRuntime({
         client,
+        threadClient: threadService,
         playgroundId,
         getPlayground: () => {
           const current = playgroundRef.current;
@@ -232,6 +235,7 @@ function _PlaygroundTabPane({
       playgroundId,
       queryClient,
       queryKey,
+      threadService,
     ]
   );
   const handleStreamingStart = useCallback(

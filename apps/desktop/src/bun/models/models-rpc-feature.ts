@@ -1,44 +1,44 @@
-import { ContainerModule } from "inversify";
+import { ContainerModule, inject, injectable } from "inversify";
 
-import type { ModelsRequests, ModelsRpc } from "../../shared/models-rpc";
+import type { Disposable } from "../../shared/disposable";
+import type { ModelsRpc } from "../../shared/models-rpc";
 import { MODELS_RPC } from "../../shared/models-rpc";
-import type { RpcServer } from "../../shared/namespaced-rpc";
 import {
   RpcContribution,
   type RpcContribution as RpcContributionApi,
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
 
-import { ModelsApplication } from "./models-application";
-
-class ModelsRpcServer implements RpcServer<ModelsRpc> {
-  readonly namespace = MODELS_RPC;
-  readonly requests: ModelsRequests;
-  readonly streams = {};
-
-  constructor(application: ModelsApplication) {
-    this.requests = application;
-  }
-}
+import { ModelsService } from "./models-service";
 
 /** Owns the Models namespace for one native window. */
+@injectable()
 class ModelsRpcContribution implements RpcContributionApi {
-  constructor(private readonly _application: ModelsApplication) {}
+  constructor(
+    @inject(ModelsService) private readonly _application: ModelsService
+  ) {}
 
   registerRpc(rpc: RpcRegistry): void {
-    rpc.registerServer(new ModelsRpcServer(this._application));
+    rpc.registerServer({
+      namespace: MODELS_RPC,
+      requests: this._application,
+      streams: {},
+      eventSource: {
+        subscribe: (event, listener): Disposable => {
+          if (event !== "changed") {
+            throw new Error(`Unknown Models event: ${String(event)}`);
+          }
+          return this._application.onDidChange(() => listener({}));
+        },
+      },
+    } satisfies import("../../shared/namespaced-rpc").RpcServer<ModelsRpc>);
   }
 }
 
 /** Bind Models use cases as one window RPC contribution. */
 export function modelsRpcModule(): ContainerModule {
   return new ContainerModule(({ bind }) => {
-    bind(ModelsRpcContribution)
-      .toDynamicValue(
-        (context) =>
-          new ModelsRpcContribution(context.get(ModelsApplication))
-      )
-      .inSingletonScope();
+    bind(ModelsRpcContribution).toSelf().inSingletonScope();
     bind<RpcContributionApi>(RpcContribution).toService(ModelsRpcContribution);
   });
 }

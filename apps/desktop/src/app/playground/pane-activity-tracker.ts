@@ -1,4 +1,7 @@
+import { injectable } from "inversify";
+
 /** Coordinates tab mutations with in-flight execution and persistence. */
+@injectable()
 export class PaneActivityTracker {
   private readonly _mutatingPanes = new Set<string>();
   private readonly _persistingPanes = new Map<string, Set<object>>();

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 
 import type { HostServices } from "@llm-space/ui/host";
+import { Container } from "inversify";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import type {
@@ -90,8 +91,10 @@ const { CommandProvider } = await import("@/commands");
 const { DesktopHostProvider } = await import("./host-services");
 const { useHostServices } = await import("@llm-space/ui/host");
 const { rendererCommonModule } = await import("@/app/di/common-module");
-const { RendererScope } = await import("@/app/di/lifecycle");
-const { RendererScopeProvider } = await import("@/app/di/react");
+const { createElectrobunRpcTransport } = await import(
+  "@/app/rpc/electrobun-rpc-transport"
+);
+const { RendererContainerProvider } = await import("@/app/di/react");
 
 function _captureHost(): HostServices {
   let captured: HostServices | null = null;
@@ -99,15 +102,16 @@ function _captureHost(): HostServices {
     captured = useHostServices();
     return null;
   }
-  const scope = new RendererScope({ modules: [rendererCommonModule()] });
+  const container = new Container();
+  container.load(rendererCommonModule(createElectrobunRpcTransport()));
   renderToStaticMarkup(
-    <RendererScopeProvider scope={scope}>
+    <RendererContainerProvider container={container}>
       <CommandProvider>
         <DesktopHostProvider>
           <CaptureHost />
         </DesktopHostProvider>
       </CommandProvider>
-    </RendererScopeProvider>
+    </RendererContainerProvider>
   );
   if (!captured) throw new Error("Desktop host was not rendered");
   return captured;

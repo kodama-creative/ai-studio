@@ -1,4 +1,5 @@
 import type { StudioThread } from "@llm-space/studio";
+import { inject, injectable } from "inversify";
 
 import {
   ProjectSourceController,
@@ -39,6 +40,7 @@ type Listener = () => void;
  * workspace owns the selection epoch shared by both, so an older async open
  * can never steal focus from a newer selection of the other resource kind.
  */
+@injectable()
 export class ProjectWorkspaceController {
   private readonly _listeners = new Set<Listener>();
   private _activeTabId?: string;
@@ -49,7 +51,9 @@ export class ProjectWorkspaceController {
   private _snapshot: ProjectWorkspaceSnapshot;
 
   constructor(
+    @inject(ProjectThreadsController)
     private readonly _threads: ProjectThreadsController,
+    @inject(ProjectSourceController)
     private readonly _source: ProjectSourceController
   ) {
     this._snapshot = this._composeSnapshot();

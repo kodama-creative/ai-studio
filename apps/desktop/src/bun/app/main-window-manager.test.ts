@@ -1,26 +1,25 @@
 import { expect, test } from "bun:test";
 
-import { createDesktopProcessContainer } from "../di/process-container";
+import { Emitter } from "../../shared/event";
 
 import { MainWindowManager } from "./main-window-manager";
 
-test("native Main close disposes its scope and the next open recreates it", async () => {
-  const process = createDesktopProcessContainer();
+test("native Main close clears the handle and the next open recreates it", async () => {
   const ids: number[] = [];
   let nextId = 0;
-  const manager = new MainWindowManager(process, (scope) => {
-    const id = ++nextId;
-    ids.push(id);
-    const listeners = new Set<() => void>();
-    scope.onDispose(() => undefined);
-    return Promise.resolve({
-      id,
-      activate: () => undefined,
-      closeNative: () => {
-        listeners.forEach((listener) => listener());
-        void scope.dispose();
-      },
-    });
+  const manager = new MainWindowManager({
+    async createMain() {
+      const id = ++nextId;
+      ids.push(id);
+      const didClose = new Emitter<void>();
+      return Promise.resolve({
+        id,
+        activate: () => undefined,
+        close: () => didClose.fire(),
+        onDidClose: didClose.event,
+        closeNative: () => didClose.fire(),
+      });
+    },
   });
 
   const first = await manager.open();
@@ -30,26 +29,27 @@ test("native Main close disposes its scope and the next open recreates it", asyn
   expect(manager.current()).toBeUndefined();
   expect((await manager.open()).id).toBe(2);
   expect(ids).toEqual([1, 2]);
-
-  await process.dispose();
+  await manager.close();
 });
 
 test("concurrent Main opens share creation and activate the result", async () => {
-  const process = createDesktopProcessContainer();
   let createCount = 0;
   let activations = 0;
   let finish!: () => void;
   const gate = new Promise<void>((resolve) => {
     finish = resolve;
   });
-  const manager = new MainWindowManager(process, async () => {
-    createCount += 1;
-    await gate;
-    return {
-      activate: () => {
-        activations += 1;
-      },
-    };
+  const manager = new MainWindowManager({
+    createMain: () => {
+      createCount += 1;
+      return gate.then(() => ({
+        activate: () => {
+          activations += 1;
+        },
+        close: () => undefined,
+        onDidClose: _emptyEvent,
+      }));
+    },
   });
 
   const first = manager.open();
@@ -58,27 +58,52 @@ test("concurrent Main opens share creation and activate the result", async () =>
   expect(await first).toBe(await second);
   expect(createCount).toBe(1);
   expect(activations).toBe(1);
-
-  await process.dispose();
+  await manager.close();
 });
 
-test("a Main closed during async creation is never retained", async () => {
-  const process = createDesktopProcessContainer();
-  let finish!: () => void;
-  const gate = new Promise<void>((resolve) => {
-    finish = resolve;
-  });
-  const manager = new MainWindowManager(process, async (scope) => {
-    await gate;
-    await scope.dispose();
-    return { activate: () => undefined };
+test("a failed Main creation is never retained", async () => {
+  let attempts = 0;
+  const manager = new MainWindowManager({
+    createMain: () => {
+      attempts += 1;
+      if (attempts === 1) return Promise.reject(new Error("creation failed"));
+      return Promise.resolve({
+        activate: () => undefined,
+        close: () => undefined,
+        onDidClose: _emptyEvent,
+      });
+    },
   });
 
   const opening = manager.open();
-  finish();
-
-  expect(opening).rejects.toThrow("Main window closed during creation.");
+  expect(opening).rejects.toThrow("creation failed");
   await opening.catch(() => undefined);
   expect(manager.current()).toBeUndefined();
-  await process.dispose();
+  expect(await manager.open()).toBeDefined();
 });
+
+test("a Main closed during creation is not retained", async () => {
+  let attempts = 0;
+  const manager = new MainWindowManager({
+    createMain: () => {
+      attempts += 1;
+      return Promise.resolve({
+        activate: () => undefined,
+        close: () => undefined,
+        onDidClose: (listener: () => void) => {
+          listener();
+          return { dispose: () => undefined };
+        },
+      });
+    },
+  });
+
+  await manager.open();
+  expect(manager.current()).toBeUndefined();
+  await manager.open();
+  expect(attempts).toBe(2);
+});
+
+function _emptyEvent(): { dispose(): void } {
+  return { dispose: () => undefined };
+}

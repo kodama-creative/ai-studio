@@ -5,8 +5,11 @@ import {
   type McpToolView,
   type McpTransportType,
 } from "@llm-space/core";
+import { inject, injectable, optional } from "inversify";
 
-import type { McpClient } from "@/client/mcp";
+import { MCP_SERVICE, type McpRequests } from "@/shared/mcp-rpc";
+
+import { RendererNotificationService } from "../notifications/renderer-notification-service";
 
 export interface McpKeyValueRow {
   readonly id: string;
@@ -42,7 +45,7 @@ export interface McpSettingsSnapshot {
 }
 
 export type McpSettingsClient = Pick<
-  McpClient,
+  McpRequests,
   | "listServers"
   | "addServer"
   | "updateServer"
@@ -52,12 +55,7 @@ export type McpSettingsClient = Pick<
   | "listTools"
 >;
 
-export interface McpSettingsControllerOptions {
-  readonly client: McpSettingsClient;
-  readonly notifySuccess: (title: string, description?: string) => void;
-  readonly notifyError: (title: string, error: unknown) => void;
-  readonly saveDelayMs?: number;
-}
+export const MCP_SETTINGS_SAVE_DELAY = Symbol("McpSettingsSaveDelay");
 
 type Listener = () => void;
 
@@ -67,6 +65,7 @@ type Listener = () => void;
  * The interface accepts user intent. Debounced persistence, selection safety,
  * test cancellation, and stale async result suppression stay internal.
  */
+@injectable()
 export class McpSettingsController {
   private readonly _listeners = new Set<Listener>();
   private _cancelRequested = false;
@@ -77,7 +76,17 @@ export class McpSettingsController {
   private _started = false;
   private _snapshot: McpSettingsSnapshot;
 
-  constructor(private readonly _options: McpSettingsControllerOptions) {
+  constructor(
+    @inject(MCP_SERVICE)
+    private readonly _client: McpSettingsClient,
+    @inject(RendererNotificationService)
+    private readonly _notifications: Pick<
+      RendererNotificationService,
+      "success" | "error"
+    >,
+    @inject(MCP_SETTINGS_SAVE_DELAY) @optional()
+    private readonly _saveDelayMs = 600
+  ) {
     this._snapshot = {
       servers: [],
       selectedId: null,
@@ -130,7 +139,7 @@ export class McpSettingsController {
     const request = ++this._refreshRequest;
     this._set({ ...this._snapshot, loading: true });
     try {
-      const servers = await this._options.client.listServers();
+      const servers = await this._client.listServers();
       if (!this._isCurrent(lifecycle) || request !== this._refreshRequest)
         return;
       if (this._snapshot.creating) {
@@ -160,7 +169,7 @@ export class McpSettingsController {
       });
     } catch (error) {
       if (this._isCurrent(lifecycle) && request === this._refreshRequest) {
-        this._options.notifyError("Failed to load MCP servers", error);
+        this._notifications.error("Failed to load MCP servers", error);
       }
     } finally {
       if (this._isCurrent(lifecycle) && request === this._refreshRequest) {
@@ -248,7 +257,7 @@ export class McpSettingsController {
       testingServerId: server.id,
     });
     try {
-      const response = await this._options.client.listTools(server.id);
+      const response = await this._client.listTools(server.id);
       if (!this._isCurrent(lifecycle)) return;
       if (this._cancelRequested) return;
       this._set({
@@ -258,9 +267,8 @@ export class McpSettingsController {
           item.id === response.server.id ? response.server : item
         ),
       });
-      this._options.notifySuccess(
-        "MCP server connected",
-        `${response.tools.length} tool${response.tools.length === 1 ? "" : "s"} discovered`
+      this._notifications.success(
+        `MCP server connected: ${response.tools.length} tool${response.tools.length === 1 ? "" : "s"} discovered`
       );
     } catch (error) {
       if (!this._isCurrent(lifecycle)) return;
@@ -268,7 +276,7 @@ export class McpSettingsController {
       if (this._cancelRequested || _isCancellation(error)) return;
       await this.refresh();
       if (this._isCurrent(lifecycle)) {
-        this._options.notifyError("Failed to connect MCP server", error);
+        this._notifications.error("Failed to connect MCP server", error);
       }
     } finally {
       if (this._isCurrent(lifecycle)) {
@@ -292,13 +300,13 @@ export class McpSettingsController {
     this._cancelRequested = true;
     this._set({ ...this._snapshot, cancellingTest: true });
     try {
-      const servers = await this._options.client.cancelTest(serverId);
+      const servers = await this._client.cancelTest(serverId);
       if (!this._isCurrent(lifecycle)) return;
       this._set({ ...this._snapshot, servers, tools: [] });
     } catch (error) {
       if (!this._isCurrent(lifecycle)) return;
       this._cancelRequested = false;
-      this._options.notifyError("Failed to cancel MCP test", error);
+      this._notifications.error("Failed to cancel MCP test", error);
     } finally {
       if (this._isCurrent(lifecycle)) {
         this._set({ ...this._snapshot, cancellingTest: false });
@@ -319,13 +327,13 @@ export class McpSettingsController {
     const lifecycle = this._lifecycle;
     this._set({ ...this._snapshot, disconnecting: true });
     try {
-      const servers = await this._options.client.disconnectServer(server.id);
+      const servers = await this._client.disconnectServer(server.id);
       if (!this._isCurrent(lifecycle)) return;
       this._set({ ...this._snapshot, servers, tools: [] });
-      this._options.notifySuccess("MCP server disconnected");
+      this._notifications.success("MCP server disconnected");
     } catch (error) {
       if (this._isCurrent(lifecycle)) {
-        this._options.notifyError("Failed to disconnect MCP server", error);
+        this._notifications.error("Failed to disconnect MCP server", error);
       }
     } finally {
       if (this._isCurrent(lifecycle)) {
@@ -340,7 +348,7 @@ export class McpSettingsController {
     if (server === null || this._selectionLocked()) return;
     const lifecycle = this._lifecycle;
     try {
-      const servers = await this._options.client.removeServer(server.id);
+      const servers = await this._client.removeServer(server.id);
       if (!this._isCurrent(lifecycle)) return;
       const selectedId = servers[0]?.id ?? null;
       this._set({
@@ -354,10 +362,10 @@ export class McpSettingsController {
         tools: [],
         dirty: false,
       });
-      this._options.notifySuccess("MCP server removed");
+      this._notifications.success("MCP server removed");
     } catch (error) {
       if (this._isCurrent(lifecycle)) {
-        this._options.notifyError("Failed to remove MCP server", error);
+        this._notifications.error("Failed to remove MCP server", error);
       }
     }
   }
@@ -374,8 +382,8 @@ export class McpSettingsController {
       const draft = this._draftFromForm(form);
       const servers =
         creating || targetId === null
-          ? await this._options.client.addServer(draft)
-          : await this._options.client.updateServer(targetId, draft);
+          ? await this._client.addServer(draft)
+          : await this._client.updateServer(targetId, draft);
       if (!this._isCurrent(lifecycle)) return;
       const saved =
         creating || targetId === null
@@ -436,7 +444,7 @@ export class McpSettingsController {
     const lifecycle = this._lifecycle;
     const timeout = setTimeout(
       () => void this._save(form, targetId, creating, lifecycle),
-      this._options.saveDelayMs ?? 600
+      this._saveDelayMs
     );
     this._cancelScheduledSave = () => clearTimeout(timeout);
   }

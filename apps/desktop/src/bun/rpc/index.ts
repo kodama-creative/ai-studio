@@ -1,6 +1,5 @@
 import { BrowserView } from "electrobun/bun";
 
-import type { Command } from "../../shared/commands";
 import type { DesktopRPCType } from "../../shared/rpc";
 import type { RpcRegistry } from "../di/rpc-registry";
 
@@ -18,14 +17,12 @@ export interface MainWindowRPCController {
 }
 
 export interface MainWindowRPCDependencies {
-  executeCommand: (command: Command) => void;
   rpcRegistry: RpcRegistry;
 }
 
 const MAX_REQUEST_TIME_MS = 5 * 60_000 + 10_000;
 
 export function createMainWindowRPC({
-  executeCommand,
   rpcRegistry,
 }: MainWindowRPCDependencies): MainWindowRPCController {
   const rpc: MainWindowRPC = BrowserView.defineRPC<DesktopRPCType>({
@@ -40,7 +37,6 @@ export function createMainWindowRPC({
           rpcRegistry.unsubscribe(subscriptionId),
         rpcNamespaceRequestCancel: ({ requestId }) =>
           rpcRegistry.cancelRequest(requestId),
-        executeCommand: (command) => executeCommand(command),
       },
     },
   });

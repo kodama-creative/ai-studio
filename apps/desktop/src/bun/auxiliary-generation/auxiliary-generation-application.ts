@@ -1,33 +1,23 @@
-import type { Models } from "@earendil-works/pi-ai";
 import { PiAssistantExecutor } from "@llm-space/pi-runtime";
+import { ModelManager } from "@llm-space/runtime/models";
 import { coreMessagesToPi } from "@llm-space/studio";
+import { inject, injectable } from "inversify";
 
 import type {
   AuxiliaryGenerateEvent,
   AuxiliaryGenerateInput,
 } from "../../shared/auxiliary-generation-rpc";
 
-interface AuxiliaryGenerationApplicationOptions {
-  readonly models: Models | (() => Models | Promise<Models>);
-  readonly resolveConnection?: (input: {
-    readonly providerId: string;
-    readonly profileId?: string;
-  }) =>
-    | {
-        readonly apiKey?: string;
-        readonly baseUrl?: string;
-        readonly headers?: Record<string, string>;
-      }
-    | Promise<{
-        readonly apiKey?: string;
-        readonly baseUrl?: string;
-        readonly headers?: Record<string, string>;
-      }>;
-}
-
 /** Executes UI helper generation without creating product or Pi Session state. */
+@injectable()
 export class AuxiliaryGenerationApplication {
-  constructor(private readonly _options: AuxiliaryGenerationApplicationOptions) {}
+  constructor(
+    @inject(ModelManager)
+    private readonly _models: Pick<
+      ModelManager,
+      "getAvailableModels" | "resolveConnection"
+    >
+  ) {}
 
   async *generate(
     input: AuxiliaryGenerateInput
@@ -35,23 +25,20 @@ export class AuxiliaryGenerationApplication {
     const signal = input.signal ?? new AbortController().signal;
     signal.throwIfAborted();
     const executor = new PiAssistantExecutor({
-      models: this._options.models,
-      resolveConnection:
-        this._options.resolveConnection === undefined
-          ? undefined
-          : ({ providerId }) => {
-              if (providerId !== input.model.provider) {
-                throw new Error(
-                  `Auxiliary model provider "${providerId}" does not match the selected connection.`
-                );
-              }
-              return this._options.resolveConnection!({
-                providerId,
-                ...(input.profileId === undefined
-                  ? {}
-                  : { profileId: input.profileId }),
-              });
-            },
+      models: () => this._models.getAvailableModels(),
+      resolveConnection: ({ providerId }) => {
+        if (providerId !== input.model.provider) {
+          throw new Error(
+            `Auxiliary model provider "${providerId}" does not match the selected connection.`
+          );
+        }
+        return this._models.resolveConnection({
+          providerId,
+          ...(input.profileId === undefined
+            ? {}
+            : { profileId: input.profileId }),
+        });
+      },
       streamOptions: {
         ...(input.model.params?.temperature === undefined
           ? {}

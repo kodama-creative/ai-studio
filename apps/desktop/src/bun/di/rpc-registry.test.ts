@@ -3,7 +3,6 @@ import { expect, test } from "bun:test";
 import { EventHub } from "../../shared/event-hub";
 import { defineRpcNamespace } from "../../shared/namespaced-rpc";
 
-import { SnapshotContributionProvider } from "./contribution-provider";
 import type { RpcContribution } from "./rpc-contribution";
 import { RpcRegistry } from "./rpc-registry";
 
@@ -67,7 +66,7 @@ test("RPC Registry collects contributions and owns streams and events", async ()
     },
   };
   const registry = new RpcRegistry(
-    new SnapshotContributionProvider(() => [contribution]),
+    [contribution],
     {
       sendStreamEvent: (event) => events.push(event),
       sendEvent: (event) => published.push(event),
@@ -106,7 +105,7 @@ test("RPC Registry collects contributions and owns streams and events", async ()
 test("RPC Registry injects and cancels request-local AbortSignals", async () => {
   let signal: AbortSignal | undefined;
   const registry = new RpcRegistry(
-    new SnapshotContributionProvider(() => [
+    [
       {
         registerRpc(rpc) {
           rpc.registerServer({
@@ -136,7 +135,7 @@ test("RPC Registry injects and cancels request-local AbortSignals", async () => 
           });
         },
       },
-    ]),
+    ],
     { sendStreamEvent: () => undefined, sendEvent: () => undefined }
   );
   registry.onStart();
@@ -157,7 +156,7 @@ test("RPC Registry injects and cancels request-local AbortSignals", async () => 
 
 test("RPC Registry treats an AbortError as expected cancellation", async () => {
   const registry = new RpcRegistry(
-    new SnapshotContributionProvider(() => [
+    [
       {
         registerRpc(rpc) {
           rpc.registerServer({
@@ -179,7 +178,7 @@ test("RPC Registry treats an AbortError as expected cancellation", async () => {
           });
         },
       },
-    ]),
+    ],
     { sendStreamEvent: () => undefined, sendEvent: () => undefined }
   );
   registry.onStart();
@@ -218,14 +217,14 @@ test("RPC Registry rejects duplicate and late namespace registration", () => {
     registerRpc: (rpc) => void rpc.registerServer(server),
   });
   const duplicate = new RpcRegistry(
-    new SnapshotContributionProvider(() => [contribution(), contribution()]),
+    [contribution(), contribution()],
     { sendStreamEvent: () => undefined, sendEvent: () => undefined }
   );
   expect(() => duplicate.onStart()).toThrow(
     'RPC namespace "fixture" is already registered.'
   );
 
-  const started = new RpcRegistry(new SnapshotContributionProvider(() => []), {
+  const started = new RpcRegistry([], {
     sendStreamEvent: () => undefined,
     sendEvent: () => undefined,
   });
@@ -237,7 +236,7 @@ test("RPC Registry rejects duplicate and late namespace registration", () => {
 
 test("RPC Registry validates namespace implementations at startup", () => {
   const registry = new RpcRegistry(
-    new SnapshotContributionProvider(() => [
+    [
       {
         registerRpc(rpc) {
           rpc.registerServer({
@@ -255,7 +254,7 @@ test("RPC Registry validates namespace implementations at startup", () => {
           });
         },
       },
-    ]),
+    ],
     { sendStreamEvent: () => undefined, sendEvent: () => undefined }
   );
 
@@ -300,7 +299,7 @@ test("RPC Registry best-effort disposal releases every server", async () => {
     },
   };
   const registry = new RpcRegistry(
-    new SnapshotContributionProvider(() => [contribution]),
+    [contribution],
     { sendStreamEvent: () => undefined, sendEvent: () => undefined }
   );
   registry.onStart();
@@ -317,7 +316,7 @@ test("RPC Registry best-effort disposal releases every server", async () => {
 test("RPC Registry reports synchronous stream admission errors through the envelope", () => {
   const events: unknown[] = [];
   const registry = new RpcRegistry(
-    new SnapshotContributionProvider(() => []),
+    [],
     {
       sendStreamEvent: (event) => events.push(event),
       sendEvent: () => undefined,

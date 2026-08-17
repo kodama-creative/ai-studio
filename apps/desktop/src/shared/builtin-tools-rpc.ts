@@ -7,6 +7,8 @@ import type {
 import { defineRpcNamespace } from "./namespaced-rpc";
 import type { RequestRpcShape } from "./rpc-shape";
 
+export const BUILTIN_TOOLS_SERVICE = Symbol("BuiltinToolsService");
+
 export interface BuiltinToolsRequests {
   list(): Promise<BuiltinTool[]>;
   call(input: {

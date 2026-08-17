@@ -14,7 +14,10 @@ test("generates stateless auxiliary text without creating a Pi Session", async (
   const models = createModels();
   models.setProvider(faux.provider);
   faux.setResponses([fauxAssistantMessage("Generated instructions")]);
-  const application = new AuxiliaryGenerationApplication({ models });
+  const application = new AuxiliaryGenerationApplication({
+    getAvailableModels: () => Promise.resolve(models),
+    resolveConnection: () => Promise.resolve({}),
+  });
 
   const events = [];
   for await (const event of application.generate({

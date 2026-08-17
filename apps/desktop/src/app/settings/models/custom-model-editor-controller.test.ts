@@ -4,6 +4,19 @@ import type { CustomModel } from "@llm-space/core";
 
 import { CustomModelEditorController } from "./custom-model-editor-controller";
 
+interface TestOptions {
+  readonly save: (
+    providerId: string,
+    model: CustomModel,
+    originalModelId?: string
+  ) => Promise<void>;
+  readonly test: (
+    providerId: string,
+    profileId: string,
+    model: CustomModel
+  ) => Promise<void>;
+}
+
 describe("CustomModelEditorController", () => {
   test("contains a failed save and keeps the current session retryable", async () => {
     let attempts = 0;
@@ -98,16 +111,24 @@ function _target(providerId: string) {
   return { providerId, profileId: "profile" };
 }
 
-function _controller(
-  overrides: Partial<
-    ConstructorParameters<typeof CustomModelEditorController>[0]
-  > = {}
-) {
-  return new CustomModelEditorController({
+function _controller(overrides: Partial<TestOptions> = {}) {
+  const options: TestOptions = {
     save: () => Promise.resolve(),
     test: () => Promise.resolve(),
     ...overrides,
-  });
+  };
+  return new CustomModelEditorController(
+    {
+      upsertCustomModel: options.save,
+      testModelConnection: (providerId, _modelId, model, profileId) => {
+        if (model === undefined) {
+          throw new Error("Custom model candidate is required.");
+        }
+        return options.test(providerId, profileId ?? "", model);
+      },
+    },
+    _target("initial")
+  );
 }
 
 function _deferred<T>() {

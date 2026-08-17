@@ -8,23 +8,33 @@ import {
   playgroundToThread,
   threadToPlaygroundDocument,
 } from "@llm-space/studio";
+import { inject, injectable } from "inversify";
 
 import { buildWebShareUrl } from "../../shared/share";
 import type { ThreadSharingRequests } from "../../shared/thread-sharing-rpc";
-import type { ModelsApplication } from "../models/models-application";
-import type { DesktopPlaygroundApplication } from "../playgrounds/playground-application";
+import { ModelsService } from "../models/models-service";
+import { DesktopPlaygroundApplication } from "../playgrounds/playground-application";
 
 import { buildSharedThread } from "./thread-sharing";
+import {
+  GIST_THREAD_READER,
+  GIST_THREAD_WRITER,
+} from "./thread-sharing-identifiers";
 
 /** Publishes immutable Playground copies through the Gist connector. */
+@injectable()
 export class ThreadSharingApplication implements ThreadSharingRequests {
   constructor(
+    @inject(DesktopPlaygroundApplication)
     private readonly _playgrounds: Pick<
       DesktopPlaygroundApplication,
       "loadPlayground" | "createPlayground"
     >,
-    private readonly _models: ModelsApplication,
+    @inject(ModelsService)
+    private readonly _models: ModelsService,
+    @inject(GIST_THREAD_WRITER)
     private readonly _writer: Pick<GistThreadWriter, "writeSnapshot">,
+    @inject(GIST_THREAD_READER)
     private readonly _reader: Pick<GistThreadReader, "readSnapshot">
   ) {}
 

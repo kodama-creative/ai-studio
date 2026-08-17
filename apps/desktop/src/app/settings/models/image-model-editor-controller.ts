@@ -1,4 +1,13 @@
 import type { SeedreamImageModelDefinition } from "@llm-space/core";
+import { inject, injectable } from "inversify";
+
+import { DesktopModelCatalogController } from "../../models/desktop-model-catalog-controller";
+
+export const IMAGE_MODEL_EDITOR_TARGET = Symbol("ImageModelEditorTarget");
+
+export interface ImageModelEditorTarget {
+  readonly originalModelId?: string;
+}
 
 export type ImageModelEditorOperation = "idle" | "saving";
 
@@ -11,13 +20,6 @@ export type ImageModelEditorResult =
   | { readonly type: "failed"; readonly error: unknown }
   | { readonly type: "ignored" };
 
-export interface ImageModelEditorControllerOptions {
-  readonly save: (
-    model: SeedreamImageModelDefinition,
-    originalModelId?: string
-  ) => Promise<void>;
-}
-
 type Listener = () => void;
 
 const IDLE_SNAPSHOT: ImageModelEditorSnapshot = { operation: "idle" };
@@ -26,16 +28,27 @@ const IDLE_SNAPSHOT: ImageModelEditorSnapshot = { operation: "idle" };
  * Owns one Image Model editor session and contains its Save operation. Closing
  * or retargeting the editor invalidates the in-flight result immediately.
  */
+@injectable()
 export class ImageModelEditorController {
+  private readonly _catalog: Pick<
+    DesktopModelCatalogController,
+    "upsertCustomImageModel"
+  >;
+  private readonly _target: ImageModelEditorTarget;
   private readonly _listeners = new Set<Listener>();
   private _epoch = 0;
   private _originalModelId: string | null | undefined = null;
   private _snapshot: ImageModelEditorSnapshot = IDLE_SNAPSHOT;
 
   constructor(
-    private readonly _options: ImageModelEditorControllerOptions,
-    private readonly _initialOriginalModelId: string | undefined = undefined
-  ) {}
+    @inject(DesktopModelCatalogController)
+    catalog: Pick<DesktopModelCatalogController, "upsertCustomImageModel">,
+    @inject(IMAGE_MODEL_EDITOR_TARGET)
+    target: ImageModelEditorTarget
+  ) {
+    this._catalog = catalog;
+    this._target = target;
+  }
 
   readonly getSnapshot = (): ImageModelEditorSnapshot => this._snapshot;
 
@@ -45,7 +58,7 @@ export class ImageModelEditorController {
   };
 
   start(): void {
-    this.open(this._initialOriginalModelId);
+    this.open(this._target.originalModelId);
   }
 
   stop(): void {
@@ -83,7 +96,7 @@ export class ImageModelEditorController {
     const epoch = this._epoch;
     this._setSnapshot({ operation: "saving" });
     try {
-      await this._options.save(model, originalModelId);
+      await this._catalog.upsertCustomImageModel(model, originalModelId);
     } catch (error) {
       if (!this._isCurrent(epoch, originalModelId)) {
         return { type: "ignored" };

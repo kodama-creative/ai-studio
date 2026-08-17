@@ -1,3 +1,5 @@
+import { inject, injectable, multiInject } from "inversify";
+
 import { isDisposable, type Disposable } from "../../shared/disposable";
 import type {
   NamespacedRpcEvent,
@@ -9,11 +11,11 @@ import type {
 import type { RpcError, RpcResult } from "../../shared/rpc-error";
 import { RpcDomainError } from "../../shared/rpc-error";
 
-import type { ContributionProvider } from "./contribution-provider";
-import type {
-  AnyRpcServer,
+import {
+  type AnyRpcServer,
   RpcContribution,
-  RpcRegistration,
+  type RpcContribution as RpcContributionApi,
+  type RpcRegistration,
 } from "./rpc-contribution";
 
 interface RegisteredRpcServer {
@@ -30,6 +32,8 @@ interface RegisteredRpcServer {
   };
 }
 
+export const RpcEventSink = Symbol("RpcEventSink");
+
 export interface RpcEventSink {
   sendStreamEvent(event: NamespacedRpcStreamEvent): void;
   sendEvent(event: NamespacedRpcEvent): void;
@@ -38,6 +42,7 @@ export interface RpcEventSink {
 type RegistryState = "idle" | "starting" | "started" | "disposed";
 
 /** Window-scoped namespace registry and transport-independent RPC dispatcher. */
+@injectable()
 export class RpcRegistry implements Disposable, RpcRegistration {
   private readonly _servers = new Map<string, RegisteredRpcServer>();
   private readonly _subscriptions = new Map<string, AbortController>();
@@ -47,8 +52,9 @@ export class RpcRegistry implements Disposable, RpcRegistration {
   private _state: RegistryState = "idle";
 
   constructor(
-    private readonly _contributions: ContributionProvider<RpcContribution>,
-    private readonly _sink: RpcEventSink
+    @multiInject(RpcContribution)
+    private readonly _contributions: RpcContributionApi[],
+    @inject(RpcEventSink) private readonly _sink: RpcEventSink
   ) {}
 
   /** Collect every RPC contribution exactly once, then freeze namespaces. */
@@ -58,7 +64,7 @@ export class RpcRegistry implements Disposable, RpcRegistration {
     }
     this._state = "starting";
     try {
-      for (const contribution of this._contributions.getContributions()) {
+      for (const contribution of this._contributions) {
         contribution.registerRpc(this);
       }
       this._state = "started";

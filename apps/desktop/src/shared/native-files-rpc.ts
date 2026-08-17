@@ -1,6 +1,8 @@
 import { defineRpcNamespace } from "./namespaced-rpc";
 import type { RequestRpcShape } from "./rpc-shape";
 
+export const NATIVE_FILES_SERVICE = Symbol("NativeFilesService");
+
 export interface NativeFilesRequests {
   directoryExists(path: string): Promise<boolean>;
   reveal(pathOrLocator: string): Promise<void>;

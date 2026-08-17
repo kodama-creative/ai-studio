@@ -2,10 +2,14 @@ import { describe, expect, test } from "bun:test";
 
 import type { ModelProviderGroup } from "@llm-space/core";
 
-import {
-  OnboardingController,
-  type OnboardingControllerOptions,
-} from "./onboarding-controller";
+import { OnboardingController } from "./onboarding-controller";
+
+interface TestOptions {
+  readonly fetchBuiltinProviders: () => Promise<ModelProviderGroup[]>;
+  readonly addProvider: (providerId: string) => Promise<void>;
+  readonly notifyProviderAdded: (providerName: string) => void;
+  readonly notifyAddFailed: (error: unknown) => void;
+}
 
 describe("OnboardingController", () => {
   test("ignores provider discovery completed after close", async () => {
@@ -74,7 +78,7 @@ describe("OnboardingController", () => {
     addition.resolve();
     await first;
     expect(controller.getSnapshot().addedProviderName).toBe("alpha");
-    expect(notifications).toEqual(["alpha"]);
+    expect(notifications).toEqual(["alpha is ready"]);
 
     controller.close();
     controller.open(false);
@@ -103,15 +107,26 @@ describe("OnboardingController", () => {
 });
 
 function _controller(
-  overrides: Partial<OnboardingControllerOptions> = {}
+  overrides: Partial<TestOptions> = {}
 ): OnboardingController {
-  return new OnboardingController({
+  const options: TestOptions = {
     fetchBuiltinProviders: () => Promise.resolve([]),
     addProvider: () => Promise.resolve(),
     notifyProviderAdded: () => undefined,
     notifyAddFailed: () => undefined,
     ...overrides,
-  });
+  };
+  return new OnboardingController(
+    {
+      builtinProviders: options.fetchBuiltinProviders,
+      addProvider: options.addProvider,
+    },
+    {
+      success: options.notifyProviderAdded,
+      error: (_title, error) => options.notifyAddFailed(error),
+    },
+    false
+  );
 }
 
 function _provider(id: string): ModelProviderGroup {

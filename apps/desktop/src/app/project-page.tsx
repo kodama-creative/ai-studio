@@ -22,21 +22,22 @@ import { useMemo, useState } from "react";
 
 import {
   AGENT_PROJECT_VIEW,
-  PROJECT_WORKSPACE_CONTROLLER,
-  STUDIO_CLIENT,
 } from "@/app/di/project-window-module";
 import { useController, useInject } from "@/app/di/react";
 import { useCommands, useRegisterCommands } from "@/commands";
 import { TreeView, type TreeDataItem } from "@/components/tree-view";
+import type { AgentProjectView } from "@/shared/agent-project";
 import type { ProjectSourceNode } from "@/shared/project-source-rpc";
+import { STUDIO_SERVICE, type StudioTransport } from "@/shared/studio-rpc";
 
 import { ProjectThreadPane } from "./project/project-thread-pane";
+import { ProjectWorkspaceController } from "./project/project-workspace-controller";
 
 export function ProjectPage() {
-  const project = useInject(AGENT_PROJECT_VIEW);
-  const studioClient = useInject(STUDIO_CLIENT);
+  const project = useInject<AgentProjectView>(AGENT_PROJECT_VIEW);
+  const studioClient = useInject<StudioTransport>(STUDIO_SERVICE);
   const { controller: workspace, state: workspaceState } = useController(
-    PROJECT_WORKSPACE_CONTROLLER
+    ProjectWorkspaceController
   );
   const threadState = workspaceState.threads;
   const sourceState = workspaceState.source;

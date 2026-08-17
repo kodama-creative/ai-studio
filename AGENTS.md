@@ -83,9 +83,9 @@ Bun-workspace monorepo. Workspaces are `packages/*`, `apps/*`, and the runnable
 
 ### The RPC bridge
 
-`src/shared/rpc.ts` (`DesktopRPCType`) is only the Electrobun transport envelope: one namespaced request, stream subscribe/unsubscribe messages, namespace events, and `executeCommand`. Business methods are never flattened into that contract. Each feature owns a shared `RpcNamespace` interface, a Bun `RpcServer` class, and a renderer `createRpcClient()` client with exact request/response/stream/event types. Namespace manifests explicitly enumerate every request, stream, and event; the client exposes only those declared members so JavaScript reflection protocols can never become accidental RPC calls.
+`src/shared/rpc.ts` (`DesktopRPCType`) is only the Electrobun transport envelope: one namespaced request, stream subscribe/unsubscribe messages, namespace events, and `executeCommand`. Business methods are never flattened into that contract. Each feature owns a shared Service symbol, typed `RpcNamespace` contract, serializable payloads, and an explicit request/stream/event manifest. Renderer composition binds the generic `createRpcClient()` proxy directly to that Service symbol; there is no top-level `client/` factory layer. The proxy exposes only declared members so JavaScript reflection protocols can never become accidental RPC calls.
 
-Native shell capabilities follow the same ownership rule under `bun/native/`: Window, Native Dialogs/import, Native Files, App Directories, and Shell each have a feature module; RPC features have separate shared contracts, server classes, renderer client factories, and `RpcContribution` owners. Do not recreate the previous `native-applications`, `native-module`, `native-rpc`, `native-rpc-servers`, `native-files` client aggregation, or a catch-all native contribution/module.
+Native shell capabilities follow the same ownership rule under `bun/native/`: Window, Native Dialogs/import, Native Files, App Directories, and Shell each have a feature module, shared Service contract, and window-scoped `RpcContribution`. Keep a dedicated RPC adapter only when it performs argument projection, compatibility, or error translation; a class that only copies a Service into `requests` fails the deletion test. Do not recreate the previous native/client aggregations or a catch-all native contribution/module.
 
 The window-scoped `WindowApplication` is constructed before its native
 `BrowserWindow`, attached exactly once immediately after native construction,
@@ -94,16 +94,9 @@ contribution only maps Commands/RPC onto that interface. Do not pass delayed
 `getWindow()` callbacks through DI, resolve applications from native event
 callbacks, or bind raw BrowserWindow/RPC values without an actual consumer.
 
-Every native window owns one `RpcRegistry`. Window-scoped feature classes implement the same-name `RpcContribution` symbol + interface and register their server classes during `RpcRegistry.onStart()`. A named `ContributionProvider<RpcContribution>` takes one frozen snapshot after all window modules are bound; duplicate namespaces and late registration fail. The Registry owns request dispatch, stream abort, event subscriptions, and reverse-order registration cleanup. `createMainWindowRPC()` only forwards the Electrobun envelope to that Registry and never constructs business services.
+Every native window owns one `RpcRegistry`. Window-scoped feature classes multi-bind the same `RpcContribution` symbol and the Registry receives the fixed set through native Inversify `@multiInject()`. Contributions register typed namespace adapters during `RpcRegistry.onStart()`; duplicate namespaces and late registration fail. The Registry owns request dispatch, request/stream abort, event subscriptions, and reverse-order registration cleanup. `createMainWindowRPC()` only forwards the Electrobun envelope to that Registry and never constructs business services.
 
-Bundled window composition is explicit in the production composition root.
-`bootstrap.ts` owns the ordered Common/Main/Project module sets and
-injects one staged `DesktopWindowScopeComposition` through
-`DesktopWindowFactory` into `DesktopWindowRuntime`. The Factory and Runtime
-invoke those registration callbacks at their lifecycle boundaries before
-freezing the Command/RPC contribution snapshots; neither imports or loads a
-container module directly. Do not recreate distributed process-level window feature
-multi-bindings or a catch-all `di/modules` aggregation.
+Bundled window composition is explicit in the production composition root. `bootstrap.ts` owns the ordered Common/Main/Project module sets and injects one staged `DesktopWindowComposition` into `DesktopWindowFactory`. The Factory creates a raw child `Container` with the Desktop container as parent, loads the selected modules, resolves exactly one `MainWindowApplication` or `ProjectWindowApplication`, and owns `Application.stop()` followed by `container.unbindAllAsync()`. Main and Project containers are siblings; closing either cannot invalidate the other. Do not recreate custom Scope wrappers, distributed process-level window feature bindings, or a catch-all `di/modules` aggregation.
 
 Project windows keep three interfaces distinct: `projectSource.*` owns source
 read/watch, `studio.*` owns Studio Thread metadata, Drafts, history,
@@ -123,9 +116,7 @@ starts it; `src/bun/index.ts` only invokes this bootstrap.
 `src/bun/app/desktop-app.ts` exports the container-agnostic `DesktopApp`
 lifecycle class. It receives ordinary constructor dependencies, coordinates
 native startup and shutdown, and never resolves or registers services.
-Process-scoped managers are constructed, bound, and eagerly adopted once in
-bootstrap with feature-owned DI identities, then consumed by constructor
-factories in feature-owned modules. Vertical feature slices live under their
+External process resources are constructed and registered with `DesktopLifecycle` immediately in bootstrap. Container-owned Applications, Services, Managers, Controllers, Registries, and Contributions use `@injectable()` plus explicit `@inject()`/`@multiInject()`; modules declare bindings and aliases instead of manually constructing ordinary long-lived classes. Vertical feature slices live under their
 named `bun/*/` directories; each owns its application
 logic, DI identities/module, RPC server/contribution, and local implementation
 details. `bun/rpc/` contains only the Electrobun transport bridge, while shared
@@ -146,33 +137,18 @@ Reminders adapt their existing manager/state owner directly in the RPC feature.
 `GitHubAuthManager` and `UpdaterService` own their process events; Reminders
 state is one process-owned `RemindersState` with serialized file access, never
 module-level mutable state. Do not add a second process singleton merely to
-mirror RPC methods. Every feature still owns one shared RPC contract and
-renderer client;
+mirror RPC methods. Every feature still owns one shared RPC contract and renderer Service proxy;
 do not merge them into generic `application-services`, `application-rpc-servers`,
 `application-rpc`, or `application-rpc-clients` aggregations. Bun feature
 modules must not export import-time manager instances or let application classes
 reach through a service locator.
 
-Feature `ContainerModule` factories resolve constructor dependencies through
-Inversify `ResolutionContext`; they do not call `DesktopWindowScope.get(...)`.
-`DesktopWindowRuntime` resolves the window-scoped `WindowApplication` once as a
-lifecycle root before starting the Registries; that resolution lets the scope's
-disposable tracker adopt it without passing the scope into the feature module.
+Feature `ContainerModule` factories contain bindings, `toService()` aliases, and lifetime declarations. They do not perform I/O, inject a `Container`, or manually start long-lived objects. Concrete internal classes are DI identities; feature-owned Symbols are reserved for interface seams, external values, runtime inputs, and open collections.
 
-Each native window has a child Inversify scope. Feature modules bind window
-contribution classes with `toService(...)`; one class may implement both
-`CommandContribution` and `RpcContribution` without creating two instances.
-`DesktopWindowRuntime` is the deep lifecycle module around that scope: it
-applies the composition-root-provided window module configuration, freezes and
-starts both Registries, owns the Electrobun bridge, attaches the eventual
-native window, and disposes transports before closing the window. The child
-container remains the instance and lifecycle isolation boundary; callers must
-not reproduce that sequence. Concrete internal application classes use their
-constructors as DI identities; typed symbols are reserved for external values
-and actual interface seams and remain owned by the relevant feature.
-`DesktopWindowFactory` owns Main/Project native creation around that runtime,
-including Studio resolution, immutable Project identity, window-state binding,
-command routing, and failed-scope cleanup; window managers consume the factory
+Each native window has a raw child Inversify `Container`. Feature modules bind contribution classes once and alias them with `toService(...)`; native `@multiInject()` supplies the fixed set. `MainWindowApplication` and `ProjectWindowApplication` are the single child roots. They start Project resources and `DesktopWindowRuntime` in business order; the Runtime starts RPC, owns the Electrobun bridge, attaches the eventual native window once, and disposes transports before closing it. The child container remains the instance and lifecycle isolation boundary; callers must not reproduce that sequence.
+`DesktopWindowFactory` owns Main/Project native creation around those Applications,
+including synchronous Project Service composition, immutable Project identity, window-state binding,
+command routing, close-during-create replay, and failed-container cleanup; window managers consume the factory
 instead of reconstructing those steps.
 External process resources which are not DI disposables register with
 `DesktopLifecycle` immediately after construction. The same LIFO module owns
@@ -183,17 +159,13 @@ composition fails. Do not defer cleanup registration until the end of startup.
 Cold-start URL capture is the deliberate import-time exception:
 `bootstrap.ts` loads `deep-link/launch.ts` immediately after shell hydration and
 before longer seed/composition imports. The launch adapter buffers Electrobun
-URLs in a `DeepLinkInbox`; `DesktopLaunchController` atomically connects to that
+URLs in a `DeepLinkInbox`; `DesktopLaunchService` atomically connects to that
 inbox, routes buffered/live Main and Studio links, owns reopen behavior, and
 disconnects before window teardown. The top-level `DesktopLifecycle` stack owns
 the idempotent stop order (launch routing → Project windows → process scope).
 Keep these state machines out of `bootstrap.ts`; it only constructs and injects
 their platform adapters into the final `DesktopApp` lifecycle root.
-The named generic `ContributionProvider<T>` keeps both Registries independent
-from Inversify. Registries start once before the Electrobun bridge and native
-window are created, reject late registration, then dispose registrations before
-the window scope disposes contribution instances. Application classes never
-implement Desktop contribution interfaces and never access the container.
+Registries start once before the Electrobun bridge and native window are created, reject late registration, then dispose registrations before the child container unbinds contribution instances. Application classes never implement Desktop contribution interfaces and never access the container.
 
 `DesktopHost` (`src/bun/host/desktop-host.ts`) is the lifecycle boundary for
 trusted, bundled modules. Modules register synchronously before RPC/window
@@ -251,9 +223,9 @@ Releases ship for **macOS arm64 + x64** (so four build jobs per tag: 2 arches ×
 
 ### The command layer
 
-Every cross-boundary user action (menus, context menus, toolbar buttons, shortcuts) is a `Command` — a namespaced `type` discriminant (`playground.create`, `window.toggleMaximized`, `updates.check`) plus typed `args` — defined in `src/shared/commands.ts`. Read/event capabilities such as window context and fullscreen state remain namespaced RPC. `COMMAND_META` tags each command with a target of `"webview"` or `"bun"`; the single `executeCommand` RPC message is only a transport envelope. On the Bun side, every window owns one `CommandRegistry`. Feature classes implement the same-name `CommandContribution` symbol + interface and register one typed handler per command during `onStart()`; duplicate ownership and late registration fail. Unclaimed renderer commands are forwarded through the window's `CommandSink`. On the renderer side, the state-owning UI module registers its handlers through `CommandProvider`. The native menu maps shell action ids into commands. DI symbols use `desktopToken(namespace, name)` so every service identity has an explicit namespace.
+Every user action exposed by menus, context menus, toolbar buttons, shortcuts, or the palette is a typed `Command` defined in `src/shared/commands.ts`. Each renderer-window container owns the only `RendererCommandRegistry`; state-owning renderer modules register handlers through `CommandProvider`, while fixed native-operation handlers are contributed through the injected `CommandService` seam. Bun owns no Command Registry. Native menus forward the typed command envelope to the target window, whose renderer Registry dispatches it; handlers call injected remote Services for native effects.
 
-Command results are intentionally ignored, but both Bun and renderer registries contain synchronous throws and rejected handler promises at the dispatch seam. Features needing user-visible completion or error state publish it through their own typed RPC events. Agent Project open/pick is command-only; its RPC namespace exposes the catalog read plus `changed` and `openFailed` events.
+Read/event capabilities such as Window context, fullscreen state, Agent Project catalog changes, auth, models, and updates remain namespaced RPC. Commands may return promises, and the Registry contains synchronous throws and rejected handler promises at the dispatch seam. Features needing durable state or one-to-many post-commit notification publish it through their own typed Service/RPC events rather than a global event bus.
 
 Interactive Thread editor execution (`run`, `step`, `continue`, tool approval,
 and cancellation) is the deliberate exception: these actions belong to the
@@ -268,11 +240,11 @@ Playground/Experiment target on every request.
 - `app/` — `index.tsx` resolves the native window context; `layout.tsx` owns visual/query providers; `desktop-window-providers.tsx` is the shared Main/Project renderer composition root (`CommandProvider` → `DesktopHostProvider` → `ModelProvider`); `page.tsx` exports `MainWindowPage` and owns only Main-window composition. Main-window Playground application behavior lives under `app/playground/`: `PlaygroundWorkspaceController` owns the restartable durable catalog, pane-projection merging, blank/example creation, dynamic seed resolution, versioned snapshot import, and tab opening; sidebar presentation must consume its snapshot rather than keep an independent list query. `app/tabs/` owns Main tab identity, local persistence, restoration validation, close/reopen ordering, and deferred pruning after pane activity settles behind `MainTabsController`'s snapshot + intent interface; the Playground RPC client and pane-activity tracker are injected at composition. Project behavior lives under `app/project/`: `AgentProjectCatalogController` owns the Main-window known-Project subscription-before-read lifecycle and stale-response suppression; `ProjectWorkspaceController` is the Project-window renderer owner for tabs and the cross-Thread/source selection epoch, composing the internal `ProjectThreadsController` (Thread collection/open concurrency, event cursors, stream cancellation, history/evaluation state) and `ProjectSourceController` (authoritative source watch plus open-file refresh) behind one restartable snapshot interface. The Bun `ProjectWindowManager` owns process-wide Project catalog mutations and emits their authoritative change event, including opens initiated by deep links and restore paths; renderer-command adapters must not synthesize catalog changes themselves. Account behavior lives under `app/account/`: `GithubAuthController` and `GithubAuthProvider` own initial-read/live-event precedence, subscription lifecycle, error reporting, and login/logout commands. `app/onboarding/` owns the open-session epoch, provider discovery precedence, and serialized provider-add mutation; onboarding presentation renders its snapshot and owns analytics/navigation intent. `app/thread-sharing/` owns dialog target epochs plus auth/publish stale-result suppression; presentation owns only transient form, clipboard, and visual state and must clean that state on every close path. `app/reminders/` owns best-effort passive reminder state; `app/updates/` owns the passive update channel and Main-window update provider; `app/window/` owns native-window projections: `FullScreenController` subscribes before its initial RPC read, keeps live events authoritative, and contains restart/cleanup failures; `app/lifecycle/` contains shared renderer teardown policy. Settings application behavior lives under `app/settings/`: `McpSettingsController` owns MCP selection, Draft conversion, debounced persistence, test/cancel/disconnect operations, and stale RPC suppression; `SkillsSettingsController` owns skill-folder selection, native folder/reveal operations, mutation ordering, optimistic skill toggles, and stale RPC suppression; `SettingsFormController` owns restartable reads, ordered writes, local Drafts, and latest-intent rollback. Models Settings is the local feature under `app/settings/models/`; its React presentation is colocated under `components/settings/models/`. `runSettingsMutation` adapts other fallible async mutations to void UI events. Do not move RPC lifecycle, mutation ordering, rollback, or stale-result suppression back into presentation state/effects.
   - `ModelsSettingsController` adapts the shared `ModelCatalogController` projection and mutation ports, and owns provider selection/fallback, Add/Remove admission, and the lifecycle of `AddProviderController`, `ProviderMetadataController`, `ProviderProfilesController`, and the focused `ProviderProfileController`. The custom chat/image model editor controllers live beside that aggregate and suppress results after close or retarget. `models-page.tsx` is the React adapter; provider search/filter/dialog state stays in presentation.
 - `bun/` — main-process code: `app/` (process/window composition, menu, window-state), vertical `playgrounds/`, `projects/`, `native/`, `models/`, `auxiliary-generation/`, and `thread-sharing/` feature slices, `rpc/` for transport infrastructure and manager/state adapters, `di/`, `host/`, `auth/` (`GitHubAuthManager` — OAuth Device Flow + `settings/auth.json`), `fs/` (truly shared trash/reveal primitives only), `updates/`, `reminders/` (one-time feature reminders + GitHub-star reminder, persisted to `settings/reminders.json`; reminder definitions ship in code at `shared/feature-reminders.ts` — append to `FEATURE_REMINDERS`, never reorder or reuse an `id`), `env/hydrate` (loads login-shell env — API keys/PATH — before anything reads `process.env`), and `workspace/seed`.
-  - Model mutations cross the renderer seam as user intents. In particular, Ark image-model enablement and custom-model CRUD are applied atomically by `ModelManager` through `ModelsApplication`; a custom-provider model upsert also owns the provider API-mode update in the same persisted intent. Renderer code must not read a configuration snapshot, construct a replacement config, or split one user intent across multiple RPC mutations.
+  - Model mutations cross the renderer seam as user intents. In particular, Ark image-model enablement and custom-model CRUD are applied atomically by `ModelManager` through `ModelsService`; a custom-provider model upsert also owns the provider API-mode update in the same persisted intent. Renderer code must not read a configuration snapshot, construct a replacement config, or split one user intent across multiple RPC mutations.
 
 > **GitHub calls go through the proxy.** GitHub auth (`bun/auth/`) and any future gist calls run from the **bun process** using the global `fetch`, which `NetworkSettingsManager` (`bun/network/`) routes through the user's configured proxy by writing `HTTP(S)_PROXY` onto `process.env`. Just call `fetch` — never add a bypassing custom dispatcher, or corporate/proxied users' GitHub requests will fail.
 
-- `client/` — renderer-side namespaced RPC adapter factories. Each feature owns its client file, and the renderer composition/application/presentation owner creates and retains the adapter for its own lifetime. Do not export import-time client instances or introduce cross-feature client aggregations.
+- Renderer remote Services are bound directly from shared namespace manifests in `app/di/`; do not recreate a top-level `client/` directory, feature `create*Client()` wrappers, import-time proxies, or cross-feature client aggregations.
 - `host/` — `host-services.tsx`: the desktop `HostServices` + `ModelClient` impls (`DesktopHostProvider`, `createElectrobunModelClient`) feeding the shared `@llm-space/ui` playground.
 - `shared/` — code used by both contexts: the Electrobun envelope, commands, and one `*-rpc.ts` contract per feature.
 - `components/` — desktop-only presentation: `thread-tabs/`, `settings/`, `command-palette.tsx`, `onboard-dialog.tsx`, `feature-reminder-dialog.tsx` (the "what's new" reminder popup), and account/update/github widgets. Application providers, RPC lifecycle, mutation ordering, and teardown policy belong under `app/`, not here. **The Thread Playground, model-provider, code-editor, shadcn `ui/`, and design tokens moved to `@llm-space/ui`** — import them from there, not from `@/components`.
@@ -320,7 +292,7 @@ Prefer dropping new images into the existing `src/mainview/public/images/` folde
 - Prefer the **app-level wrappers** in `components/` over the raw shadcn primitives. In particular, **Tooltips must use `@/components/tooltip`** (`<Tooltip content={...}>…</Tooltip>`) — do **not** import `Tooltip`/`TooltipTrigger`/`TooltipContent` from `ui/tooltip` directly. The only direct use of the primitive is `TooltipProvider`, wired once in `app/layout.tsx`.
 - **Confirmations**: gate destructive or irreversible actions (delete a file, remove a provider) behind `ConfirmDialog` from `@/components/confirm-dialog` — don't fire them straight from a click.
 - **Empty states**: every list or collection view must define an intentional empty state. Prefer the shared `Empty`, `EmptyHeader`, `EmptyMedia`, `EmptyTitle`, `EmptyDescription`, and `EmptyContent` primitives from `@llm-space/ui/ui/empty` over ad hoc centered text or blank space. Include a concise explanation and, when useful, the primary action that helps the user populate or recover the list; also handle filtered/search results that contain no matches.
-- **Menus and commands**: every cross-boundary action is a `Command` (`shared/commands.ts`); its `type` is `<namespace>.<camelCaseAction>`. Labels in `COMMAND_META`, native menus (`bun/app/menu.ts`), context menus, dropdown menus, and similar menu-like surfaces are **Title Case** ("Add New Method", "New Playground", "Close Tab"). Route cross-boundary dispatch through `executeCommand`; register Bun handlers from the owning application module.
+- **Menus and commands**: every menu/shortcut/palette/toolbar action is a `Command` (`shared/commands.ts`); its `type` is `<namespace>.<camelCaseAction>`. Labels in `COMMAND_META`, native menus (`bun/app/menu.ts`), context menus, dropdown menus, and similar menu-like surfaces are **Title Case** ("Add New Method", "New Playground", "Close Tab"). Route dispatch through the renderer-owned `RendererCommandRegistry`; Bun only forwards native-menu envelopes to the target renderer, and native side effects run through injected remote Services.
 - **General UI copy**: ordinary buttons, headings, helper text, empty states, dialogs, and other non-menu labels use sentence case ("Add new method", "Start from example", "No tools yet").
 
 ### Performance

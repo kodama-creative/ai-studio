@@ -1,6 +1,8 @@
 import type { FeatureReminder } from "./feature-reminders";
 import { defineRpcNamespace } from "./namespaced-rpc";
 
+export const REMINDERS_SERVICE = Symbol("RemindersService");
+
 export interface RemindersRequests {
   shouldShowGithubStar(): Promise<{ show: boolean }>;
   dismissGithubStarForever(): Promise<void>;

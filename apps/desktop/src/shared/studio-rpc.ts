@@ -12,6 +12,8 @@ import type {
 
 import { defineRpcNamespace } from "./namespaced-rpc";
 
+export const STUDIO_SERVICE = Symbol("StudioService");
+
 /** Studio Thread metadata and Draft contract; execution lives in `thread.*`. */
 export interface StudioRpc {
   readonly requests: StudioRequests;

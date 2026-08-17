@@ -1,7 +1,8 @@
+import { injectable } from "inversify";
+
 import type { RendererLifecycleContribution } from "@/app/di/lifecycle";
 import { electrobun } from "@/lib/electrobun";
 import {
-  COMMAND_META,
   type Command,
   type CommandArgs,
   type CommandType,
@@ -14,6 +15,7 @@ export type CommandHandlers = {
 type StoredHandler = (args: unknown) => void | Promise<void>;
 
 /** Window-scoped command registry shared by native and renderer entry points. */
+@injectable()
 export class RendererCommandRegistry implements RendererLifecycleContribution {
   private readonly _handlers = new Map<CommandType, StoredHandler>();
   private _started = false;
@@ -35,10 +37,6 @@ export class RendererCommandRegistry implements RendererLifecycleContribution {
   }
 
   readonly executeCommand = (command: Command): void => {
-    if (COMMAND_META[command.type].target === "bun") {
-      electrobun.rpc?.send.executeCommand(command);
-      return;
-    }
     const handler = this._handlers.get(command.type);
     if (!handler) {
       console.warn(`No handler registered for command: ${command.type}`);

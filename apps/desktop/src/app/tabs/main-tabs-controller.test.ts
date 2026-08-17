@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 
 import {
   MainTabsController,
+  type AppTab,
+  type MainTabsActivity,
   type MainTabsPersistence,
   type MainTabsStoredState,
 } from "./main-tabs-controller";
@@ -194,6 +196,7 @@ describe("MainTabsController", () => {
     await alphaExists.promise;
     await Promise.resolve();
     await Promise.resolve();
+    await Promise.resolve();
     controller.dispatch({ type: "reopenClosed" });
     await _eventually(
       () => controller.getSnapshot().tabs.at(-1)?.playgroundId,
@@ -307,15 +310,30 @@ class MemoryTabsPersistence implements MainTabsPersistence {
 }
 
 function _controller(
-  overrides: Partial<ConstructorParameters<typeof MainTabsController>[0]> = {}
+  overrides: {
+    persistence?: MainTabsPersistence;
+    playgroundExists?: (playgroundId: string) => Promise<boolean>;
+    canPruneRestoredTab?: (tab: AppTab) => boolean;
+    subscribeToPruneChanges?: (listener: () => void) => () => void;
+  } = {}
 ): MainTabsController {
-  return new MainTabsController({
-    persistence: new MemoryTabsPersistence(),
-    playgroundExists: () => Promise.resolve(true),
-    canPruneRestoredTab: () => true,
-    subscribeToPruneChanges: () => () => undefined,
-    ...overrides,
-  });
+  const playgroundExists =
+    overrides.playgroundExists ?? (() => Promise.resolve(true));
+  const activity: MainTabsActivity = {
+    canPruneRestoredTab: overrides.canPruneRestoredTab ?? (() => true),
+    subscribe:
+      overrides.subscribeToPruneChanges ?? (() => () => undefined),
+  };
+  return new MainTabsController(
+    overrides.persistence ?? new MemoryTabsPersistence(),
+    {
+      load: (playgroundId) =>
+        playgroundExists(playgroundId).then((exists) =>
+          exists ? ({} as never) : undefined
+        ),
+    },
+    activity
+  );
 }
 
 function _stored(playgroundId: string, title: string) {

@@ -1,6 +1,8 @@
 import { defineRpcNamespace } from "./namespaced-rpc";
 import type { RequestRpcShape } from "./rpc-shape";
 
+export const APP_DIRECTORIES_SERVICE = Symbol("AppDirectoriesService");
+
 export interface AppDirectoriesRequests {
   ensure(relativePath: string): Promise<string>;
 }

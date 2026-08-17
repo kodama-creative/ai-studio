@@ -4,7 +4,7 @@ import type { AssistantMessage, Thread } from "@llm-space/core";
 import type { PiSessionSnapshot } from "@llm-space/pi-runtime";
 import type { Playground } from "@llm-space/studio";
 
-import type { PlaygroundClient } from "@/client/playground-client";
+import type { PlaygroundClient } from "@/shared/playground-rpc";
 import type { ThreadClient } from "@/shared/thread-rpc";
 
 import {

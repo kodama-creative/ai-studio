@@ -2,10 +2,12 @@
 
 import { useMemo } from "react";
 
-import { REMINDERS_CONTROLLER } from "@/app/di/main-window-module";
 import { useController } from "@/app/di/react";
 
-import type { RemindersSnapshot } from "./reminders-controller";
+import {
+  RemindersController,
+  type RemindersSnapshot,
+} from "./reminders-controller";
 
 interface RemindersValue extends RemindersSnapshot {
   readonly requestFeature: () => Promise<void>;
@@ -16,7 +18,7 @@ interface RemindersValue extends RemindersSnapshot {
 
 /** Domain adapter over the window-scoped reminders controller. */
 export function useReminders(): RemindersValue {
-  const { controller, state } = useController(REMINDERS_CONTROLLER);
+  const { controller, state } = useController(RemindersController);
   return useMemo(
     () => ({
       ...state,

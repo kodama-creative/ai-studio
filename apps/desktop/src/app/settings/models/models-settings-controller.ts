@@ -1,14 +1,19 @@
-import type { ModelProviderGroup, ProviderProfilePatch } from "@llm-space/core";
+import type { ModelProviderGroup } from "@llm-space/core";
+import { inject, injectable } from "inversify";
+
+import type { Disposable } from "@/shared/disposable";
+
+import { DesktopModelCatalogController } from "../../models/desktop-model-catalog-controller";
+import { RendererNotificationService } from "../../notifications/renderer-notification-service";
 
 import {
   AddProviderController,
   type AddProviderChoice,
-  type AddProviderControllerOptions,
   type AddProviderSnapshot,
 } from "./add-provider-controller";
+import { reportModelMutationFailure } from "./model-notifications";
 import {
   ProviderMetadataController,
-  type ProviderMetadataControllerOptions,
   type ProviderMetadataField,
   type ProviderMetadataSnapshot,
   type ProviderMetadataTextField,
@@ -23,7 +28,6 @@ import {
 } from "./provider-profile-controller";
 import {
   ProviderProfilesController,
-  type ProviderProfilesControllerOptions,
   type ProviderProfilesOperation,
   type ProviderProfilesSnapshot,
   type ProviderProfilesTarget,
@@ -51,32 +55,6 @@ export type ModelsSettingsFailure =
       readonly field: ProviderProfileField;
     };
 
-export interface ModelsSettingsControllerOptions {
-  readonly catalog?: {
-    readonly read: () => readonly ModelProviderGroup[];
-    readonly subscribe: (listener: () => void) => () => void;
-  };
-  readonly subscribeProviderAdded?: (
-    listener: (providerId: string) => void
-  ) => () => void;
-  readonly fetchBuiltinProviders: AddProviderControllerOptions["fetchBuiltinProviders"];
-  readonly addBuiltinProvider: AddProviderControllerOptions["addBuiltinProvider"];
-  readonly addCustomProvider: AddProviderControllerOptions["addCustomProvider"];
-  readonly removeProvider: (providerId: string) => Promise<void>;
-  readonly updateProvider: ProviderMetadataControllerOptions["updateProvider"];
-  readonly addProviderProfile: ProviderProfilesControllerOptions["addProfile"];
-  readonly removeProviderProfile: ProviderProfilesControllerOptions["removeProfile"];
-  readonly updateProviderProfile: (
-    providerId: string,
-    profileId: string,
-    patch: ProviderProfilePatch
-  ) => Promise<void>;
-  readonly mutationFailed: (
-    failure: ModelsSettingsFailure,
-    error: unknown
-  ) => void;
-}
-
 export interface ModelsSettingsSnapshot {
   readonly providers: readonly ModelProviderGroup[];
   readonly selectedProviderId: string | null;
@@ -88,11 +66,10 @@ export interface ModelsSettingsSnapshot {
   readonly profile: ProviderProfileSnapshot;
 }
 
-export interface ModelsSettingsChildren {
-  readonly addProvider: AddProviderController;
-  readonly metadata: ProviderMetadataController;
-  readonly profiles: ProviderProfilesController;
-  readonly profile: ProviderProfileController;
+interface ModelsCatalogPort {
+  getSnapshot(): { readonly providers?: readonly ModelProviderGroup[] | null };
+  subscribe(listener: () => void): () => void;
+  removeProvider(providerId: string): Promise<void>;
 }
 
 interface RemovalLease {
@@ -144,7 +121,13 @@ const EMPTY_SNAPSHOT: ModelsSettingsSnapshot = {
  * lifecycle of the focused provider/profile editors projected from that
  * catalog. It has no React, Electrobun or toast dependency.
  */
+@injectable()
 export class ModelsSettingsController {
+  private readonly _catalog: ModelsCatalogPort;
+  private readonly _notifications: Pick<
+    RendererNotificationService,
+    "error"
+  >;
   private readonly _listeners = new Set<Listener>();
   private readonly _addProvider: AddProviderController;
   private readonly _metadata: ProviderMetadataController;
@@ -152,7 +135,7 @@ export class ModelsSettingsController {
   private readonly _profile: ProviderProfileController;
   private _unsubscribeChildren: (() => void)[] = [];
   private _unsubscribeCatalog: (() => void) | null = null;
-  private _unsubscribeProviderAdded: (() => void) | null = null;
+  private _providerAddedSubscription: Disposable | null = null;
   private _unsubscribeProfiles: (() => void) | null = null;
   private _started = false;
   private _epoch = 0;
@@ -195,15 +178,23 @@ export class ModelsSettingsController {
   } as const;
 
   constructor(
-    providers: readonly ModelProviderGroup[],
-    private readonly _options: ModelsSettingsControllerOptions,
-    children: ModelsSettingsChildren
+    @inject(DesktopModelCatalogController)
+    catalog: ModelsCatalogPort,
+    @inject(RendererNotificationService)
+    notifications: Pick<RendererNotificationService, "error">,
+    @inject(AddProviderController)
+    addProvider: AddProviderController,
+    @inject(ProviderMetadataController) metadata: ProviderMetadataController,
+    @inject(ProviderProfilesController) profiles: ProviderProfilesController,
+    @inject(ProviderProfileController) profile: ProviderProfileController
   ) {
-    this._addProvider = children.addProvider;
-    this._metadata = children.metadata;
-    this._profiles = children.profiles;
-    this._profile = children.profile;
-    this.syncCatalog(providers);
+    this._catalog = catalog;
+    this._notifications = notifications;
+    this._addProvider = addProvider;
+    this._metadata = metadata;
+    this._profiles = profiles;
+    this._profile = profile;
+    this.syncCatalog(catalog.getSnapshot().providers ?? []);
   }
 
   readonly getSnapshot = (): ModelsSettingsSnapshot => this._snapshot;
@@ -226,16 +217,13 @@ export class ModelsSettingsController {
       this._profiles.subscribe(this._publishChildren),
       this._profile.subscribe(this._publishChildren),
     ];
-    if (this._options.catalog) {
-      this._unsubscribeCatalog = this._options.catalog.subscribe(() => {
-        this.syncCatalog(this._options.catalog?.read() ?? []);
-      });
-      this.syncCatalog(this._options.catalog.read());
-    } else {
-      this._syncFocusedControllers();
-    }
-    this._unsubscribeProviderAdded =
-      this._options.subscribeProviderAdded?.(this._providerAdded) ?? null;
+    this._unsubscribeCatalog = this._catalog.subscribe(() => {
+      this.syncCatalog(this._catalog.getSnapshot().providers ?? []);
+    });
+    this.syncCatalog(this._catalog.getSnapshot().providers ?? []);
+    this._providerAddedSubscription = this._addProvider.onDidAddProvider(
+      this._providerAdded
+    );
   }
 
   stop(): void {
@@ -244,8 +232,8 @@ export class ModelsSettingsController {
     this._epoch += 1;
     this._unsubscribeCatalog?.();
     this._unsubscribeCatalog = null;
-    this._unsubscribeProviderAdded?.();
-    this._unsubscribeProviderAdded = null;
+    void this._providerAddedSubscription?.dispose();
+    this._providerAddedSubscription = null;
     this._unsubscribeProfiles?.();
     this._unsubscribeProfiles = null;
     for (const unsubscribe of this._unsubscribeChildren) unsubscribe();
@@ -362,7 +350,7 @@ export class ModelsSettingsController {
       removingProviderId: providerId,
     });
     try {
-      await this._options.removeProvider(providerId);
+      await this._catalog.removeProvider(providerId);
       if (!this._isCurrentRemoval(lease)) return;
       this._setSnapshot({
         ...this._snapshot,
@@ -371,7 +359,8 @@ export class ModelsSettingsController {
     } catch (error) {
       if (!this._isCurrentRemoval(lease)) return;
       this._setSnapshot({ ...this._snapshot, removingProviderId: null });
-      this._options.mutationFailed(
+      reportModelMutationFailure(
+        this._notifications,
         { operation: "remove-provider", providerId },
         error
       );

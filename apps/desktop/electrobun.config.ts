@@ -59,6 +59,12 @@ export default {
     urlSchemes: [deepLinkScheme],
   },
   build: {
+    bun: {
+      // Electrobun's compiled CLI drops TypeScript parameter decorators when
+      // it bundles source directly. pre-build.ts emits and verifies JavaScript
+      // first; Electrobun then packages that stable transport entrypoint.
+      entrypoint: "node_modules/.cache/llm-space-electrobun/bun/index.js",
+    },
     // Vite builds to dist/, we copy from there. `assets/` holds hashed,
     // import-ed assets; `images/` (and anything else under Vite's `public/`)
     // is referenced by absolute path (e.g. `/images/onboard.png`) and must be
@@ -70,6 +76,9 @@ export default {
     },
     // Ignore Vite output in watch mode — HMR handles view rebuilds separately
     watchIgnore: ["dist/**"],
+    // The generated Bun entrypoint lives under ignored node_modules. Keep the
+    // source directories explicit for `electrobun dev --watch` rebuilds.
+    watch: ["src/bun", "src/shared"],
     mac: {
       // Signing/notarization run only on canary/stable builds and require the
       // ELECTROBUN_DEVELOPER_ID + App Store Connect API key env vars (CI).
@@ -95,9 +104,11 @@ export default {
     exitOnLastWindowClosed: false,
   },
   scripts: {
-    // Both run right before their respective codesign step. Workaround for
-    // electrobun#485 (x64-only, no-op elsewhere); see the script header.
-    postBuild: "scripts/fix-x64-headerpad.ts",
+    // Pre/post build preserve and verify Inversify metadata. postBuild and
+    // postWrap also apply the x64 signing workaround before their code-sign
+    // phases; see the script headers.
+    preBuild: "scripts/pre-build.ts",
+    postBuild: "scripts/post-build.ts",
     postWrap: "scripts/fix-x64-headerpad.ts",
   },
   release: {

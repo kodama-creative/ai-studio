@@ -156,8 +156,7 @@ export default defineConfig([
             },
             {
               group: ["@llm-space/*/server", "@llm-space/*/server/*"],
-              message:
-                "Shared UI must not import Bun-only server entrypoints.",
+              message: "Shared UI must not import Bun-only server entrypoints.",
             },
           ],
         },
@@ -165,10 +164,7 @@ export default defineConfig([
     },
   },
   {
-    files: [
-      "apps/web/src/**/*.{ts,tsx}",
-      "apps/desktop/src/**/*.{ts,tsx}",
-    ],
+    files: ["apps/web/src/**/*.{ts,tsx}", "apps/desktop/src/**/*.{ts,tsx}"],
     ignores: ["apps/desktop/src/bun/**"],
     rules: {
       "no-restricted-imports": [
@@ -181,6 +177,58 @@ export default defineConfig([
                 "Browser-rendered code must not import Bun-only server entrypoints.",
             },
           ],
+        },
+      ],
+    },
+  },
+  {
+    files: ["apps/desktop/src/**/*.{ts,tsx}"],
+    rules: {
+      "import-x/no-restricted-paths": [
+        "error",
+        {
+          zones: [
+            {
+              target: "./apps/desktop/src/shared",
+              from: "./apps/desktop/src/bun",
+              message: "Shared Desktop contracts cannot depend on Bun code.",
+            },
+            {
+              target: "./apps/desktop/src/shared",
+              from: "./apps/desktop/src/app",
+              message:
+                "Shared Desktop contracts cannot depend on renderer application code.",
+            },
+            {
+              target: "./apps/desktop/src/app",
+              from: "./apps/desktop/src/bun",
+              message:
+                "Renderer application code cannot depend on Bun implementations.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ["apps/desktop/src/**/*.{ts,tsx}"],
+    ignores: [
+      "apps/desktop/src/**/*.test.{ts,tsx}",
+      "apps/desktop/src/**/*-fixture.ts",
+      "apps/desktop/src/app/di/**",
+      "apps/desktop/src/bun/**/*-module.ts",
+      "apps/desktop/src/bun/**/*-rpc-feature.ts",
+      "apps/desktop/src/bun/app/bootstrap.ts",
+      "apps/desktop/src/bun/app/desktop-window-factory.ts",
+    ],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector:
+            "ImportDeclaration[source.value='inversify'] > ImportSpecifier[imported.name=/^(Container|ContainerModule)$/]",
+          message:
+            "Container access belongs only in Desktop composition roots, container factories, modules, and composition tests.",
         },
       ],
     },

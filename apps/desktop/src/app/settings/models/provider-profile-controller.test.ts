@@ -4,9 +4,17 @@ import type { ProviderProfilePatch } from "@llm-space/core";
 
 import {
   ProviderProfileController,
-  type ProviderProfileControllerOptions,
   type ProviderProfileTarget,
 } from "./provider-profile-controller";
+
+interface TestOptions {
+  readonly updateProfile: (
+    providerId: string,
+    profileId: string,
+    patch: ProviderProfilePatch
+  ) => Promise<void>;
+  readonly saveFailed: (title: string, error: unknown) => void;
+}
 
 describe("ProviderProfileController", () => {
   test("rolls a failed latest scalar intent back to the last successful value", async () => {
@@ -32,7 +40,7 @@ describe("ProviderProfileController", () => {
     second.reject(new Error("second failed"));
     await _eventually(() => controller.getSnapshot().apiKey, "first-key");
 
-    expect(failures).toEqual(["apiKey"]);
+    expect(failures).toEqual(["Failed to update provider profile"]);
   });
 
   test("rolls two failed scalar intents back to the catalog projection", async () => {
@@ -108,9 +116,7 @@ describe("ProviderProfileController", () => {
     );
 
     expect(controller.getSnapshot().baseUrlEnabled).toBe(true);
-    expect(controller.getSnapshot().baseUrl).toBe(
-      "https://initial.example/v1"
-    );
+    expect(controller.getSnapshot().baseUrl).toBe("https://initial.example/v1");
   });
 
   test("retains a failed latest header Draft and makes it retryable", async () => {
@@ -143,7 +149,7 @@ describe("ProviderProfileController", () => {
     await _eventually(() => failures.length, 1);
 
     expect(controller.getSnapshot().headers[0]?.value).toBe("three");
-    expect(failures).toEqual(["headers"]);
+    expect(failures).toEqual(["Failed to update provider profile"]);
 
     controller.commitHeaders();
     await _eventually(() => patches.length, 3);
@@ -184,9 +190,7 @@ describe("ProviderProfileController", () => {
 
     expect(controller.getSnapshot().name).toBe("Remote name");
     expect(controller.getSnapshot().apiKey).toBe("draft-key");
-    expect(controller.getSnapshot().baseUrl).toBe(
-      "https://remote.example/v1"
-    );
+    expect(controller.getSnapshot().baseUrl).toBe("https://remote.example/v1");
   });
 
   test("retargeting skips queued work and ignores the old in-flight failure", async () => {
@@ -220,19 +224,24 @@ describe("ProviderProfileController", () => {
 });
 
 function _controller(
-  overrides: Partial<ProviderProfileControllerOptions> = {}
+  overrides: Partial<TestOptions> = {}
 ): ProviderProfileController {
-  return new ProviderProfileController(_target("provider", "profile"), {
+  const options: TestOptions = {
     updateProfile: () => Promise.resolve(),
     saveFailed: () => undefined,
     ...overrides,
-  });
+  };
+  const controller = new ProviderProfileController(
+    { updateProviderProfile: options.updateProfile },
+    {
+      error: options.saveFailed,
+    }
+  );
+  controller.sync(_target("provider", "profile"));
+  return controller;
 }
 
-function _target(
-  providerId: string,
-  profileId: string
-): ProviderProfileTarget {
+function _target(providerId: string, profileId: string): ProviderProfileTarget {
   return {
     providerId,
     profile: {

@@ -26,6 +26,9 @@ import {
   type PlaygroundApplication,
 } from "@llm-space/studio";
 import { createSqliteStudioStore } from "@llm-space/studio/storage/sqlite";
+import { inject, injectable, preDestroy } from "inversify";
+
+import { APP_HOME_PATH } from "../native/app-directories-module";
 
 export interface CreateDesktopPlaygroundApplicationOptions {
   readonly homePath: string;
@@ -55,14 +58,137 @@ export interface PlaygroundToolHost {
   }): Promise<McpCallToolResponse>;
 }
 
-export interface DesktopPlaygroundApplication extends PlaygroundApplication {
+export const PLAYGROUND_MODEL_HOST = Symbol("PlaygroundModelHost");
+export const PLAYGROUND_TOOL_HOST = Symbol("PlaygroundToolHost");
+
+export interface PlaygroundModelHost {
+  readonly models: Models | (() => Models | Promise<Models>);
+  resolveConnection?: CreateDesktopPlaygroundApplicationOptions["resolveConnection"];
+}
+
+interface DesktopPlaygroundRuntime extends PlaygroundApplication {
   dispose(): Promise<void>;
 }
 
-/** Composes Studio metadata, Pi Session, and bindings over one SQLite file. */
+/** Owns the process-wide Playground Studio/Pi/SQLite runtime and its cleanup. */
+@injectable()
+export class DesktopPlaygroundApplication implements PlaygroundApplication {
+  private readonly _runtime: DesktopPlaygroundRuntime;
+
+  constructor(
+    @inject(APP_HOME_PATH) homePath: string,
+    @inject(PLAYGROUND_MODEL_HOST) models: PlaygroundModelHost,
+    @inject(PLAYGROUND_TOOL_HOST) tools: PlaygroundToolHost
+  ) {
+    this._runtime = _createDesktopPlaygroundRuntime({
+      homePath,
+      models: models.models,
+      resolveConnection: models.resolveConnection,
+      tools,
+    });
+  }
+
+  /** Create one durable Playground and its authoritative Pi Session. */
+  createPlayground(...args: Parameters<PlaygroundApplication["createPlayground"]>) {
+    return this._runtime.createPlayground(...args);
+  }
+
+  /** Load one durable Playground projection by product identity. */
+  loadPlayground(...args: Parameters<PlaygroundApplication["loadPlayground"]>) {
+    return this._runtime.loadPlayground(...args);
+  }
+
+  /** List the durable Playground catalog in application order. */
+  listPlaygrounds(...args: Parameters<PlaygroundApplication["listPlaygrounds"]>) {
+    return this._runtime.listPlaygrounds(...args);
+  }
+
+  /** Persist one Playground document without changing execution ownership. */
+  savePlayground(...args: Parameters<PlaygroundApplication["savePlayground"]>) {
+    return this._runtime.savePlayground(...args);
+  }
+
+  /** Admit and execute one durable Playground operation. */
+  run(...args: Parameters<PlaygroundApplication["run"]>) {
+    return this._runtime.run(...args);
+  }
+
+  /** Execute exactly one debugger step for a committed operation. */
+  stepRun(...args: Parameters<PlaygroundApplication["stepRun"]>) {
+    return this._runtime.stepRun(...args);
+  }
+
+  /** Continue one paused durable Playground operation. */
+  continueRun(...args: Parameters<PlaygroundApplication["continueRun"]>) {
+    return this._runtime.continueRun(...args);
+  }
+
+  /** Resolve one durable tool-approval suspension. */
+  resolveToolApproval(
+    ...args: Parameters<PlaygroundApplication["resolveToolApproval"]>
+  ) {
+    return this._runtime.resolveToolApproval(...args);
+  }
+
+  /** Cancel one identified Playground operation. */
+  cancelRun(...args: Parameters<PlaygroundApplication["cancelRun"]>) {
+    return this._runtime.cancelRun(...args);
+  }
+
+  /** Cancel whichever operation is currently active for a Playground. */
+  cancelActiveRun(
+    ...args: Parameters<PlaygroundApplication["cancelActiveRun"]>
+  ) {
+    return this._runtime.cancelActiveRun(...args);
+  }
+
+  /** Inspect the authoritative Pi Session projection for one operation. */
+  inspectRun(...args: Parameters<PlaygroundApplication["inspectRun"]>) {
+    return this._runtime.inspectRun(...args);
+  }
+
+  /** Return one committed operation snapshot when it still exists. */
+  getRun(...args: Parameters<PlaygroundApplication["getRun"]>) {
+    return this._runtime.getRun(...args);
+  }
+
+  /** List committed operations belonging to one Playground. */
+  listRuns(...args: Parameters<PlaygroundApplication["listRuns"]>) {
+    return this._runtime.listRuns(...args);
+  }
+
+  /** Stream committed changes for one durable operation with cancellation. */
+  streamRun(...args: Parameters<PlaygroundApplication["streamRun"]>) {
+    return this._runtime.streamRun(...args);
+  }
+
+  /** Close SQLite, Pi, and Studio resources exactly once. */
+  @preDestroy()
+  close(): Promise<void> {
+    return this._runtime.dispose();
+  }
+
+  /** Alias used by the Desktop process lifecycle and failure cleanup. */
+  dispose(): Promise<void> {
+    return this.close();
+  }
+}
+
+/** Test-friendly construction seam that still returns the concrete Application. */
 export function createDesktopPlaygroundApplication(
   options: CreateDesktopPlaygroundApplicationOptions
 ): DesktopPlaygroundApplication {
+  return new DesktopPlaygroundApplication(
+    options.homePath,
+    { models: options.models, resolveConnection: options.resolveConnection },
+    options.tools
+  );
+}
+
+/** Compose the concrete Studio metadata, Pi Session, and binding resources. */
+function _createDesktopPlaygroundRuntime(
+  options: CreateDesktopPlaygroundApplicationOptions
+): DesktopPlaygroundRuntime {
   const databasePath = path.join(options.homePath, "studio", "studio.sqlite");
   const repository = new BunSqliteSessionRepository({ path: databasePath });
   let bindings: BunSqliteRuntimeBindingStore;

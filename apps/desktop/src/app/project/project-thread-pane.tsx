@@ -8,8 +8,10 @@ import {
 import { useCallback, useMemo, useRef } from "react";
 import { toast } from "sonner";
 
+import { useInject } from "@/app/di/react";
 import { SerializedPersistence } from "@/app/thread/serialized-persistence";
 import type { StudioTransport } from "@/shared/studio-rpc";
+import { THREAD_SERVICE, type ThreadRequests } from "@/shared/thread-rpc";
 
 import {
   createProjectThreadExecutionRuntime,
@@ -46,6 +48,7 @@ function ProjectThreadPaneOwner({
   onThreadProjection,
   onRunSettled,
 }: ProjectThreadPaneProps) {
+  const threadService = useInject<ThreadRequests>(THREAD_SERVICE);
   const threadRef = useRef(thread);
   threadRef.current = thread;
   const metadataSaveChain = useRef(Promise.resolve());
@@ -118,6 +121,7 @@ function ProjectThreadPaneOwner({
     () =>
       createProjectThreadExecutionRuntime({
         client,
+        threadClient: threadService,
         projectId,
         threadId: thread.id,
         getThread: () => threadRef.current,
@@ -128,7 +132,15 @@ function ProjectThreadPaneOwner({
           await onRunSettled();
         },
       }),
-    [client, flushPending, onRunSettled, projectId, publishThread, thread.id]
+    [
+      client,
+      flushPending,
+      onRunSettled,
+      projectId,
+      publishThread,
+      thread.id,
+      threadService,
+    ]
   );
   return (
     <ThreadPlayground

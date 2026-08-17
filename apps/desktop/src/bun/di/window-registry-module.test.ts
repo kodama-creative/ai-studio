@@ -1,16 +1,10 @@
 import { expect, test } from "bun:test";
 
-import { ContainerModule } from "inversify";
+import { Container, ContainerModule, injectable, preDestroy } from "inversify";
 
 import type { Disposable } from "../../shared/disposable";
 import { defineRpcNamespace } from "../../shared/namespaced-rpc";
 
-import {
-  CommandContribution,
-  type CommandContribution as CommandContributionApi,
-} from "./command-contribution";
-import { CommandRegistry } from "./command-registry";
-import { createDesktopProcessContainer } from "./process-container";
 import {
   RpcContribution,
   type RpcContribution as RpcContributionApi,
@@ -30,22 +24,15 @@ const FIXTURE_RPC = defineRpcNamespace<FixtureRpc>("fixture", {
   events: {},
 });
 
-test("window Registries resolve one shared multi-contribution instance", async () => {
-  const process = createDesktopProcessContainer();
-  const scope = process.createWindowScope("fixture");
+test("window RpcRegistry resolves its multi-contribution once", async () => {
+  const desktop = new Container();
+  const container = new Container({ parent: desktop });
   const lifecycle: string[] = [];
   let constructions = 0;
-  class FixtureContribution
-    implements CommandContributionApi, RpcContributionApi, Disposable
-  {
+  @injectable()
+  class FixtureContribution implements RpcContributionApi, Disposable {
     constructor() {
       constructions += 1;
-    }
-
-    registerCommands(commands: CommandRegistry): void {
-      commands.registerCommand("shell.reportBugs", {
-        execute: () => lifecycle.push("command"),
-      });
     }
 
     registerRpc(rpc: RpcRegistry): void {
@@ -56,49 +43,37 @@ test("window Registries resolve one shared multi-contribution instance", async (
       });
     }
 
+    @preDestroy()
     dispose(): void {
       lifecycle.push("contribution");
     }
   }
-  scope.load(
+  container.load(
     new ContainerModule(({ bind }) => {
-      bind(FixtureContribution)
-        .toDynamicValue(() => new FixtureContribution())
-        .inSingletonScope();
-      bind<CommandContributionApi>(CommandContribution).toService(
-        FixtureContribution
-      );
+      bind(FixtureContribution).toSelf().inSingletonScope();
       bind<RpcContributionApi>(RpcContribution).toService(FixtureContribution);
     })
   );
-  scope.load(
-    windowRegistryModule(scope, {
-      commandSink: { sendToWebview: () => undefined },
+  container.load(
+    windowRegistryModule({
       rpcEventSink: {
         sendStreamEvent: () => undefined,
         sendEvent: () => undefined,
       },
     })
   );
-  const commands = scope.get(CommandRegistry);
-  const rpc = scope.get(RpcRegistry);
-  commands.onStart();
+  const rpc = container.get(RpcRegistry);
   rpc.onStart();
-  scope.onDispose(async () => {
-    await rpc.dispose();
-    await commands.dispose();
-    lifecycle.push("registries");
-  });
 
-  commands.execute({ type: "shell.reportBugs", args: {} });
   expect(
     await rpc.request({ namespace: "fixture", method: "ping", args: [] })
   ).toEqual({ ok: true, value: "pong" });
-  expect(scope.get(CommandRegistry)).toBe(commands);
-  expect(scope.get(RpcRegistry)).toBe(rpc);
+  expect(container.get(RpcRegistry)).toBe(rpc);
   expect(constructions).toBe(1);
 
-  await scope.dispose();
-  expect(lifecycle).toEqual(["command", "registries", "contribution"]);
-  await process.dispose();
+  await rpc.dispose();
+  lifecycle.push("registry");
+  await container.unbindAllAsync();
+  expect(lifecycle).toEqual(["registry", "contribution"]);
+  await desktop.unbindAllAsync();
 });

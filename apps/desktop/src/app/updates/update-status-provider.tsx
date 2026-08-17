@@ -5,11 +5,10 @@ import { CheckIcon, Loader2Icon, XIcon } from "lucide-react";
 import { useEffect, useLayoutEffect } from "react";
 import { toast } from "sonner";
 
-import { RENDERER_EVENTS } from "@/app/di/common-module";
-import { UPDATE_STATUS_CONTROLLER } from "@/app/di/main-window-module";
-import { useController, useInject } from "@/app/di/react";
-import type { RendererEventEmitter } from "@/app/events/renderer-events";
+import { useController } from "@/app/di/react";
 import { UpdateDialog } from "@/components/update-dialog";
+
+import { UpdateStatusController } from "./update-status-controller";
 
 // The dialog only covers the quick / terminal states (checking → up-to-date /
 // error). The long, non-interactive states live bottom-right as passive cards so
@@ -113,8 +112,7 @@ function _UpdateDownloadingCard({
 
 /** React projection for update dialogs and event-driven passive cards. */
 export function UpdateStatusSurface() {
-  const { controller, state } = useController(UPDATE_STATUS_CONTROLLER);
-  const events = useInject<RendererEventEmitter>(RENDERER_EVENTS);
+  const { controller, state } = useController(UpdateStatusController);
   useLayoutEffect(() => {
     const downloading = (version: string) => {
       toast.custom(
@@ -156,15 +154,20 @@ export function UpdateStatusSurface() {
         },
       });
     };
-    events.on("updates:downloading", downloading);
-    events.on("updates:ready", ready);
-    events.on("updates:installed", installed);
-    return () => {
-      events.off("updates:downloading", downloading);
-      events.off("updates:ready", ready);
-      events.off("updates:installed", installed);
-    };
-  }, [controller, events]);
+    const subscription = controller.onDidNotify((notice) => {
+      switch (notice.type) {
+        case "downloading":
+          downloading(notice.version);
+          return;
+        case "ready":
+          ready(notice.version);
+          return;
+        case "installed":
+          installed(notice.version);
+      }
+    });
+    return () => void subscription.dispose();
+  }, [controller]);
 
   useEffect(() => {
     if (
@@ -187,7 +190,7 @@ export function UpdateStatusSurface() {
 
 export function useUpdateStatus(): UpdateStatusValue {
   const readyVersion = useController(
-    UPDATE_STATUS_CONTROLLER,
+    UpdateStatusController,
     (snapshot) => snapshot.readyVersion
   ).state;
   return { readyVersion };
