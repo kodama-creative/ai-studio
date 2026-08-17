@@ -29,7 +29,6 @@ import { auxiliaryGenerationRpcModule } from "../auxiliary-generation/auxiliary-
 import { activateWindowForDeepLink } from "../deep-link/activate-window";
 import { desktopDeepLinks } from "../deep-link/launch";
 import {
-  createDesktopProcessContainer,
   type DesktopProcessContainer,
   type DesktopWindowScope,
 } from "../di/process-container";
@@ -137,22 +136,8 @@ export function configureDesktopWindowScope(
   }
 }
 
-/** Build and start the production Bun object graph. */
-export async function startDesktopApp(): Promise<DesktopAppRuntime> {
-  const processContainer = createDesktopProcessContainer();
-  try {
-    return await _startDesktopApp(processContainer);
-  } catch (error) {
-    const startupFailure = new DesktopLifecycle();
-    startupFailure.defer("desktop process scope after startup failure", () =>
-      processContainer.dispose()
-    );
-    await startupFailure.stop();
-    throw error;
-  }
-}
-
-async function _startDesktopApp(
+/** Build and start the production Bun object graph in the supplied process scope. */
+export async function startDesktopApp(
   processContainer: DesktopProcessContainer
 ): Promise<DesktopAppRuntime> {
   const processLifecycle = new DesktopLifecycle();

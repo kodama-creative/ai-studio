@@ -60,7 +60,7 @@ const { ThreadSharingApplication } = await import(
   "../thread-sharing/thread-sharing-application"
 );
 const { UPDATER } = await import("../updates/updates-module");
-const { configureDesktopWindowScope } = await import("./start-desktop-app");
+const { configureDesktopWindowScope } = await import("./desktop-app");
 const { DesktopWindowRuntime } = await import("./desktop-window-runtime");
 
 test("window scope configuration completes before Registry snapshots start", async () => {

@@ -97,7 +97,7 @@ callbacks, or bind raw BrowserWindow/RPC values without an actual consumer.
 Every native window owns one `RpcRegistry`. Window-scoped feature classes implement the same-name `RpcContribution` symbol + interface and register their server classes during `RpcRegistry.onStart()`. A named `ContributionProvider<RpcContribution>` takes one frozen snapshot after all window modules are bound; duplicate namespaces and late registration fail. The Registry owns request dispatch, stream abort, event subscriptions, and reverse-order registration cleanup. `createMainWindowRPC()` only forwards the Electrobun envelope to that Registry and never constructs business services.
 
 Bundled window composition is explicit in the production composition root.
-`start-desktop-app.ts` owns the ordered Common/Main/Project module sets and
+`desktop-app.ts` owns the ordered Common/Main/Project module sets and
 injects one scope-configuration function through `DesktopWindowFactory` into
 `DesktopWindowRuntime`. The runtime invokes it once before freezing the
 Command/RPC contribution snapshots and must not import business feature modules
@@ -112,8 +112,13 @@ methods into a catch-all Project Studio client/server.
 
 ### Bun composition and bundled modules
 
+`src/bun/app/bootstrap.ts` owns shell-environment hydration, cold-start deep-link
+capture, workspace/Skill seeding, process-scope creation, and composition-failure
+cleanup. It loads the production composition root only after those startup
+prerequisites complete; `src/bun/index.ts` only invokes this bootstrap.
+
 The Bun process object graph is assembled in one production composition root,
-`src/bun/app/start-desktop-app.ts`. Process-scoped managers are constructed
+`src/bun/app/desktop-app.ts`. Process-scoped managers are constructed
 there, bound and eagerly adopted once with feature-owned DI identities, and
 consumed by constructor factories in feature-owned modules. Vertical feature
 slices live under their named `bun/*/` directories; each owns its application
@@ -171,12 +176,13 @@ it cleans each stack once in reverse ownership order and continues after
 individual failures. The startup wrapper always stops the process scope if
 composition fails. Do not defer cleanup registration until the end of startup.
 Cold-start URL capture is the deliberate import-time exception:
-`deep-link/launch.ts` adapts Electrobun into a `DeepLinkInbox` before async
-bootstrap begins. `DesktopLaunchController` atomically connects to that inbox,
-routes buffered/live Main and Studio links, owns reopen behavior, and
+`bootstrap.ts` loads `deep-link/launch.ts` immediately after shell hydration and
+before longer seed/composition imports. The launch adapter buffers Electrobun
+URLs in a `DeepLinkInbox`; `DesktopLaunchController` atomically connects to that
+inbox, routes buffered/live Main and Studio links, owns reopen behavior, and
 disconnects before window teardown. The top-level `DesktopLifecycle` stack owns
 the idempotent stop order (launch routing → Project windows → process scope).
-Keep these state machines out of `start-desktop-app.ts`; the composition root
+Keep these state machines out of `desktop-app.ts`; the composition root
 only injects their platform adapters.
 The named generic `ContributionProvider<T>` keeps both Registries independent
 from Inversify. Registries start once before the Electrobun bridge and native
