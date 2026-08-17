@@ -4,7 +4,6 @@ import type { Command } from "../../shared/commands";
 import { CommandRegistry, type CommandSink } from "../di/command-registry";
 import type { DesktopWindowScope } from "../di/process-container";
 import { RpcRegistry, type RpcEventSink } from "../di/rpc-registry";
-import { windowRegistryModule } from "../di/window-registry-module";
 import {
   type NativeWindowStateBinding,
   WINDOW_APPLICATION,
@@ -21,6 +20,7 @@ export type DesktopWindowKind = "main" | "project";
 export interface DesktopWindowCompositionContext {
   readonly kind: DesktopWindowKind;
   readonly commandSink: CommandSink;
+  readonly rpcEventSink: RpcEventSink;
 }
 
 export type ConfigureDesktopWindowScope = (
@@ -69,8 +69,8 @@ export class DesktopWindowRuntime {
     configureScope(_scope, {
       kind: _kind,
       commandSink,
+      rpcEventSink,
     });
-    _scope.load(windowRegistryModule(_scope, { commandSink, rpcEventSink }));
     this._windowApplication = _scope.get(WINDOW_APPLICATION);
     this._commands = _scope.get(CommandRegistry);
     this._rpcRegistry = _scope.get(RpcRegistry);

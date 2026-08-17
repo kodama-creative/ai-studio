@@ -8,13 +8,8 @@ import type {
   DesktopWindowScope,
 } from "../di/process-container";
 import type { NativeWindowStateBinding } from "../native/native-window-module";
-import { playgroundWindowModule } from "../playgrounds/playground-module";
 import type { AgentProject } from "../projects/agent-project";
-import {
-  projectWindowIdentityModule,
-  projectWindowModule,
-  PROJECT_STUDIO,
-} from "../projects/project-module";
+import { PROJECT_STUDIO } from "../projects/project-module";
 import type {
   ProjectWindowAdapter,
   ProjectWindowHandle,
@@ -34,6 +29,20 @@ export interface DesktopMainWindowHandle {
   activate(): void;
 }
 
+/** Bootstrap-owned registrations needed across the staged window lifecycle. */
+export interface DesktopWindowScopeComposition {
+  configureMainIdentity(scope: DesktopWindowScope): void;
+  configureProjectSource(
+    scope: DesktopWindowScope,
+    project: AgentProject
+  ): void;
+  configureProjectIdentity(
+    scope: DesktopWindowScope,
+    projectView: AgentProjectView
+  ): void;
+  readonly configureRuntime: ConfigureDesktopWindowScope;
+}
+
 /** Create Main and Project native windows around one owned DI scope. */
 export class DesktopWindowFactory implements ProjectWindowAdapter {
   private readonly _runtimes = new Map<number, DesktopWindowRuntime>();
@@ -41,18 +50,18 @@ export class DesktopWindowFactory implements ProjectWindowAdapter {
   constructor(
     private readonly _process: DesktopProcessContainer,
     private readonly _homePath: string,
-    private readonly _configureWindowScope: ConfigureDesktopWindowScope
+    private readonly _composition: DesktopWindowScopeComposition
   ) {}
 
   /** Create the Main window inside the scope allocated by MainWindowManager. */
   async createMain(
     scope: DesktopWindowScope
   ): Promise<DesktopMainWindowHandle> {
-    scope.load(playgroundWindowModule());
+    this._composition.configureMainIdentity(scope);
     const runtime = new DesktopWindowRuntime(
       scope,
       "main",
-      this._configureWindowScope
+      this._composition.configureRuntime
     );
     const window = await createMainWindow({
       rpc: runtime.rpc,
@@ -70,7 +79,7 @@ export class DesktopWindowFactory implements ProjectWindowAdapter {
   async create(project: AgentProject): Promise<ProjectWindowHandle> {
     const scope = this._process.createWindowScope(`project:${project.id}`);
     try {
-      scope.load(projectWindowModule({ source: project }));
+      this._composition.configureProjectSource(scope, project);
       const studio = await scope.getAsync<Studio>(PROJECT_STUDIO);
       const projectView: AgentProjectView = {
         id: project.id,
@@ -80,13 +89,13 @@ export class DesktopWindowFactory implements ProjectWindowAdapter {
         agentId: studio.agent.agentSpecId,
         generationId: studio.agent.sourceRevision,
       };
-      scope.load(projectWindowIdentityModule(projectView));
+      this._composition.configureProjectIdentity(scope, projectView);
       const closed = new Set<() => void>();
       scope.onDisposed(() => closed.forEach((listener) => listener()));
       const runtime = new DesktopWindowRuntime(
         scope,
         "project",
-        this._configureWindowScope
+        this._composition.configureRuntime
       );
       const stateStore = await ProjectWindowStateFile.load(
         this._homePath,

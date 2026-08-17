@@ -52,14 +52,9 @@ await mock.module("./desktop-lifecycle", () => {
     },
   };
 });
-await mock.module("./desktop-app", () => {
-  events.push("desktop-app:import");
-  return {
-    startDesktopApp: () => {
-      events.push("desktop-app:start");
-      throw new Error("startup failed");
-    },
-  };
+await mock.module("inversify", () => {
+  events.push("composition:import");
+  throw new Error("startup failed");
 });
 
 const { bootstrapDesktopApp } = await import("./bootstrap");
@@ -82,9 +77,8 @@ const expected = [
   "skills:seed",
   "process:import",
   "lifecycle:import",
-  "desktop-app:import",
   "process:create",
-  "desktop-app:start",
+  "composition:import",
   "lifecycle:create",
   "lifecycle:defer",
   "lifecycle:stop",

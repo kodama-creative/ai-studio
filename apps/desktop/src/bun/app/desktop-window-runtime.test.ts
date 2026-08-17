@@ -33,6 +33,7 @@ const { createDesktopProcessContainer } = await import(
   "../di/process-container"
 );
 const { RpcContribution } = await import("../di/rpc-contribution");
+const { windowRegistryModule } = await import("../di/window-registry-module");
 const { DESKTOP_HOST } = await import("../host/desktop-host-module");
 const { MCP_MANAGER } = await import("../mcp/mcp-module");
 const { ModelsApplication } = await import("../models/models-application");
@@ -60,7 +61,7 @@ const { ThreadSharingApplication } = await import(
   "../thread-sharing/thread-sharing-application"
 );
 const { UPDATER } = await import("../updates/updates-module");
-const { configureDesktopWindowScope } = await import("./desktop-app");
+const { createDesktopWindowScopeComposition } = await import("./bootstrap");
 const { DesktopWindowRuntime } = await import("./desktop-window-runtime");
 
 test("window scope configuration completes before Registry snapshots start", async () => {
@@ -68,7 +69,7 @@ test("window scope configuration completes before Registry snapshots start", asy
   const scope = process.createWindowScope("main");
   const lifecycle: string[] = [];
 
-  const runtime = new DesktopWindowRuntime(scope, "main", (windowScope) => {
+  const runtime = new DesktopWindowRuntime(scope, "main", (windowScope, context) => {
     lifecycle.push("configure");
     windowScope.bindConstant(WINDOW_APPLICATION, {
       attach: () => undefined,
@@ -83,6 +84,7 @@ test("window scope configuration completes before Registry snapshots start", asy
         });
       })
     );
+    windowScope.load(windowRegistryModule(windowScope, context));
   });
 
   expect(runtime.rpc).toBeDefined();
@@ -93,6 +95,8 @@ test("window scope configuration completes before Registry snapshots start", asy
 });
 
 test("production composition keeps Common, Main, and Project contributions explicit", async () => {
+  const { configureRuntime: configureDesktopWindowScope } =
+    await createDesktopWindowScopeComposition();
   const process = createDesktopProcessContainer();
   process.bindConstant(ANALYTICS, {} as never);
   process.bindConstant(GITHUB_AUTH, {} as never);
@@ -127,6 +131,10 @@ test("production composition keeps Common, Main, and Project contributions expli
     configureDesktopWindowScope(scope, {
       kind,
       commandSink: { sendToWebview: () => undefined },
+      rpcEventSink: {
+        sendEvent: () => undefined,
+        sendStreamEvent: () => undefined,
+      },
     });
     return {
       commands: scope
