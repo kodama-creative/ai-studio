@@ -1,20 +1,25 @@
-
 import { ChevronDown, type LucideIcon } from "lucide-react";
 
-import { Button } from "@llm-space/ui/ui/button";
+import { Button } from "../../ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@llm-space/ui/ui/dropdown-menu";
+} from "../../ui/dropdown-menu";
 
 /** An entry that renders as a plain divider in the menu. */
-interface SeparatorItem { type: "separator" }
+interface SeparatorItem {
+  type: "separator";
+}
 
 /** The minimum shape a selectable example item must provide to be rendered. */
-interface ExampleItem { type: string; label: string; icon: LucideIcon }
+interface ExampleItem {
+  type: string;
+  label: string;
+  icon: LucideIcon;
+}
 
 /**
  * The shared "Examples ▾" dropdown used by the system-prompt and tool editors.

@@ -10,8 +10,7 @@ import {
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
-import { CodeEditor } from "@llm-space/ui/components/code-editor";
-import { Button } from "@llm-space/ui/ui/button";
+import { Button } from "../../../ui/button";
 import {
   Dialog,
   DialogContent,
@@ -19,18 +18,14 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@llm-space/ui/ui/dialog";
-
+} from "../../../ui/dialog";
+import { CodeEditor } from "../../code-editor";
 import metaToolPrompt from "../examples/meta-tool.md?raw";
 import { DEFAULT_TOOL, TOOL_EXAMPLES } from "../examples/tools";
 import { ExamplesMenu } from "../examples-menu";
 import { GeneratePopoverButton } from "../generate-popover-button";
-import {
-  useThreadStore,
-  useThreadStoreActions,
-} from "../stores/thread-store";
+import { useThreadStore, useThreadStoreActions } from "../stores/thread-store";
 import { useStreamText } from "../use-stream-text";
-
 
 export function ToolEditorDialog({
   open,

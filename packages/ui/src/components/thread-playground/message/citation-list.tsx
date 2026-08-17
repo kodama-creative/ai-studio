@@ -1,7 +1,7 @@
 import type { TextContent } from "@llm-space/core";
 import { memo, useMemo } from "react";
 
-import { Link } from "@llm-space/ui/components/link";
+import { Link } from "../../link";
 
 import { collectCitations } from "./provider-hosted-tool-activity-utils";
 

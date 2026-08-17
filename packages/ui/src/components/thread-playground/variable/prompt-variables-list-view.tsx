@@ -22,12 +22,11 @@ import {
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
-import { Tooltip } from "@llm-space/ui/components/tooltip";
-import { useHostServices } from "@llm-space/ui/host";
-import { useAutoAnimation } from "@llm-space/ui/lib/use-auto-animation";
-import { cn } from "@llm-space/ui/lib/utils";
-import { Button } from "@llm-space/ui/ui/button";
-
+import { useHostServices } from "../../../host";
+import { useAutoAnimation } from "../../../lib/use-auto-animation";
+import { cn } from "../../../lib/utils";
+import { Button } from "../../../ui/button";
+import { Tooltip } from "../../tooltip";
 import { useThreadStore } from "../stores";
 
 import { PROMPT_DATE_FORMATS } from "./prompt-variable-options";

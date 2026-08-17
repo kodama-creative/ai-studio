@@ -19,26 +19,25 @@ import {
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
-import { useModels } from "@llm-space/ui/components/model-provider";
-import { useHostServices } from "@llm-space/ui/host";
-import { cn } from "@llm-space/ui/lib/utils";
+import { useHostServices } from "../../../host";
+import { cn } from "../../../lib/utils";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from "@llm-space/ui/ui/dialog";
-import { Input } from "@llm-space/ui/ui/input";
+} from "../../../ui/dialog";
+import { Input } from "../../../ui/input";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@llm-space/ui/ui/select";
-import { Switch } from "@llm-space/ui/ui/switch";
-
+} from "../../../ui/select";
+import { Switch } from "../../../ui/switch";
+import { useModels } from "../../model-provider";
 import { ProviderProfileSelector } from "../model/provider-profile-selector";
 
 import { getBuiltInToolIcon } from "./built-in-tool-icon";
@@ -111,7 +110,9 @@ function _BuiltInToolImportDialog({
   const toolRowRefs = useRef(new Map<string, HTMLDivElement>());
   const { builtinTools } = useHostServices();
   const providers = useModels();
-  const generateImageTool = tools.find((tool) => tool.name === "generate_image");
+  const generateImageTool = tools.find(
+    (tool) => tool.name === "generate_image"
+  );
   const imageProviderId = generateImageTool
     ? getToolConnectionProviderId(generateImageTool)
     : undefined;
@@ -471,9 +472,7 @@ function _GenerateImageConfigFields({
           >
             <SelectValue placeholder="Choose model" />
           </SelectTrigger>
-          <SelectContent
-            onPointerDownOutside={(e) => e.preventDefault()}
-          >
+          <SelectContent onPointerDownOutside={(e) => e.preventDefault()}>
             {enabledModels.map((model) => (
               <SelectItem key={model.id} value={model.id}>
                 {model.name}

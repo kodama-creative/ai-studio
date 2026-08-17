@@ -8,7 +8,7 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from "@llm-space/ui/ui/dialog";
+} from "../../../ui/dialog";
 
 import {
   PromptVariablesPanel,

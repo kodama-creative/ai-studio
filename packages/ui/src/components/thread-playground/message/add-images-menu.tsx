@@ -3,16 +3,14 @@
 import { ClipboardPasteIcon, FileIcon, ImagePlusIcon } from "lucide-react";
 import { useCallback, useRef } from "react";
 
-import { Button } from "@llm-space/ui/ui/button";
+import { Button } from "../../../ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuTrigger,
-} from "@llm-space/ui/ui/dropdown-menu";
-
-
+} from "../../../ui/dropdown-menu";
 import { useThreadStoreActions } from "../stores/thread-store";
 
 function readImageFile(

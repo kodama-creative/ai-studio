@@ -122,11 +122,6 @@ Thread execution transport lives under `bun/thread/`. Do not recreate a central
 business-token registry or put feature adapters back into `bun/rpc/`.
 Do not recreate central `runtime-module` or catch-all `di/modules` files.
 
-The Generator slice owns guarded project filesystem/uv operations and the
-explicit model/environment-secret resolution needed by generated projects.
-Do not expose that generator-only capability through the Models RPC interface;
-the Models application owns provider configuration and connection testing.
-
 The Playground slice binds one process-owned `DesktopPlaygroundApplication`,
 which directly owns Studio/Pi/SQLite/tool composition and disposal. RPC performs
 the transport naming projection; do not add a second pass-through Playground
@@ -212,32 +207,6 @@ Desktop is local-only and communicates with its Bun process through namespaced E
 
 Each open thread owns its own Zustand store (`stores/thread-store.ts`), created per-tab via `createThreadStore()` and supplied through `ThreadStoreContext` — there is **no global store**. Read it with `useThreadStore(selector)` and `useThreadStoreActions()`. State holds the `thread`, `streamingMessage`, `status`, `runHistory`, and `changeHistory`; `run()` drives a streaming turn. Undo/redo lives in `stores/thread-history.ts`: snapshots are thread _references_ (copy-on-write shares unchanged substructure, so undo is an O(1) pointer move), capped by count and a retained-image-bytes budget.
 
-### LangGraph generator parity
-
-Prompt semantics have two runtime implementations that must stay in sync:
-the TypeScript thread renderer under `packages/core/src/thread/` and the
-generated Python runtime under `packages/core/src/generator/langgraph/`.
-
-Whenever a built-in prompt variable, template function, filter, or macro is
-added or changed, update the LangGraph generator in the same change. In
-particular:
-
-- Add every built-in variable type to `applyTemplatePy()`'s generated
-  `build_variables()`; do not assume exporting it to
-  `references/variables.json` makes it available at run time.
-- Keep `current_date`, `available_skills`, and
-  `current_working_directory` available to both generated system prompts and
-  generated meta user prompts.
-- Mirror template helpers such as `exists(path)` and `@include(...)` in the
-  generated Python renderer, including recursive-include and missing-file
-  behavior.
-- Add generator regression tests in
-  `packages/core/src/generator/langgraph/templates.test.ts`, then execute the
-  generated Python at least once for syntax and behavior; TypeScript
-  string/snapshot assertions alone are not sufficient.
-- Before releasing a prompt-runtime change, generate or inspect a General Agent
-  project and verify its `meta_user_prompt.md` renders successfully.
-
 ### Persistence
 
 State is **persisted to disk** under the llm-space root (`~/.llm-space` by default; override with `LLM_SPACE_HOME`):
@@ -285,7 +254,7 @@ Playground/Experiment target on every request.
 - `mainview/` — the Vite entry: `index.html` + `main.tsx` mounting `<App>`.
 - `app/` — `index.tsx` resolves the native window context; `layout.tsx` owns visual/query providers; `desktop-window-providers.tsx` is the shared Main/Project renderer composition root (`CommandProvider` → `DesktopHostProvider` → `ModelProvider`); `page.tsx` exports `MainWindowPage` and owns only Main-window composition. Main-window Playground application behavior lives under `app/playground/`: `PlaygroundWorkspaceController` owns the restartable durable catalog, pane-projection merging, blank/example creation, dynamic seed resolution, versioned snapshot import, and tab opening; sidebar presentation must consume its snapshot rather than keep an independent list query. `app/tabs/` owns Main tab identity, local persistence, restoration validation, close/reopen ordering, and deferred pruning after pane activity settles behind `MainTabsController`'s snapshot + intent interface; the Playground RPC client and pane-activity tracker are injected at composition. Project behavior lives under `app/project/`: `AgentProjectCatalogController` owns the Main-window known-Project subscription-before-read lifecycle and stale-response suppression; `ProjectWorkspaceController` is the Project-window renderer owner for tabs and the cross-Thread/source selection epoch, composing the internal `ProjectThreadsController` (Thread collection/open concurrency, event cursors, stream cancellation, history/evaluation state) and `ProjectSourceController` (authoritative source watch plus open-file refresh) behind one restartable snapshot interface. The Bun `ProjectWindowManager` owns process-wide Project catalog mutations and emits their authoritative change event, including opens initiated by deep links and restore paths; renderer-command adapters must not synthesize catalog changes themselves. Account behavior lives under `app/account/`: `GithubAuthController` and `GithubAuthProvider` own initial-read/live-event precedence, subscription lifecycle, error reporting, and login/logout commands. `app/onboarding/` owns the open-session epoch, provider discovery precedence, and serialized provider-add mutation; onboarding presentation renders its snapshot and owns analytics/navigation intent. `app/thread-sharing/` owns dialog target epochs plus auth/publish stale-result suppression; presentation owns only transient form, clipboard, and visual state and must clean that state on every close path. `app/reminders/` owns best-effort passive reminder state; `app/updates/` owns the passive update channel and Main-window update provider; `app/window/` owns native-window projections: `FullScreenController` subscribes before its initial RPC read, keeps live events authoritative, and contains restart/cleanup failures; `app/lifecycle/` contains shared renderer teardown policy. Settings application behavior lives under `app/settings/`: `McpSettingsController` owns MCP selection, Draft conversion, debounced persistence, test/cancel/disconnect operations, and stale RPC suppression; `SkillsSettingsController` owns skill-folder selection, native folder/reveal operations, mutation ordering, optimistic skill toggles, and stale RPC suppression; `SettingsFormController` owns restartable reads, ordered writes, local Drafts, and latest-intent rollback. Models Settings is the local feature under `app/settings/models/`; its React presentation is colocated under `components/settings/models/`. `runSettingsMutation` adapts other fallible async mutations to void UI events. Do not move RPC lifecycle, mutation ordering, rollback, or stale-result suppression back into presentation state/effects.
   - `ModelsSettingsController` adapts the shared `ModelCatalogController` projection and mutation ports, and owns provider selection/fallback, Add/Remove admission, and the lifecycle of `AddProviderController`, `ProviderMetadataController`, `ProviderProfilesController`, and the focused `ProviderProfileController`. The custom chat/image model editor controllers live beside that aggregate and suppress results after close or retarget. `models-page.tsx` is the React adapter; provider search/filter/dialog state stays in presentation.
-- `bun/` — main-process code: `app/` (process/window composition, menu, window-state), vertical `playgrounds/`, `projects/`, `native/`, `generator/`, `models/`, `auxiliary-generation/`, and `thread-sharing/` feature slices, `rpc/` for transport infrastructure and manager/state adapters, `di/`, `host/`, `auth/` (`GitHubAuthManager` — OAuth Device Flow + `settings/auth.json`), `fs/` (truly shared trash/reveal primitives only), `updates/`, `reminders/` (one-time feature reminders + GitHub-star reminder, persisted to `settings/reminders.json`; reminder definitions ship in code at `shared/feature-reminders.ts` — append to `FEATURE_REMINDERS`, never reorder or reuse an `id`), `env/hydrate` (loads login-shell env — API keys/PATH — before anything reads `process.env`), and `workspace/seed`.
+- `bun/` — main-process code: `app/` (process/window composition, menu, window-state), vertical `playgrounds/`, `projects/`, `native/`, `models/`, `auxiliary-generation/`, and `thread-sharing/` feature slices, `rpc/` for transport infrastructure and manager/state adapters, `di/`, `host/`, `auth/` (`GitHubAuthManager` — OAuth Device Flow + `settings/auth.json`), `fs/` (truly shared trash/reveal primitives only), `updates/`, `reminders/` (one-time feature reminders + GitHub-star reminder, persisted to `settings/reminders.json`; reminder definitions ship in code at `shared/feature-reminders.ts` — append to `FEATURE_REMINDERS`, never reorder or reuse an `id`), `env/hydrate` (loads login-shell env — API keys/PATH — before anything reads `process.env`), and `workspace/seed`.
   - Model mutations cross the renderer seam as user intents. In particular, Ark image-model enablement and custom-model CRUD are applied atomically by `ModelManager` through `ModelsApplication`; a custom-provider model upsert also owns the provider API-mode update in the same persisted intent. Renderer code must not read a configuration snapshot, construct a replacement config, or split one user intent across multiple RPC mutations.
 
 > **GitHub calls go through the proxy.** GitHub auth (`bun/auth/`) and any future gist calls run from the **bun process** using the global `fetch`, which `NetworkSettingsManager` (`bun/network/`) routes through the user's configured proxy by writing `HTTP(S)_PROXY` onto `process.env`. Just call `fetch` — never add a bypassing custom dispatcher, or corporate/proxied users' GitHub requests will fail.

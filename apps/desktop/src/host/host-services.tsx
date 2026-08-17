@@ -7,12 +7,10 @@ import {
   APP_DIRECTORIES_CLIENT,
   AUXILIARY_GENERATION_CLIENT,
   BUILTIN_TOOLS_CLIENT,
-  GENERATOR_CLIENT,
   MCP_CLIENT,
   NATIVE_DIALOGS_CLIENT,
   NATIVE_FILES_CLIENT,
   PROMPT_FILES_CLIENT,
-  SEARCH_CLIENT,
   SKILLS_CLIENT,
 } from "@/app/di/common-module";
 import { useInject } from "@/app/di/react";
@@ -33,11 +31,9 @@ export function DesktopHostProvider({ children }: { children: ReactNode }) {
   const appDirectories = useInject(APP_DIRECTORIES_CLIENT);
   const builtinTools = useInject(BUILTIN_TOOLS_CLIENT);
   const dialogs = useInject(NATIVE_DIALOGS_CLIENT);
-  const generator = useInject(GENERATOR_CLIENT);
   const mcp = useInject(MCP_CLIENT);
   const nativeFiles = useInject(NATIVE_FILES_CLIENT);
   const promptFiles = useInject(PROMPT_FILES_CLIENT);
-  const search = useInject(SEARCH_CLIENT);
   const skills = useInject(SKILLS_CLIENT);
   const executeTool = useMemo(
     () => createToolExecutor(mcp, builtinTools),
@@ -70,30 +66,6 @@ export function DesktopHostProvider({ children }: { children: ReactNode }) {
         pickFile: () => dialogs.pickFile(),
         pickDirectory: () => dialogs.pickDirectory(),
       },
-      generator: {
-        pickDirectory: async () => ({ path: await generator.pickDirectory() }),
-        prepareDirectory: (parentDir, projectName) =>
-          generator.prepareDirectory(parentDir, projectName),
-        checkUv: () => generator.checkUv(),
-        runUv: (rootDir, args, options) =>
-          generator.runUv(rootDir, args, options),
-        writeFile: (rootDir, relativePath, contents) =>
-          generator.writeFile(rootDir, relativePath, contents),
-        removeFile: (rootDir, relativePath) =>
-          generator.removeFile(rootDir, relativePath),
-        openDevTerminal: (rootDir) => generator.openDevTerminal(rootDir),
-        getSearchSettings: () => search.get(),
-        resolveEnv: (
-          providerId: string,
-          envNames: string[],
-          options?: { profileId?: string }
-        ) =>
-          generator.resolveEnv({
-            providerId,
-            profileId: options?.profileId,
-            envNames,
-          }),
-      },
       actions: {
         openSettings: (tab) =>
           executeCommand({
@@ -123,12 +95,10 @@ export function DesktopHostProvider({ children }: { children: ReactNode }) {
       dialogs,
       executeCommand,
       executeTool,
-      generator,
       mcp,
       nativeFiles,
       promptFiles,
       registerCommandHandlers,
-      search,
       skills,
     ]
   );

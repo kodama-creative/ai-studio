@@ -3,14 +3,13 @@
 import { MoreHorizontal } from "lucide-react";
 import { memo, useState } from "react";
 
-import { cn } from "@llm-space/ui/lib/utils";
+import { cn } from "../../../lib/utils";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@llm-space/ui/ui/dropdown-menu";
-
+} from "../../../ui/dropdown-menu";
 
 /**
  * Right-side slot for a tool-import sidebar row: shows the tool count badge at
@@ -50,7 +49,10 @@ function _ToolImportSidebarActions({
             <MoreHorizontal className="size-3.5" />
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" onClick={(event) => event.stopPropagation()}>
+        <DropdownMenuContent
+          align="end"
+          onClick={(event) => event.stopPropagation()}
+        >
           <DropdownMenuItem onSelect={onEnableAll}>
             Enable all tools
           </DropdownMenuItem>

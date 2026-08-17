@@ -1,12 +1,12 @@
 import type { ThreadConnector } from "../../types/storage/connector";
 
+import { GIST_CONNECTOR_ID } from "./gist-constants";
 import {
   GistThreadReader,
   type GistThreadReaderOptions,
 } from "./gist-thread-reader";
 
-/** The connector id for the GitHub Gist backend. */
-export const GIST_CONNECTOR_ID = "gist";
+export { GIST_CONNECTOR_ID } from "./gist-constants";
 
 /**
  * Build the gist {@link ThreadConnector}: a {@link GistThreadReader} under the

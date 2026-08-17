@@ -17,18 +17,17 @@ import {
 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 
-import { useHostServices } from "@llm-space/ui/host";
-import { useAutoAnimation } from "@llm-space/ui/lib/use-auto-animation";
-import { cn } from "@llm-space/ui/lib/utils";
-import { Button } from "@llm-space/ui/ui/button";
+import { useHostServices } from "../../../host";
+import { useAutoAnimation } from "../../../lib/use-auto-animation";
+import { cn } from "../../../lib/utils";
+import { Button } from "../../../ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@llm-space/ui/ui/dropdown-menu";
-
+} from "../../../ui/dropdown-menu";
 import { useThreadStore, useThreadStoreActions } from "../stores/thread-store";
 
 import { BuiltInToolImportDialog } from "./built-in-tool-import-dialog";

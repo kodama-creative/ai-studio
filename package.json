@@ -16,7 +16,6 @@
     "preview:web": "bun --filter @llm-space/web preview",
     "release": "bun scripts/release.ts",
     "release:canary": "bun scripts/release.ts --prerelease canary",
-    "gen:langgraph-tools": "bun scripts/gen-langgraph-tools.ts",
     "test": "bun test --parallel=4",
     "lint": "NODE_OPTIONS=--max-old-space-size=8192 eslint --max-warnings 0 .",
     "lint:fix": "NODE_OPTIONS=--max-old-space-size=8192 eslint --fix .",

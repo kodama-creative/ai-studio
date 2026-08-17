@@ -23,19 +23,17 @@ import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { format } from "timeago.js";
 
-import { ConfirmDialog } from "@llm-space/ui/components/confirm-dialog";
-import { cn } from "@llm-space/ui/lib/utils";
-import { Button } from "@llm-space/ui/ui/button";
+import { cn } from "../../lib/utils";
+import { Button } from "../../ui/button";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from "@llm-space/ui/ui/dialog";
-import { Textarea } from "@llm-space/ui/ui/textarea";
-
-
+} from "../../ui/dialog";
+import { Textarea } from "../../ui/textarea";
+import { ConfirmDialog } from "../confirm-dialog";
 
 import { EvaluationRubricEditor } from "./evaluation-rubric-editor";
 import { RunEvaluationScorecard } from "./run-evaluation-scorecard";

@@ -6,9 +6,8 @@ import {
 } from "@llm-space/core";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { useHostServices } from "@llm-space/ui/host";
-import { createFrameThrottle } from "@llm-space/ui/lib/frame-throttle";
-
+import { useHostServices } from "../../host";
+import { createFrameThrottle } from "../../lib/frame-throttle";
 import { useDefaultTextGenerationModel } from "../model-provider";
 
 import { useGetProviderProfileId } from "./model/provider-profile-selection-provider";

@@ -2,8 +2,7 @@ import { isExecutableTool, type Tool, type ToolCall } from "@llm-space/core";
 import { getToolResultText } from "@llm-space/core/thread";
 import { useCallback } from "react";
 
-import { isFirecrawlLimitError } from "@llm-space/ui/lib/firecrawl";
-
+import { isFirecrawlLimitError } from "../../../lib/firecrawl";
 import { useThreadStore, useThreadStoreActions } from "../stores";
 import { useToolExecutor } from "../tool/use-tool-executor";
 

@@ -3,16 +3,17 @@
 import { SparklesIcon } from "lucide-react";
 import { memo } from "react";
 
-import { Tooltip } from "@llm-space/ui/components/tooltip";
-import { cn } from "@llm-space/ui/lib/utils";
+import { cn } from "../lib/utils";
 import {
   Item,
   ItemContent,
   ItemDescription,
   ItemMedia,
   ItemTitle,
-} from "@llm-space/ui/ui/item";
-import { Switch } from "@llm-space/ui/ui/switch";
+} from "../ui/item";
+import { Switch } from "../ui/switch";
+
+import { Tooltip } from "./tooltip";
 
 interface SkillListItemProps {
   name: string;

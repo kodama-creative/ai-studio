@@ -1,33 +1,24 @@
 "use client";
 
 import type {
+  SkillInfo,
   ThreadCurrentDateVariable,
-  ThreadFileVariable,
-  ThreadJsonVariable,
-  ThreadSkillsVariable,
   ThreadVariable,
-  ThreadWorkingDirectoryVariable,
 } from "@llm-space/core";
-import type { SkillInfo } from "@llm-space/core";
 import {
   DEFAULT_VARIABLE_VARIANT_NAME,
-  formatCurrentDateVariable,
-  formatSkillsVariable,
   hasThreadPromptVariableReference,
   includesAllSkills,
   normalizePromptVariableState,
-  VARIABLE_NAME_RE,
 } from "@llm-space/core/thread";
 import {
   BracesIcon,
   CalendarDaysIcon,
   FileTextIcon,
   FolderOpenIcon,
-  ListFilterIcon,
   PlusIcon,
   SparklesIcon,
   Trash2Icon,
-  TriangleAlertIcon,
   TypeIcon,
 } from "lucide-react";
 import {
@@ -39,48 +30,39 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { toast } from "sonner";
 
-import { CodeEditor } from "@llm-space/ui/components/code-editor";
-import { ConfirmDialog } from "@llm-space/ui/components/confirm-dialog";
-import { Tooltip } from "@llm-space/ui/components/tooltip";
-import { useHostServices } from "@llm-space/ui/host";
-import { cn } from "@llm-space/ui/lib/utils";
-import { Button } from "@llm-space/ui/ui/button";
+import { useHostServices } from "../../../host";
+import { cn } from "../../../lib/utils";
+import { Button } from "../../../ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@llm-space/ui/ui/dropdown-menu";
-import { Input } from "@llm-space/ui/ui/input";
-import { ScrollArea } from "@llm-space/ui/ui/scroll-area";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@llm-space/ui/ui/select";
-
+} from "../../../ui/dropdown-menu";
+import { ScrollArea } from "../../../ui/scroll-area";
+import { ConfirmDialog } from "../../confirm-dialog";
+import { Tooltip } from "../../tooltip";
 import { useThreadStore, useThreadStoreActions } from "../stores";
 
-import {
-  PROMPT_DATE_FORMATS,
-  PROMPT_SKILLS_FORMATS,
-  PROMPT_SKILLS_INDENTS,
-} from "./prompt-variable-options";
+import { VariableDetail } from "./prompt-variable-detail";
+import { PROMPT_DATE_FORMATS } from "./prompt-variable-options";
 import { listEnabledPromptVariableSkills } from "./prompt-variable-skills";
-import { SkillSelectionDialog } from "./skill-selection-dialog";
+import {
+  customVariableNames,
+  jsonStatus,
+  selectionExists,
+  uniqueName,
+  type PromptVariableSelection,
+} from "./prompt-variable-utils";
+
+export type { PromptVariableSelection } from "./prompt-variable-utils";
 
 interface PromptVariablesPanelProps {
   className?: string;
   disabled?: boolean;
   initialSelection?: PromptVariableSelection | null;
 }
-
-export type PromptVariableSelection =
-  { kind: "builtIn"; name: string } | { kind: "custom"; name: string };
 
 type VariableListItem =
   | {
@@ -132,7 +114,7 @@ function _PromptVariablesPanel({
   );
   const customNames = useMemo(
     () =>
-      _customVariableNames(
+      customVariableNames(
         variableVariants.variants[DEFAULT_VARIABLE_VARIANT_NAME] ?? {}
       ),
     [variableVariants]
@@ -147,7 +129,7 @@ function _PromptVariablesPanel({
   const [selection, setSelection] = useState<PromptVariableSelection | null>(
     () =>
       initialSelection &&
-      _selectionExists(initialSelection, variables, customValues)
+      selectionExists(initialSelection, variables, customValues)
         ? initialSelection
         : null
   );
@@ -196,7 +178,7 @@ function _PromptVariablesPanel({
           kind: "builtIn",
           name,
           variable,
-          status: _jsonStatus(variable.value),
+          status: jsonStatus(variable.value),
         });
         continue;
       }
@@ -251,7 +233,7 @@ function _PromptVariablesPanel({
     appliedInitialSelectionKeyRef.current = initialSelectionKey;
     if (
       initialSelection &&
-      _selectionExists(initialSelection, variables, customValues)
+      selectionExists(initialSelection, variables, customValues)
     ) {
       setSelection(initialSelection);
     }
@@ -260,7 +242,7 @@ function _PromptVariablesPanel({
   // Keep the selected detail stable across edits, but fall back when a selected
   // variable is removed.
   useEffect(() => {
-    if (selection && _selectionExists(selection, variables, customValues)) {
+    if (selection && selectionExists(selection, variables, customValues)) {
       return;
     }
     const firstBuiltIn = Object.keys(variables)[0];
@@ -302,7 +284,7 @@ function _PromptVariablesPanel({
 
   const addCustom = useCallback(() => {
     const used = new Set([...Object.keys(variables), ...customNames]);
-    const name = _uniqueName("custom_variable", used);
+    const name = uniqueName("custom_variable", used);
     if (addCustomVariable(name, "")) {
       setSelection({ kind: "custom", name });
     }
@@ -310,14 +292,14 @@ function _PromptVariablesPanel({
 
   const addJson = useCallback(() => {
     const used = new Set([...Object.keys(variables), ...customNames]);
-    const name = _uniqueName("json_variable", used);
+    const name = uniqueName("json_variable", used);
     updatePromptVariable(name, { type: "json", value: "" });
     setSelection({ kind: "builtIn", name });
   }, [customNames, updatePromptVariable, variables]);
 
   const addFile = useCallback(() => {
     const used = new Set([...Object.keys(variables), ...customNames]);
-    const name = _uniqueName("file_variable", used);
+    const name = uniqueName("file_variable", used);
     updatePromptVariable(name, { type: "file", value: "" });
     setSelection({ kind: "builtIn", name });
   }, [customNames, updatePromptVariable, variables]);
@@ -635,854 +617,6 @@ function VariableListRow({
   );
 }
 
-function VariableDetail({
-  selection,
-  disabled,
-  variables,
-  customNames,
-  customValues,
-  skills,
-  skillsByName,
-  skillsLoading,
-  skillsError,
-  onRenameBuiltIn,
-  onUpdateBuiltIn,
-  onRenameCustom,
-  onUpdateCustom,
-}: {
-  selection: PromptVariableSelection | null;
-  disabled?: boolean;
-  variables: Record<string, ThreadVariable>;
-  customNames: Set<string>;
-  customValues: Record<string, string>;
-  skills: SkillInfo[];
-  skillsByName: Map<string, SkillInfo>;
-  skillsLoading: boolean;
-  skillsError: string | null;
-  onRenameBuiltIn: (oldName: string, newName: string) => boolean;
-  onUpdateBuiltIn: (name: string, variable: ThreadVariable) => void;
-  onRenameCustom: (oldName: string, newName: string) => boolean;
-  onUpdateCustom: (name: string, value: string) => void;
-}) {
-  if (!selection) {
-    return (
-      <div className="text-muted-foreground p-3 text-xs">
-        Add a custom variable to provide a reusable value.
-      </div>
-    );
-  }
-
-  if (selection.kind === "custom") {
-    const value = customValues[selection.name];
-    if (value === undefined) {
-      return (
-        <div className="text-muted-foreground p-3 text-xs">
-          Select a variable to edit.
-        </div>
-      );
-    }
-    return (
-      <CustomVariableDetail
-        name={selection.name}
-        value={value}
-        disabled={disabled}
-        variables={variables}
-        customNames={customNames}
-        onRename={onRenameCustom}
-        onUpdate={onUpdateCustom}
-      />
-    );
-  }
-
-  const variable = variables[selection.name];
-  if (!variable) {
-    return (
-      <div className="text-muted-foreground p-3 text-xs">
-        Select a variable to edit.
-      </div>
-    );
-  }
-
-  if (variable.type === "currentDate") {
-    return (
-      <CurrentDateVariableDetail
-        name={selection.name}
-        variable={variable}
-        disabled={disabled}
-        variables={variables}
-        customNames={customNames}
-        onRename={onRenameBuiltIn}
-        onUpdate={(name, next) => onUpdateBuiltIn(name, next)}
-      />
-    );
-  }
-
-  if (variable.type === "workingDirectory") {
-    return (
-      <WorkingDirectoryVariableDetail
-        name={selection.name}
-        variable={variable}
-        disabled={disabled}
-        variables={variables}
-        customNames={customNames}
-        onRename={onRenameBuiltIn}
-        onUpdate={(name, next) => onUpdateBuiltIn(name, next)}
-      />
-    );
-  }
-
-  if (variable.type === "json") {
-    return (
-      <JsonVariableDetail
-        name={selection.name}
-        variable={variable}
-        disabled={disabled}
-        variables={variables}
-        customNames={customNames}
-        onRename={onRenameBuiltIn}
-        onUpdate={(name, next) => onUpdateBuiltIn(name, next)}
-      />
-    );
-  }
-
-  if (variable.type === "file") {
-    return (
-      <FileVariableDetail
-        name={selection.name}
-        variable={variable}
-        disabled={disabled}
-        variables={variables}
-        customNames={customNames}
-        onRename={onRenameBuiltIn}
-        onUpdate={(name, next) => onUpdateBuiltIn(name, next)}
-      />
-    );
-  }
-
-  return (
-    <SkillsVariableDetail
-      name={selection.name}
-      variable={variable}
-      disabled={disabled}
-      variables={variables}
-      customNames={customNames}
-      skills={skills}
-      skillsByName={skillsByName}
-      skillsLoading={skillsLoading}
-      skillsError={skillsError}
-      onRename={onRenameBuiltIn}
-      onUpdate={(name, next) => onUpdateBuiltIn(name, next)}
-    />
-  );
-}
-
-function CurrentDateVariableDetail({
-  name,
-  variable,
-  disabled,
-  variables,
-  customNames,
-  onRename,
-  onUpdate,
-}: {
-  name: string;
-  variable: ThreadCurrentDateVariable;
-  disabled?: boolean;
-  variables: Record<string, ThreadVariable>;
-  customNames: Set<string>;
-  onRename: (oldName: string, newName: string) => boolean;
-  onUpdate: (name: string, variable: ThreadCurrentDateVariable) => void;
-}) {
-  return (
-    <DetailShell
-      icon={<CalendarDaysIcon className="text-muted-foreground size-4" />}
-      title="Current date"
-      disabled={disabled}
-    >
-      <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_12rem]">
-        <Field label="Name">
-          <VariableNameInput
-            name={name}
-            disabled={disabled}
-            isAvailable={(next) =>
-              _isBuiltInNameAvailable(next, name, variables, customNames)
-            }
-            onCommit={(next) => onRename(name, next)}
-          />
-        </Field>
-        <Field label="Format">
-          <Select
-            value={variable.format}
-            disabled={disabled}
-            onValueChange={(format: ThreadCurrentDateVariable["format"]) =>
-              onUpdate(name, { ...variable, format })
-            }
-          >
-            <SelectTrigger className="w-full" aria-label="Current date format">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {PROMPT_DATE_FORMATS.map((format) => (
-                <SelectItem key={format.value} value={format.value}>
-                  {format.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </Field>
-      </div>
-      <Field label="Value">
-        <PreviewBlock value={formatCurrentDateVariable(variable.format)} />
-      </Field>
-    </DetailShell>
-  );
-}
-
-function WorkingDirectoryVariableDetail({
-  name,
-  variable,
-  disabled,
-  variables,
-  customNames,
-  onRename,
-  onUpdate,
-}: {
-  name: string;
-  variable: ThreadWorkingDirectoryVariable;
-  disabled?: boolean;
-  variables: Record<string, ThreadVariable>;
-  customNames: Set<string>;
-  onRename: (oldName: string, newName: string) => boolean;
-  onUpdate: (name: string, variable: ThreadWorkingDirectoryVariable) => void;
-}) {
-  const { builtinTools, files } = useHostServices();
-  const [directoryExists, setDirectoryExists] = useState<boolean | null>(null);
-  const directoryCheckIdRef = useRef(0);
-
-  const checkPath = useCallback(
-    async (rawValue: string) => {
-      const checkId = ++directoryCheckIdRef.current;
-      const value = _normalizeDirectoryPath(rawValue);
-      if (!value) {
-        setDirectoryExists(null);
-        return;
-      }
-
-      setDirectoryExists(null);
-      try {
-        const exists = await files.directoryExists(value);
-        if (directoryCheckIdRef.current === checkId) {
-          setDirectoryExists(exists);
-        }
-      } catch {
-        if (directoryCheckIdRef.current === checkId) {
-          setDirectoryExists(null);
-        }
-      }
-    },
-    [files]
-  );
-
-  useEffect(() => {
-    const timeout = window.setTimeout(() => {
-      void checkPath(variable.value);
-    }, 200);
-
-    return () => window.clearTimeout(timeout);
-  }, [checkPath, variable.value]);
-
-  const commitPath = useCallback(
-    (rawValue: string) => {
-      const value = _normalizeDirectoryPath(rawValue);
-      if (value !== variable.value) {
-        onUpdate(name, { ...variable, value });
-      } else {
-        void checkPath(value);
-      }
-    },
-    [checkPath, name, onUpdate, variable]
-  );
-
-  const handlePathChange = useCallback(
-    (value: string) => {
-      ++directoryCheckIdRef.current;
-      setDirectoryExists(null);
-      onUpdate(name, { ...variable, value });
-    },
-    [name, onUpdate, variable]
-  );
-
-  const browse = useCallback(async () => {
-    const path = await files.pickDirectory();
-    if (path) {
-      ++directoryCheckIdRef.current;
-      setDirectoryExists(true);
-      onUpdate(name, {
-        ...variable,
-        value: _normalizeDirectoryPath(path),
-      });
-    }
-  }, [files, name, onUpdate, variable]);
-
-  const reveal = useCallback(async () => {
-    try {
-      await builtinTools.fsReveal(variable.value);
-    } catch (error) {
-      toast.error("Failed to reveal folder", {
-        description:
-          error instanceof Error ? error.message : "Please try again.",
-      });
-    }
-  }, [builtinTools, variable.value]);
-
-  return (
-    <DetailShell
-      icon={<FolderOpenIcon className="text-muted-foreground size-4" />}
-      title="Current working directory"
-      disabled={disabled}
-    >
-      <Field label="Name">
-        <VariableNameInput
-          name={name}
-          disabled={disabled}
-          isAvailable={(next) =>
-            _isBuiltInNameAvailable(next, name, variables, customNames)
-          }
-          onCommit={(next) => onRename(name, next)}
-        />
-      </Field>
-      <Field label="Directory">
-        <div className="flex items-center gap-2">
-          <Input
-            className="h-7 font-mono text-xs"
-            value={variable.value}
-            disabled={disabled}
-            placeholder="~/Desktop/llm-space-project"
-            onChange={(event) => handlePathChange(event.currentTarget.value)}
-            onBlur={(event) => commitPath(event.currentTarget.value)}
-          />
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-7 shrink-0"
-            disabled={disabled}
-            onClick={() => void browse()}
-          >
-            <FolderOpenIcon className="size-3.5" />
-            Browse…
-          </Button>
-        </div>
-        {directoryExists === true && (
-          <Button
-            type="button"
-            size="sm"
-            variant="link"
-            className="h-auto w-fit p-0"
-            disabled={disabled}
-            onClick={() => void reveal()}
-          >
-            <FolderOpenIcon className="size-3.5" />
-            Reveal in Finder
-          </Button>
-        )}
-      </Field>
-      {directoryExists === false && (
-        <p
-          className="text-muted-foreground flex items-center gap-1.5 text-xs"
-          role="status"
-        >
-          <TriangleAlertIcon
-            className="size-3.5 shrink-0 text-amber-500 dark:text-amber-400"
-            aria-hidden="true"
-          />
-          This folder hasn&apos;t been created yet, but it doesn&apos;t need to
-          exist before you continue.
-        </p>
-      )}
-    </DetailShell>
-  );
-}
-
-function _normalizeDirectoryPath(value: string): string {
-  const trimmed = value.trim();
-  if (/^\/+$/.test(trimmed)) {
-    return "/";
-  }
-  if (/^\\+$/.test(trimmed)) {
-    return "\\";
-  }
-  if (/^[A-Za-z]:[\\/]$/.test(trimmed)) {
-    return trimmed;
-  }
-  return trimmed.replace(/[\\/]+$/, "");
-}
-
-function SkillsVariableDetail({
-  name,
-  variable,
-  disabled,
-  variables,
-  customNames,
-  skills,
-  skillsByName,
-  skillsLoading,
-  skillsError,
-  onRename,
-  onUpdate,
-}: {
-  name: string;
-  variable: ThreadSkillsVariable;
-  disabled?: boolean;
-  variables: Record<string, ThreadVariable>;
-  customNames: Set<string>;
-  skills: SkillInfo[];
-  skillsByName: Map<string, SkillInfo>;
-  skillsLoading: boolean;
-  skillsError: string | null;
-  onRename: (oldName: string, newName: string) => boolean;
-  onUpdate: (name: string, variable: ThreadSkillsVariable) => void;
-}) {
-  const [skillsDialogOpen, setSkillsDialogOpen] = useState(false);
-  const selectedSkills = variable.skillNames.flatMap((skillName) => {
-    const skill = skillsByName.get(skillName);
-    return skill ? [skill] : [];
-  });
-  // Empty selection means "all enabled skills".
-  const usingAllSkills = includesAllSkills(variable);
-  const someMissing =
-    !usingAllSkills && selectedSkills.length !== variable.skillNames.length;
-  const preview =
-    skillsError ??
-    (someMissing
-      ? "Some selected skills are no longer enabled."
-      : formatSkillsVariable(
-          usingAllSkills ? skills : selectedSkills,
-          variable
-        ));
-
-  const update = (next: Partial<ThreadSkillsVariable>) => {
-    onUpdate(name, { ...variable, ...next });
-  };
-
-  return (
-    <DetailShell
-      icon={<SparklesIcon className="text-muted-foreground size-4" />}
-      title="Available skills"
-      disabled={disabled}
-      action={
-        <Button
-          className="text-muted-foreground hover:text-foreground focus-visible:text-foreground"
-          size="sm"
-          variant="outline"
-          disabled={disabled}
-          onClick={() => setSkillsDialogOpen(true)}
-        >
-          <ListFilterIcon className="size-3.5" />
-          Select skills
-        </Button>
-      }
-      className="flex h-full flex-col"
-      contentClassName="flex min-h-0 grow flex-col"
-    >
-      <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_9rem_9rem]">
-        <Field label="Name">
-          <VariableNameInput
-            name={name}
-            disabled={disabled}
-            isAvailable={(next) =>
-              _isBuiltInNameAvailable(next, name, variables, customNames)
-            }
-            onCommit={(next) => onRename(name, next)}
-          />
-        </Field>
-        <Field label="Format">
-          <Select
-            value={variable.format}
-            disabled={disabled}
-            onValueChange={(format: ThreadSkillsVariable["format"]) =>
-              update({ format })
-            }
-          >
-            <SelectTrigger className="w-full" aria-label="Skills format">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {PROMPT_SKILLS_FORMATS.map((format) => (
-                <SelectItem key={format.value} value={format.value}>
-                  {format.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </Field>
-        <Field label="Indent">
-          <Select
-            value={String(variable.indent)}
-            disabled={disabled}
-            onValueChange={(indent) => update({ indent: Number(indent) })}
-          >
-            <SelectTrigger className="w-full" aria-label="Skills indentation">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {PROMPT_SKILLS_INDENTS.map((indent) => (
-                <SelectItem key={indent} value={String(indent)}>
-                  {indent === 0 ? "Default" : `${indent} spaces`}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </Field>
-      </div>
-      <Field label="Value" className="flex min-h-0 grow flex-col">
-        <CodeEditor
-          className={cn(
-            "min-h-32 grow",
-            (skillsLoading || Boolean(skillsError) || someMissing) &&
-              "opacity-60"
-          )}
-          language="markdown"
-          readonly
-          value={skillsLoading ? "Loading skills..." : preview}
-        />
-      </Field>
-      <SkillSelectionDialog
-        open={skillsDialogOpen}
-        disabled={disabled}
-        loading={skillsLoading}
-        error={skillsError}
-        skills={skills}
-        selectedSkillNames={variable.skillNames}
-        includeAllSkills={usingAllSkills}
-        onOpenChange={setSkillsDialogOpen}
-        onApply={(skillNames, includeAll) => update({ skillNames, includeAll })}
-      />
-    </DetailShell>
-  );
-}
-
-function CustomVariableDetail({
-  name,
-  value,
-  disabled,
-  variables,
-  customNames,
-  onRename,
-  onUpdate,
-}: {
-  name: string;
-  value: string;
-  disabled?: boolean;
-  variables: Record<string, ThreadVariable>;
-  customNames: Set<string>;
-  onRename: (oldName: string, newName: string) => boolean;
-  onUpdate: (name: string, value: string) => void;
-}) {
-  return (
-    <DetailShell
-      icon={<TypeIcon className="text-muted-foreground size-4" />}
-      title="User defined variable"
-      disabled={disabled}
-      className="flex h-full flex-col"
-      contentClassName="flex min-h-0 grow flex-col"
-    >
-      <Field label="Name">
-        <VariableNameInput
-          name={name}
-          disabled={disabled}
-          isAvailable={(next) =>
-            _isCustomNameAvailable(next, name, variables, customNames)
-          }
-          onCommit={(next) => onRename(name, next)}
-        />
-      </Field>
-      <Field label="Value" className="flex min-h-0 grow flex-col">
-        <CodeEditor
-          className="min-h-32 grow"
-          language="markdown"
-          value={value}
-          readonly={disabled}
-          placeholder="Variable value"
-          onChange={(next) => onUpdate(name, next)}
-        />
-      </Field>
-    </DetailShell>
-  );
-}
-
-function JsonVariableDetail({
-  name,
-  variable,
-  disabled,
-  variables,
-  customNames,
-  onRename,
-  onUpdate,
-}: {
-  name: string;
-  variable: ThreadJsonVariable;
-  disabled?: boolean;
-  variables: Record<string, ThreadVariable>;
-  customNames: Set<string>;
-  onRename: (oldName: string, newName: string) => boolean;
-  onUpdate: (name: string, variable: ThreadVariable) => void;
-}) {
-  const error = _jsonError(variable.value);
-  return (
-    <DetailShell
-      icon={<BracesIcon className="text-muted-foreground size-4" />}
-      title="JSON variable"
-      disabled={disabled}
-      className="flex h-full flex-col"
-      contentClassName="flex min-h-0 grow flex-col"
-    >
-      <Field label="Name">
-        <VariableNameInput
-          name={name}
-          disabled={disabled}
-          isAvailable={(next) =>
-            _isBuiltInNameAvailable(next, name, variables, customNames)
-          }
-          onCommit={(next) => onRename(name, next)}
-        />
-      </Field>
-      <Field label="Value (JSON)" className="flex min-h-0 grow flex-col">
-        <CodeEditor
-          language="json"
-          value={variable.value}
-          readonly={disabled}
-          placeholder={'{ "key": "value" }'}
-          className="min-h-32 grow"
-          onChange={(next) => onUpdate(name, { ...variable, value: next })}
-        />
-      </Field>
-      {error ? (
-        <p className="text-destructive text-xs">{error}</p>
-      ) : (
-        <p className="text-muted-foreground text-xs">
-          Use it in templates, e.g. {"{% if data.enabled %}"},{" "}
-          {"{% for x in data.items %}"}, {"{{ data.name }}"}.
-        </p>
-      )}
-    </DetailShell>
-  );
-}
-
-function FileVariableDetail({
-  name,
-  variable,
-  disabled,
-  variables,
-  customNames,
-  onRename,
-  onUpdate,
-}: {
-  name: string;
-  variable: ThreadFileVariable;
-  disabled?: boolean;
-  variables: Record<string, ThreadVariable>;
-  customNames: Set<string>;
-  onRename: (oldName: string, newName: string) => boolean;
-  onUpdate: (name: string, variable: ThreadVariable) => void;
-}) {
-  const { files } = useHostServices();
-  const browse = useCallback(async () => {
-    const path = await files.pickFile();
-    if (path) {
-      onUpdate(name, { ...variable, value: path });
-    }
-  }, [files, name, onUpdate, variable]);
-
-  return (
-    <DetailShell
-      icon={<FileTextIcon className="text-muted-foreground size-4" />}
-      title="File content variable"
-      disabled={disabled}
-    >
-      <Field label="Name">
-        <VariableNameInput
-          name={name}
-          disabled={disabled}
-          isAvailable={(next) =>
-            _isBuiltInNameAvailable(next, name, variables, customNames)
-          }
-          onCommit={(next) => onRename(name, next)}
-        />
-      </Field>
-      <Field label="File path">
-        <div className="flex items-center gap-2">
-          <Input
-            className="h-7 font-mono text-xs"
-            value={variable.value}
-            disabled={disabled}
-            placeholder="~/notes/style.md"
-            onChange={(event) =>
-              onUpdate(name, { ...variable, value: event.currentTarget.value })
-            }
-          />
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-7 shrink-0"
-            disabled={disabled}
-            onClick={() => void browse()}
-          >
-            <FolderOpenIcon className="size-3.5" />
-            Browse…
-          </Button>
-        </div>
-      </Field>
-      <p className="text-muted-foreground text-xs">
-        Inlines the file contents at run time (a missing file → empty). For
-        recursive rendering, use {'{{@include("...")}}'} instead.
-      </p>
-    </DetailShell>
-  );
-}
-
-function DetailShell({
-  icon,
-  title,
-  action,
-  children,
-  className,
-  contentClassName,
-}: {
-  icon: ReactNode;
-  title: string;
-  disabled?: boolean;
-  action?: ReactNode;
-  children: ReactNode;
-  className?: string;
-  contentClassName?: string;
-}) {
-  return (
-    <div className={cn("grid w-full gap-5 p-5", className)}>
-      <div className="flex min-w-0 items-center gap-2.5">
-        {icon}
-        <div className="min-w-0 grow">
-          <div className="truncate text-base font-medium">{title}</div>
-        </div>
-        {action}
-      </div>
-      <div className={cn("grid gap-4", contentClassName)}>{children}</div>
-    </div>
-  );
-}
-
-function Field({
-  label,
-  children,
-  className,
-}: {
-  label: string;
-  children: ReactNode;
-  className?: string;
-}) {
-  return (
-    <label className={cn("grid min-w-0 gap-1.5", className)}>
-      <span className="text-muted-foreground text-xs">{label}</span>
-      {children}
-    </label>
-  );
-}
-
-function PreviewBlock({
-  value,
-  muted,
-  className,
-}: {
-  value: string;
-  muted?: boolean;
-  className?: string;
-}) {
-  return (
-    <pre
-      className={cn(
-        "bg-muted/30 text-foreground/80 max-h-28 overflow-auto rounded-md border px-2 py-1.5 font-mono text-xs whitespace-pre-wrap",
-        muted && "text-muted-foreground",
-        className
-      )}
-    >
-      {value}
-    </pre>
-  );
-}
-
-function VariableNameInput({
-  name,
-  disabled,
-  className,
-  ariaLabel,
-  showFeedback = true,
-  isAvailable,
-  onCommit,
-}: {
-  name: string;
-  disabled?: boolean;
-  className?: string;
-  ariaLabel?: string;
-  showFeedback?: boolean;
-  isAvailable: (name: string) => boolean;
-  onCommit: (name: string) => boolean;
-}) {
-  const [draft, setDraft] = useState(name);
-  useEffect(() => {
-    setDraft(name);
-  }, [name]);
-  const trimmedDraft = draft.trim();
-  const valid = _isNameAvailable(trimmedDraft);
-  const available = trimmedDraft === name || isAvailable(trimmedDraft);
-  const commit = () => {
-    const next = trimmedDraft;
-    if (next === name) {
-      setDraft(name);
-      return;
-    }
-    if (!valid || !available || !onCommit(next)) {
-      setDraft(name);
-      return;
-    }
-    setDraft(next);
-  };
-  return (
-    <div className={cn("grid gap-1", className)}>
-      <Input
-        className={cn(
-          "h-7 font-mono text-xs",
-          !showFeedback && "h-7",
-          (!valid || !available) && "border-destructive"
-        )}
-        value={draft}
-        disabled={disabled}
-        aria-label={ariaLabel}
-        aria-invalid={!valid || !available}
-        onChange={(event) => {
-          setDraft(event.currentTarget.value);
-        }}
-        onBlur={commit}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") {
-            event.currentTarget.blur();
-          }
-          if (event.key === "Escape") {
-            setDraft(name);
-            event.currentTarget.blur();
-          }
-        }}
-      />
-      {showFeedback && !valid ? (
-        <div className="text-destructive text-xs">
-          Use letters, numbers, and underscores; start with a letter or
-          underscore.
-        </div>
-      ) : showFeedback && !available ? (
-        <div className="text-destructive text-xs">Name already exists.</div>
-      ) : null}
-    </div>
-  );
-}
-
 function _variableIcon(item: VariableListItem): ReactNode {
   if (item.kind === "custom") {
     return <TypeIcon className="size-3.5 shrink-0" />;
@@ -1506,86 +640,6 @@ function _dateFormatLabel(value: ThreadCurrentDateVariable["format"]): string {
   return (
     PROMPT_DATE_FORMATS.find((format) => format.value === value)?.label ?? value
   );
-}
-
-/** A JSON parse error message for the editor, or `null` when valid/empty. */
-function _jsonError(value: string): string | null {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return null;
-  }
-  try {
-    JSON.parse(trimmed);
-    return null;
-  } catch (error) {
-    return error instanceof Error ? error.message : "Invalid JSON.";
-  }
-}
-
-/** The list-row status line for a JSON variable. */
-function _jsonStatus(value: string): string {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return "(empty)";
-  }
-  return _jsonError(trimmed) ? "Invalid JSON" : trimmed.replace(/\s+/g, " ");
-}
-
-function _selectionExists(
-  selection: PromptVariableSelection,
-  variables: Record<string, ThreadVariable>,
-  customValues: Record<string, string>
-): boolean {
-  if (selection.kind === "builtIn") {
-    return Object.prototype.hasOwnProperty.call(variables, selection.name);
-  }
-  return Object.prototype.hasOwnProperty.call(customValues, selection.name);
-}
-
-function _customVariableNames(values: Record<string, string>): Set<string> {
-  return new Set(Object.keys(values));
-}
-
-function _isNameAvailable(name: string): boolean {
-  return VARIABLE_NAME_RE.test(name);
-}
-
-function _isBuiltInNameAvailable(
-  name: string,
-  currentName: string,
-  variables: Record<string, ThreadVariable>,
-  customNames: Set<string>
-): boolean {
-  return (
-    _isNameAvailable(name) &&
-    (name === currentName ||
-      (!Object.prototype.hasOwnProperty.call(variables, name) &&
-        !customNames.has(name)))
-  );
-}
-
-function _isCustomNameAvailable(
-  name: string,
-  currentName: string,
-  variables: Record<string, ThreadVariable>,
-  customNames: Set<string>
-): boolean {
-  return (
-    _isNameAvailable(name) &&
-    !Object.prototype.hasOwnProperty.call(variables, name) &&
-    (name === currentName || !customNames.has(name))
-  );
-}
-
-function _uniqueName(base: string, used: Set<string>): string {
-  if (!used.has(base)) {
-    return base;
-  }
-  let index = 2;
-  while (used.has(`${base}_${index}`)) {
-    index += 1;
-  }
-  return `${base}_${index}`;
 }
 
 export const PromptVariablesPanel = memo(_PromptVariablesPanel);

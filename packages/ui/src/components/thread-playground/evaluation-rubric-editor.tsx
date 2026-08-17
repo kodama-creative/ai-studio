@@ -19,11 +19,11 @@ import {
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
-import { ConfirmDialog } from "@llm-space/ui/components/confirm-dialog";
-import { Tooltip } from "@llm-space/ui/components/tooltip";
-import { Button } from "@llm-space/ui/ui/button";
-import { Input } from "@llm-space/ui/ui/input";
-import { Textarea } from "@llm-space/ui/ui/textarea";
+import { Button } from "../../ui/button";
+import { Input } from "../../ui/input";
+import { Textarea } from "../../ui/textarea";
+import { ConfirmDialog } from "../confirm-dialog";
+import { Tooltip } from "../tooltip";
 
 function _emptyCriterion(): EvaluationCriterion {
   return { id: uuid(), name: "" };
@@ -54,8 +54,7 @@ export function EvaluationRubricEditor({
   const [criteria, setCriteria] = useState(() => _initialCriteria(rubric));
   const [removeOpen, setRemoveOpen] = useState(false);
   const normalizedNames = useMemo(
-    () =>
-      criteria.map((criterion) => criterion.name.trim().toLowerCase()),
+    () => criteria.map((criterion) => criterion.name.trim().toLowerCase()),
     [criteria]
   );
   const duplicateNames = useMemo(() => {

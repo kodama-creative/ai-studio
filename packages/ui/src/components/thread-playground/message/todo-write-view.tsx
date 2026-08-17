@@ -1,7 +1,7 @@
 import { CheckIcon, XIcon } from "lucide-react";
 import { memo } from "react";
 
-import { cn } from "@llm-space/ui/lib/utils";
+import { cn } from "../../../lib/utils";
 
 import type { TodoItem } from "./todo-write-input";
 

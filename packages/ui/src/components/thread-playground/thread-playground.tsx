@@ -18,18 +18,11 @@ import {
 } from "react";
 import { usePanelRef } from "react-resizable-panels";
 
-import {
-  resolveModelConfig,
-  useDefaultModel,
-  useFirstAvailableModel,
-  useModels,
-} from "@llm-space/ui/components/model-provider";
-import { Tooltip } from "@llm-space/ui/components/tooltip";
-import { useHostServices } from "@llm-space/ui/host";
-import { threadTitleFromPath } from "@llm-space/ui/lib/thread-file";
-import { cn } from "@llm-space/ui/lib/utils";
-import { Button } from "@llm-space/ui/ui/button";
-import { ButtonGroup } from "@llm-space/ui/ui/button-group";
+import { useHostServices } from "../../host";
+import { threadTitleFromPath } from "../../lib/thread-file";
+import { cn } from "../../lib/utils";
+import { Button } from "../../ui/button";
+import { ButtonGroup } from "../../ui/button-group";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -37,16 +30,22 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@llm-space/ui/ui/dropdown-menu";
+} from "../../ui/dropdown-menu";
 import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
-} from "@llm-space/ui/ui/resizable";
-import { Spinner } from "@llm-space/ui/ui/spinner";
-import { Switch } from "@llm-space/ui/ui/switch";
+} from "../../ui/resizable";
+import { Spinner } from "../../ui/spinner";
+import { Switch } from "../../ui/switch";
+import {
+  resolveModelConfig,
+  useDefaultModel,
+  useFirstAvailableModel,
+  useModels,
+} from "../model-provider";
+import { Tooltip } from "../tooltip";
 
-import { GenerateProjectButton } from "./codegen/generate-project-button";
 import { MessageListView } from "./message/message-list-view";
 import { ThreadPlaygroundSkeleton } from "./misc/skeleton";
 import { TitleEditor, type TitleValidator } from "./misc/title-editor";
@@ -205,13 +204,17 @@ function _ThreadPlaygroundStore({
       fileExists: promptFiles.fileExists,
     });
   });
-  useThreadPlaygroundEvents(store, {
-    onChange,
-    onStreamingStart,
-    onStreamingEnd,
-  }, {
-    runChangePersistence,
-  });
+  useThreadPlaygroundEvents(
+    store,
+    {
+      onChange,
+      onStreamingStart,
+      onStreamingEnd,
+    },
+    {
+      runChangePersistence,
+    }
+  );
   return (
     <ThreadStoreContext.Provider value={store}>
       <ThreadPlaygroundContent {...props} />
@@ -386,7 +389,6 @@ function ThreadPlaygroundContent({
                   />
                 </Tooltip>
               )}
-              <GenerateProjectButton disabled={status !== "idle"} />
             </div>
             <div className="flex items-center gap-1 px-3">
               <ButtonGroup

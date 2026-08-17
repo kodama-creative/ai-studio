@@ -1,9 +1,7 @@
 import type { ModelConfig } from "@llm-space/core";
 import type { ReactNode } from "react";
 
-import { cn } from "@llm-space/ui/lib/utils";
-
-
+import { cn } from "../../../lib/utils";
 import { useModel, useModels } from "../../model-provider";
 
 function formatTokenCount(value: number) {

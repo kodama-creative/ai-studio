@@ -1,14 +1,13 @@
 "use client";
 
-
 import { SparklesIcon, WandSparkles } from "lucide-react";
 import { type KeyboardEvent, memo, useCallback, useState } from "react";
 
-import { Tooltip } from "@llm-space/ui/components/tooltip";
-import { cn } from "@llm-space/ui/lib/utils";
-import { Button } from "@llm-space/ui/ui/button";
-import { Popover, PopoverContent, PopoverTrigger } from "@llm-space/ui/ui/popover";
-import { Textarea } from "@llm-space/ui/ui/textarea";
+import { cn } from "../../lib/utils";
+import { Button } from "../../ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "../../ui/popover";
+import { Textarea } from "../../ui/textarea";
+import { Tooltip } from "../tooltip";
 
 interface GeneratePopoverButtonProps {
   className?: string;

@@ -43,7 +43,7 @@ LLM Space is a sister project of [DeerFlow](https://github.com/bytedance/deer-fl
 - **Debug** — replay a run from history and step through it to find what went wrong.
 - **Evaluate** — measure how your agent performs across runs.
 - **Manage** — keep your threads organized as files on your own machine.
-- **Generate** — let AI write your prompt and tools for you, and even turn any thread into a runnable [LangGraph](https://github.com/langchain-ai/langgraph) agent.
+- **Generate** — let AI write your prompts and tools for you.
 
 Your files and API keys stay on your local computer. LLM Space collects a small amount of anonymous usage data to improve the app - see [TELEMETRY.md](./TELEMETRY.md) for exactly what is collected and how to opt out.
 

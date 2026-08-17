@@ -19,19 +19,15 @@ import {
 import { memo, useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
 
-import {
-  CodeEditor,
-  type CodeEditorProps,
-} from "@llm-space/ui/components/code-editor";
-import { openFirecrawlLimitDialog } from "@llm-space/ui/components/firecrawl-limit-dialog";
-import { PreviewDialog } from "@llm-space/ui/components/preview-dialog-lazy";
-import { useRenderingFidelity } from "@llm-space/ui/components/theme-provider";
-import { Tooltip } from "@llm-space/ui/components/tooltip";
-import { useHostServices } from "@llm-space/ui/host";
-import { cn } from "@llm-space/ui/lib/utils";
-import { Button } from "@llm-space/ui/ui/button";
-import { Input } from "@llm-space/ui/ui/input";
-
+import { useHostServices } from "../../../host";
+import { cn } from "../../../lib/utils";
+import { Button } from "../../../ui/button";
+import { Input } from "../../../ui/input";
+import { CodeEditor, type CodeEditorProps } from "../../code-editor";
+import { openFirecrawlLimitDialog } from "../../firecrawl-limit-dialog";
+import { PreviewDialog } from "../../preview-dialog-lazy";
+import { useRenderingFidelity } from "../../theme-provider";
+import { Tooltip } from "../../tooltip";
 import { useThreadStore, useThreadStoreActions } from "../stores";
 import { usePromptVariableExtensionForContext } from "../variable/use-prompt-variable-extension";
 

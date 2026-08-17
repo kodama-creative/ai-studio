@@ -119,6 +119,7 @@ export default defineConfig([
           },
         },
       ],
+      "import-x/no-cycle": ["error", { ignoreExternal: true }],
       "no-console": ["warn", { allow: ["info", "warn", "error"] }],
       "no-unused-vars": "off",
       // The house `export const Foo = memo(_Foo)` pattern names the inner
@@ -132,6 +133,56 @@ export default defineConfig([
       "react-hooks/set-state-in-effect": "off",
       "react-hooks/refs": "off",
       "react/react-in-jsx-scope": "off",
+    },
+  },
+
+  // Architecture boundaries that must remain true as packages evolve.
+  {
+    files: ["packages/ui/src/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["@llm-space/ui", "@llm-space/ui/*"],
+              message:
+                "Use a relative import inside @llm-space/ui to avoid package self-cycles.",
+            },
+            {
+              group: ["@/*", "electrobun", "electrobun/*"],
+              message:
+                "Shared UI must not depend on the Desktop alias or Electrobun.",
+            },
+            {
+              group: ["@llm-space/*/server", "@llm-space/*/server/*"],
+              message:
+                "Shared UI must not import Bun-only server entrypoints.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: [
+      "apps/web/src/**/*.{ts,tsx}",
+      "apps/desktop/src/**/*.{ts,tsx}",
+    ],
+    ignores: ["apps/desktop/src/bun/**"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["@llm-space/*/server", "@llm-space/*/server/*"],
+              message:
+                "Browser-rendered code must not import Bun-only server entrypoints.",
+            },
+          ],
+        },
+      ],
     },
   },
 

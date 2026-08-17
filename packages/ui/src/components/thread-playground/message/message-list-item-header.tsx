@@ -12,12 +12,11 @@ import {
 } from "lucide-react";
 import { memo, useCallback, useMemo, useState } from "react";
 
-import { PreviewDialog } from "@llm-space/ui/components/preview-dialog-lazy";
-import { Tooltip } from "@llm-space/ui/components/tooltip";
-import { useHostServices } from "@llm-space/ui/host";
-import { cn } from "@llm-space/ui/lib/utils";
-import { Button } from "@llm-space/ui/ui/button";
-
+import { useHostServices } from "../../../host";
+import { cn } from "../../../lib/utils";
+import { Button } from "../../../ui/button";
+import { PreviewDialog } from "../../preview-dialog-lazy";
+import { Tooltip } from "../../tooltip";
 import { useThreadStoreActions } from "../stores";
 
 import { AddImagesMenu } from "./add-images-menu";
@@ -61,7 +60,8 @@ function _MessageListItemHeader({
   // still shows (disabled) for an assistant message whose tool results aren't
   // ready yet, since that can become runnable.
   const showRun =
-    message.role === "user" || (message.role === "assistant" && !!message.toolCalls?.length);
+    message.role === "user" ||
+    (message.role === "assistant" && !!message.toolCalls?.length);
   const runTooltip = runnable ? "Run from this message" : "No runnable content";
   const runAriaLabel = runnable
     ? "Run from this message"

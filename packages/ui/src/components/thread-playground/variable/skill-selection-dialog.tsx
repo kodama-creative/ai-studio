@@ -4,9 +4,8 @@ import type { SkillInfo } from "@llm-space/core";
 import { SearchIcon, Settings2Icon } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 
-import { SkillListItem } from "@llm-space/ui/components/skill-list-item";
-import { useHostServices } from "@llm-space/ui/host";
-import { Button } from "@llm-space/ui/ui/button";
+import { useHostServices } from "../../../host";
+import { Button } from "../../../ui/button";
 import {
   Dialog,
   DialogContent,
@@ -14,9 +13,10 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@llm-space/ui/ui/dialog";
-import { Input } from "@llm-space/ui/ui/input";
-import { ScrollArea } from "@llm-space/ui/ui/scroll-area";
+} from "../../../ui/dialog";
+import { Input } from "../../../ui/input";
+import { ScrollArea } from "../../../ui/scroll-area";
+import { SkillListItem } from "../../skill-list-item";
 
 interface SkillSelectionDialogProps {
   open: boolean;

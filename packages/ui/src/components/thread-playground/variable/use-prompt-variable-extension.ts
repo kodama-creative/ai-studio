@@ -8,8 +8,7 @@ import {
 } from "@llm-space/core/thread";
 import { useCallback, useContext, useMemo } from "react";
 
-import { useHostServices } from "@llm-space/ui/host";
-
+import { useHostServices } from "../../../host";
 import { ThreadStoreContext, type ThreadStore } from "../stores";
 
 import { createPromptVariableExtension } from "./prompt-variable-extension";

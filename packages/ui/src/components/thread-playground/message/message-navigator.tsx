@@ -9,12 +9,12 @@ import {
   useState,
 } from "react";
 
-import { cn } from "@llm-space/ui/lib/utils";
+import { cn } from "../../../lib/utils";
 import {
   HoverCard,
   HoverCardContent,
   HoverCardTrigger,
-} from "@llm-space/ui/ui/hover-card";
+} from "../../../ui/hover-card";
 
 const ANCHOR_SELECTOR = "[data-navigation-anchor-id]";
 
@@ -156,7 +156,9 @@ function _MessageNavigator({
   const jumpToAnchor = useCallback(
     (anchorId: string) => {
       const content = contentRef.current;
-      const element = content ? _getAnchorElement(content, anchorId) : undefined;
+      const element = content
+        ? _getAnchorElement(content, anchorId)
+        : undefined;
       if (!element) {
         return;
       }
@@ -176,7 +178,7 @@ function _MessageNavigator({
       aria-label="Message navigation"
       className="pointer-events-none absolute top-1/2 -left-2 z-50 -translate-y-1/2"
     >
-      <div className="hover:bg-background/70 focus-within:bg-background/70 pointer-events-auto flex max-h-[45vh] w-7 flex-col items-start gap-px overflow-hidden hover:overflow-y-auto rounded-full py-1 pl-1.5 opacity-65 transition-[background-color,opacity] focus-within:opacity-100 hover:opacity-100">
+      <div className="hover:bg-background/70 focus-within:bg-background/70 pointer-events-auto flex max-h-[45vh] w-7 flex-col items-start gap-px overflow-hidden rounded-full py-1 pl-1.5 opacity-65 transition-[background-color,opacity] focus-within:opacity-100 hover:overflow-y-auto hover:opacity-100">
         {messages.map((message, index) => {
           const messageAnchorId = `message:${message.id}`;
           return (
@@ -231,8 +233,8 @@ function _MessageAnchor({
         >
           <span
             className={cn(
-              "bg-muted-foreground/55 group-hover/anchor:bg-foreground group-focus-visible/anchor:bg-foreground h-0.5 w-5 origin-left scale-x-[0.4] transform-gpu rounded-full transition-[scale,background-color] motion-reduce:transition-none group-hover/anchor:scale-x-100 group-focus-visible/anchor:scale-x-100",
-              active ? "bg-accent-foreground" : "",
+              "bg-muted-foreground/55 group-hover/anchor:bg-foreground group-focus-visible/anchor:bg-foreground h-0.5 w-5 origin-left scale-x-[0.4] transform-gpu rounded-full transition-[scale,background-color] group-hover/anchor:scale-x-100 group-focus-visible/anchor:scale-x-100 motion-reduce:transition-none",
+              active ? "bg-accent-foreground" : ""
             )}
           />
         </button>

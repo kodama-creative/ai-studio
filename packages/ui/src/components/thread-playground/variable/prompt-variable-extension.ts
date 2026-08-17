@@ -334,7 +334,9 @@ function createHoverTooltip(
           pos: from,
           end: to,
           above: true,
-          create: () => ({ dom: renderTooltipDom(name, resolution, onInspect) }),
+          create: () => ({
+            dom: renderTooltipDom(name, resolution, onInspect),
+          }),
         });
         const resolution = resolve(name);
         return resolution instanceof Promise
@@ -448,7 +450,11 @@ function createVariableCompletion(list: PromptVariableLister): Extension {
           const after = view.state.sliceDoc(applyTo, applyTo + 16);
           const closeLen = /^\s*%?\}/.exec(after)?.[0].length ?? 0;
           view.dispatch({
-            changes: { from: start, to: applyTo + closeLen, insert: tag.insert },
+            changes: {
+              from: start,
+              to: applyTo + closeLen,
+              insert: tag.insert,
+            },
             selection: { anchor: start + tag.caret },
           });
         },

@@ -1,6 +1,6 @@
 import type { SkillInfo } from "@llm-space/core";
 
-import type { SkillsHost } from "@llm-space/ui/host";
+import type { SkillsHost } from "../../../host";
 
 /** Return enabled local skills in stable name order for core prompt rendering. */
 export async function listEnabledPromptVariableSkills(

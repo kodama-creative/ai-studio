@@ -1,12 +1,8 @@
 "use client";
 
-import {
-  useModel,
-  useResolveModelConfig,
-} from "@llm-space/ui/components/model-provider";
-import { useHostServices } from "@llm-space/ui/host";
-import { cn } from "@llm-space/ui/lib/utils";
-
+import { useHostServices } from "../../../host";
+import { cn } from "../../../lib/utils";
+import { useModel, useResolveModelConfig } from "../../model-provider";
 import { useThreadStore } from "../stores";
 
 import { ModelParamsPopover } from "./model-params-popover";

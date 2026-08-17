@@ -15,7 +15,7 @@ import {
   readLocalStorage,
   removeLocalStorage,
   writeLocalStorage,
-} from "@llm-space/ui/lib/local-storage";
+} from "../lib/local-storage";
 
 /** User-selectable appearance. `"system"` follows the OS color scheme. */
 export type Theme = "light" | "dark" | "system";
@@ -58,7 +58,9 @@ interface RenderingFidelityContextValue {
 // `resolvedTheme`. Keeping accent in its own context spares those hot-list
 // components a re-render storm while the color picker is dragged.
 const ThemeContext = createContext<ThemeContextValue | null>(null);
-const PrimaryColorContext = createContext<PrimaryColorContextValue | null>(null);
+const PrimaryColorContext = createContext<PrimaryColorContextValue | null>(
+  null
+);
 const RenderingFidelityContext =
   createContext<RenderingFidelityContextValue | null>(null);
 
@@ -135,12 +137,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   );
 
   const [primaryColor, setPrimaryState] = useState<string>(_readStoredPrimary);
-  const [hasPrimaryColorOverride, setHasPrimaryColorOverride] = useState(
-    () => {
-      const stored = readLocalStorage(LOCAL_STORAGE_KEYS.primaryColor);
-      return Boolean(stored && HEX_RE.test(stored));
-    }
-  );
+  const [hasPrimaryColorOverride, setHasPrimaryColorOverride] = useState(() => {
+    const stored = readLocalStorage(LOCAL_STORAGE_KEYS.primaryColor);
+    return Boolean(stored && HEX_RE.test(stored));
+  });
   const [resetPrimaryColorVersion, setResetPrimaryColorVersion] = useState(0);
 
   const [fidelity, setFidelityState] =
@@ -256,9 +256,7 @@ export function usePrimaryColor(): PrimaryColorContextValue {
 export function useRenderingFidelity(): RenderingFidelityContextValue {
   const ctx = useContext(RenderingFidelityContext);
   if (!ctx) {
-    throw new Error(
-      "useRenderingFidelity must be used within <ThemeProvider>"
-    );
+    throw new Error("useRenderingFidelity must be used within <ThemeProvider>");
   }
   return ctx;
 }

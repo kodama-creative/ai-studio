@@ -1,16 +1,10 @@
-
 import { memo } from "react";
 
-import { CodeEditor } from "@llm-space/ui/components/code-editor";
-import { Markdown } from "@llm-space/ui/components/markdown";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@llm-space/ui/ui/dialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@llm-space/ui/ui/tabs";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 
+import { CodeEditor } from "./code-editor";
+import { Markdown } from "./markdown";
 
 export type PreviewType = "text" | "json";
 export type PreviewMode = "code" | "markdown" | "html";
@@ -51,7 +45,11 @@ function _PreviewDialog({
           <Tabs
             className="min-h-0 flex-1 gap-0"
             defaultValue={
-              mode === "markdown" ? "markdown" : mode === "html" ? "html" : "raw"
+              mode === "markdown"
+                ? "markdown"
+                : mode === "html"
+                  ? "html"
+                  : "raw"
             }
           >
             <div className="border-b px-4 py-2">

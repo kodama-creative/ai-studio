@@ -8,11 +8,7 @@ import {
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 
-import {
-  CodeEditor,
-  type CodeEditorHandle,
-} from "@llm-space/ui/components/code-editor";
-import { Button } from "@llm-space/ui/ui/button";
+import { Button } from "../../../ui/button";
 import {
   Dialog,
   DialogContent,
@@ -20,8 +16,8 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@llm-space/ui/ui/dialog";
-
+} from "../../../ui/dialog";
+import { CodeEditor, type CodeEditorHandle } from "../../code-editor";
 import { useThreadStoreActions } from "../stores/thread-store";
 
 import { parseProviderHostedToolConfig } from "./provider-hosted-tool-config";
@@ -95,9 +91,7 @@ export function ProviderHostedToolEditorDialog({
       >
         <DialogHeader>
           <DialogTitle>
-            {tool
-              ? "Edit provider-hosted tool"
-              : "Add provider-hosted tool"}
+            {tool ? "Edit provider-hosted tool" : "Add provider-hosted tool"}
           </DialogTitle>
           <DialogDescription>
             This JSON is passed directly to the selected model service. Fields

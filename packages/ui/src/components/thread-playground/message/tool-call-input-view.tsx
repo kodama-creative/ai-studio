@@ -3,19 +3,18 @@ import { ChevronDown, ChevronRight, MoreHorizontal } from "lucide-react";
 import { memo, useCallback, useState } from "react";
 import { toast } from "sonner";
 
-import { PreviewDialog } from "@llm-space/ui/components/preview-dialog-lazy";
-import { Tooltip } from "@llm-space/ui/components/tooltip";
-import { useHostServices, type BuiltinToolsHost } from "@llm-space/ui/host";
-import { cn } from "@llm-space/ui/lib/utils";
-import { Button } from "@llm-space/ui/ui/button";
+import { useHostServices, type BuiltinToolsHost } from "../../../host";
+import { cn } from "../../../lib/utils";
+import { Button } from "../../../ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@llm-space/ui/ui/dropdown-menu";
-
+} from "../../../ui/dropdown-menu";
+import { PreviewDialog } from "../../preview-dialog-lazy";
+import { Tooltip } from "../../tooltip";
 
 import { parseTodoWriteInput } from "./todo-write-input";
 import { TodoWriteView } from "./todo-write-view";
@@ -227,9 +226,7 @@ function _ToolCallArgumentRow({
               "text-muted-foreground absolute top-0.5 left-0 size-5 aria-expanded:visible",
               // Object rows always show their expand/collapse chevron; other
               // rows only reveal the actions button on hover.
-              isObject
-                ? "visible"
-                : "invisible group-hover/argument:visible",
+              isObject ? "visible" : "invisible group-hover/argument:visible",
               open && "visible"
             )}
             size="icon-xs"
@@ -307,7 +304,9 @@ function _ToolCallArgumentRow({
         expanded={expanded}
         onToggle={toggleExpanded}
         onActivate={linkKind ? handleActivate : undefined}
-        activateTitle={linkKind === "url" ? "Open in browser" : "Reveal in file manager"}
+        activateTitle={
+          linkKind === "url" ? "Open in browser" : "Reveal in file manager"
+        }
       />
       {typeof value === "string" ? (
         <PreviewDialog
@@ -352,10 +351,7 @@ function _PathArrayArgumentRow({
         <span className="text-muted-foreground">: [</span>
       </div>
       {paths.map((p, index) => (
-        <div
-          key={index}
-          className="flex min-w-0 items-baseline whitespace-pre"
-        >
+        <div key={index} className="flex min-w-0 items-baseline whitespace-pre">
           <span className="shrink-0">{"    "}</span>
           <button
             type="button"
@@ -365,7 +361,9 @@ function _PathArrayArgumentRow({
           >
             {formatJson(p)}
           </button>
-          <span className="shrink-0">{index < paths.length - 1 ? "," : ""}</span>
+          <span className="shrink-0">
+            {index < paths.length - 1 ? "," : ""}
+          </span>
         </div>
       ))}
       <div className="whitespace-pre">

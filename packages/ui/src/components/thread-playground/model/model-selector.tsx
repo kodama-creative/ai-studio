@@ -4,8 +4,8 @@ import { type ModelConfig } from "@llm-space/core";
 import { SettingsIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { useHostServices } from "@llm-space/ui/host";
-import { cn } from "@llm-space/ui/lib/utils";
+import { useHostServices } from "../../../host";
+import { cn } from "../../../lib/utils";
 import {
   Combobox,
   ComboboxCollection,
@@ -17,8 +17,7 @@ import {
   ComboboxLabel,
   ComboboxList,
   ComboboxSeparator,
-} from "@llm-space/ui/ui/combobox";
-
+} from "../../../ui/combobox";
 import { useModels, useRefreshModels } from "../../model-provider";
 import { ModelAvatar } from "../model-avatar";
 import { ProviderAvatar } from "../provider-avatar";

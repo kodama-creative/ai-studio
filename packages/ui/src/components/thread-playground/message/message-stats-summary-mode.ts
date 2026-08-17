@@ -4,7 +4,7 @@ import {
   LOCAL_STORAGE_KEYS,
   readLocalStorage,
   writeLocalStorage,
-} from "@llm-space/ui/lib/local-storage";
+} from "../../../lib/local-storage";
 
 export type MessageStatsSummaryMode = "timing" | "tokens";
 

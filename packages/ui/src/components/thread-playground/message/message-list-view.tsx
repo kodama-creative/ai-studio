@@ -9,11 +9,10 @@ import type { AssistantMessage, Message, ThreadContext } from "@llm-space/core";
 import { PlusIcon } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { cn } from "@llm-space/ui/lib/utils";
-import { Button } from "@llm-space/ui/ui/button";
-import { ScrollArea } from "@llm-space/ui/ui/scroll-area";
-import { ShineBorder } from "@llm-space/ui/ui/shine-border";
-
+import { cn } from "../../../lib/utils";
+import { Button } from "../../../ui/button";
+import { ScrollArea } from "../../../ui/scroll-area";
+import { ShineBorder } from "../../../ui/shine-border";
 import {
   type RunValidationIssue,
   useThreadStore,
@@ -151,7 +150,7 @@ export function MessageListView({
                 // No top margin: the preceding message / streaming item (or, in the
                 // empty state, the list's own top padding) already provides the gap.
                 className={cn(
-                  "text-muted-foreground hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_2%)]! hover:text-accent-foreground w-full justify-start rounded-lg py-5",
+                  "text-muted-foreground hover:text-accent-foreground w-full justify-start rounded-lg py-5 hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_2%)]!",
                   dragging && "invisible",
                   readonly && "hidden"
                 )}
@@ -159,7 +158,9 @@ export function MessageListView({
                 variant="secondary"
                 size="lg"
                 onClick={
-                  addMessageSuggested ? resolveRunValidationIssue : appendMessage
+                  addMessageSuggested
+                    ? resolveRunValidationIssue
+                    : appendMessage
                 }
               >
                 <PlusIcon className="size-4" />

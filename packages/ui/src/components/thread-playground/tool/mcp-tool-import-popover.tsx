@@ -11,17 +11,17 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { format } from "timeago.js";
 
-import { useHostServices } from "@llm-space/ui/host";
-import { cn } from "@llm-space/ui/lib/utils";
-import { Button } from "@llm-space/ui/ui/button";
+import { useHostServices } from "../../../host";
+import { cn } from "../../../lib/utils";
+import { Button } from "../../../ui/button";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from "@llm-space/ui/ui/dialog";
-import { Switch } from "@llm-space/ui/ui/switch";
+} from "../../../ui/dialog";
+import { Switch } from "../../../ui/switch";
 
 import { ToolImportSidebarActions } from "./tool-import-sidebar-actions";
 

@@ -32,7 +32,6 @@ import {
   type DesktopProcessContainer,
 } from "../di/process-container";
 import { openPath, revealInFileManager } from "../fs";
-import { generatorModule } from "../generator/generator-module";
 import { DesktopHost } from "../host/desktop-host";
 import {
   DESKTOP_HOST,
@@ -196,7 +195,6 @@ async function _startDesktopApp(
   processContainer.load(remindersModule());
   processContainer.load(analyticsModule());
   processContainer.load(agentProjectsModule());
-  processContainer.load(generatorModule());
   processContainer.load(nativeDialogsApplicationModule());
   processContainer.load(nativeFilesModule());
   processContainer.load(appDirectoriesModule());

@@ -10,35 +10,33 @@ import {
   useState,
 } from "react";
 
-import { useFirstAvailableModel } from "@llm-space/ui/components/model-provider";
-import { Tooltip } from "@llm-space/ui/components/tooltip";
-import { useHostServices } from "@llm-space/ui/host";
-import { cn } from "@llm-space/ui/lib/utils";
-import { Button } from "@llm-space/ui/ui/button";
+import { useHostServices } from "../../../host";
+import { cn } from "../../../lib/utils";
+import { Button } from "../../../ui/button";
 import {
   HoverCard,
   HoverCardContent,
   HoverCardTrigger,
-} from "@llm-space/ui/ui/hover-card";
-import { Input } from "@llm-space/ui/ui/input";
+} from "../../../ui/hover-card";
+import { Input } from "../../../ui/input";
 import {
   Popover,
   PopoverContent,
   PopoverHeader,
   PopoverTitle,
   PopoverTrigger,
-} from "@llm-space/ui/ui/popover";
+} from "../../../ui/popover";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@llm-space/ui/ui/select";
-import { Slider } from "@llm-space/ui/ui/slider";
-import { Switch } from "@llm-space/ui/ui/switch";
-
-
+} from "../../../ui/select";
+import { Slider } from "../../../ui/slider";
+import { Switch } from "../../../ui/switch";
+import { useFirstAvailableModel } from "../../model-provider";
+import { Tooltip } from "../../tooltip";
 import { useThreadStore, useThreadStoreActions } from "../stores/thread-store";
 
 import { DEFAULT_JSON_SCHEMA, JsonSchemaDialog } from "./json-schema-dialog";
@@ -157,9 +155,7 @@ export function ModelParamsPopover({
   }, [setPopoverOpen, actions]);
 
   return (
-    <div
-      className={cn("flex shrink-0 gap-1", readonly && "invisible")}
-    >
+    <div className={cn("flex shrink-0 gap-1", readonly && "invisible")}>
       <HoverCard>
         <HoverCardTrigger asChild>
           <Button

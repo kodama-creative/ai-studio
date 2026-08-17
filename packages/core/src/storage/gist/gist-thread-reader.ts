@@ -24,7 +24,7 @@ import {
   type GistResponse,
   type TokenProvider,
 } from "./gist-api";
-import { GIST_CONNECTOR_ID } from "./gist-connector";
+import { GIST_CONNECTOR_ID } from "./gist-constants";
 
 export interface GistThreadReaderOptions {
   /**

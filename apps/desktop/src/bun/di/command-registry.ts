@@ -5,16 +5,15 @@ import {
 } from "../../shared/commands";
 import { isDisposable, type Disposable } from "../../shared/disposable";
 
-import type { CommandContribution } from "./command-contribution";
+import type {
+  CommandContribution,
+  CommandHandler,
+  CommandRegistration,
+} from "./command-contribution";
 import type { ContributionProvider } from "./contribution-provider";
 
 export interface CommandSink {
   sendToWebview(command: Command): void;
-}
-
-export interface CommandHandler<TType extends CommandType = CommandType> {
-  /** The registry ignores results but contains synchronous/async failures. */
-  execute(command: Extract<Command, { type: TType }>): unknown;
 }
 
 interface RegisteredCommandHandler {
@@ -24,7 +23,7 @@ interface RegisteredCommandHandler {
 type RegistryState = "idle" | "starting" | "started" | "disposed";
 
 /** Window-scoped command registry with one owner for every Bun command. */
-export class CommandRegistry implements Disposable {
+export class CommandRegistry implements Disposable, CommandRegistration {
   private readonly _handlers = new Map<CommandType, RegisteredCommandHandler>();
   private readonly _registrations: Disposable[] = [];
   private _disposePromise: Promise<void> | undefined;

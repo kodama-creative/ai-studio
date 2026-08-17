@@ -1,10 +1,8 @@
 import { ChevronDownIcon } from "lucide-react";
 import React, { useCallback, useState } from "react";
 
-import { cn } from "@llm-space/ui/lib/utils";
-import { CollapsibleContent } from "@llm-space/ui/ui/collapsible-content";
-
-
+import { cn } from "../../../lib/utils";
+import { CollapsibleContent } from "../../../ui/collapsible-content";
 
 function _ThinkingView({
   className,
@@ -43,7 +41,7 @@ function _ThinkingView({
       </header>
       <CollapsibleContent collapsed={collapsed} className="pl-1.5">
         <main>
-          <div className="text-muted-foreground whitespace-pre-wrap border-l pl-3 text-sm">
+          <div className="text-muted-foreground border-l pl-3 text-sm whitespace-pre-wrap">
             {thinking}
           </div>
         </main>

@@ -1,15 +1,14 @@
-
 import { PencilIcon } from "lucide-react";
 import { memo, useCallback, useMemo, useRef, useState } from "react";
 
-import { Tooltip } from "@llm-space/ui/components/tooltip";
 import {
   validateThreadFileStem,
   type FileStemValidationResult,
-} from "@llm-space/ui/lib/thread-file";
-import { cn } from "@llm-space/ui/lib/utils";
-import { Button } from "@llm-space/ui/ui/button";
-import { Input } from "@llm-space/ui/ui/input";
+} from "../../../lib/thread-file";
+import { cn } from "../../../lib/utils";
+import { Button } from "../../../ui/button";
+import { Input } from "../../../ui/input";
+import { Tooltip } from "../../tooltip";
 
 export type TitleValidator = (value: string) => FileStemValidationResult;
 

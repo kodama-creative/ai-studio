@@ -2,7 +2,7 @@
 
 import type { AnchorHTMLAttributes, MouseEvent } from "react";
 
-import { useHostServices } from "@llm-space/ui/host";
+import { useHostServices } from "../host";
 
 /**
  * An `<a>` that opens its `href` via the host's `openLink` action (the desktop

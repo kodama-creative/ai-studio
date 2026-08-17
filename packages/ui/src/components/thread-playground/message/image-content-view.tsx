@@ -2,11 +2,10 @@ import type { ImageContent } from "@llm-space/core";
 import { ImageIcon, XIcon } from "lucide-react";
 import React, { useCallback, useState } from "react";
 
-import { Tooltip } from "@llm-space/ui/components/tooltip";
-import { cn } from "@llm-space/ui/lib/utils";
-import { Button } from "@llm-space/ui/ui/button";
-import { Dialog, DialogContent, DialogTitle } from "@llm-space/ui/ui/dialog";
-
+import { cn } from "../../../lib/utils";
+import { Button } from "../../../ui/button";
+import { Dialog, DialogContent, DialogTitle } from "../../../ui/dialog";
+import { Tooltip } from "../../tooltip";
 import { useThreadStoreActions } from "../stores";
 
 import { useImageDisplay } from "./image-display-context";
@@ -70,7 +69,8 @@ function _ImageContentView({
           )}
           aria-label="Open image preview"
         >
-          <ImageIcon className="size-3.5" />[Image #{imageNumber}]
+          <ImageIcon className="size-3.5" />
+          [Image #{imageNumber}]
         </button>
       ) : (
         <div

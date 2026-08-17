@@ -8,8 +8,7 @@ import {
 import { memo } from "react";
 import { format } from "timeago.js";
 
-import { cn } from "@llm-space/ui/lib/utils";
-
+import { cn } from "../../lib/utils";
 
 import { MessageListView } from "./message/message-list-view";
 import { MessageStatsSummary } from "./message/message-stats-summary";

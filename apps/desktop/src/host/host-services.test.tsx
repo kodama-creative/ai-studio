@@ -68,12 +68,6 @@ class ControllableRpc {
     if (input.namespace === "skills" && input.method === "getSettings") {
       return { discoveryPaths: [{ path: "/local/skills", hiddenSkills: [] }] };
     }
-    if (input.namespace === "search" && input.method === "get") {
-      return { provider: "builtin" };
-    }
-    if (input.namespace === "generator" && input.method === "resolveEnv") {
-      return { modelApiKey: "local-secret", envValues: {} };
-    }
     if (input.namespace === "mcp" && input.method === "callTool") {
       return {
         content: [{ type: "text", text: "tool result" }],
@@ -156,15 +150,12 @@ describe("Desktop local host services", () => {
     expect(RPC.unsubscribed).toContain(stream.subscriptionId);
   });
 
-  test("host calls omit the removed runtime-selection argument", async () => {
+  test("host delegates skill and MCP reads to their feature namespaces", async () => {
     const host = _captureHost();
-    if (!host.generator) throw new Error("Generator services are unavailable");
     await host.skills.getSettings();
     await host.skills.listAvailable();
     await host.skills.listSkills("/local/skills");
     await host.mcp.listServers();
-    await host.generator.getSearchSettings();
-    await host.generator.resolveEnv("local-provider", ["SEARCH_KEY"]);
 
     expect(RPC.requests).toEqual([
       { namespace: "skills", method: "getSettings", args: [] },
@@ -175,12 +166,6 @@ describe("Desktop local host services", () => {
         args: ["/local/skills"],
       },
       { namespace: "mcp", method: "listServers", args: [] },
-      { namespace: "search", method: "get", args: [] },
-      {
-        namespace: "generator",
-        method: "resolveEnv",
-        args: [{ providerId: "local-provider", envNames: ["SEARCH_KEY"] }],
-      },
     ]);
   });
 

@@ -10,7 +10,11 @@ import type { RpcError, RpcResult } from "../../shared/rpc-error";
 import { RpcDomainError } from "../../shared/rpc-error";
 
 import type { ContributionProvider } from "./contribution-provider";
-import type { AnyRpcServer, RpcContribution } from "./rpc-contribution";
+import type {
+  AnyRpcServer,
+  RpcContribution,
+  RpcRegistration,
+} from "./rpc-contribution";
 
 interface RegisteredRpcServer {
   readonly namespace: {
@@ -34,7 +38,7 @@ export interface RpcEventSink {
 type RegistryState = "idle" | "starting" | "started" | "disposed";
 
 /** Window-scoped namespace registry and transport-independent RPC dispatcher. */
-export class RpcRegistry implements Disposable {
+export class RpcRegistry implements Disposable, RpcRegistration {
   private readonly _servers = new Map<string, RegisteredRpcServer>();
   private readonly _subscriptions = new Map<string, AbortController>();
   private readonly _requests = new Map<string, AbortController>();

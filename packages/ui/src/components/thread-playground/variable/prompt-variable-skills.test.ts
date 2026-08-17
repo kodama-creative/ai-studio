@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import type { SkillsHost } from "@llm-space/ui/host";
+import type { SkillsHost } from "../../../host";
 
 import { listEnabledPromptVariableSkills } from "./prompt-variable-skills";
 

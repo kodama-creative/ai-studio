@@ -1,7 +1,8 @@
 import { create } from "zustand";
 
-import { ConfirmDialog } from "@llm-space/ui/components/confirm-dialog";
-import { useHostServices } from "@llm-space/ui/host";
+import { useHostServices } from "../host";
+
+import { ConfirmDialog } from "./confirm-dialog";
 
 interface FirecrawlLimitDialogState {
   open: boolean;
@@ -14,11 +15,13 @@ interface FirecrawlLimitDialogState {
  * per-tab thread store, this is a single global instance because the limit error
  * can fire from multiple call sites (single tool call, "Call all" batch).
  */
-const useFirecrawlLimitDialogStore = create<FirecrawlLimitDialogState>((set) => ({
-  open: false,
-  openDialog: () => set({ open: true }),
-  setOpen: (open) => set({ open }),
-}));
+const useFirecrawlLimitDialogStore = create<FirecrawlLimitDialogState>(
+  (set) => ({
+    open: false,
+    openDialog: () => set({ open: true }),
+    setOpen: (open) => set({ open }),
+  })
+);
 
 /** Open the dialog from non-React call sites (tool-call catch blocks). */
 export function openFirecrawlLimitDialog() {

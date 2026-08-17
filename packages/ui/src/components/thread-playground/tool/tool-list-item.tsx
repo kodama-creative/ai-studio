@@ -5,18 +5,11 @@ import {
   isProviderHostedTool,
   type Tool,
 } from "@llm-space/core";
-import {
-  CableIcon,
-  CloudIcon,
-  FunctionSquareIcon,
-  XIcon,
-} from "lucide-react";
+import { CableIcon, CloudIcon, FunctionSquareIcon, XIcon } from "lucide-react";
 import React, { memo, useCallback, useMemo } from "react";
 
-import { Tooltip } from "@llm-space/ui/components/tooltip";
-import { cn } from "@llm-space/ui/lib/utils";
-
-
+import { cn } from "../../../lib/utils";
+import { Tooltip } from "../../tooltip";
 
 import { getBuiltInToolIcon } from "./built-in-tool-icon";
 
@@ -54,10 +47,9 @@ function _ToolListItem({
     },
     [onRemove, tool]
   );
-  const ToolIcon =
-    providerHosted
-      ? CloudIcon
-      : tool.type === "mcp"
+  const ToolIcon = providerHosted
+    ? CloudIcon
+    : tool.type === "mcp"
       ? CableIcon
       : tool.type === "builtin"
         ? getBuiltInToolIcon(tool)
@@ -79,29 +71,29 @@ function _ToolListItem({
               </pre>
             </div>
           ) : (
-          <div>
-            <div className="font-mono">
-              <span className="text-primary font-bold">{displayName}</span>
-              <span>(</span>
-              <span className="whitespace-pre-wrap">
-                {keys.length > 0
-                  ? "{\n" +
-                    keys
-                      .map((key) =>
-                        required.includes(key) ? `  ${key}` : `  [${key}]`
-                      )
-                      .join(", \n") +
-                    "\n}"
-                  : ""}
-              </span>
-              <span>)</span>
-            </div>
-            {tool.description && (
-              <div className="pt-2 text-xs whitespace-pre-wrap opacity-60">
-                {tool.description}
+            <div>
+              <div className="font-mono">
+                <span className="text-primary font-bold">{displayName}</span>
+                <span>(</span>
+                <span className="whitespace-pre-wrap">
+                  {keys.length > 0
+                    ? "{\n" +
+                      keys
+                        .map((key) =>
+                          required.includes(key) ? `  ${key}` : `  [${key}]`
+                        )
+                        .join(", \n") +
+                      "\n}"
+                    : ""}
+                </span>
+                <span>)</span>
               </div>
-            )}
-          </div>
+              {tool.description && (
+                <div className="pt-2 text-xs whitespace-pre-wrap opacity-60">
+                  {tool.description}
+                </div>
+              )}
+            </div>
           )
         }
       >

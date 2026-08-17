@@ -1,5 +1,5 @@
-import { cn } from "@llm-space/ui/lib/utils";
-import { Skeleton } from "@llm-space/ui/ui/skeleton";
+import { cn } from "../../../lib/utils";
+import { Skeleton } from "../../../ui/skeleton";
 
 export function ThreadPlaygroundSkeleton({
   className,

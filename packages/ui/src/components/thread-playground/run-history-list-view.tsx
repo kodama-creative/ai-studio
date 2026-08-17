@@ -31,12 +31,12 @@ import {
 } from "react";
 import { format } from "timeago.js";
 
-import { ConfirmDialog } from "@llm-space/ui/components/confirm-dialog";
-import { Tooltip } from "@llm-space/ui/components/tooltip";
-import { useAutoAnimation } from "@llm-space/ui/lib/use-auto-animation";
-import { cn } from "@llm-space/ui/lib/utils";
-import { Button } from "@llm-space/ui/ui/button";
-import { Item, ItemContent, ItemDescription, ItemGroup } from "@llm-space/ui/ui/item";
+import { useAutoAnimation } from "../../lib/use-auto-animation";
+import { cn } from "../../lib/utils";
+import { Button } from "../../ui/button";
+import { Item, ItemContent, ItemDescription, ItemGroup } from "../../ui/item";
+import { ConfirmDialog } from "../confirm-dialog";
+import { Tooltip } from "../tooltip";
 
 import { RunEvaluationDialog } from "./run-evaluation-dialog";
 import { RunTraceView } from "./run-trace-view";

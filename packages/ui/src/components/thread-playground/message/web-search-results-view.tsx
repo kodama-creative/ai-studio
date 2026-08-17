@@ -2,7 +2,7 @@ import { type ToolCallInput } from "@llm-space/core";
 import { GlobeIcon } from "lucide-react";
 import { memo } from "react";
 
-import { Link } from "@llm-space/ui/components/link";
+import { Link } from "../../link";
 
 interface WebSearchResult {
   title: string;

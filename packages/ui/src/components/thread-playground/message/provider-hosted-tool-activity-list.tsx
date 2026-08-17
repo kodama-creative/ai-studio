@@ -2,7 +2,7 @@ import type { ProviderHostedToolActivity } from "@llm-space/core";
 import { CloudIcon } from "lucide-react";
 import { memo, useMemo } from "react";
 
-import { Link } from "@llm-space/ui/components/link";
+import { Link } from "../../link";
 
 import { summarizeProviderHostedActivity } from "./provider-hosted-tool-activity-utils";
 

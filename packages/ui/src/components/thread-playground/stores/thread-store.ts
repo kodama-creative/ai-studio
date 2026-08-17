@@ -69,8 +69,7 @@ import { createStore, useStore, type StoreApi } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
 import { useShallow } from "zustand/shallow";
 
-import { createFrameThrottle } from "@llm-space/ui/lib/frame-throttle";
-
+import { createFrameThrottle } from "../../../lib/frame-throttle";
 import { PREVIEW_THROTTLE_MS } from "../streaming-preview";
 
 import { getRunValidationIssue } from "./run-validation";
@@ -1624,7 +1623,11 @@ export function createThreadStore(
         async resolveToolApproval(approved: boolean) {
           const approval = get().pendingToolApproval;
           const resolve = options.executionRuntime?.resolveToolApproval;
-          if (approval === null || resolve === undefined || get().status !== "idle") {
+          if (
+            approval === null ||
+            resolve === undefined ||
+            get().status !== "idle"
+          ) {
             return false;
           }
           const runId = uuid();

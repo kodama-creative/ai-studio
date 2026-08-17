@@ -1,11 +1,9 @@
 "use client";
 
-
 import { useState } from "react";
 import { toast } from "sonner";
 
-import { CodeEditor } from "@llm-space/ui/components/code-editor";
-import { Button } from "@llm-space/ui/ui/button";
+import { Button } from "../../../ui/button";
 import {
   Dialog,
   DialogContent,
@@ -13,7 +11,8 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@llm-space/ui/ui/dialog";
+} from "../../../ui/dialog";
+import { CodeEditor } from "../../code-editor";
 
 /**
  * The JSON Schema seeded into the editor when none is configured yet.

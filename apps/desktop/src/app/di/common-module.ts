@@ -4,7 +4,6 @@ import { ContainerModule, type ResolutionContext } from "inversify";
 import { createAppDirectoriesClient } from "@/client/app-directories";
 import { createAuxiliaryGenerationClient } from "@/client/auxiliary-generation-client";
 import { createBuiltinToolsClient } from "@/client/built-in-tools";
-import { createGeneratorClient } from "@/client/generator";
 import { createMcpClient, type McpClient } from "@/client/mcp";
 import { createModelsClient } from "@/client/models";
 import { createNativeDialogsClient } from "@/client/native-dialogs";
@@ -68,9 +67,6 @@ export const AUXILIARY_GENERATION_CLIENT = rendererToken<
 export const BUILTIN_TOOLS_CLIENT = rendererToken<
   ReturnType<typeof createBuiltinToolsClient>
 >("builtin-tools", "client");
-export const GENERATOR_CLIENT = rendererToken<
-  ReturnType<typeof createGeneratorClient>
->("generator", "client");
 export const NATIVE_DIALOGS_CLIENT = rendererToken<
   ReturnType<typeof createNativeDialogsClient>
 >("native-dialogs", "client");
@@ -128,7 +124,6 @@ export function rendererCommonModule(): ContainerModule {
       createAuxiliaryGenerationClient()
     );
     bind(BUILTIN_TOOLS_CLIENT).toConstantValue(createBuiltinToolsClient());
-    bind(GENERATOR_CLIENT).toConstantValue(createGeneratorClient());
     bind(NATIVE_DIALOGS_CLIENT).toConstantValue(createNativeDialogsClient());
     bind(NATIVE_FILES_CLIENT).toConstantValue(createNativeFilesClient());
     bind(PROMPT_FILES_CLIENT).toConstantValue(createPromptFilesClient());

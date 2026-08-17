@@ -15,18 +15,17 @@ import { CircleAlertIcon, PlusIcon, TriangleAlertIcon } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
-import { CodeEditor } from "@llm-space/ui/components/code-editor";
-import { openFirecrawlLimitDialog } from "@llm-space/ui/components/firecrawl-limit-dialog";
-import { useRenderingFidelity } from "@llm-space/ui/components/theme-provider";
-import { Tooltip } from "@llm-space/ui/components/tooltip";
-import { useHostServices } from "@llm-space/ui/host";
-import { cn } from "@llm-space/ui/lib/utils";
-import { Button } from "@llm-space/ui/ui/button";
-import { CollapsibleContent } from "@llm-space/ui/ui/collapsible-content";
-import { Marker, MarkerContent } from "@llm-space/ui/ui/marker";
-import { ShineBorder } from "@llm-space/ui/ui/shine-border";
-import { Skeleton } from "@llm-space/ui/ui/skeleton";
-
+import { useHostServices } from "../../../host";
+import { cn } from "../../../lib/utils";
+import { Button } from "../../../ui/button";
+import { CollapsibleContent } from "../../../ui/collapsible-content";
+import { Marker, MarkerContent } from "../../../ui/marker";
+import { ShineBorder } from "../../../ui/shine-border";
+import { Skeleton } from "../../../ui/skeleton";
+import { CodeEditor } from "../../code-editor";
+import { openFirecrawlLimitDialog } from "../../firecrawl-limit-dialog";
+import { useRenderingFidelity } from "../../theme-provider";
+import { Tooltip } from "../../tooltip";
 import {
   type RunValidationIssue,
   useThreadStore,
@@ -76,9 +75,7 @@ function _MessageListItem({
   const assistantTextContents = useMemo(
     () =>
       message.role === "assistant"
-        ? (message.content.filter(
-            (content) => content.type === "text"
-          ))
+        ? message.content.filter((content) => content.type === "text")
         : [],
     [message]
   );
@@ -278,26 +275,26 @@ function _MessageListItem({
             (text.length > 0 ||
               message.role !== "assistant" ||
               !message.providerHostedToolActivities?.length) && (
-            <CodeEditor
-              className="max-h-[40vh] min-h-9.5 w-full bg-transparent"
-              autoFocus={autoFocus}
-              hideFocusRing
-              hideBorder
-              scrollOnFocus
-              plain={fidelity === "lite"}
-              placeholder={
-                placeholder ??
-                `Enter ${message.role === "user" ? "user" : "assistant"} message here`
-              }
-              streaming={streaming}
-              readonly={readonly}
-              value={text}
-              extraExtensions={editorExtensions}
-              onChange={handleTextContentChange}
-              onKeyDown={handleKeyDown}
-              onPaste={handlePaste}
-            />
-          )}
+              <CodeEditor
+                className="max-h-[40vh] min-h-9.5 w-full bg-transparent"
+                autoFocus={autoFocus}
+                hideFocusRing
+                hideBorder
+                scrollOnFocus
+                plain={fidelity === "lite"}
+                placeholder={
+                  placeholder ??
+                  `Enter ${message.role === "user" ? "user" : "assistant"} message here`
+                }
+                streaming={streaming}
+                readonly={readonly}
+                value={text}
+                extraExtensions={editorExtensions}
+                onChange={handleTextContentChange}
+                onKeyDown={handleKeyDown}
+                onPaste={handlePaste}
+              />
+            )}
           {message.role === "assistant" && (
             <CitationList contents={assistantTextContents} />
           )}

@@ -10,17 +10,16 @@ import {
 import { Edit3Icon, PlusIcon } from "lucide-react";
 import { useMemo, type KeyboardEvent } from "react";
 
-import { Tooltip } from "@llm-space/ui/components/tooltip";
-import { Button } from "@llm-space/ui/ui/button";
-import { ButtonGroup } from "@llm-space/ui/ui/button-group";
+import { Button } from "../../ui/button";
+import { ButtonGroup } from "../../ui/button-group";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@llm-space/ui/ui/select";
-
+} from "../../ui/select";
+import { Tooltip } from "../tooltip";
 
 const NO_RUBRIC = "none";
 const SAVED_RUBRIC = "saved";

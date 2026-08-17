@@ -5,7 +5,7 @@ import {
   readLocalStorage,
   writeLocalStorage,
   type LocalStorageKey,
-} from "@llm-space/ui/lib/local-storage";
+} from "../../../lib/local-storage";
 
 /**
  * Persisted run-mode preferences. App-level and shared across every thread tab

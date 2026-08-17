@@ -9,8 +9,8 @@ import {
 import { GaugeIcon } from "lucide-react";
 import { memo, useCallback, useMemo, type MouseEvent } from "react";
 
-import { Tooltip } from "@llm-space/ui/components/tooltip";
-import { cn } from "@llm-space/ui/lib/utils";
+import { cn } from "../../../lib/utils";
+import { Tooltip } from "../../tooltip";
 
 import { useMessageStatsSummaryMode } from "./message-stats-summary-mode";
 

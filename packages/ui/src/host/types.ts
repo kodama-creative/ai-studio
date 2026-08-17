@@ -18,7 +18,6 @@ import type {
   ModelProviderGroup,
   ProviderConnectionRef,
   ProviderProfilePatch,
-  SearchSettings,
   SeedreamImageModelDefinition,
   SkillInfo,
   SkillsSettings,
@@ -39,7 +38,9 @@ export type AuxiliaryGenerateEvent =
 
 /** Stateless model generation that never creates or mutates a product Session. */
 export interface AuxiliaryGenerationHost {
-  generate(input: AuxiliaryGenerateInput): AsyncIterable<AuxiliaryGenerateEvent>;
+  generate(
+    input: AuxiliaryGenerateInput
+  ): AsyncIterable<AuxiliaryGenerateEvent>;
 }
 
 /** A tool call's result, normalized across the built-in and MCP backends. */
@@ -116,70 +117,6 @@ export interface FilesHost {
 }
 
 /**
- * Filesystem/exec backing for the code Generator ("export this thread as a
- * runnable project"). Writes/exec are scoped to a directory the user picks via
- * {@link pickDirectory}. `null` on hosts without it (the web viewer).
- */
-export interface GeneratorHost {
-  /**
-   * Open the native folder picker for the project's PARENT directory. `path` is
-   * `null` on cancel; the wizard combines it with the project name.
-   */
-  pickDirectory(): Promise<{ path: string | null }>;
-  /**
-   * Resolve `parentDir/projectName`, validate it can hold a fresh project,
-   * create it, and authorize it for the generator's writes + `uv` runs. The
-   * wizard's "Next" gate on the directory step.
-   */
-  prepareDirectory(
-    parentDir: string,
-    projectName: string
-  ): Promise<{ ok: true; dir: string } | { ok: false; error: string }>;
-  /** Whether `uv` is installed on the host, and its version when detectable. */
-  checkUv(): Promise<{ installed: boolean; version?: string }>;
-  /**
-   * Run `uv <args>` with cwd = an authorized project directory. `opts.timeoutMs`
-   * kills the process after that long, returning `timedOut: true` instead of
-   * letting the RPC layer reject and orphan `uv`.
-   */
-  runUv(
-    rootDir: string,
-    args: string[],
-    opts?: { timeoutMs?: number }
-  ): Promise<{
-    code: number;
-    stdout: string;
-    stderr: string;
-    timedOut: boolean;
-  }>;
-  /** Write a UTF-8 file under an authorized project directory. */
-  writeFile(
-    rootDir: string,
-    relativePath: string,
-    contents: string
-  ): Promise<void>;
-  /** Delete a file under an authorized project directory; no-op when missing. */
-  removeFile(rootDir: string, relativePath: string): Promise<void>;
-  /**
-   * Open a native terminal in the generated project and run its development
-   * target. Returns false when the host platform does not support this action.
-   */
-  openDevTerminal(rootDir: string): Promise<boolean>;
-  /** The user's web-search settings, written into a generated project's `.env`. */
-  getSearchSettings(): Promise<SearchSettings>;
-  /**
-   * Resolve the model provider's real API key plus the values of the named
-   * environment variables — used to write a `.env` with the user's actual
-   * secrets when they opt in.
-   */
-  resolveEnv(
-    providerId: string,
-    envNames: string[],
-    options?: { profileId?: string }
-  ): Promise<{ modelApiKey: string; envValues: Record<string, string> }>;
-}
-
-/**
  * Host navigation, replacing the desktop command bus. On web these are no-ops
  * (or `openLink` → `window.open`). `registerRunThread` wires the playground's
  * run action into a host command palette / shortcut and returns a disposer.
@@ -214,8 +151,6 @@ export interface HostServices {
   builtinTools: BuiltinToolsHost;
   paths: PathsHost;
   files: FilesHost;
-  /** Code-generator backing; `null` on hosts without it (the web viewer). */
-  generator: GeneratorHost | null;
   actions: HostActions;
 }
 
