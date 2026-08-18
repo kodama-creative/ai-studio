@@ -111,16 +111,21 @@ inject `Container`, call `get()`, or load a module.
 
 ```text
 bun/index.ts
-  -> bootstrapDesktopApp()
-      -> create Desktop container
-      -> load explicit process modules
-      -> resolve DesktopApp exactly once
-      -> run DesktopApp
+  -> bootstrapDesktopProcess()
+      -> hydrate shell environment
+      -> capture cold-start deep links
+      -> composeAndStartDesktopApp(deepLinks)
+          -> create Desktop container
+          -> load explicit process modules
+          -> resolve DesktopApp exactly once
+          -> run DesktopApp
 ```
 
-`bootstrapDesktopApp()` owns shell hydration, cold-start capture, module order,
-root-container cleanup, and composition-failure rollback. It does not implement
-feature behavior.
+`bootstrapDesktopProcess()` is only the sequential import barrier: shell
+hydration precedes the deep-link listener, which precedes the statically
+imported composition graph. `composeAndStartDesktopApp()` owns container module
+order, root-container cleanup, and composition-failure rollback. Neither
+function implements feature behavior.
 
 `DesktopApp` owns the process startup/stop transaction. Its fixed dependencies
 include launch routing, Main and Project window managers, Analytics, and

@@ -109,19 +109,21 @@ Desktop 应维持三层生命周期根，而不是把它们揉成一个 `Desktop
 
 ```text
 src/bun/index.ts
-  → bootstrapDesktopApp()          composition root
-      → resolve DesktopApp once    process lifecycle root
-          → DesktopWindowFactory
-              → DesktopWindowRuntime per native window
-                  → CommandRegistry + RpcRegistry
+  → bootstrapDesktopProcess()           import-order barrier
+      → composeAndStartDesktopApp()     composition root
+          → resolve DesktopApp once     process lifecycle root
+              → DesktopWindowFactory
+                  → DesktopWindowRuntime per native window
+                      → CommandRegistry + RpcRegistry
 ```
 
-- `bootstrap.ts`：唯一知道 module 集合、外部 Electrobun/runtime adapter、process/window scopes 和失败回滚的地方。文件大不是首要问题；把装配责任分散到业务 class 才是问题。
+- `bootstrap.ts`：只保证 shell env → deep-link listener → composition graph 的求值顺序。
+- `desktop-composition.ts`：唯一知道 module 集合、外部 Electrobun/runtime adapter、process/window containers 和失败回滚的地方。文件大不是首要问题；把装配责任分散到业务 class 才是问题。
 - `DesktopApp`：只协调进程启动/退出、launch、后台服务和窗口管理；不 `container.get()`、不 load module。
 - `DesktopWindowFactory`：唯一创建 native window + child scope + immutable window identity。
 - `DesktopWindowRuntime`：每窗口 lifecycle root，启动/释放 registries 和 transport，再关闭 native window。
 
-这与 Theia 的“入口装配、Application 运行生命周期”的方向一致；不同点是 Desktop 还需要 Bun process root 下的**每原生窗口 child scope**，不能照搬 Theia 单 frontend-container 的作用域。当前依据：[`bootstrap.ts`](../../apps/desktop/src/bun/app/bootstrap.ts) · [`desktop-app.ts`](../../apps/desktop/src/bun/app/desktop-app.ts) · [`desktop-window-runtime.ts`](../../apps/desktop/src/bun/app/desktop-window-runtime.ts)。
+这与 Theia 的“入口装配、Application 运行生命周期”的方向一致；不同点是 Desktop 还需要 Bun process root 下的**每原生窗口 child container**，不能照搬 Theia 单 frontend-container 的作用域。当前依据：[`bootstrap.ts`](../../apps/desktop/src/bun/app/bootstrap.ts) · [`desktop-composition.ts`](../../apps/desktop/src/bun/app/desktop-composition.ts) · [`desktop-app.ts`](../../apps/desktop/src/bun/app/desktop-app.ts) · [`desktop-window-runtime.ts`](../../apps/desktop/src/bun/app/desktop-window-runtime.ts)。
 
 不建议新增一个无差别 `DesktopApplicationContribution` 并把所有 manager 都塞进去。Theia backend 的 contribution hooks 有并行阶段，且 stop 贡献需要彼此独立；Desktop 目前 launch → windows → process scope 的严格逆序和 Electrobun 两阶段 quit 是业务不变量，显式 `DesktopLifecycle` 更清楚。[Theia backend parallel initialize/stop contract](https://github.com/eclipse-theia/theia/blob/713634fd5885ff8abde8cfd50bc3493d535772a5/packages/core/src/node/backend-application.ts#L84-L140) · [implementation](https://github.com/eclipse-theia/theia/blob/713634fd5885ff8abde8cfd50bc3493d535772a5/packages/core/src/node/backend-application.ts#L234-L245)
 
@@ -234,7 +236,7 @@ Theia 源码显示的是职责命名，而不是固定层级：
 7. push 数据应建模为 event 还是 stream？event 是长期状态变化广播；stream 是一次调用拥有的有序序列和 cancellation。现有 namespace 是否混用了两者？
 8. contribution snapshot 何时冻结？任何窗口创建后是否还允许 late binding？若不允许，失败应发生在 module load、registry start 还是首个 RPC call？
 9. decorator 迁移是否包含 renderer？如果 renderer 没有明确 composition root 和生命周期收益，应先只改 Bun，对 React controller 继续显式构造。
-10. 当前 `bootstrap.ts` 的痛点究竟是“行数多”，还是“资源构造、注册、启动、回滚之间缺少可证明的顺序”？只有后者才需要架构调整，前者可以用私有 composition helper 收敛而不分散 root ownership。
+10. 当前 composition root 的痛点究竟是“行数多”，还是“资源构造、注册、启动、回滚之间缺少可证明的顺序”？只有后者才需要架构调整；import-order barrier 与 composition ownership 可以分文件表达，但不能把装配责任分散到业务类。
 
 ## 建议的决策基线
 

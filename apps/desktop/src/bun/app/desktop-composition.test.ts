@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
 import path from "node:path";
 
-test("bootstrap hydrates env and captures deep links before composition loads", async () => {
-  const fixture = path.join(import.meta.dir, "bootstrap-fixture.ts");
+test("composition cleans a failed process in reverse ownership order", async () => {
+  const fixture = path.join(import.meta.dir, "desktop-composition-fixture.ts");
   const subprocess = Bun.spawn([process.execPath, fixture], {
     stderr: "pipe",
     stdout: "pipe",
@@ -14,7 +14,7 @@ test("bootstrap hydrates env and captures deep links before composition loads", 
   ]);
   if (exitCode !== 0) {
     throw new Error(
-      `Bootstrap fixture failed with exit code ${exitCode}.\n${stdout}\n${stderr}`
+      `Composition fixture failed with exit code ${exitCode}.\n${stdout}\n${stderr}`
     );
   }
   expect(exitCode).toBe(0);

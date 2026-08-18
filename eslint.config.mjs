@@ -218,7 +218,7 @@ export default defineConfig([
       "apps/desktop/src/app/di/**",
       "apps/desktop/src/bun/**/*-module.ts",
       "apps/desktop/src/bun/**/*-rpc-feature.ts",
-      "apps/desktop/src/bun/app/bootstrap.ts",
+      "apps/desktop/src/bun/app/desktop-composition.ts",
       "apps/desktop/src/bun/app/desktop-window-factory.ts",
     ],
     rules: {

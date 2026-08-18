@@ -60,7 +60,9 @@ const { ThreadSharingApplication } = await import(
   "../thread-sharing/thread-sharing-application"
 );
 const { UpdaterService } = await import("../updates");
-const { createDesktopWindowComposition } = await import("./bootstrap");
+const { createDesktopWindowComposition } = await import(
+  "./desktop-composition"
+);
 const {
   DESKTOP_WINDOW_CLOSE,
   DESKTOP_WINDOW_KIND,
@@ -108,7 +110,7 @@ test("window Container composition completes before Registries start", async () 
 });
 
 test("production composition keeps Common, Main, and Project contributions explicit", async () => {
-  const composition = await createDesktopWindowComposition();
+  const composition = createDesktopWindowComposition();
   const configureDesktopWindowContainer = composition.configureRuntime.bind(
     composition
   );

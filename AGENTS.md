@@ -96,7 +96,7 @@ callbacks, or bind raw BrowserWindow/RPC values without an actual consumer.
 
 Every native window owns one `RpcRegistry`. Window-scoped feature classes multi-bind the same `RpcContribution` symbol and the Registry receives the fixed set through native Inversify `@multiInject()`. Contributions register typed namespace adapters during `RpcRegistry.onStart()`; duplicate namespaces and late registration fail. The Registry owns request dispatch, request/stream abort, event subscriptions, and reverse-order registration cleanup. `createMainWindowRPC()` only forwards the Electrobun envelope to that Registry and never constructs business services.
 
-Bundled window composition is explicit in the production composition root. `bootstrap.ts` owns the ordered Common/Main/Project module sets and injects one staged `DesktopWindowComposition` into `DesktopWindowFactory`. The Factory creates a raw child `Container` with the Desktop container as parent, loads the selected modules, resolves exactly one `MainWindowApplication` or `ProjectWindowApplication`, and owns `Application.stop()` followed by `container.unbindAllAsync()`. Main and Project containers are siblings; closing either cannot invalidate the other. Do not recreate custom Scope wrappers, distributed process-level window feature bindings, or a catch-all `di/modules` aggregation.
+Bundled window composition is explicit in the production composition root. `desktop-composition.ts` owns the ordered Common/Main/Project module sets and injects one staged `DesktopWindowComposition` into `DesktopWindowFactory`. The Factory creates a raw child `Container` with the Desktop container as parent, loads the selected modules, resolves exactly one `MainWindowApplication` or `ProjectWindowApplication`, and owns `Application.stop()` followed by `container.unbindAllAsync()`. Main and Project containers are siblings; closing either cannot invalidate the other. Do not recreate custom Scope wrappers, distributed process-level window feature bindings, or a catch-all `di/modules` aggregation.
 
 Project windows keep three interfaces distinct: `projectSource.*` owns source
 read/watch, `studio.*` owns Studio Thread metadata, Drafts, history,
@@ -106,17 +106,20 @@ methods into a catch-all Project Studio client/server.
 
 ### Bun composition and bundled modules
 
-`src/bun/app/bootstrap.ts` is the one production composition root. It owns
-shell-environment hydration, cold-start deep-link capture, workspace/Skill
-seeding, process-scope creation, every process/window container registration,
-eager lifecycle-root adoption, and composition-failure cleanup. After all
-other bindings are complete it registers `DesktopApp`, resolves it once, and
-starts it; `src/bun/index.ts` only invokes this bootstrap.
+`src/bun/app/bootstrap.ts` is the process import barrier. It hydrates the shell
+environment, dynamically loads cold-start deep-link capture, and only then
+dynamically loads `desktop-composition.ts`; these two imports stay sequential.
+`src/bun/app/desktop-composition.ts` is the one production composition root. It
+uses ordinary static imports and owns workspace/Skill seeding, process-scope
+creation, every process/window container registration, eager lifecycle-root
+adoption, and composition-failure cleanup. After all other bindings are
+complete it registers `DesktopApp`, resolves it once, and starts it;
+`src/bun/index.ts` only invokes the bootstrap barrier.
 
 `src/bun/app/desktop-app.ts` exports the container-agnostic `DesktopApp`
 lifecycle class. It receives ordinary constructor dependencies, coordinates
 native startup and shutdown, and never resolves or registers services.
-External process resources are constructed and registered with `DesktopLifecycle` immediately in bootstrap. Container-owned Applications, Services, Managers, Controllers, Registries, and Contributions use `@injectable()` plus explicit `@inject()`/`@multiInject()`; modules declare bindings and aliases instead of manually constructing ordinary long-lived classes. Vertical feature slices live under their
+External process resources are constructed and registered with `DesktopLifecycle` immediately in the composition root. Container-owned Applications, Services, Managers, Controllers, Registries, and Contributions use `@injectable()` plus explicit `@inject()`/`@multiInject()`; modules declare bindings and aliases instead of manually constructing ordinary long-lived classes. Vertical feature slices live under their
 named `bun/*/` directories; each owns its application
 logic, DI identities/module, RPC server/contribution, and local implementation
 details. `bun/rpc/` contains only the Electrobun transport bridge, while shared
@@ -158,13 +161,14 @@ individual failures. The startup wrapper always stops the process scope if
 composition fails. Do not defer cleanup registration until the end of startup.
 Cold-start URL capture is the deliberate import-time exception:
 `bootstrap.ts` loads `deep-link/launch.ts` immediately after shell hydration and
-before longer seed/composition imports. The launch adapter buffers Electrobun
+before the static composition graph. The launch adapter buffers Electrobun
 URLs in a `DeepLinkInbox`; `DesktopLaunchService` atomically connects to that
 inbox, routes buffered/live Main and Studio links, owns reopen behavior, and
 disconnects before window teardown. The top-level `DesktopLifecycle` stack owns
 the idempotent stop order (launch routing → Project windows → process scope).
-Keep these state machines out of `bootstrap.ts`; it only constructs and injects
-their platform adapters into the final `DesktopApp` lifecycle root.
+Keep these state machines out of `bootstrap.ts`; it only enforces import order.
+The composition root constructs and injects their platform adapters into the
+final `DesktopApp` lifecycle root.
 Registries start once before the Electrobun bridge and native window are created, reject late registration, then dispose registrations before the child container unbinds contribution instances. Application classes never implement Desktop contribution interfaces and never access the container.
 
 `DesktopHost` (`src/bun/host/desktop-host.ts`) is the lifecycle boundary for

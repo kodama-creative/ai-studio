@@ -1,3 +1,3 @@
-const { bootstrapDesktopApp } = await import("./app/bootstrap");
+import { bootstrapDesktopProcess } from "./app/bootstrap";
 
-await bootstrapDesktopApp();
+await bootstrapDesktopProcess();
