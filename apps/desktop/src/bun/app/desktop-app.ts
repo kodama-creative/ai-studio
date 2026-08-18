@@ -2,12 +2,10 @@ import type { BrowserWindow } from "electrobun/bun";
 import { inject, injectable } from "inversify";
 
 import type { Command } from "../../shared/commands";
-import type { Analytics } from "../analytics";
-import { ANALYTICS } from "../analytics/analytics-module";
+import { Analytics } from "../analytics";
 import { DesktopPlaygroundApplication } from "../playgrounds/playground-application";
 import { ProjectWindowManager } from "../projects/project-window-manager";
-import type { UpdaterService } from "../updates";
-import { UPDATER } from "../updates/updates-module";
+import { UpdaterService } from "../updates";
 
 import { DesktopLaunchService } from "./desktop-launch-service";
 import {
@@ -36,8 +34,8 @@ export class DesktopApp implements DesktopAppRuntime {
   private _started = false;
 
   constructor(
-    @inject(ANALYTICS) private readonly _analytics: Analytics,
-    @inject(UPDATER) private readonly _updater: UpdaterService,
+    @inject(Analytics) private readonly _analytics: Analytics,
+    @inject(UpdaterService) private readonly _updater: UpdaterService,
     @inject(DesktopPlaygroundApplication)
     private readonly _playground: DesktopPlaygroundApplication,
     @inject(DesktopLaunchService)

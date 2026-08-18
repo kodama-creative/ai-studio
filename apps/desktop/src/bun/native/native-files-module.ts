@@ -1,5 +1,5 @@
 import { userDirectoryExists } from "@llm-space/core/server";
-import type { SkillsManager } from "@llm-space/runtime/skills";
+import { SkillsManager } from "@llm-space/runtime/skills";
 import { ContainerModule, inject, injectable } from "inversify";
 
 import {
@@ -13,13 +13,12 @@ import {
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
 import { revealResource } from "../fs/reveal-resource";
-import { SKILLS_MANAGER } from "../skills/skills-module";
 
 /** Owns native-files RPC registration for one native window. */
 @injectable()
 class NativeFilesContribution implements RpcContributionApi {
   constructor(
-    @inject(SKILLS_MANAGER)
+    @inject(SkillsManager)
     private readonly _skills: Pick<SkillsManager, "findSkill">
   ) {}
 

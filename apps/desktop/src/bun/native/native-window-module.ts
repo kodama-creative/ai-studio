@@ -11,9 +11,9 @@ import {
   type WindowRequests,
   type WindowRpc,
 } from "../../shared/window-rpc";
-import type {
+import {
   WindowStateManager,
-  WindowStatePersistenceStore,
+  type WindowStatePersistenceStore,
 } from "../app/window-state";
 import {
   RpcContribution,
@@ -27,9 +27,7 @@ function _clampZoom(zoom: number): number {
   return Math.min(3, Math.max(0.3, zoom));
 }
 
-export const WINDOW_APPLICATION = Symbol("WindowApplication");
 export const WINDOW_CONTEXT_PROVIDER = Symbol("WindowContextProvider");
-export const WINDOW_STATE_MANAGER = Symbol("WindowStateManager");
 
 export interface NativeWindowStateBinding {
   readonly store: WindowStatePersistenceStore;
@@ -50,7 +48,7 @@ export class WindowApplication implements WindowRequests, Disposable {
   constructor(
     @inject(WINDOW_CONTEXT_PROVIDER)
     private readonly _context: WindowContextProvider,
-    @inject(WINDOW_STATE_MANAGER)
+    @inject(WindowStateManager)
     private readonly _windowStates: WindowStateManager
   ) {}
 
@@ -143,7 +141,7 @@ class WindowRpcServer implements RpcServer<WindowRpc> {
 @injectable()
 class WindowContribution implements RpcContributionApi {
   constructor(
-    @inject(WINDOW_APPLICATION)
+    @inject(WindowApplication)
     private readonly _application: WindowApplication
   ) {}
 
@@ -157,8 +155,8 @@ class WindowContribution implements RpcContributionApi {
 /** Bind the Window application, RPC, and commands for one native window. */
 export function nativeWindowContributionsModule(): ContainerModule {
   return new ContainerModule(({ bind }) => {
-    bind<WindowApplication>(WINDOW_APPLICATION)
-      .to(WindowApplication)
+    bind(WindowApplication)
+      .toSelf()
       .inSingletonScope()
       .onDeactivation((application) => application.dispose());
     bind(WindowContribution).toSelf().inSingletonScope();

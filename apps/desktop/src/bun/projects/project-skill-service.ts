@@ -1,14 +1,12 @@
 import type { SkillService } from "@llm-space/agent/runtime";
-import type { SkillsManager } from "@llm-space/runtime/skills";
+import { SkillsManager } from "@llm-space/runtime/skills";
 import { inject, injectable } from "inversify";
-
-import { SKILLS_MANAGER } from "../skills/skills-module";
 
 /** Resolves Agent-mounted Skills through the process-owned discovery manager. */
 @injectable()
 export class ProjectSkillService implements SkillService {
   constructor(
-    @inject(SKILLS_MANAGER) private readonly _skills: SkillsManager
+    @inject(SkillsManager) private readonly _skills: SkillsManager
   ) {}
 
   /** Return one validated Skill handle for an admitted Project operation. */

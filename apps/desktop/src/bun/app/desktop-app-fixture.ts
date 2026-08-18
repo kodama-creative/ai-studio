@@ -1,4 +1,12 @@
+import { mock } from "bun:test";
+
 const events: string[] = [];
+
+await mock.module("electrobun/bun", () => ({
+  ApplicationMenu: {},
+  BrowserWindow: class {},
+  Updater: {},
+}));
 
 const { DesktopApp } = await import("./desktop-app");
 

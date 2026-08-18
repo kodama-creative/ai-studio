@@ -1,4 +1,4 @@
-import type { McpManager } from "@llm-space/runtime/mcp";
+import { McpManager } from "@llm-space/runtime/mcp";
 import { ContainerModule, inject, injectable } from "inversify";
 
 import {
@@ -12,12 +12,10 @@ import {
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
 
-export const MCP_MANAGER = Symbol("McpManager");
-
 /** Owns MCP configuration and tool-call RPC for one native window. */
 @injectable()
 class McpRpcContribution implements RpcContributionApi {
-  constructor(@inject(MCP_MANAGER) private readonly _mcp: McpManager) {}
+  constructor(@inject(McpManager) private readonly _mcp: McpManager) {}
 
   registerRpc(rpc: RpcRegistry): void {
     const requests: McpRequests = {

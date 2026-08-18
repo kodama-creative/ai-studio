@@ -1,4 +1,4 @@
-import type { NetworkSettingsManager } from "@llm-space/runtime/network";
+import { NetworkSettingsManager } from "@llm-space/runtime/network";
 import { ContainerModule, inject, injectable } from "inversify";
 
 import {
@@ -12,13 +12,11 @@ import {
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
 
-export const NETWORK_SETTINGS = Symbol("NetworkSettingsManager");
-
 /** Owns network settings RPC for one native window. */
 @injectable()
 class NetworkRpcContribution implements RpcContributionApi {
   constructor(
-    @inject(NETWORK_SETTINGS)
+    @inject(NetworkSettingsManager)
     private readonly _settings: NetworkSettingsManager
   ) {}
 

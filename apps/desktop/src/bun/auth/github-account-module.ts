@@ -11,14 +11,12 @@ import {
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
 
-import type { GitHubAuthManager } from "./github-auth-manager";
-
-export const GITHUB_AUTH = Symbol("GitHubAuthManager");
+import { GitHubAuthManager } from "./github-auth-manager";
 
 @injectable()
 class GithubAccountContribution implements RpcContributionApi {
   constructor(
-    @inject(GITHUB_AUTH) private readonly _auth: GitHubAuthManager
+    @inject(GitHubAuthManager) private readonly _auth: GitHubAuthManager
   ) {}
 
   registerRpc(rpc: RpcRegistry): void {

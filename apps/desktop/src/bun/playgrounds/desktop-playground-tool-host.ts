@@ -1,9 +1,7 @@
-import type { McpManager } from "@llm-space/runtime/mcp";
+import { McpManager } from "@llm-space/runtime/mcp";
 import { inject, injectable } from "inversify";
 
-import type { DesktopHost } from "../host/desktop-host";
-import { DESKTOP_HOST } from "../host/desktop-host-module";
-import { MCP_MANAGER } from "../mcp/mcp-module";
+import { DesktopHost } from "../host/desktop-host";
 
 import {
   PLAYGROUND_TOOL_HOST,
@@ -14,8 +12,8 @@ import {
 @injectable()
 export class DesktopPlaygroundToolHost implements PlaygroundToolHost {
   constructor(
-    @inject(DESKTOP_HOST) private readonly _desktop: DesktopHost,
-    @inject(MCP_MANAGER) private readonly _mcp: McpManager
+    @inject(DesktopHost) private readonly _desktop: DesktopHost,
+    @inject(McpManager) private readonly _mcp: McpManager
   ) {}
 
   /** Snapshot currently available bundled tool definitions. */

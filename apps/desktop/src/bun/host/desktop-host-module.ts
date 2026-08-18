@@ -11,14 +11,12 @@ import {
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
 
-import type { DesktopHost } from "./desktop-host";
-
-export const DESKTOP_HOST = Symbol("DesktopHost");
+import { DesktopHost } from "./desktop-host";
 
 /** Owns bundled-tool discovery and execution RPC for one native window. */
 @injectable()
 class BuiltinToolsRpcContribution implements RpcContributionApi {
-  constructor(@inject(DESKTOP_HOST) private readonly _host: DesktopHost) {}
+  constructor(@inject(DesktopHost) private readonly _host: DesktopHost) {}
 
   registerRpc(rpc: RpcRegistry): void {
     const requests: BuiltinToolsRequests = {

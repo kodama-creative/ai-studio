@@ -11,13 +11,13 @@ import {
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
 
-import type { UpdaterService } from "./index";
-
-export const UPDATER = Symbol("UpdaterService");
+import { UpdaterService } from "./index";
 
 @injectable()
 class UpdatesContribution implements RpcContributionApi {
-  constructor(@inject(UPDATER) private readonly _updater: UpdaterService) {}
+  constructor(
+    @inject(UpdaterService) private readonly _updater: UpdaterService
+  ) {}
 
   registerRpc(rpc: RpcRegistry): void {
     const requests: UpdatesRequests = {

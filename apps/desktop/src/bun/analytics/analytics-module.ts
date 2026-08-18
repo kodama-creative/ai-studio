@@ -12,13 +12,11 @@ import {
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
 
-import type { Analytics } from "./index";
-
-export const ANALYTICS = Symbol("Analytics");
+import { Analytics } from "./index";
 
 @injectable()
 class AnalyticsContribution implements RpcContributionApi {
-  constructor(@inject(ANALYTICS) private readonly _analytics: Analytics) {}
+  constructor(@inject(Analytics) private readonly _analytics: Analytics) {}
 
   registerRpc(rpc: RpcRegistry): void {
     const requests: AnalyticsRequests = {

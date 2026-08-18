@@ -5,8 +5,7 @@ import type { Command } from "../../shared/commands";
 import { RpcRegistry, type RpcEventSink } from "../di/rpc-registry";
 import {
   type NativeWindowStateBinding,
-  WINDOW_APPLICATION,
-  type WindowApplication,
+  WindowApplication,
 } from "../native/native-window-module";
 import {
   createMainWindowRPC,
@@ -44,7 +43,7 @@ export class DesktopWindowRuntime {
 
   constructor(
     @inject(DESKTOP_WINDOW_KIND) private readonly _kind: DesktopWindowKind,
-    @inject(WINDOW_APPLICATION)
+    @inject(WindowApplication)
     private readonly _windowApplication: WindowApplication,
     @inject(RpcRegistry) private readonly _rpcRegistry: RpcRegistry,
     @inject(DESKTOP_WINDOW_CLOSE)

@@ -1,4 +1,4 @@
-import type { SkillsManager } from "@llm-space/runtime/skills";
+import { SkillsManager } from "@llm-space/runtime/skills";
 import { ContainerModule, inject, injectable } from "inversify";
 
 import {
@@ -12,13 +12,11 @@ import {
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
 
-export const SKILLS_MANAGER = Symbol("SkillsManager");
-
 /** Owns Skill discovery and settings RPC for one native window. */
 @injectable()
 class SkillsRpcContribution implements RpcContributionApi {
   constructor(
-    @inject(SKILLS_MANAGER) private readonly _skills: SkillsManager
+    @inject(SkillsManager) private readonly _skills: SkillsManager
   ) {}
 
   registerRpc(rpc: RpcRegistry): void {

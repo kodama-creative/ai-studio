@@ -39,22 +39,15 @@ export async function bootstrapDesktopApp(): Promise<void> {
     const { resolveDeepLinkScheme } =
       await import("../../shared/deep-link-scheme");
     const { Analytics } = await import("../analytics");
-    const { ANALYTICS } = await import("../analytics/analytics-module");
-    const { GITHUB_AUTH } = await import("../auth/github-account-module");
     const { GitHubAuthManager } = await import("../auth/github-auth-manager");
     const { auxiliaryGenerationModule } =
       await import("../auxiliary-generation/auxiliary-generation-module");
     const { openPath, revealInFileManager } = await import("../fs");
     const { DesktopHost } = await import("../host/desktop-host");
-    const { DESKTOP_HOST } = await import("../host/desktop-host-module");
-    const { MCP_MANAGER } = await import("../mcp/mcp-module");
     const { modelsModule } = await import("../models/models-module");
     const { APP_HOME_PATH } = await import("../native/app-directories-module");
     const { nativeDialogsApplicationModule } =
       await import("../native/native-dialogs-module");
-    const { WINDOW_STATE_MANAGER } =
-      await import("../native/native-window-module");
-    const { NETWORK_SETTINGS } = await import("../network/network-module");
     const { playgroundModule } =
       await import("../playgrounds/playground-module");
     const { agentProjectsModule } =
@@ -70,13 +63,10 @@ export async function bootstrapDesktopApp(): Promise<void> {
     const { openAgentProject } = await import("../projects/agent-project");
     const { remindersModule } = await import("../reminders/reminders-module");
     const { REMINDERS_STATE_FILE } = await import("../reminders/state");
-    const { SEARCH_SETTINGS } = await import("../search/search-module");
-    const { SKILLS_MANAGER } = await import("../skills/skills-module");
     const { GIST_THREAD_READER, GIST_THREAD_WRITER, threadSharingModule } =
       await import("../thread-sharing/thread-sharing-module");
     const { UpdaterService } = await import("../updates");
     const { UpdatesState } = await import("../updates/state");
-    const { UPDATER } = await import("../updates/updates-module");
     const { DesktopApp } = await import("./desktop-app");
     const {
       DESKTOP_DEEP_LINK_SCHEME,
@@ -156,7 +146,7 @@ export async function bootstrapDesktopApp(): Promise<void> {
     // every remaining process resource inside the container cleanup window.
     const githubAuth = new GitHubAuthManager();
     processLifecycle.defer("GitHub authentication", () => githubAuth.dispose());
-    bindConstant(GITHUB_AUTH, githubAuth);
+    bindConstant(GitHubAuthManager, githubAuth);
     const gistWriter = new GistThreadWriter({
       getToken: () => githubAuth.getAccessToken(),
     });
@@ -171,18 +161,18 @@ export async function bootstrapDesktopApp(): Promise<void> {
     processLifecycle.defer("window state", () => windowStates.flush());
 
     // Process service registrations precede every window and application root.
-    bindConstant(ANALYTICS, analytics);
+    bindConstant(Analytics, analytics);
     bindConstant(APP_HOME_PATH, homePath);
-    bindConstant(DESKTOP_HOST, host);
+    bindConstant(DesktopHost, host);
     bindConstant(GIST_THREAD_READER, gistReader);
     bindConstant(GIST_THREAD_WRITER, gistWriter);
-    bindConstant(MCP_MANAGER, mcpManager);
+    bindConstant(McpManager, mcpManager);
     bindConstant(ModelManager, modelManager);
-    bindConstant(NETWORK_SETTINGS, networkSettings);
-    bindConstant(SEARCH_SETTINGS, searchSettings);
-    bindConstant(SKILLS_MANAGER, skillsManager);
-    bindConstant(UPDATER, updater);
-    bindConstant(WINDOW_STATE_MANAGER, windowStates);
+    bindConstant(NetworkSettingsManager, networkSettings);
+    bindConstant(SearchSettingsManager, searchSettings);
+    bindConstant(SkillsManager, skillsManager);
+    bindConstant(UpdaterService, updater);
+    bindConstant(WindowStateManager, windowStates);
     bindConstant(
       REMINDERS_STATE_FILE,
       path.join(homePath, "settings", "reminders.json")

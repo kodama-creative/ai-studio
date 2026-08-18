@@ -1,4 +1,4 @@
-import type { SearchSettingsManager } from "@llm-space/runtime/search";
+import { SearchSettingsManager } from "@llm-space/runtime/search";
 import { ContainerModule, inject, injectable } from "inversify";
 
 import {
@@ -12,13 +12,11 @@ import {
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
 
-export const SEARCH_SETTINGS = Symbol("SearchSettingsManager");
-
 /** Owns search settings RPC for one native window. */
 @injectable()
 class SearchRpcContribution implements RpcContributionApi {
   constructor(
-    @inject(SEARCH_SETTINGS)
+    @inject(SearchSettingsManager)
     private readonly _settings: SearchSettingsManager
   ) {}
 

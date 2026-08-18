@@ -26,26 +26,26 @@ await mock.module("electrobun/bun", () => ({
   Utils: {},
 }));
 
-const { ANALYTICS } = await import("../analytics/analytics-module");
-const { GITHUB_AUTH } = await import("../auth/github-account-module");
+const { Analytics } = await import("../analytics");
+const { GitHubAuthManager } = await import("../auth/github-auth-manager");
 const { AuxiliaryGenerationApplication } = await import(
   "../auxiliary-generation/auxiliary-generation-application"
 );
 const { RpcContribution } = await import("../di/rpc-contribution");
 const { windowRegistryModule } = await import("../di/window-registry-module");
-const { DESKTOP_HOST } = await import("../host/desktop-host-module");
-const { MCP_MANAGER } = await import("../mcp/mcp-module");
+const { DesktopHost } = await import("../host/desktop-host");
+const { McpManager } = await import("@llm-space/runtime/mcp");
 const { ModelsService } = await import("../models/models-service");
 const { APP_HOME_PATH } = await import("../native/app-directories-module");
 const { NativeDialogsApplication } = await import(
   "../native/native-dialogs-module"
 );
 const {
-  WINDOW_APPLICATION,
   WINDOW_CONTEXT_PROVIDER,
-  WINDOW_STATE_MANAGER,
+  WindowApplication,
 } = await import("../native/native-window-module");
-const { NETWORK_SETTINGS } = await import("../network/network-module");
+const { WindowStateManager } = await import("./window-state");
+const { NetworkSettingsManager } = await import("@llm-space/runtime/network");
 const { DesktopPlaygroundApplication } = await import(
   "../playgrounds/playground-application"
 );
@@ -54,12 +54,12 @@ const { AgentProjectsApplication } = await import(
 );
 const { ProjectService } = await import("../projects/project-module");
 const { RemindersState } = await import("../reminders/state");
-const { SEARCH_SETTINGS } = await import("../search/search-module");
-const { SKILLS_MANAGER } = await import("../skills/skills-module");
+const { SearchSettingsManager } = await import("@llm-space/runtime/search");
+const { SkillsManager } = await import("@llm-space/runtime/skills");
 const { ThreadSharingApplication } = await import(
   "../thread-sharing/thread-sharing-application"
 );
-const { UPDATER } = await import("../updates/updates-module");
+const { UpdaterService } = await import("../updates");
 const { createDesktopWindowComposition } = await import("./bootstrap");
 const {
   DESKTOP_WINDOW_CLOSE,
@@ -71,9 +71,11 @@ test("window Container composition completes before Registries start", async () 
   const container = new Container();
   const lifecycle: string[] = [];
   lifecycle.push("configure");
-  container.bind(WINDOW_APPLICATION).toConstantValue({
-    attach: () => undefined,
-  });
+  container
+    .bind<Pick<InstanceType<typeof WindowApplication>, "attach">>(
+      WindowApplication
+    )
+    .toConstantValue({ attach: () => undefined });
   container.load(
     new ContainerModule(({ bind }) => {
       bind(RpcContribution).toConstantValue({
@@ -111,25 +113,27 @@ test("production composition keeps Common, Main, and Project contributions expli
     composition
   );
   const desktop = new Container();
-  const bindConstant = <T>(token: ServiceIdentifier<T>, value: T) =>
-    desktop.bind(token).toConstantValue(value);
-  bindConstant(ANALYTICS, {});
-  bindConstant(GITHUB_AUTH, {});
-  bindConstant(AuxiliaryGenerationApplication, {} as never);
-  bindConstant(DESKTOP_HOST, {});
-  bindConstant(MCP_MANAGER, {});
-  bindConstant(ModelsService, {} as never);
+  const bindConstant = <T>(
+    token: ServiceIdentifier<T>,
+    value: Partial<T>
+  ) => desktop.bind(token).toConstantValue(value as T);
+  bindConstant(Analytics, {});
+  bindConstant(GitHubAuthManager, {});
+  bindConstant(AuxiliaryGenerationApplication, {});
+  bindConstant(DesktopHost, {});
+  bindConstant(McpManager, {});
+  bindConstant(ModelsService, {});
   bindConstant(APP_HOME_PATH, "/tmp/llm-space-test");
-  bindConstant(NativeDialogsApplication, {} as never);
-  bindConstant(NETWORK_SETTINGS, {});
-  bindConstant(DesktopPlaygroundApplication, {} as never);
-  bindConstant(AgentProjectsApplication, {} as never);
-  bindConstant(RemindersState, {} as never);
-  bindConstant(SEARCH_SETTINGS, {});
-  bindConstant(SKILLS_MANAGER, {});
-  bindConstant(ThreadSharingApplication, {} as never);
-  bindConstant(UPDATER, {});
-  bindConstant(WINDOW_STATE_MANAGER, {});
+  bindConstant(NativeDialogsApplication, {});
+  bindConstant(NetworkSettingsManager, {});
+  bindConstant(DesktopPlaygroundApplication, {});
+  bindConstant(AgentProjectsApplication, {});
+  bindConstant(RemindersState, {});
+  bindConstant(SearchSettingsManager, {});
+  bindConstant(SkillsManager, {});
+  bindConstant(ThreadSharingApplication, {});
+  bindConstant(UpdaterService, {});
+  bindConstant(WindowStateManager, {});
 
   const contributionNames = (kind: "main" | "project") => {
     const container = new Container({ parent: desktop });

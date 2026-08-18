@@ -11,8 +11,7 @@ import { inject, injectable } from "inversify";
 
 import { Emitter } from "../../shared/event";
 import type { ModelsRequests } from "../../shared/models-rpc";
-import type { Analytics } from "../analytics";
-import { ANALYTICS } from "../analytics/analytics-module";
+import { Analytics } from "../analytics";
 
 /** Owns model configuration use cases and their product analytics. */
 @injectable()
@@ -24,7 +23,7 @@ export class ModelsService implements ModelsRequests {
 
   constructor(
     @inject(ModelManager) private readonly _models: ModelManager,
-    @inject(ANALYTICS) private readonly _analytics: Analytics
+    @inject(Analytics) private readonly _analytics: Analytics
   ) {}
 
   list() {
