@@ -2,7 +2,6 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 import {
-  DEFAULT_SKILLS_SETTINGS,
   type DiscoveryPathConfig,
   type SkillContent,
   type SkillInfo,
@@ -11,6 +10,7 @@ import {
 import {
   atomicWriteJsonFileSync,
   expandHomePath,
+  getLlmSpaceHomePath,
   getSettingsDir,
   readJsonFileSync,
 } from "@llm-space/core/server";
@@ -29,6 +29,19 @@ const SkillsSettingsFileSchema = z.object({
     .optional(),
 });
 
+/** Fresh-install discovery folders resolved once after process env hydration. */
+export const DEFAULT_SKILLS_SETTINGS: SkillsSettings = {
+  discoveryPaths: [
+    { path: "~/.claude/skills", hiddenSkills: [] },
+    { path: "~/.codex/skills", hiddenSkills: [] },
+    { path: "~/.agents/skills", hiddenSkills: [] },
+    {
+      path: path.join(getLlmSpaceHomePath(), "skills"),
+      hiddenSkills: [],
+    },
+  ],
+};
+
 /**
  * Owns `settings/skills.json`: the discovery folders backing the built-in Skill
  * tool and, per folder, the skills the user has hidden. Mirrors
@@ -39,14 +52,10 @@ const SkillsSettingsFileSchema = z.object({
  * reads (`readSkill`) parse `SKILL.md` frontmatter with gray-matter and validate
  * it against the Agent Skills spec via `skills-handler`.
  */
-export interface SkillsManagerOptions {
-  managedSkillsDir?: string;
-}
-
 export class SkillsManager {
   private _settings: SkillsSettings;
 
-  constructor(private readonly _options: SkillsManagerOptions = {}) {
+  constructor() {
     this._settings = this._loadConfig();
   }
 
@@ -240,21 +249,9 @@ export class SkillsManager {
     };
   }
 
-  /**
-   * The seeded defaults: the shared browser-safe folders plus the
-   * llm-space-managed `<root>/skills` folder (whose absolute path is only
-   * resolvable here, in the bun process).
-   */
+  /** Return a mutable copy so persisted normalization cannot change defaults. */
   private _defaultSettings(): SkillsSettings {
-    const settings = this._clone(DEFAULT_SKILLS_SETTINGS);
-    const managed = this._options.managedSkillsDir;
-    if (
-      managed &&
-      !settings.discoveryPaths.some((entry) => entry.path === managed)
-    ) {
-      settings.discoveryPaths.push({ path: managed, hiddenSkills: [] });
-    }
-    return settings;
+    return this._clone(DEFAULT_SKILLS_SETTINGS);
   }
 
   private get _configPath(): string {

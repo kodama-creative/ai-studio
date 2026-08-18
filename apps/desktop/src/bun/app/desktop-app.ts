@@ -1,24 +1,19 @@
+import { NetworkSettingsManager } from "@llm-space/runtime/network";
 import type { BrowserWindow } from "electrobun/bun";
-import { inject, injectable } from "inversify";
+import { inject, injectable, preDestroy } from "inversify";
 
 import type { Command } from "../../shared/commands";
-import { Analytics } from "../analytics";
+import { Analytics } from "../analytics/analytics";
 import { DesktopPlaygroundApplication } from "../playgrounds/playground-application";
 import { ProjectWindowManager } from "../projects/project-window-manager";
-import { UpdaterService } from "../updates";
+import { UpdaterService } from "../updates/updater-service";
 
 import { DesktopLaunchService } from "./desktop-launch-service";
-import {
-  type DesktopAppRuntime,
-  DesktopLifecycle,
-} from "./desktop-lifecycle";
 import {
   DESKTOP_WINDOW_COMMAND_ROUTER,
   type DesktopWindowCommandRouter,
 } from "./desktop-window-command-router";
-import {
-  type DesktopMainWindowHandle,
-} from "./desktop-window-factory";
+import { type DesktopMainWindowHandle } from "./desktop-window-factory";
 import { MainWindowManager } from "./main-window-manager";
 
 /**
@@ -29,11 +24,13 @@ import { MainWindowManager } from "./main-window-manager";
  * collaborators are registered and constructed.
  */
 @injectable()
-export class DesktopApp implements DesktopAppRuntime {
-  private readonly _lifecycle = new DesktopLifecycle();
+export class DesktopApp {
   private _started = false;
+  private _stopPromise: Promise<void> | undefined;
 
   constructor(
+    @inject(NetworkSettingsManager)
+    private readonly _network: NetworkSettingsManager,
     @inject(Analytics) private readonly _analytics: Analytics,
     @inject(UpdaterService) private readonly _updater: UpdaterService,
     @inject(DesktopPlaygroundApplication)
@@ -46,15 +43,7 @@ export class DesktopApp implements DesktopAppRuntime {
     private readonly _projectWindows: ProjectWindowManager,
     @inject(DESKTOP_WINDOW_COMMAND_ROUTER)
     private readonly _windowCommands: DesktopWindowCommandRouter
-  ) {
-    // Registration order mirrors ownership; DesktopLifecycle stops in reverse.
-    this._lifecycle.defer("playground", () => this._playground.dispose());
-    this._lifecycle.defer("main window", () => this._mainWindows.close());
-    this._lifecycle.defer("agent project windows", () =>
-      this._projectWindows.closeAll()
-    );
-    this._lifecycle.defer("desktop launch", () => this._launch.dispose());
-  }
+  ) {}
 
   /** Start native routing, background services, restored windows, and events. */
   async start(): Promise<void> {
@@ -64,6 +53,7 @@ export class DesktopApp implements DesktopAppRuntime {
     this._started = true;
 
     try {
+      this._network.applyToProcessEnvironment();
       await this._launch.start();
 
       this._analytics.capture("app_opened", {
@@ -78,8 +68,36 @@ export class DesktopApp implements DesktopAppRuntime {
   }
 
   /** Stop launch routing, native windows, and the process scope exactly once. */
+  @preDestroy()
   stop(): Promise<void> {
-    return this._lifecycle.stop();
+    return (this._stopPromise ??= this._stop());
+  }
+
+  private async _stop(): Promise<void> {
+    const errors: unknown[] = [];
+    try {
+      await this._launch.dispose();
+    } catch (error) {
+      errors.push(error);
+    }
+
+    const windows = await Promise.allSettled([
+      this._mainWindows.close(),
+      this._projectWindows.closeAll(),
+    ]);
+    for (const result of windows) {
+      if (result.status === "rejected") errors.push(result.reason);
+    }
+
+    try {
+      await this._playground.dispose();
+    } catch (error) {
+      errors.push(error);
+    }
+
+    if (errors.length > 0) {
+      throw new AggregateError(errors, "Failed to stop Desktop application.");
+    }
   }
 
   /** Route a native reopen through the already-resolved Application graph. */

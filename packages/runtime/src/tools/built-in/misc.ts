@@ -1,6 +1,6 @@
 import type { BuiltinTool } from "@llm-space/core";
 
-import type { ToolEntry } from "../tool-registry";
+import type { BuiltInToolEntry } from "../tool-entry";
 
 // -- todo_write ---------------------------------------------------------------
 
@@ -156,7 +156,7 @@ export const askUserQuestionTool: BuiltinTool = {
 
 // -- registry -----------------------------------------------------------------
 
-export const miscBuiltInTools: ToolEntry[] = [
+export const miscBuiltInTools: BuiltInToolEntry[] = [
   {
     tool: todoWriteTool,
     async execute() {

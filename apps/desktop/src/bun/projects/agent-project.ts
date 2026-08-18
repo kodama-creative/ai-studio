@@ -4,6 +4,9 @@ import { basename, join } from "node:path";
 
 import { resolveAgentProject } from "@llm-space/agent/loader";
 import { getLlmSpaceHomePath } from "@llm-space/core/server";
+import { inject, injectable } from "inversify";
+
+import { APP_HOME_PATH } from "../app/desktop-paths";
 
 export interface AgentProject {
   readonly id: string;
@@ -41,4 +44,15 @@ export async function openAgentProject(
     studioStateRoot,
     databasePath: join(studioStateRoot, "studio.sqlite"),
   };
+}
+
+/** Resolve user-selected source paths into immutable Desktop Project identity. */
+@injectable()
+export class AgentProjectLoader {
+  constructor(@inject(APP_HOME_PATH) private readonly _homePath: string) {}
+
+  /** Open one Agent Project without storing application data in its source tree. */
+  open(startPath: string): Promise<AgentProject> {
+    return openAgentProject(startPath, { homePath: this._homePath });
+  }
 }

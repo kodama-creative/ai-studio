@@ -10,9 +10,8 @@ import { BrowserWindow, Updater } from "electrobun/bun";
 
 import type { AgentProjectView } from "../../shared/agent-project";
 import type { NativeWindowStateBinding } from "../native/native-window-module";
+import type { WindowStatePersistenceStore } from "../native/window-state-controller";
 import type { MainWindowRPC } from "../rpc";
-
-import type { WindowStatePersistenceStore } from "./window-state";
 
 const DEV_SERVER_PORT = Number(
   process.env.LLM_SPACE_DESKTOP_DEV_SERVER_PORT ?? 5173

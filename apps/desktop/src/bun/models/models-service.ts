@@ -11,7 +11,7 @@ import { inject, injectable } from "inversify";
 
 import { Emitter } from "../../shared/event";
 import type { ModelsRequests } from "../../shared/models-rpc";
-import { Analytics } from "../analytics";
+import { Analytics } from "../analytics/analytics";
 
 /** Owns model configuration use cases and their product analytics. */
 @injectable()

@@ -6,6 +6,7 @@ import {
   getSettingsDir,
   readJsonFileSync,
 } from "@llm-space/core/server";
+import { injectable, preDestroy } from "inversify";
 import { PostHog } from "posthog-node";
 import { z } from "zod";
 
@@ -57,6 +58,7 @@ const PersistedAnalyticsFileSchema: z.ZodType<Partial<PersistedAnalytics>> =
  * `capture` is a silent no-op. Capture is fire-and-forget and defensively
  * wrapped so telemetry can never crash the app.
  */
+@injectable()
 export class Analytics {
   /** True when this launch minted the install id (first run, or an id reset). */
   readonly isFirstRun: boolean;
@@ -131,6 +133,7 @@ export class Analytics {
   }
 
   /** Flush and tear down the client on shutdown. Best-effort. */
+  @preDestroy()
   async shutdown(): Promise<void> {
     try {
       await this._client?.shutdown();

@@ -5,14 +5,14 @@ import path from "node:path";
 
 import { DEFAULT_UPDATE_MODE } from "../../shared/updates";
 
-import { UpdatesState } from "./state";
+import { UpdatesState } from "./updates-state";
 
 let testHome = "";
 let state: UpdatesState;
 
 beforeEach(async () => {
   testHome = await mkdtemp(path.join(os.tmpdir(), "llm-space-updates-"));
-  state = new UpdatesState(path.join(testHome, "settings", "updates.json"));
+  state = new UpdatesState(testHome);
 });
 
 afterEach(async () => {

@@ -28,7 +28,7 @@ import {
 import { createSqliteStudioStore } from "@llm-space/studio/storage/sqlite";
 import { inject, injectable, preDestroy } from "inversify";
 
-import { APP_HOME_PATH } from "../native/app-directories-module";
+import { APP_HOME_PATH } from "../app/desktop-paths";
 
 export interface CreateDesktopPlaygroundApplicationOptions {
   readonly homePath: string;
@@ -74,6 +74,7 @@ interface DesktopPlaygroundRuntime extends PlaygroundApplication {
 @injectable()
 export class DesktopPlaygroundApplication implements PlaygroundApplication {
   private readonly _runtime: DesktopPlaygroundRuntime;
+  private _disposePromise: Promise<void> | undefined;
 
   constructor(
     @inject(APP_HOME_PATH) homePath: string,
@@ -165,7 +166,7 @@ export class DesktopPlaygroundApplication implements PlaygroundApplication {
   /** Close SQLite, Pi, and Studio resources exactly once. */
   @preDestroy()
   close(): Promise<void> {
-    return this._runtime.dispose();
+    return (this._disposePromise ??= this._runtime.dispose());
   }
 
   /** Alias used by the Desktop process lifecycle and failure cleanup. */

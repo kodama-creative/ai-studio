@@ -39,12 +39,14 @@ describe("Brave Search provider", () => {
 
     const search = createWebBuiltInTools({
       env: {},
-      getSearchSettings: () => ({
-        provider: "brave",
-        braveApiKey: "brave-key",
-        firecrawlApiKey: "",
-        tavilyApiKey: "",
-      }),
+      searchSettings: {
+        get: () => ({
+          provider: "brave",
+          braveApiKey: "brave-key",
+          firecrawlApiKey: "",
+          tavilyApiKey: "",
+        }),
+      },
     }).find((entry) => entry.tool.name === "web_search");
 
     const result = await search?.execute({
@@ -76,12 +78,14 @@ describe("Brave Search provider", () => {
   test("requires a configured Brave Search API key", async () => {
     const search = createWebBuiltInTools({
       env: {},
-      getSearchSettings: () => ({
-        provider: "brave",
-        braveApiKey: "$BRAVE_SEARCH_API_KEY",
-        firecrawlApiKey: "",
-        tavilyApiKey: "",
-      }),
+      searchSettings: {
+        get: () => ({
+          provider: "brave",
+          braveApiKey: "$BRAVE_SEARCH_API_KEY",
+          firecrawlApiKey: "",
+          tavilyApiKey: "",
+        }),
+      },
     }).find((entry) => entry.tool.name === "web_search");
 
     let rejection: unknown;
@@ -116,12 +120,14 @@ describe("Brave Search provider", () => {
 
     const search = createWebBuiltInTools({
       env: {},
-      getSearchSettings: () => ({
-        provider: "brave",
-        braveApiKey: "invalid-brave-key",
-        firecrawlApiKey: "",
-        tavilyApiKey: "",
-      }),
+      searchSettings: {
+        get: () => ({
+          provider: "brave",
+          braveApiKey: "invalid-brave-key",
+          firecrawlApiKey: "",
+          tavilyApiKey: "",
+        }),
+      },
     }).find((entry) => entry.tool.name === "web_search");
 
     let rejection: unknown;
@@ -161,12 +167,14 @@ describe("Brave Search provider", () => {
 
     const fetchTool = createWebBuiltInTools({
       env: {},
-      getSearchSettings: () => ({
-        provider: "brave",
-        braveApiKey: "brave-key",
-        firecrawlApiKey: "firecrawl-key",
-        tavilyApiKey: "",
-      }),
+      searchSettings: {
+        get: () => ({
+          provider: "brave",
+          braveApiKey: "brave-key",
+          firecrawlApiKey: "firecrawl-key",
+          tavilyApiKey: "",
+        }),
+      },
     }).find((entry) => entry.tool.name === "web_fetch");
 
     const result = await fetchTool?.execute({ url: "https://example.com" });

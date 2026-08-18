@@ -1,4 +1,4 @@
-import { inject, injectable } from "inversify";
+import { inject, injectable, preDestroy } from "inversify";
 
 import type { Event } from "../../shared/event";
 
@@ -19,6 +19,8 @@ export interface MainWindowFactory<T extends MainWindowHandle> {
 export class MainWindowManager<T extends MainWindowHandle = MainWindowHandle> {
   private _current: T | undefined;
   private _opening: Promise<T> | undefined;
+  private _closing = false;
+  private _closePromise: Promise<void> | undefined;
 
   constructor(
     @inject(WINDOW_CONTAINER_FACTORY)
@@ -27,6 +29,9 @@ export class MainWindowManager<T extends MainWindowHandle = MainWindowHandle> {
 
   /** Create Main on demand, or activate the existing window. */
   open(): Promise<T> {
+    if (this._closing) {
+      return Promise.reject(new Error("Main window is shutting down."));
+    }
     if (this._current !== undefined) {
       this._current.activate();
       return Promise.resolve(this._current);
@@ -60,7 +65,13 @@ export class MainWindowManager<T extends MainWindowHandle = MainWindowHandle> {
   }
 
   /** Close Main without disposing any process-scoped Playground or Run. */
-  async close(): Promise<void> {
+  @preDestroy()
+  close(): Promise<void> {
+    return (this._closePromise ??= this._close());
+  }
+
+  private async _close(): Promise<void> {
+    this._closing = true;
     const opening = this._opening;
     if (opening !== undefined) await opening;
     const current = this._current;

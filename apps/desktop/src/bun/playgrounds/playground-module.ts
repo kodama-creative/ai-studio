@@ -28,10 +28,7 @@ export function playgroundModule(): ContainerModule {
     bind(PLAYGROUND_MODEL_HOST).toService(DesktopPlaygroundModelHost);
     bind(DesktopPlaygroundToolHost).toSelf().inSingletonScope();
     bind(PLAYGROUND_TOOL_HOST).toService(DesktopPlaygroundToolHost);
-    bind(DesktopPlaygroundApplication)
-      .toSelf()
-      .inSingletonScope()
-      .onDeactivation((application) => application.dispose());
+    bind(DesktopPlaygroundApplication).toSelf().inSingletonScope();
   });
 }
 

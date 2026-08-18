@@ -1,4 +1,5 @@
 import { Updater } from "electrobun/bun";
+import { inject, injectable, preDestroy } from "inversify";
 
 import { EventHub } from "../../shared/event-hub";
 import type {
@@ -9,13 +10,14 @@ import type {
 import type { UpdatesEvents } from "../../shared/updates-rpc";
 import { setUpdateReadyInMenu } from "../app/menu";
 
-import { UpdatesState } from "./state";
+import { UpdatesState } from "./updates-state";
 
 const INITIAL_CHECK_DELAY_MS = 30_000;
 const CHECK_INTERVAL_MS = 4 * 60 * 60_000;
 const APPLY_GRACE_MS = 5_000;
 
 /** Process-scoped updater state and scheduling. */
+@injectable()
 export class UpdaterService {
   readonly events = new EventHub<UpdatesEvents>();
   private _isCheckInFlight = false;
@@ -25,10 +27,12 @@ export class UpdaterService {
   private _backgroundTimer: ReturnType<typeof setTimeout> | null = null;
   private _backgroundInterval: ReturnType<typeof setInterval> | null = null;
   private _applyTimer: ReturnType<typeof setTimeout> | null = null;
+  private _stopped = false;
 
-  constructor(private readonly _state: UpdatesState) {}
+  constructor(@inject(UpdatesState) private readonly _state: UpdatesState) {}
 
   async checkForUpdates(manual: boolean): Promise<void> {
+    if (this._stopped) return;
     if (this._isCheckInFlight) {
       if (manual && !this._isPassManual) {
         this._isPassManual = true;
@@ -41,6 +45,7 @@ export class UpdaterService {
     try {
       this._sendStatus({ state: "checking" });
       const info = await Updater.checkForUpdate();
+      if (this._stopped) return;
       if (info.error) {
         this._sendStatus({ state: "error", message: info.error });
         return;
@@ -48,11 +53,13 @@ export class UpdaterService {
       if (!info.updateAvailable) {
         setUpdateReadyInMenu(null);
         const { version } = await Updater.getLocalInfo();
+        if (this._stopped) return;
         this._sendStatus({ state: "up-to-date", version });
         return;
       }
       this._sendStatus({ state: "downloading", version: info.version });
       await Updater.downloadUpdate();
+      if (this._stopped) return;
       if (!Updater.updateInfo()?.updateReady) {
         const message =
           Updater.updateInfo()?.error || "download did not complete";
@@ -70,6 +77,7 @@ export class UpdaterService {
   }
 
   async applyUpdateAndRestart(): Promise<void> {
+    if (this._stopped) return;
     try {
       await Updater.applyUpdate();
     } catch (error) {
@@ -78,6 +86,7 @@ export class UpdaterService {
       this._sendStatus({ state: "error", message });
       return;
     }
+    if (this._stopped) return;
     if (this._applyTimer) clearTimeout(this._applyTimer);
     this._applyTimer = setTimeout(() => {
       this._applyTimer = null;
@@ -101,23 +110,42 @@ export class UpdaterService {
   }
 
   async start(): Promise<void> {
+    if (this._stopped) return;
+    try {
+      await this._start();
+    } catch (error) {
+      if (this._stopped) return;
+      const message = error instanceof Error ? error.message : String(error);
+      this._sendStatus({ state: "error", message });
+    }
+  }
+
+  /** Initialize persisted update identity without outliving process shutdown. */
+  private async _start(): Promise<void> {
     const { channel, hash, version, identifier } = await Updater.getLocalInfo();
+    if (this._stopped) return;
     if (channel === "dev") return;
 
     const lastSeen = await this._state.getLastSeenHash(identifier);
+    if (this._stopped) return;
     if (lastSeen && lastSeen !== hash) this._installedVersion = version;
     if (lastSeen !== hash) await this._state.setLastSeenHash(identifier, hash);
+    if (this._stopped) return;
 
     this._applySchedule(await this._state.getMode());
   }
 
-  async stop(): Promise<void> {
+  /** Stop update scheduling; the process Container separately drains state. */
+  @preDestroy()
+  stop(): void {
+    if (this._stopped) return;
+    this._stopped = true;
     this._clearSchedule();
-    await this._state.dispose();
     this.events.dispose();
   }
 
   private _sendStatus(status: UpdateStatus): void {
+    if (this._stopped) return;
     this._lastStatus = status;
     const payload: UpdateStatusChangedPayload = {
       status,
@@ -137,7 +165,7 @@ export class UpdaterService {
 
   private _applySchedule(mode: UpdateMode): void {
     this._clearSchedule();
-    if (mode !== "automatic") return;
+    if (this._stopped || mode !== "automatic") return;
     this._backgroundTimer = setTimeout(
       () => void this.checkForUpdates(false),
       INITIAL_CHECK_DELAY_MS

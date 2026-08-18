@@ -9,7 +9,8 @@ import {
   type RpcContribution as RpcContributionApi,
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
-import { RemindersState } from "../reminders/state";
+
+import { RemindersState } from "./reminders-state";
 
 @injectable()
 class RemindersContribution implements RpcContributionApi {

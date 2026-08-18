@@ -2,9 +2,8 @@ import { expect, test } from "bun:test";
 
 import type { BrowserWindow } from "electrobun/bun";
 
-import type { WindowStateManager } from "../app/window-state";
-
 import { WindowApplication } from "./native-window-module";
+import type { WindowStateController } from "./window-state-controller";
 
 const STATE_BINDING = {
   store: {
@@ -20,7 +19,10 @@ test("WindowApplication requires exactly one attached native window", async () =
   } as BrowserWindow;
   const application = new WindowApplication(
     { getWindowContext: () => ({ kind: "playground" }) },
-    { attach: () => undefined } as unknown as WindowStateManager
+    {
+      attach: () => undefined,
+      onDidChangeFullScreen: _emptyEvent,
+    } as unknown as WindowStateController
   );
 
   expect(() => application.getFullscreenState()).toThrow(
@@ -64,11 +66,11 @@ test("WindowApplication owns native window commands and zoom persistence", async
   } as unknown as BrowserWindow;
   const windowStates = {
     attach: () => undefined,
-    saveZoom: (target: BrowserWindow, next: number) => {
-      expect(target).toBe(window);
+    onDidChangeFullScreen: _emptyEvent,
+    saveZoom: (next: number) => {
       savedZooms.push(next);
     },
-  } as unknown as WindowStateManager;
+  } as unknown as WindowStateController;
   const application = new WindowApplication(
     { getWindowContext: () => ({ kind: "playground" }) },
     windowStates
@@ -96,17 +98,24 @@ test("WindowApplication owns window-state attachment and fullscreen events", () 
   let attached:
     | {
         target: BrowserWindow;
-        options: Parameters<WindowStateManager["attach"]>[1];
+        store: Parameters<WindowStateController["attach"]>[1];
+        options: Parameters<WindowStateController["attach"]>[2];
       }
     | undefined;
+  let notifyFullScreen: ((fullScreen: boolean) => void) | undefined;
   const windowStates = {
+    onDidChangeFullScreen: (listener: (fullScreen: boolean) => void) => {
+      notifyFullScreen = listener;
+      return { dispose: () => undefined };
+    },
     attach: (
       target: BrowserWindow,
-      options: Parameters<WindowStateManager["attach"]>[1]
+      attachedStore: Parameters<WindowStateController["attach"]>[1],
+      options: Parameters<WindowStateController["attach"]>[2]
     ) => {
-      attached = { target, options };
+      attached = { target, store: attachedStore, options };
     },
-  } as WindowStateManager;
+  } as WindowStateController;
   const application = new WindowApplication(
     { getWindowContext: () => ({ kind: "playground" }) },
     windowStates
@@ -124,13 +133,13 @@ test("WindowApplication owns window-state attachment and fullscreen events", () 
   });
 
   expect(attached?.target).toBe(window);
+  expect(attached?.store).toBe(store);
   expect(attached?.options).toMatchObject({
-    store,
     isMaximized: true,
     isFullScreen: false,
     zoom: 1.25,
   });
-  attached?.options.onFullScreenChange(true);
+  notifyFullScreen?.(true);
   expect(fullScreenEvents).toEqual([true]);
 });
 
@@ -138,11 +147,12 @@ test("WindowApplication remains unattached when window-state attachment fails", 
   const window = { isFullScreen: () => true } as BrowserWindow;
   let attempts = 0;
   const windowStates = {
+    onDidChangeFullScreen: _emptyEvent,
     attach: () => {
       attempts += 1;
       if (attempts === 1) throw new Error("state attach failed");
     },
-  } as unknown as WindowStateManager;
+  } as unknown as WindowStateController;
   const application = new WindowApplication(
     { getWindowContext: () => ({ kind: "playground" }) },
     windowStates
@@ -158,3 +168,7 @@ test("WindowApplication remains unattached when window-state attachment fails", 
   application.attach(window, STATE_BINDING);
   expect(await application.getFullscreenState()).toEqual({ fullScreen: true });
 });
+
+function _emptyEvent(): { dispose(): void } {
+  return { dispose: () => undefined };
+}

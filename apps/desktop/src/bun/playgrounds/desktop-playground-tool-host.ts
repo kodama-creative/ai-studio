@@ -1,7 +1,7 @@
 import { McpManager } from "@llm-space/runtime/mcp";
 import { inject, injectable } from "inversify";
 
-import { DesktopHost } from "../host/desktop-host";
+import { BuiltInTools } from "../tools/built-in-tools";
 
 import {
   PLAYGROUND_TOOL_HOST,
@@ -12,18 +12,18 @@ import {
 @injectable()
 export class DesktopPlaygroundToolHost implements PlaygroundToolHost {
   constructor(
-    @inject(DesktopHost) private readonly _desktop: DesktopHost,
+    @inject(BuiltInTools) private readonly _builtInTools: BuiltInTools,
     @inject(McpManager) private readonly _mcp: McpManager
   ) {}
 
   /** Snapshot currently available bundled tool definitions. */
   listBuiltinTools() {
-    return this._desktop.tools.listTools();
+    return this._builtInTools.listTools();
   }
 
-  /** Execute one bundled tool through the process-owned registry. */
+  /** Execute one bundled tool through the fixed process-owned bundle. */
   callBuiltinTool: PlaygroundToolHost["callBuiltinTool"] = (input) =>
-    this._desktop.tools.call(input);
+    this._builtInTools.call(input);
 
   /** Resolve current tools for one frozen MCP server binding. */
   listMcpTools: PlaygroundToolHost["listMcpTools"] = (serverId) =>

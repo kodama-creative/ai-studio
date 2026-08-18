@@ -13,17 +13,20 @@ import { join } from "node:path";
 
 import { openAgentProject } from "./agent-project";
 import {
-  type AgentProjectCatalogStore,
-  type ProjectWindowStateStore,
   ProjectWindowManager,
   type ProjectWindowAdapter,
   type ProjectWindowHandle,
 } from "./project-window-manager";
 
+interface PathStore {
+  load(): Promise<readonly string[]>;
+  save(paths: readonly string[]): Promise<void>;
+}
+
 interface TestOptions {
   readonly windows: ProjectWindowAdapter;
-  readonly state?: ProjectWindowStateStore;
-  readonly catalog?: AgentProjectCatalogStore;
+  readonly state?: PathStore;
+  readonly catalog?: PathStore;
   readonly openProject?: typeof openAgentProject;
 }
 
@@ -124,6 +127,45 @@ test("different projects remain isolated and close together", async () => {
   expect(closed).toEqual([alpha, beta]);
 });
 
+test("shutdown drains a Project window already being created", async () => {
+  const root = await _project("closing-during-create");
+  let finishCreate!: () => void;
+  let notifyCreateStarted!: () => void;
+  const createGate = new Promise<void>((resolve) => {
+    finishCreate = resolve;
+  });
+  const createStarted = new Promise<void>((resolve) => {
+    notifyCreateStarted = resolve;
+  });
+  let closes = 0;
+  const manager = _manager({
+    windows: {
+      async create() {
+        notifyCreateStarted();
+        await createGate;
+        return {
+          activate: () => undefined,
+          close: () => {
+            closes += 1;
+          },
+          onDidClose: _emptyEvent,
+        };
+      },
+    },
+  });
+
+  const opening = manager.openProject(root);
+  await createStarted;
+  const closing = manager.closeAll();
+  expect(manager.openProject(root)).rejects.toThrow(
+    "Project windows are shutting down."
+  );
+  finishCreate();
+
+  await Promise.all([opening, closing]);
+  expect(closes).toBe(1);
+});
+
 test("concurrent project opens serialize durable catalog mutations", async () => {
   const alpha = await _project("alpha-catalog");
   const beta = await _project("beta-catalog");
@@ -148,6 +190,47 @@ test("concurrent project opens serialize durable catalog mutations", async () =>
 
   expect(new Set(paths)).toEqual(new Set([alpha, beta]));
   expect(saves).toBe(2);
+});
+
+test("concurrent native closes serialize the durable restore list", async () => {
+  const alpha = await _project("alpha-close-state");
+  const beta = await _project("beta-close-state");
+  const closeListeners = new Map<string, () => void>();
+  let activeSaves = 0;
+  let maxActiveSaves = 0;
+  let savedPaths: readonly string[] = [];
+  const manager = _manager({
+    state: {
+      load: () => Promise.resolve([]),
+      save: async (paths) => {
+        activeSaves += 1;
+        maxActiveSaves = Math.max(maxActiveSaves, activeSaves);
+        await Bun.sleep(2);
+        savedPaths = [...paths];
+        activeSaves -= 1;
+      },
+    },
+    windows: {
+      create: (project) =>
+        Promise.resolve({
+          activate: () => undefined,
+          close: () => undefined,
+          onDidClose: (listener) => {
+            closeListeners.set(project.rootPath, listener);
+            return { dispose: () => undefined };
+          },
+        }),
+    },
+  });
+  await manager.openProject(alpha);
+  await manager.openProject(beta);
+
+  closeListeners.get(alpha)?.();
+  closeListeners.get(beta)?.();
+  await manager.closeAll();
+
+  expect(maxActiveSaves).toBe(1);
+  expect(savedPaths).toEqual([]);
 });
 
 test("opened projects remain in the main-window catalog after their windows close", async () => {
@@ -236,15 +319,15 @@ async function _project(name: string): Promise<string> {
 function _manager(options: TestOptions): ProjectWindowManager {
   return new ProjectWindowManager(
     options.windows,
-    options.state ?? {
+    (options.state ?? {
       load: () => Promise.resolve([]),
       save: () => Promise.resolve(),
-    },
-    options.catalog ?? {
+    }) as never,
+    (options.catalog ?? {
       load: () => Promise.resolve([]),
       save: () => Promise.resolve(),
-    },
-    { open: options.openProject ?? openAgentProject }
+    }) as never,
+    { open: options.openProject ?? openAgentProject } as never
   );
 }
 

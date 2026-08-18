@@ -1,4 +1,4 @@
-import { inject, injectable } from "inversify";
+import { inject, injectable, preDestroy } from "inversify";
 
 import type {
   AgentProjectsEvents,
@@ -57,6 +57,7 @@ export class AgentProjectsApplication
     }
   }
 
+  @preDestroy()
   async dispose(): Promise<void> {
     await this._catalogSubscription.dispose();
     this.events.dispose();

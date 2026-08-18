@@ -62,7 +62,7 @@ Bun-workspace monorepo. Workspaces are `packages/*`, `apps/*`, and the runnable
 
 - **`@llm-space/agent`** (`packages/agent`) — code-first Agent definition surfaces plus filesystem discovery/loading. The loader returns a serializable manifest alongside executable module namespaces. `agent/skills/index.ts` is the optional collection-level `defineVariable()` slot; without it the runtime provides `available_skills`. Skill summaries enter instructions only through an explicit variable reference, while the host automatically freezes the agent-scoped `load_skill` tool and resolved Skill set into each Pi operation binding.
 - **`@llm-space/pi-runtime`** (`packages/pi-runtime`) — the durable Pi Session execution kernel. It owns the Bun-native, `pi_`-prefixed SQLite `SessionRepo`, immutable LLM Space operation bindings, direct one-turn Pi model execution, sequential local tools, debugger Step/Continue, and durable tool-approval recovery. `DurablePiRuntime` is its only public execution facade. Pi `AgentMessage` is canonical; Playground and Project Experiment execution use this runtime as their only transcript and execution-state authority.
-- **`@llm-space/runtime`** (`packages/runtime`) — Bun-local host capability implementations: Models, MCP, network/search settings, Skill discovery, traces, and the frozen built-in `ToolRegistry`. It is not a session/execution runtime and exposes no aggregate `RuntimeClient`; Desktop composes these capability managers directly, while all agent execution remains in `@llm-space/pi-runtime`.
+- **`@llm-space/runtime`** (`packages/runtime`) — Bun-local host capability implementations: Models, MCP, network/search settings, Skill discovery, traces, and concrete built-in tool factories/contracts. It is not a session/execution runtime, exposes no aggregate `RuntimeClient`, and owns no DI registry. Desktop injects capability managers directly and assembles its fixed `BuiltInTools`; all agent execution remains in `@llm-space/pi-runtime`.
 - **`@llm-space/acp`** (`packages/acp`) — the isolated official ACP v2 Draft edge pinned to `@agentclientprotocol/sdk@1.3.0`. It projects committed Pi log identities into replay-safe ACP updates and hosts the standard session lifecycle plus capability-negotiated `_llm-space.dev/session/{snapshot,step,continue}` methods. Pi Runtime never depends on ACP. ACP exists only at the CLI/external protocol edge; Desktop does not use ACP.
 - **`@llm-space/app`** (`packages/app`) — reusable Pi-backed end-application layer. It owns Session and Task product metadata plus durable command receipts; transcript, operation state, branch, leaf, outcome, and usage come from Pi Session entries. Its Bun-only `@llm-space/app/server` entry exposes `createAgent()`, which accepts `projectRoot`, host-owned `dataRoot`, Pi `Models`, and explicit runtime services, then composes Loader + Pi Runtime + App tables in one SQLite database.
 - **`@llm-space/studio`** (`packages/studio`) — Studio product metadata over Pi Session. It owns ordinary `Playground`/`AgentSpec` and Project Experiment metadata, dirty editable Drafts, ordered Pi operation references, evaluations, durable debugger command receipts, and Studio event projection. Transcript, active operation, lane, leaf, outcome, and usage are read from Pi Session. Draft admission clears the Draft after Pi commits the operation. Pi, immutable runtime bindings, and Studio tables share one physical SQLite database with separate table ownership. Its Bun-only `@llm-space/studio/server` entry owns Project source browsing/watch, Git revision binding, Agent loading, Pi runtime composition, and SQLite; Desktop exposes it only through namespaced Electrobun RPC.
@@ -96,7 +96,7 @@ callbacks, or bind raw BrowserWindow/RPC values without an actual consumer.
 
 Every native window owns one `RpcRegistry`. Window-scoped feature classes multi-bind the same `RpcContribution` symbol and the Registry receives the fixed set through native Inversify `@multiInject()`. Contributions register typed namespace adapters during `RpcRegistry.onStart()`; duplicate namespaces and late registration fail. The Registry owns request dispatch, request/stream abort, event subscriptions, and reverse-order registration cleanup. `createMainWindowRPC()` only forwards the Electrobun envelope to that Registry and never constructs business services.
 
-Bundled window composition is explicit in the production composition root. `desktop-composition.ts` owns the ordered Common/Main/Project module sets and injects one staged `DesktopWindowComposition` into `DesktopWindowFactory`. The Factory creates a raw child `Container` with the Desktop container as parent, loads the selected modules, resolves exactly one `MainWindowApplication` or `ProjectWindowApplication`, and owns `Application.stop()` followed by `container.unbindAllAsync()`. Main and Project containers are siblings; closing either cannot invalidate the other. Do not recreate custom Scope wrappers, distributed process-level window feature bindings, or a catch-all `di/modules` aggregation.
+Bundled window composition is explicit in the production composition root. `app/bootstrap.ts` owns the Common/Main/Project module factory arrays and injects one `DesktopWindowComposition` into `DesktopWindowFactory`. The Factory creates a raw child `Container` with the Desktop container as parent, loads the selected modules, resolves exactly one `MainWindowApplication` or `ProjectWindowApplication`, and owns `Application.stop()` followed by `container.unbindAllAsync()`. Main and Project containers are siblings; closing either cannot invalidate the other. Do not recreate custom Scope wrappers, distributed process-level window feature bindings, or a catch-all `di/modules` aggregation.
 
 Project windows keep three interfaces distinct: `projectSource.*` owns source
 read/watch, `studio.*` owns Studio Thread metadata, Drafts, history,
@@ -106,20 +106,20 @@ methods into a catch-all Project Studio client/server.
 
 ### Bun composition and bundled modules
 
-`src/bun/app/bootstrap.ts` is the process import barrier. It hydrates the shell
+`src/bun/process-startup.ts` is the process import barrier. It hydrates the shell
 environment, dynamically loads cold-start deep-link capture, and only then
-dynamically loads `desktop-composition.ts`; these two imports stay sequential.
-`src/bun/app/desktop-composition.ts` is the one production composition root. It
-uses ordinary static imports and owns workspace/Skill seeding, process-scope
-creation, every process/window container registration, eager lifecycle-root
-adoption, and composition-failure cleanup. After all other bindings are
-complete it registers `DesktopApp`, resolves it once, and starts it;
-`src/bun/index.ts` only invokes the bootstrap barrier.
+dynamically loads `app/bootstrap.ts`; these are the only production dynamic
+imports and must remain sequential. `src/bun/app/bootstrap.ts` is the one
+production composition root. It uses ordinary static imports and owns
+workspace/Skill seeding, process-container creation, every process/window
+module registration, platform event adapters, and composition-failure cleanup.
+After all other bindings are complete it registers `DesktopApp`, resolves it
+once, and starts it; `src/bun/index.ts` only invokes `startDesktopProcess()`.
 
 `src/bun/app/desktop-app.ts` exports the container-agnostic `DesktopApp`
 lifecycle class. It receives ordinary constructor dependencies, coordinates
 native startup and shutdown, and never resolves or registers services.
-External process resources are constructed and registered with `DesktopLifecycle` immediately in the composition root. Container-owned Applications, Services, Managers, Controllers, Registries, and Contributions use `@injectable()` plus explicit `@inject()`/`@multiInject()`; modules declare bindings and aliases instead of manually constructing ordinary long-lived classes. Vertical feature slices live under their
+Container-owned Applications, Services, Managers, Controllers, Registries, and Contributions use `@injectable()` plus explicit `@inject()`/`@multiInject()`; modules declare bindings and aliases instead of manually constructing ordinary long-lived classes. A class uses itself as its DI identity unless it represents an interface seam, runtime value, or open collection. Vertical feature slices live under their
 named `bun/*/` directories; each owns its application
 logic, DI identities/module, RPC server/contribution, and local implementation
 details. `bun/rpc/` contains only the Electrobun transport bridge, while shared
@@ -153,44 +153,43 @@ Each native window has a raw child Inversify `Container`. Feature modules bind c
 including synchronous Project Service composition, immutable Project identity, window-state binding,
 command routing, close-during-create replay, and failed-container cleanup; window managers consume the factory
 instead of reconstructing those steps.
-External process resources which are not DI disposables register with
-`DesktopLifecycle` immediately after construction. The same LIFO module owns
-both process-resource cleanup and the top-level Desktop shutdown transaction;
-it cleans each stack once in reverse ownership order and continues after
-individual failures. The startup wrapper always stops the process scope if
-composition fails. Do not defer cleanup registration until the end of startup.
+`DesktopApp.stop()` expresses only real business ordering: disconnect launch
+ingress, close Main and Project windows in parallel, then dispose Playground.
+The composition owner subsequently calls `container.unbindAllAsync()`.
+Container-owned leaf resources use idempotent `@preDestroy()`; external Runtime
+objects that cannot carry Desktop decorators use binding `onDeactivation`.
+There is no generic Desktop lifecycle stack and no assumed reverse disposal
+order across unrelated services. The startup wrapper always stops the
+Application and unbinds the process container if composition fails.
 Cold-start URL capture is the deliberate import-time exception:
 `bootstrap.ts` loads `deep-link/launch.ts` immediately after shell hydration and
 before the static composition graph. The launch adapter buffers Electrobun
 URLs in a `DeepLinkInbox`; `DesktopLaunchService` atomically connects to that
 inbox, routes buffered/live Main and Studio links, owns reopen behavior, and
-disconnects before window teardown. The top-level `DesktopLifecycle` stack owns
-the idempotent stop order (launch routing → Project windows → process scope).
-Keep these state machines out of `bootstrap.ts`; it only enforces import order.
-The composition root constructs and injects their platform adapters into the
-final `DesktopApp` lifecycle root.
+disconnects before window teardown. `DesktopApp` owns that explicit stop phase;
+the process container owner handles final service deactivation. Keep these state
+machines out of `bootstrap.ts`; it only composes them and connects platform
+adapters.
 Registries start once before the Electrobun bridge and native window are created, reject late registration, then dispose registrations before the child container unbinds contribution instances. Application classes never implement Desktop contribution interfaces and never access the container.
 
-`DesktopHost` (`src/bun/host/desktop-host.ts`) is the lifecycle boundary for
-trusted, bundled modules. Modules register synchronously before RPC/window
-creation, the contribution registry then freezes for the process lifetime, and
-cleanup runs in reverse order on a best-effort basis. Startup errors include
-the module id. Electrobun quit uses a two-phase handshake so asynchronous host,
-MCP, and analytics cleanup finishes before the process exits.
+Bundled process and window modules are a compile-time set in `app/bootstrap.ts`;
+there is no `DesktopHost` registration layer. Electrobun quit still uses a
+two-phase handshake so asynchronous container deactivation completes before the
+process exits.
 
-V1 exposes one internal extension seam: `ToolContribution` through
-`ToolRegistry` (`packages/runtime/src/tools/tool-registry.ts`). Contributions
-have stable unique ids and tool names; registration snapshots and freezes tool definitions.
-The bundled built-in-tools module is the reference implementation. This is not
-a public plugin SDK: dynamic loading, manifests, permissions, runtime
-enable/disable, renderer contributions, and third-party compatibility remain
-out of scope.
+Built-in tools are also a fixed product capability, not an extension registry.
+Runtime exports concrete tool factories and `BuiltInToolEntry`; Desktop's
+process-owned `BuiltInTools` directly injects Skills, Search, image generation,
+native files, workspace, and environment dependencies, snapshots the fixed
+definitions, rejects duplicate tool names, and serves list/call RPC. Do not
+recreate `ToolRegistry`, `ToolContribution`, dynamic loading, manifests,
+permissions, or runtime enable/disable.
 
 ### Data flow (the core loop)
 
 Main-window and Project execution is `Playground/Experiment metadata + Pi Session`: UI action → Zustand external execution adapter → namespaced Electrobun `thread.*` RPC → Playground/Studio application → `DurablePiRuntime` → Pi Session. The UI refreshes committed transcript from Pi message entries; Studio stores only Drafts, product metadata, operation ordering/references, evaluations, and command receipts. UI “Thread” means the selected lane/leaf projection, not a persistence authority. Stateless helper generation uses the separate `auxiliaryGeneration.*` RPC and never creates a Pi Session.
 
-Desktop is local-only and communicates with its Bun process through namespaced Electrobun RPC. Remote Runtime, SSH, the headless server, and the previous Plugin system do not ship. Skills are host-discovered prompt variables/tools; they are not a Pi subsystem. The only current extension seam is the frozen bundled `ToolContribution` registry described above.
+Desktop is local-only and communicates with its Bun process through namespaced Electrobun RPC. Remote Runtime, SSH, the headless server, and the previous Plugin system do not ship. Skills are host-discovered prompt variables/tools; they are not a Pi subsystem. Desktop currently exposes no runtime plugin or built-in-tool contribution seam.
 
 ### Thread store
 
@@ -243,7 +242,7 @@ Playground/Experiment target on every request.
 - `mainview/` — the Vite entry: `index.html` + `main.tsx` mounting `<App>`.
 - `app/` — `index.tsx` resolves the native window context; `layout.tsx` owns visual/query providers; `desktop-window-providers.tsx` is the shared Main/Project renderer composition root (`CommandProvider` → `DesktopHostProvider` → `ModelProvider`); `page.tsx` exports `MainWindowPage` and owns only Main-window composition. Main-window Playground application behavior lives under `app/playground/`: `PlaygroundWorkspaceController` owns the restartable durable catalog, pane-projection merging, blank/example creation, dynamic seed resolution, versioned snapshot import, and tab opening; sidebar presentation must consume its snapshot rather than keep an independent list query. `app/tabs/` owns Main tab identity, local persistence, restoration validation, close/reopen ordering, and deferred pruning after pane activity settles behind `MainTabsController`'s snapshot + intent interface; the Playground RPC client and pane-activity tracker are injected at composition. Project behavior lives under `app/project/`: `AgentProjectCatalogController` owns the Main-window known-Project subscription-before-read lifecycle and stale-response suppression; `ProjectWorkspaceController` is the Project-window renderer owner for tabs and the cross-Thread/source selection epoch, composing the internal `ProjectThreadsController` (Thread collection/open concurrency, event cursors, stream cancellation, history/evaluation state) and `ProjectSourceController` (authoritative source watch plus open-file refresh) behind one restartable snapshot interface. The Bun `ProjectWindowManager` owns process-wide Project catalog mutations and emits their authoritative change event, including opens initiated by deep links and restore paths; renderer-command adapters must not synthesize catalog changes themselves. Account behavior lives under `app/account/`: `GithubAuthController` and `GithubAuthProvider` own initial-read/live-event precedence, subscription lifecycle, error reporting, and login/logout commands. `app/onboarding/` owns the open-session epoch, provider discovery precedence, and serialized provider-add mutation; onboarding presentation renders its snapshot and owns analytics/navigation intent. `app/thread-sharing/` owns dialog target epochs plus auth/publish stale-result suppression; presentation owns only transient form, clipboard, and visual state and must clean that state on every close path. `app/reminders/` owns best-effort passive reminder state; `app/updates/` owns the passive update channel and Main-window update provider; `app/window/` owns native-window projections: `FullScreenController` subscribes before its initial RPC read, keeps live events authoritative, and contains restart/cleanup failures; `app/lifecycle/` contains shared renderer teardown policy. Settings application behavior lives under `app/settings/`: `McpSettingsController` owns MCP selection, Draft conversion, debounced persistence, test/cancel/disconnect operations, and stale RPC suppression; `SkillsSettingsController` owns skill-folder selection, native folder/reveal operations, mutation ordering, optimistic skill toggles, and stale RPC suppression; `SettingsFormController` owns restartable reads, ordered writes, local Drafts, and latest-intent rollback. Models Settings is the local feature under `app/settings/models/`; its React presentation is colocated under `components/settings/models/`. `runSettingsMutation` adapts other fallible async mutations to void UI events. Do not move RPC lifecycle, mutation ordering, rollback, or stale-result suppression back into presentation state/effects.
   - `ModelsSettingsController` adapts the shared `ModelCatalogController` projection and mutation ports, and owns provider selection/fallback, Add/Remove admission, and the lifecycle of `AddProviderController`, `ProviderMetadataController`, `ProviderProfilesController`, and the focused `ProviderProfileController`. The custom chat/image model editor controllers live beside that aggregate and suppress results after close or retarget. `models-page.tsx` is the React adapter; provider search/filter/dialog state stays in presentation.
-- `bun/` — main-process code: `app/` (process/window composition, menu, window-state), vertical `playgrounds/`, `projects/`, `native/`, `models/`, `auxiliary-generation/`, and `thread-sharing/` feature slices, `rpc/` for transport infrastructure and manager/state adapters, `di/`, `host/`, `auth/` (`GitHubAuthManager` — OAuth Device Flow + `settings/auth.json`), `fs/` (truly shared trash/reveal primitives only), `updates/`, `reminders/` (one-time feature reminders + GitHub-star reminder, persisted to `settings/reminders.json`; reminder definitions ship in code at `shared/feature-reminders.ts` — append to `FEATURE_REMINDERS`, never reorder or reuse an `id`), `env/hydrate` (loads login-shell env — API keys/PATH — before anything reads `process.env`), and `workspace/seed`.
+- `bun/` — main-process code: `app/` (process/window composition, menu, window-state), vertical `playgrounds/`, `projects/`, `native/`, `models/`, `auxiliary-generation/`, `thread-sharing/`, `tools/`, `auth/`, `network/`, `search/`, `skills/`, `mcp/`, `updates/`, and `reminders/` feature slices; `rpc/` contains only the Electrobun envelope bridge, while `di/` contains the window-scoped RPC contribution/registry infrastructure. `fs/` holds truly shared trash/reveal primitives only; `env/hydrate` loads login-shell env before anything reads `process.env`; `workspace/seed` owns bundled workspace seeding. There is no Bun `host/` aggregation layer.
   - Model mutations cross the renderer seam as user intents. In particular, Ark image-model enablement and custom-model CRUD are applied atomically by `ModelManager` through `ModelsService`; a custom-provider model upsert also owns the provider API-mode update in the same persisted intent. Renderer code must not read a configuration snapshot, construct a replacement config, or split one user intent across multiple RPC mutations.
 
 > **GitHub calls go through the proxy.** GitHub auth (`bun/auth/`) and any future gist calls run from the **bun process** using the global `fetch`, which `NetworkSettingsManager` (`bun/network/`) routes through the user's configured proxy by writing `HTTP(S)_PROXY` onto `process.env`. Just call `fetch` — never add a bypassing custom dispatcher, or corporate/proxied users' GitHub requests will fail.

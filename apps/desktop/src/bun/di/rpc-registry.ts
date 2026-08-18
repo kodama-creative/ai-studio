@@ -1,4 +1,4 @@
-import { inject, injectable, multiInject } from "inversify";
+import { inject, injectable, multiInject, preDestroy } from "inversify";
 
 import { isDisposable, type Disposable } from "../../shared/disposable";
 import type {
@@ -191,6 +191,7 @@ export class RpcRegistry implements Disposable, RpcRegistration {
   }
 
   /** Stop dispatch, cancel streams, then release registrations in reverse. */
+  @preDestroy()
   dispose(): Promise<void> {
     this._disposePromise ??= this._dispose();
     return this._disposePromise;

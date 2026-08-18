@@ -8,6 +8,8 @@
 >
 > 相关已有笔记：[`eclipse-theia-command-registry.md`](./eclipse-theia-command-registry.md)
 
+> 历史状态：本文记录的是重构前的代码与第一轮判断。最终落地已将 composition root 合并到 `app/bootstrap.ts`，删除 `DesktopLifecycle`、`DesktopHost` 和 `ToolContribution`；关于“严格逆序是业务不变量”的判断也被后续源码研究与代码验证推翻。当前结论见 [`2026-08-18-eclipse-theia-lifecycle-di.md`](./2026-08-18-eclipse-theia-lifecycle-di.md) 与 [`../desktop-architecture-redesign.md`](../desktop-architecture-redesign.md)。下文保留作为决策演进记录。
+
 ## 结论先行
 
 Theia 值得借鉴的不是“所有类都加 Inversify decorator”，而是下面四条控制反转规则：

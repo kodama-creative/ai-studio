@@ -6,6 +6,7 @@ import {
   getSettingsDir,
   readJsonFileSync,
 } from "@llm-space/core/server";
+import { injectable, preDestroy } from "inversify";
 import { z } from "zod";
 
 import {
@@ -63,6 +64,7 @@ const GITHUB_DEVICE_FLOW: GitHubDeviceFlow = {
  * "signed out" (no seeding) and the token never leaves the bun process — the
  * renderer only ever sees {@link GithubAuthState}.
  */
+@injectable()
 export class GitHubAuthManager implements Disposable {
   readonly events = new EventHub<GithubAccountEvents>();
   private _config: AuthConfig | null;
@@ -196,6 +198,7 @@ export class GitHubAuthManager implements Disposable {
     return this._config?.accessToken ?? null;
   }
 
+  @preDestroy()
   dispose(): void {
     this.cancelSignIn();
     this.events.dispose();

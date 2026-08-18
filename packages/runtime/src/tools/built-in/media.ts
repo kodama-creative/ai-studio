@@ -6,21 +6,26 @@ import {
   type SeedreamImageSize,
 } from "@llm-space/core";
 
-import { createToolCallResponse, type ToolEntry } from "../tool-registry";
+import {
+  createToolCallResponse,
+  type BuiltInToolEntry,
+} from "../tool-entry";
 
 export interface MediaBuiltInToolsDependencies {
-  generateImage(input: {
-    prompt: string;
-    model: string;
-    size: SeedreamImageSize;
-    watermark: boolean;
-    connection?: ProviderConnectionRef;
-  }): Promise<{
-    data: string;
-    mimeType: string;
-    model: string;
-    size: string;
-  }>;
+  readonly imageGeneration: {
+    generate(input: {
+      prompt: string;
+      model: string;
+      size: SeedreamImageSize;
+      watermark: boolean;
+      connection?: ProviderConnectionRef;
+    }): Promise<{
+      data: string;
+      mimeType: string;
+      model: string;
+      size: string;
+    }>;
+  };
 }
 
 export const generateImageTool: BuiltinTool = {
@@ -54,7 +59,7 @@ export const generateImageTool: BuiltinTool = {
 /** Create the Media contribution around the injected image-generation service. */
 export function createMediaBuiltInTools(
   dependencies: MediaBuiltInToolsDependencies
-): ToolEntry[] {
+): BuiltInToolEntry[] {
   return [
     {
       tool: generateImageTool,
@@ -75,7 +80,7 @@ export function createMediaBuiltInTools(
           throw new Error("size must be one of 1K, 2K, 3K, or 4K.");
         }
         const config = _generateImageConfig(configValue);
-        const result = await dependencies.generateImage({
+        const result = await dependencies.imageGeneration.generate({
           prompt,
           model: config.model,
           size: (size as SeedreamImageSize | undefined) ?? config.size,

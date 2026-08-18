@@ -66,7 +66,7 @@ test("DesktopLaunchService routes live links and disconnects on dispose", async 
 
   inbox.accept("llm-space-dev://studio/open?project=/tmp/live");
   expect(projects).toEqual(["/tmp/live"]);
-  service.dispose();
+  await service.dispose();
   inbox.accept("llm-space-dev://shared/gist/threads/later");
   service.reopen();
 

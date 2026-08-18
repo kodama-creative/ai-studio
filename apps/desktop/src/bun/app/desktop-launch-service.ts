@@ -1,4 +1,4 @@
-import { inject, injectable } from "inversify";
+import { inject, injectable, preDestroy } from "inversify";
 
 import type { DeepLinkScheme } from "../../shared/deep-link-scheme";
 import type { Disposable } from "../../shared/disposable";
@@ -28,6 +28,7 @@ export interface DesktopLaunchErrorReporter {
 @injectable()
 export class DesktopLaunchService implements Disposable {
   private _connection: DeepLinkConnection | undefined;
+  private _disposePromise: Promise<void> | undefined;
 
   constructor(
     @inject(DESKTOP_DEEP_LINK_SOURCE)
@@ -42,6 +43,9 @@ export class DesktopLaunchService implements Disposable {
 
   /** Connect live routing and settle every URL captured during process launch. */
   async start(): Promise<void> {
+    if (this._disposePromise !== undefined) {
+      throw new Error("Desktop launch service is shutting down.");
+    }
     if (this._connection !== undefined) {
       throw new Error("Desktop launch service is already started.");
     }
@@ -67,9 +71,15 @@ export class DesktopLaunchService implements Disposable {
   }
 
   /** Disconnect process-global URL delivery before window teardown begins. */
-  dispose(): void {
-    void this._connection?.dispose();
+  @preDestroy()
+  dispose(): Promise<void> {
+    return (this._disposePromise ??= this._dispose());
+  }
+
+  private async _dispose(): Promise<void> {
+    const connection = this._connection;
     this._connection = undefined;
+    await connection?.dispose();
   }
 
   /** Route one accepted URL to exactly one window owner. */

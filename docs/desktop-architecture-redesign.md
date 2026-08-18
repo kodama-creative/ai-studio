@@ -111,19 +111,20 @@ inject `Container`, call `get()`, or load a module.
 
 ```text
 bun/index.ts
-  -> bootstrapDesktopProcess()
+  -> startDesktopProcess()
       -> hydrate shell environment
       -> capture cold-start deep links
-      -> composeAndStartDesktopApp(deepLinks)
+      -> bootstrapDesktopApp(deepLinks)
           -> create Desktop container
           -> load explicit process modules
           -> resolve DesktopApp exactly once
           -> run DesktopApp
 ```
 
-`bootstrapDesktopProcess()` is only the sequential import barrier: shell
-hydration precedes the deep-link listener, which precedes the statically
-imported composition graph. `composeAndStartDesktopApp()` owns container module
+`startDesktopProcess()` is only the sequential import barrier: shell hydration
+precedes the dynamically imported deep-link listener, which precedes the
+dynamically imported, statically composed application graph. These are the only
+production dynamic imports. `bootstrapDesktopApp()` owns container module
 order, root-container cleanup, and composition-failure rollback. Neither
 function implements feature behavior.
 
@@ -133,9 +134,9 @@ Updater. It does not own feature RPC registration or native window creation.
 
 `DesktopApp.start()` resolves only after:
 
-1. platform quit/reopen/menu adapters are connected;
+1. network settings are applied to the process environment;
 2. deep-link delivery is connected and cold-start targets are settled;
-3. at least one cold-start target window is created;
+3. Analytics/Updater startup has been triggered;
 4. persisted Project-window restoration has been attempted.
 
 Analytics and update scheduling start in the background and do not block
@@ -449,10 +450,10 @@ resolve WindowApplication
   -> RpcRegistry has all Contributions
   -> create Electrobun RPC bridge
   -> NativeWindowFactory.create({ rpc })
-  -> NativeWindowService.attach(browserWindow)
+  -> WindowApplication.attach(browserWindow)
 ```
 
-`NativeWindowService` is bound before Application resolution. It rejects
+`WindowApplication` is bound before Application resolution. It rejects
 window-dependent operations before attach, permits attach exactly once, and
 exposes a narrow capability interface. Feature modules never inject the raw
 `BrowserWindow`, and the container never late-binds it.
@@ -488,8 +489,10 @@ Window stop order is: reject new RPC, cancel streams/subscriptions, detach
 renderer transport, close native window, then unbind the child container.
 
 Desktop stop order is: disconnect launch delivery, close Project and Main
-Applications, stop process background Services, then unbind the Desktop
-container.
+Applications in parallel, dispose Playground, then let the composition owner
+unbind the Desktop container. Background leaf Services clean only their own
+resources through idempotent `@preDestroy()` or binding `onDeactivation`; no
+cross-service LIFO order is assumed.
 
 ## 14. Renderer state ownership
 
@@ -598,6 +601,8 @@ second `renderer/` tree. Cross-Desktop/Web UI remains in `packages/ui`.
 | Bun `CommandRegistry`                                 | removed; renderer Registry is authoritative   |
 | callback-heavy Controller options                     | injected Services + typed Events              |
 | `app/di/*Scope*`                                      | explicit renderer/session container factories |
+| `DesktopLifecycle` / `DesktopHost`                    | Application roots + container ownership       |
+| `ToolRegistry` / `ToolContribution`                   | fixed Desktop `BuiltInTools` composition      |
 
 This table is a direction, not permission to perform mechanical renames. Each
 module must pass the deletion test and preserve the agreed interface

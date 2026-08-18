@@ -1,8 +1,4 @@
 import type { PortableThreadSnapshot } from "@llm-space/core";
-import type {
-  GistThreadReader,
-  GistThreadWriter,
-} from "@llm-space/core/storage";
 import { GIST_CONNECTOR_ID } from "@llm-space/core/storage";
 import {
   playgroundToThread,
@@ -15,11 +11,8 @@ import type { ThreadSharingRequests } from "../../shared/thread-sharing-rpc";
 import { ModelsService } from "../models/models-service";
 import { DesktopPlaygroundApplication } from "../playgrounds/playground-application";
 
+import { AuthenticatedGistStorage } from "./authenticated-gist-storage";
 import { buildSharedThread } from "./thread-sharing";
-import {
-  GIST_THREAD_READER,
-  GIST_THREAD_WRITER,
-} from "./thread-sharing-identifiers";
 
 /** Publishes immutable Playground copies through the Gist connector. */
 @injectable()
@@ -32,10 +25,8 @@ export class ThreadSharingApplication implements ThreadSharingRequests {
     >,
     @inject(ModelsService)
     private readonly _models: ModelsService,
-    @inject(GIST_THREAD_WRITER)
-    private readonly _writer: Pick<GistThreadWriter, "writeSnapshot">,
-    @inject(GIST_THREAD_READER)
-    private readonly _reader: Pick<GistThreadReader, "readSnapshot">
+    @inject(AuthenticatedGistStorage)
+    private readonly _gists: AuthenticatedGistStorage
   ) {}
 
   async read(playgroundId: string): Promise<PortableThreadSnapshot> {
@@ -70,7 +61,7 @@ export class ThreadSharingApplication implements ThreadSharingRequests {
     meta: { title?: string; description?: string } = {}
   ) {
     const snapshot = await this.read(playgroundId);
-    const locator = await this._writer.writeSnapshot(
+    const locator = await this._gists.writeSnapshot(
       {
         ...snapshot,
         thread: {
@@ -92,6 +83,6 @@ export class ThreadSharingApplication implements ThreadSharingRequests {
   }
 
   async importGist(gistId: string) {
-    return this.importSnapshot(await this._reader.readSnapshot(gistId));
+    return this.importSnapshot(await this._gists.readSnapshot(gistId));
   }
 }

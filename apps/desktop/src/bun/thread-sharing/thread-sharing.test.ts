@@ -88,8 +88,10 @@ describe("ThreadSharingApplication", () => {
         list: () => Promise.resolve([]),
         getDefault: () => Promise.resolve(null),
       } as never,
-      { writeSnapshot: () => Promise.reject(new Error("unused")) },
-      { readSnapshot: () => Promise.reject(new Error("unused")) }
+      {
+        writeSnapshot: () => Promise.reject(new Error("unused")),
+        readSnapshot: () => Promise.reject(new Error("unused")),
+      } as never
     );
 
     expect(await application.read(playground.id)).toEqual({
@@ -120,8 +122,10 @@ describe("ThreadSharingApplication", () => {
         },
       } as never,
       {} as never,
-      { writeSnapshot: () => Promise.reject(new Error("unused")) },
-      { readSnapshot: () => Promise.reject(new Error("unused")) }
+      {
+        writeSnapshot: () => Promise.reject(new Error("unused")),
+        readSnapshot: () => Promise.reject(new Error("unused")),
+      } as never
     );
 
     const result = await application.importSnapshot({

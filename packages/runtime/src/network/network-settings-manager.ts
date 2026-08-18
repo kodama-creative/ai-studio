@@ -36,15 +36,19 @@ const NO_PROXY_KEYS = ["NO_PROXY", "no_proxy"] as const;
 /**
  * Owns `settings/network.json`: the in-memory source of truth for the Bun
  * process's outbound proxy. Mirrors `SearchSettingsManager`'s eager,
- * synchronous load-and-seed pattern, and additionally reflects the resolved
- * settings onto `process.env` on construction and on every `set()` so pi-ai /
- * Bun's global `fetch` route (or don't route) through the proxy.
+ * synchronous load-and-seed pattern. The Desktop lifecycle explicitly applies
+ * the initial settings before network ingress; every later `set()` reapplies
+ * them so pi-ai and Bun's global `fetch` follow the current proxy policy.
  */
 export class NetworkSettingsManager {
   private _settings: NetworkSettings;
 
   constructor() {
     this._settings = this._loadConfig();
+  }
+
+  /** Apply the current settings to the process before network work is admitted. */
+  applyToProcessEnvironment(): void {
     this._applyToEnv();
   }
 

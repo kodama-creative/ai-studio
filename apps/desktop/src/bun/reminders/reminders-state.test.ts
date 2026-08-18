@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { RemindersState } from "./state";
+import { RemindersState } from "./reminders-state";
 
 let testHome = "";
 let statePath = "";
@@ -21,7 +21,7 @@ afterEach(async () => {
 });
 
 function _state(launchId: string): RemindersState {
-  const state = new RemindersState(statePath, { launchId });
+  const state = new RemindersState(testHome, { launchId });
   states.push(state);
   return state;
 }

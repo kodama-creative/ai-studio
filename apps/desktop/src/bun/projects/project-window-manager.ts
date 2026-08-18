@@ -1,9 +1,13 @@
-import { inject, injectable } from "inversify";
+import { inject, injectable, preDestroy } from "inversify";
 
 import { Emitter, type Event } from "../../shared/event";
 import { WINDOW_CONTAINER_FACTORY } from "../app/window-container-factory";
 
-import type { AgentProject } from "./agent-project";
+import { AgentProjectLoader, type AgentProject } from "./agent-project";
+import {
+  FileAgentProjectCatalogStore,
+  FileProjectWindowStateStore,
+} from "./project-window-state";
 
 export interface ProjectWindowHandle {
   readonly onDidClose: Event<void>;
@@ -14,24 +18,6 @@ export interface ProjectWindowHandle {
 export interface ProjectWindowAdapter {
   create(project: AgentProject): Promise<ProjectWindowHandle>;
 }
-
-export interface ProjectWindowStateStore {
-  load(): Promise<readonly string[]>;
-  save(rootPaths: readonly string[]): Promise<void>;
-}
-
-export interface AgentProjectCatalogStore {
-  load(): Promise<readonly string[]>;
-  save(rootPaths: readonly string[]): Promise<void>;
-}
-
-export interface AgentProjectLoader {
-  open(startPath: string): Promise<AgentProject>;
-}
-
-export const PROJECT_WINDOW_STATE_STORE = Symbol("ProjectWindowStateStore");
-export const AGENT_PROJECT_CATALOG_STORE = Symbol("AgentProjectCatalogStore");
-export const AGENT_PROJECT_LOADER = Symbol("AgentProjectLoader");
 
 /** Owns the one-project/one-window invariant for the desktop process. */
 @injectable()
@@ -45,23 +31,31 @@ export class ProjectWindowManager {
     string,
     { readonly project: AgentProject; readonly handle: ProjectWindowHandle }
   >();
-  private readonly _opening = new Map<string, Promise<ProjectWindowHandle>>();
+  private readonly _opening = new Map<string, Promise<void>>();
   private _catalogMutation = Promise.resolve();
+  private _stateMutation = Promise.resolve();
   private _closingAll = false;
+  private _closePromise: Promise<void> | undefined;
 
   constructor(
     @inject(WINDOW_CONTAINER_FACTORY)
     private readonly _windowsAdapter: ProjectWindowAdapter,
-    @inject(PROJECT_WINDOW_STATE_STORE)
-    private readonly _state: ProjectWindowStateStore,
-    @inject(AGENT_PROJECT_CATALOG_STORE)
-    private readonly _catalog: AgentProjectCatalogStore,
-    @inject(AGENT_PROJECT_LOADER)
+    @inject(FileProjectWindowStateStore)
+    private readonly _state: FileProjectWindowStateStore,
+    @inject(FileAgentProjectCatalogStore)
+    private readonly _catalog: FileAgentProjectCatalogStore,
+    @inject(AgentProjectLoader)
     private readonly _loader: AgentProjectLoader
   ) {}
 
   async openProject(startPath: string): Promise<void> {
+    if (this._closingAll) {
+      throw new Error("Project windows are shutting down.");
+    }
     const project = await this._loader.open(startPath);
+    // A deep link may have entered before shutdown and finished source loading
+    // after closeAll began. It must not create a child of a disposing parent.
+    if (this._closingAll) return;
     const existing = this._windows.get(project.rootPath);
     if (existing !== undefined) {
       existing.handle.activate();
@@ -69,24 +63,19 @@ export class ProjectWindowManager {
     }
     const opening = this._opening.get(project.rootPath);
     if (opening !== undefined) {
-      (await opening).activate();
+      await opening;
+      this._windows.get(project.rootPath)?.handle.activate();
       return;
     }
-    const createWindow = this._windowsAdapter.create(project);
+    const createWindow = this._openWindow(project);
     this._opening.set(project.rootPath, createWindow);
-    let handle: ProjectWindowHandle;
     try {
-      handle = await createWindow;
+      await createWindow;
     } finally {
-      this._opening.delete(project.rootPath);
+      if (this._opening.get(project.rootPath) === createWindow) {
+        this._opening.delete(project.rootPath);
+      }
     }
-    this._windows.set(project.rootPath, { project, handle });
-    await this._rememberProject(project.rootPath);
-    handle.onDidClose(() => {
-      this._windows.delete(project.rootPath);
-      if (!this._closingAll) void this._saveOpenProjects();
-    });
-    await this._saveOpenProjects();
   }
 
   /** Resolve durable catalog paths into current Project metadata. */
@@ -106,6 +95,7 @@ export class ProjectWindowManager {
   async restoreProjects(): Promise<void> {
     const paths = await this._state.load();
     for (const path of paths) {
+      if (this._closingAll) break;
       try {
         await this.openProject(path);
       } catch (error) {
@@ -114,20 +104,63 @@ export class ProjectWindowManager {
     }
   }
 
-  async closeAll(): Promise<void> {
+  /** Close every Project window without erasing the next-start restore set. */
+  @preDestroy()
+  closeAll(): Promise<void> {
+    return (this._closePromise ??= this._closeAll());
+  }
+
+  private async _closeAll(): Promise<void> {
     this._closingAll = true;
-    await Promise.all(
+    const errors: unknown[] = [];
+    const openings = await Promise.allSettled([...this._opening.values()]);
+    for (const result of openings) {
+      if (result.status === "rejected") errors.push(result.reason);
+    }
+    // Natural native closes persist in the background; drain their serialized
+    // writes before the process releases this manager.
+    await this._stateMutation;
+    const closes = await Promise.allSettled(
       [...this._windows.values()].map(({ handle }) =>
         Promise.resolve(handle.close())
       )
     );
+    for (const result of closes) {
+      if (result.status === "rejected") errors.push(result.reason);
+    }
     this._windows.clear();
+    if (errors.length > 0) {
+      throw new AggregateError(errors, "Failed to close Project windows.");
+    }
+  }
+
+  /** Create and adopt one window, or close it immediately if shutdown won. */
+  private async _openWindow(project: AgentProject): Promise<void> {
+    const handle = await this._windowsAdapter.create(project);
+    if (this._closingAll) {
+      await handle.close();
+      return;
+    }
+    this._windows.set(project.rootPath, { project, handle });
+    handle.onDidClose(() => {
+      this._windows.delete(project.rootPath);
+      if (!this._closingAll) {
+        void this._saveOpenProjects().catch((error) => {
+          console.error("Failed to persist open Project windows:", error);
+        });
+      }
+    });
+    await this._rememberProject(project.rootPath);
+    await this._saveOpenProjects();
   }
 
   private _saveOpenProjects(): Promise<void> {
-    return this._state.save(
-      [...this._windows.keys()].sort((left, right) => left.localeCompare(right))
+    const roots = [...this._windows.keys()].sort((left, right) =>
+      left.localeCompare(right)
     );
+    const mutation = this._stateMutation.then(() => this._state.save(roots));
+    this._stateMutation = mutation.catch(() => undefined);
+    return mutation;
   }
 
   private _rememberProject(rootPath: string): Promise<void> {

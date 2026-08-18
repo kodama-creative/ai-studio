@@ -11,17 +11,17 @@ import {
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
 
-import { DesktopHost } from "./desktop-host";
+import { BuiltInTools } from "./built-in-tools";
 
-/** Owns bundled-tool discovery and execution RPC for one native window. */
+/** Expose the fixed built-in tool bundle to one renderer RPC registry. */
 @injectable()
-class BuiltinToolsRpcContribution implements RpcContributionApi {
-  constructor(@inject(DesktopHost) private readonly _host: DesktopHost) {}
+class BuiltInToolsRpcContribution implements RpcContributionApi {
+  constructor(@inject(BuiltInTools) private readonly _tools: BuiltInTools) {}
 
   registerRpc(rpc: RpcRegistry): void {
     const requests: BuiltinToolsRequests = {
-      list: () => Promise.resolve(this._host.tools.listTools()),
-      call: (input) => this._host.tools.call(input),
+      list: () => Promise.resolve(this._tools.listTools()),
+      call: (input) => this._tools.call(input),
     };
     rpc.registerServer({
       namespace: BUILTIN_TOOLS_RPC,
@@ -31,12 +31,12 @@ class BuiltinToolsRpcContribution implements RpcContributionApi {
   }
 }
 
-/** Bind bundled-tool RPC as one window contribution. */
-export function builtinToolsRpcModule(): ContainerModule {
+/** Bind Built-in Tools transport for one window. */
+export function builtInToolsRpcModule(): ContainerModule {
   return new ContainerModule(({ bind }) => {
-    bind(BuiltinToolsRpcContribution).toSelf().inSingletonScope();
+    bind(BuiltInToolsRpcContribution).toSelf().inSingletonScope();
     bind<RpcContributionApi>(RpcContribution).toService(
-      BuiltinToolsRpcContribution
+      BuiltInToolsRpcContribution
     );
   });
 }

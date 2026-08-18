@@ -5,14 +5,13 @@ import {
   type AppDirectoriesRequests,
   type AppDirectoriesRpc,
 } from "../../shared/app-directories-rpc";
+import { APP_HOME_PATH } from "../app/desktop-paths";
 import {
   RpcContribution,
   type RpcContribution as RpcContributionApi,
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
 import { ensureRootDir } from "../fs/ensure-root-dir";
-
-export const APP_HOME_PATH = Symbol("AppHomePath");
 
 /** Owns app-directories RPC registration for one native window. */
 @injectable()

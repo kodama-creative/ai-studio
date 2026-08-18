@@ -9,15 +9,19 @@ import { expandHomePath } from "@llm-space/core/server";
 
 import {
   createToolCallResponse,
+  type BuiltInToolEntry,
   type ToolCallResponse,
-  type ToolEntry,
-} from "../tool-registry";
+} from "../tool-entry";
 
 export interface FsBuiltInToolsDependencies {
-  workspaceRoot: string;
-  findSkill: (name: string) => SkillContent | null;
-  openPath?: (path: string) => Promise<void> | void;
-  revealPath?: (path: string) => Promise<void> | void;
+  readonly workspaceRoot: string;
+  readonly skills: {
+    findSkill(name: string): SkillContent | null;
+  };
+  readonly files?: {
+    openWithDefaultApplication(path: string): Promise<void> | void;
+    revealInFileManager(path: string): Promise<void> | void;
+  };
 }
 
 /**
@@ -697,9 +701,9 @@ export const skillTool: BuiltinTool = {
 
 export function skill(
   name: string,
-  findSkill: FsBuiltInToolsDependencies["findSkill"]
+  skills: FsBuiltInToolsDependencies["skills"]
 ): string {
-  const found = findSkill(name);
+  const found = skills.findSkill(name);
   if (!found) {
     throw new Error(`Skill "${name}" not found.`);
   }
@@ -746,15 +750,15 @@ export const presentFilesTool: BuiltinTool = {
  */
 export async function present_files(
   paths: string[],
-  dependencies: Pick<FsBuiltInToolsDependencies, "openPath" | "revealPath"> = {}
+  files?: FsBuiltInToolsDependencies["files"]
 ): Promise<"OK"> {
   const reveals: Promise<void>[] = [];
   for (const requestedPath of paths) {
     const p = expandHomePath(requestedPath);
     if (_isHtmlFile(p)) {
-      await dependencies.openPath?.(p);
+      await files?.openWithDefaultApplication(p);
     } else {
-      const reveal = dependencies.revealPath?.(p);
+      const reveal = files?.revealInFileManager(p);
       if (reveal) {
         reveals.push(Promise.resolve(reveal));
       }
@@ -773,8 +777,8 @@ function _isHtmlFile(filePath: string): boolean {
 
 export function createFsBuiltInTools(
   dependencies: FsBuiltInToolsDependencies
-): ToolEntry[] {
-  const { workspaceRoot, findSkill } = dependencies;
+): BuiltInToolEntry[] {
+  const { files, skills, workspaceRoot } = dependencies;
   return [
     {
       tool: readTool,
@@ -798,7 +802,7 @@ export function createFsBuiltInTools(
     {
       tool: skillTool,
       execute(args: Record<string, unknown>) {
-        return Promise.resolve(skill(_requireString(args, "name"), findSkill));
+        return Promise.resolve(skill(_requireString(args, "name"), skills));
       },
     },
     {
@@ -862,7 +866,7 @@ export function createFsBuiltInTools(
     {
       tool: presentFilesTool,
       async execute(args: Record<string, unknown>) {
-        return present_files(_requireStringArray(args, "paths"), dependencies);
+        return present_files(_requireStringArray(args, "paths"), files);
       },
     },
   ];

@@ -3,7 +3,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { SkillsManager } from "./skills-manager";
+import {
+  DEFAULT_SKILLS_SETTINGS,
+  SkillsManager,
+} from "./skills-manager";
 
 const originalLlmSpaceHome = process.env.LLM_SPACE_HOME;
 const temporaryRoots: string[] = [];
@@ -55,6 +58,16 @@ afterEach(() => {
 });
 
 describe("SkillsManager YAML frontmatter", () => {
+  test("defaults include the process-resolved managed Skills folder", () => {
+    const llmSpaceHome =
+      originalLlmSpaceHome ?? path.join(os.homedir(), ".llm-space");
+
+    expect(DEFAULT_SKILLS_SETTINGS.discoveryPaths).toContainEqual({
+      path: path.join(llmSpaceHome, "skills"),
+      hiddenSkills: [],
+    });
+  });
+
   test("discovers a skill whose description is a literal block scalar", () => {
     const { manager, skillDir, description } = createManagerFixture();
 

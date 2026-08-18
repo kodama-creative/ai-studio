@@ -61,6 +61,40 @@ test("concurrent Main opens share creation and activate the result", async () =>
   await manager.close();
 });
 
+test("shutdown drains a Main window already being created", async () => {
+  let finish!: () => void;
+  let notifyStarted!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const started = new Promise<void>((resolve) => {
+    notifyStarted = resolve;
+  });
+  let closes = 0;
+  const manager = new MainWindowManager({
+    async createMain() {
+      notifyStarted();
+      await gate;
+      return {
+        activate: () => undefined,
+        close: () => {
+          closes += 1;
+        },
+        onDidClose: _emptyEvent,
+      };
+    },
+  });
+
+  const opening = manager.open();
+  await started;
+  const closing = manager.close();
+  expect(manager.open()).rejects.toThrow("Main window is shutting down.");
+  finish();
+
+  await Promise.all([opening, closing]);
+  expect(closes).toBe(1);
+});
+
 test("a failed Main creation is never retained", async () => {
   let attempts = 0;
   const manager = new MainWindowManager({

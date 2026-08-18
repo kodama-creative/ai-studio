@@ -1,5 +1,10 @@
 import type { BrowserWindow } from "electrobun/bun";
-import { ContainerModule, inject, injectable } from "inversify";
+import {
+  ContainerModule,
+  inject,
+  injectable,
+  preDestroy,
+} from "inversify";
 
 import type { DesktopWindowContext } from "../../shared/agent-project";
 import type { Disposable } from "../../shared/disposable";
@@ -12,14 +17,15 @@ import {
   type WindowRpc,
 } from "../../shared/window-rpc";
 import {
-  WindowStateManager,
-  type WindowStatePersistenceStore,
-} from "../app/window-state";
-import {
   RpcContribution,
   type RpcContribution as RpcContributionApi,
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
+
+import {
+  WindowStateController,
+  type WindowStatePersistenceStore,
+} from "./window-state-controller";
 
 const ZOOM_STEP = 0.1;
 
@@ -44,12 +50,13 @@ export interface WindowContextProvider {
 export class WindowApplication implements WindowRequests, Disposable {
   readonly events = new EventHub<WindowEvents>();
   private _window: BrowserWindow | undefined;
+  private _fullScreenSubscription: Disposable | undefined;
 
   constructor(
     @inject(WINDOW_CONTEXT_PROVIDER)
     private readonly _context: WindowContextProvider,
-    @inject(WindowStateManager)
-    private readonly _windowStates: WindowStateManager
+    @inject(WindowStateController)
+    private readonly _windowState: WindowStateController
   ) {}
 
   /** Attach the single native window owned by this application instance. */
@@ -57,11 +64,20 @@ export class WindowApplication implements WindowRequests, Disposable {
     if (this._window !== undefined) {
       throw new Error("Native window is already attached.");
     }
-    this._windowStates.attach(window, {
-      ...state,
-      onFullScreenChange: (fullScreen) =>
-        this._notifyFullScreenChanged(fullScreen),
-    });
+    const fullScreenSubscription = this._windowState.onDidChangeFullScreen(
+      (fullScreen) => this._notifyFullScreenChanged(fullScreen)
+    );
+    try {
+      this._windowState.attach(window, state.store, {
+        isMaximized: state.isMaximized,
+        isFullScreen: state.isFullScreen,
+        zoom: state.zoom ?? 1,
+      });
+    } catch (error) {
+      void fullScreenSubscription.dispose();
+      throw error;
+    }
+    this._fullScreenSubscription = fullScreenSubscription;
     this._window = window;
   }
 
@@ -106,7 +122,11 @@ export class WindowApplication implements WindowRequests, Disposable {
   }
 
   /** Release listeners owned by this native window. */
-  dispose(): void {
+  @preDestroy()
+  async dispose(): Promise<void> {
+    await this._fullScreenSubscription?.dispose();
+    this._fullScreenSubscription = undefined;
+    await this._windowState.dispose();
     this.events.dispose();
   }
 
@@ -117,7 +137,7 @@ export class WindowApplication implements WindowRequests, Disposable {
   private _setZoom(zoom: number): void {
     const window = this._requireWindow();
     window.setPageZoom(zoom);
-    this._windowStates.saveZoom(window, zoom);
+    this._windowState.saveZoom(zoom);
   }
 
   private _requireWindow(): BrowserWindow {
@@ -155,10 +175,8 @@ class WindowContribution implements RpcContributionApi {
 /** Bind the Window application, RPC, and commands for one native window. */
 export function nativeWindowContributionsModule(): ContainerModule {
   return new ContainerModule(({ bind }) => {
-    bind(WindowApplication)
-      .toSelf()
-      .inSingletonScope()
-      .onDeactivation((application) => application.dispose());
+    bind(WindowStateController).toSelf().inSingletonScope();
+    bind(WindowApplication).toSelf().inSingletonScope();
     bind(WindowContribution).toSelf().inSingletonScope();
     bind<RpcContributionApi>(RpcContribution).toService(WindowContribution);
   });

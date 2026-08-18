@@ -1,11 +1,15 @@
+import path from "node:path";
+
 import {
   atomicWriteJsonFile,
   readJsonFile,
 } from "@llm-space/core/server";
+import { inject, injectable, preDestroy } from "inversify";
 import { z } from "zod";
 
 import type { Disposable } from "../../shared/disposable";
 import { DEFAULT_UPDATE_MODE, type UpdateMode } from "../../shared/updates";
+import { APP_HOME_PATH } from "../app/desktop-paths";
 
 /**
  * Persisted updater state (`settings/updates.json`): the user's update-mode
@@ -32,11 +36,16 @@ const UpdatesStateSchema: z.ZodType<UpdatesDocument> = z.object({
 });
 
 /** Process-owned, serialized persistence for updater preferences and identity. */
+@injectable()
 export class UpdatesState implements Disposable {
   private _queue: Promise<unknown> = Promise.resolve();
   private _disposed = false;
 
-  constructor(private readonly _filePath: string) {}
+  private readonly _filePath: string;
+
+  constructor(@inject(APP_HOME_PATH) homePath: string) {
+    this._filePath = path.join(homePath, "settings", "updates.json");
+  }
 
   async getMode(): Promise<UpdateMode> {
     const mode = (await this._read()).mode;
@@ -67,6 +76,7 @@ export class UpdatesState implements Disposable {
     }));
   }
 
+  @preDestroy()
   async dispose(): Promise<void> {
     this._disposed = true;
     await this._queue.catch(() => undefined);

@@ -1,6 +1,6 @@
 import { mock } from "bun:test";
 
-import { Container } from "inversify";
+import { Container, ContainerModule } from "inversify";
 
 const events: string[] = [];
 type OnCreated = (window: object, state: object) => void;
@@ -100,13 +100,20 @@ const project = {
   agentRoot: "/tmp/project/agent",
 } as never;
 const composition = {
-  configureMainIdentity: () => events.push("configure:main-identity"),
-  configureProjectSource: (container: Container) => {
+  common: [({ kind }: { kind: string }) => {
+    events.push(`configure:runtime:${kind}`);
+    return new ContainerModule(() => undefined);
+  }],
+  main: [() => {
+    events.push("configure:main-identity");
+    return new ContainerModule(() => undefined);
+  }],
+  project: [() => {
     events.push("configure:project-source");
-    container.bind(ProjectService).toConstantValue(new ProjectService());
-  },
-  configureRuntime: (_container: Container, { kind }: { kind: string }) =>
-    events.push(`configure:runtime:${kind}`),
+    return new ContainerModule(({ bind }) => {
+      bind(ProjectService).toConstantValue(new ProjectService());
+    });
+  }],
 };
 const desktopContainer = new Container();
 const factory = new DesktopWindowFactory(
@@ -172,10 +179,10 @@ if (
 events.length = 0;
 const failedFactory = new DesktopWindowFactory(desktopContainer, "/tmp/home", {
   ...composition,
-  configureProjectSource: () => {
+  project: [() => {
     events.push("configure:project-source");
     throw new Error("source registration failed");
-  },
+  }],
 });
 try {
   await failedFactory.create(project);

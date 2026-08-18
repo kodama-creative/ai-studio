@@ -57,16 +57,16 @@ describe("filesystem built-in paths", () => {
     const relativeDirectory = path.relative(os.homedir(), directory);
     const htmlPath = path.join(directory, "report.html");
     const textPath = path.join(directory, "notes.txt");
-    const openPath = mock(() => undefined);
-    const revealPath = mock(() => Promise.resolve());
+    const openWithDefaultApplication = mock(() => undefined);
+    const revealInFileManager = mock(() => Promise.resolve());
 
     await present_files(
       [`~/${relativeDirectory}/report.html`, `~/${relativeDirectory}/notes.txt`],
-      { openPath, revealPath }
+      { openWithDefaultApplication, revealInFileManager }
     );
 
-    expect(openPath).toHaveBeenCalledWith(htmlPath);
-    expect(revealPath).toHaveBeenCalledWith(textPath);
+    expect(openWithDefaultApplication).toHaveBeenCalledWith(htmlPath);
+    expect(revealInFileManager).toHaveBeenCalledWith(textPath);
   });
 
   test("read, traversal, and search tools expand home paths", async () => {

@@ -3,16 +3,16 @@ import { join } from "node:path";
 
 import {
   atomicWriteJsonFile,
-  getSettingsDir,
   readJsonFile,
 } from "@llm-space/core/server";
-import { inject, injectable, unmanaged } from "inversify";
+import { inject, injectable, preDestroy, unmanaged } from "inversify";
 import { z } from "zod";
 
 import type { Disposable } from "../../shared/disposable";
 import type { FeatureReminder } from "../../shared/feature-reminders";
 import { FEATURE_REMINDERS } from "../../shared/feature-reminders";
 import type { RemindersRequests } from "../../shared/reminders-rpc";
+import { APP_HOME_PATH } from "../app/desktop-paths";
 
 /**
  * Persisted reminder state (`settings/reminders.json`). Today it backs the
@@ -68,8 +68,6 @@ export interface RemindersStateOptions {
   readonly now?: () => number;
 }
 
-export const REMINDERS_STATE_FILE = Symbol("RemindersStateFile");
-
 /** Whether the reminder should appear on this open (pure; no side effects). */
 function _shouldShow(
   star: GithubStarReminder,
@@ -100,16 +98,14 @@ export class RemindersState implements RemindersRequests, Disposable {
   private readonly _now: () => number;
   private _stateQueue: Promise<unknown> = Promise.resolve();
   private _disposed = false;
+  private readonly _filePath: string;
 
   constructor(
-    @inject(REMINDERS_STATE_FILE)
-    private readonly _filePath: string = join(
-      getSettingsDir(),
-      "reminders.json"
-    ),
+    @inject(APP_HOME_PATH) homePath: string,
     @unmanaged()
     options: RemindersStateOptions = {}
   ) {
+    this._filePath = join(homePath, "settings", "reminders.json");
     this._launchId = options.launchId ?? randomUUID();
     this._now = options.now ?? Date.now;
   }
@@ -177,6 +173,7 @@ export class RemindersState implements RemindersRequests, Disposable {
     });
   }
 
+  @preDestroy()
   async dispose(): Promise<void> {
     this._disposed = true;
     await this._stateQueue.catch(() => undefined);

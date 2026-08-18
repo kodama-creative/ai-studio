@@ -1,3 +1,3 @@
-import { bootstrapDesktopProcess } from "./app/bootstrap";
+import { startDesktopProcess } from "./process-startup";
 
-await bootstrapDesktopProcess();
+await startDesktopProcess();

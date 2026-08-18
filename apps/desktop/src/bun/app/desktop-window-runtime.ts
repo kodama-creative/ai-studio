@@ -17,7 +17,7 @@ export type DesktopWindowKind = "main" | "project";
 
 export const DESKTOP_WINDOW_KIND = Symbol("DesktopWindowKind");
 
-/** Owner callback used when the native window initiates child disposal. */
+/** Owner port used when the native window initiates child disposal. */
 export const DESKTOP_WINDOW_CLOSE = Symbol("DesktopWindowClose");
 
 export interface DesktopWindowClose {
@@ -97,7 +97,7 @@ export class DesktopWindowRuntime {
 
   private async _dispose(): Promise<void> {
     const errors: unknown[] = [];
-    for (const resource of [this._rpcRegistry]) {
+    for (const resource of [this._rpcRegistry, this._windowApplication]) {
       try {
         await resource.dispose();
       } catch (error) {

@@ -14,6 +14,9 @@ const { DesktopApp } = await import("./desktop-app");
 function createApp(restoreProjects: () => Promise<void>) {
   return new DesktopApp(
     {
+      applyToProcessEnvironment: () => events.push("network:apply"),
+    } as never,
+    {
       isFirstRun: true,
       capture: () => events.push("analytics:capture"),
     } as never,
@@ -51,18 +54,7 @@ await app.start();
 await app.stop();
 await app.stop();
 
-const expected = [
-  "launch:start",
-  "analytics:capture",
-  "updater:start",
-  "projects:restore",
-  "launch:dispose",
-  "projects:close",
-  "main:close",
-];
-if (JSON.stringify(events) !== JSON.stringify(expected)) {
-  throw new Error(`Unexpected DesktopApp lifecycle: ${events.join(", ")}`);
-}
+assertLifecycle(events, "DesktopApp lifecycle");
 
 try {
   await app.start();
@@ -91,15 +83,26 @@ try {
 }
 await failedApp.stop();
 
-const failureExpected = [
-  "launch:start",
-  "analytics:capture",
-  "updater:start",
-  "projects:restore",
-  "launch:dispose",
-  "projects:close",
-  "main:close",
-];
-if (JSON.stringify(events) !== JSON.stringify(failureExpected)) {
-  throw new Error(`Unexpected failed DesktopApp cleanup: ${events.join(", ")}`);
+assertLifecycle(events, "failed DesktopApp cleanup");
+
+/** Assert the business phases while allowing sibling windows to close in parallel. */
+function assertLifecycle(actual: readonly string[], label: string): void {
+  const startup = [
+    "network:apply",
+    "launch:start",
+    "analytics:capture",
+    "updater:start",
+    "projects:restore",
+    "launch:dispose",
+  ];
+  if (JSON.stringify(actual.slice(0, startup.length)) !== JSON.stringify(startup)) {
+    throw new Error(`Unexpected ${label}: ${actual.join(", ")}`);
+  }
+  const windowStops = actual.slice(startup.length).sort();
+  if (
+    JSON.stringify(windowStops) !==
+    JSON.stringify(["main:close", "projects:close"])
+  ) {
+    throw new Error(`Unexpected ${label}: ${actual.join(", ")}`);
+  }
 }

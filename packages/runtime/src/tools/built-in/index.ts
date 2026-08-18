@@ -1,9 +1,14 @@
 export {
-  createBuiltInToolsModule,
-  type BuiltInToolsModuleDependencies,
-} from "./built-in-tools-module";
+  createFsBuiltInTools,
+  type FsBuiltInToolsDependencies,
+} from "./fs";
 export {
   createMediaBuiltInTools,
   generateImageTool,
   type MediaBuiltInToolsDependencies,
 } from "./media";
+export { miscBuiltInTools } from "./misc";
+export {
+  createWebBuiltInTools,
+  type WebBuiltInToolsDependencies,
+} from "./web";

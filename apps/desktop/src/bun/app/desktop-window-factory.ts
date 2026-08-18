@@ -4,7 +4,6 @@ import { Container, ContainerModule, inject, injectable } from "inversify";
 import type { Command } from "../../shared/commands";
 import { Emitter, type Event } from "../../shared/event";
 import type { RpcEventSink } from "../di/rpc-registry";
-import { APP_HOME_PATH } from "../native/app-directories-module";
 import type { AgentProject } from "../projects/agent-project";
 import type {
   ProjectWindowAdapter,
@@ -13,6 +12,7 @@ import type {
 import { ProjectWindowStateFile } from "../projects/project-window-state";
 import type { MainWindowRPC } from "../rpc";
 
+import { APP_HOME_PATH } from "./desktop-paths";
 import type { DesktopWindowCommandRouter } from "./desktop-window-command-router";
 import {
   DESKTOP_WINDOW_CLOSE,
@@ -37,13 +37,21 @@ import type {
 export type DesktopMainWindowHandle = MainWindowContainerHandle;
 
 /** Bootstrap-owned registrations needed across the staged window lifecycle. */
+export type CommonWindowModuleFactory = (
+  context: DesktopWindowCompositionContext
+) => ContainerModule;
+
+export type MainWindowModuleFactory = () => ContainerModule;
+
+export type ProjectWindowModuleFactory = (
+  project: AgentProject
+) => ContainerModule;
+
+/** Compile-time feature sets loaded into every isolated window Container. */
 export interface DesktopWindowComposition {
-  configureMainIdentity(container: Container): void;
-  configureProjectSource(container: Container, project: AgentProject): void;
-  configureRuntime(
-    container: Container,
-    context: DesktopWindowCompositionContext
-  ): void;
+  readonly common: readonly CommonWindowModuleFactory[];
+  readonly main: readonly MainWindowModuleFactory[];
+  readonly project: readonly ProjectWindowModuleFactory[];
 }
 
 export const DESKTOP_CONTAINER = Symbol("DesktopContainer");
@@ -80,7 +88,9 @@ export class DesktopWindowFactory
   async createMain(): Promise<DesktopMainWindowHandle> {
     const owned = this._createContainer("main", "main");
     try {
-      this._composition.configureMainIdentity(owned.container);
+      owned.container.load(
+        ...this._composition.main.map((createModule) => createModule())
+      );
       const application = this._resolveMainApplication(owned);
       const window = await application.start();
       this._trackApplication(owned, window, application);
@@ -101,7 +111,11 @@ export class DesktopWindowFactory
   async create(project: AgentProject): Promise<ProjectWindowHandle> {
     const owned = this._createContainer(`project:${project.id}`, "project");
     try {
-      this._composition.configureProjectSource(owned.container, project);
+      owned.container.load(
+        ...this._composition.project.map((createModule) =>
+          createModule(project)
+        )
+      );
       const application = this._resolveProjectApplication(owned, project.id);
       const window = await application.start();
       this._trackApplication(owned, window, application);
@@ -258,10 +272,12 @@ export class DesktopWindowFactory
         requireRpc().send.rpcNamespaceStreamEvent(event),
       sendEvent: (event) => requireRpc().send.rpcNamespaceEvent(event),
     };
-    this._composition.configureRuntime(owned.container, {
-      kind,
-      rpcEventSink,
-    });
+    const context = { kind, rpcEventSink } satisfies DesktopWindowCompositionContext;
+    owned.container.load(
+      ...this._composition.common.map((createModule) =>
+        createModule(context)
+      )
+    );
     owned.container.load(
       new ContainerModule(({ bind }) => {
         bind(DESKTOP_WINDOW_KIND).toConstantValue(kind);

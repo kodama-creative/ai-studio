@@ -1,10 +1,12 @@
 import type { BuiltinTool, SearchSettings } from "@llm-space/core";
 
-import type { ToolEntry } from "../tool-registry";
+import type { BuiltInToolEntry } from "../tool-entry";
 
 export interface WebBuiltInToolsDependencies {
-  env: Readonly<Record<string, string | undefined>>;
-  getSearchSettings: () => SearchSettings;
+  readonly env: Readonly<Record<string, string | undefined>>;
+  readonly searchSettings: {
+    get(): SearchSettings;
+  };
 }
 
 const FIRECRAWL_BASE_URL = "https://api.firecrawl.dev";
@@ -348,9 +350,9 @@ class BraveSearchProvider implements SearchProvider {
 /** Build the provider selected in `settings/search.json` with its resolved key. */
 function _getSearchProvider({
   env,
-  getSearchSettings,
+  searchSettings,
 }: WebBuiltInToolsDependencies): SearchProvider {
-  const settings = getSearchSettings();
+  const settings = searchSettings.get();
   if (settings.provider === "brave") {
     return new BraveSearchProvider(
       _resolveApiKey(settings.braveApiKey, env),
@@ -526,7 +528,7 @@ export async function weather_report(location: string): Promise<WeatherReport> {
 
 export function createWebBuiltInTools(
   dependencies: WebBuiltInToolsDependencies
-): ToolEntry[] {
+): BuiltInToolEntry[] {
   return [
     {
       tool: webFetchTool,
