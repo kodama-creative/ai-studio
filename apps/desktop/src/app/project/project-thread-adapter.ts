@@ -16,12 +16,12 @@ import type {
   StudioEvaluationMetadata,
   StudioEvaluationMetadataInput,
 } from "@llm-space/studio/evaluation";
-import type { ExternalThreadExecutionRuntime } from "@llm-space/ui/components/thread-playground";
+import type { AcpSessionExecutionRuntime } from "@llm-space/ui/components/thread-playground";
 
+import type { AcpSessionClient } from "@/shared/acp-session-rpc";
 import type { StudioTransport } from "@/shared/studio-rpc";
-import type { ThreadClient, ThreadTarget } from "@/shared/thread-rpc";
 
-import { createThreadExecutionRuntime } from "../thread-execution-runtime";
+import { createDesktopAcpSessionRuntime } from "../acp-session-runtime";
 
 /** Projects a Pi-backed Experiment and its operation metadata to the editor. */
 export function studioThreadToPlaygroundThread(
@@ -110,56 +110,44 @@ export function shouldPersistProjectThread(
 /** Adapts Project editor controls directly to product-owned Thread RPC. */
 export function createProjectThreadExecutionRuntime(input: {
   readonly client: StudioTransport;
-  readonly threadClient: ThreadClient;
+  readonly acpClient: AcpSessionClient;
   readonly projectId: string;
   readonly threadId: string;
   readonly getThread: () => StudioThread;
   readonly onThread: (thread: StudioThread) => void;
   readonly beforeAdmission?: () => void | Promise<void>;
   readonly onSettled?: () => void | Promise<void>;
-}): ExternalThreadExecutionRuntime {
-  const target: ThreadTarget = {
+}): AcpSessionExecutionRuntime {
+  const target = {
     kind: "experiment",
     projectId: input.projectId,
     experimentId: input.threadId,
-  };
-  return createThreadExecutionRuntime({
-    productName: "Studio",
+  } as const;
+  return createDesktopAcpSessionRuntime({
+    client: input.acpClient,
     target,
-    getClient: () => Promise.resolve(input.threadClient),
-    currentOperationId: () => input.getThread().operationId,
-    async persist(thread) {
+    sessionId: input.getThread().sessionId,
+    async persistPrompt(thread) {
+      const current = input.getThread();
       const saved = await input.client.saveDocument(
         input.threadId,
-        playgroundThreadToStudioDocument(thread, input.getThread())
+        {
+          ...playgroundThreadToStudioDocument(thread, current),
+          // ACP carries the operation transcript; Studio RPC persists only
+          // product document metadata before admission.
+          conversation: structuredClone(current.document.conversation),
+        }
       );
       input.onThread(saved);
     },
-    async refresh(source) {
-      const [thread, history, evaluations] = await Promise.all([
-        _requireThread(input),
-        input.client.listRunHistory(input.threadId),
-        input.client.listEvaluationMetadata(input.threadId),
-      ]);
-      const projected = studioThreadToPlaygroundThread(
-        thread,
-        history,
-        evaluations
-      );
-      return {
-        operationId: thread.operationId,
-        thread:
-          source.model === undefined
-            ? projected
-            : { ...projected, model: structuredClone(source.model) },
-      };
+    modelOverride(thread) {
+      return _modelDefinition(thread.model);
     },
-    runOverrides(thread) {
-      const modelOverride = _modelDefinition(thread.model);
-      return modelOverride === undefined ? {} : { modelOverride };
+    beforePrompt: input.beforeAdmission,
+    async onSettled() {
+      await _requireThread(input);
+      await input.onSettled?.();
     },
-    beforeAdmission: input.beforeAdmission,
-    onSettled: input.onSettled,
   });
 }
 

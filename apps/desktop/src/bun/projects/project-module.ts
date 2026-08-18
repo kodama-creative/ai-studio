@@ -12,7 +12,7 @@ import {
   WINDOW_CONTEXT_PROVIDER,
   type WindowContextProvider,
 } from "../native/native-window-module";
-import { StudioThreadRpcServer } from "../thread/thread-rpc-server";
+import { StudioAcpSessionRpcServer } from "../thread/acp-session-rpc-server";
 
 import type { AgentProject } from "./agent-project";
 import { PROJECT_SOURCE } from "./project-identifiers";
@@ -136,7 +136,7 @@ class ProjectContribution implements RpcContributionApi {
     rpc.registerServer(new ProjectSourceRpcServer(studio));
     rpc.registerServer(new StudioRpcServer(studio));
     rpc.registerServer(
-      new StudioThreadRpcServer(studio, this._project.projectView.id)
+      new StudioAcpSessionRpcServer(studio, this._project.projectView.id)
     );
   }
 }

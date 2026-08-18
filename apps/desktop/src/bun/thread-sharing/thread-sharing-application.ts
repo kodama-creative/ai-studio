@@ -1,4 +1,9 @@
-import type { PortableThreadSnapshot } from "@llm-space/core";
+import { projectPiLogItems } from "@llm-space/acp/server";
+import {
+  threadFromSharedDocument,
+  type SharedDocumentV1,
+  type SharedSessionUpdate,
+} from "@llm-space/core";
 import { GIST_CONNECTOR_ID } from "@llm-space/core/storage";
 import {
   playgroundToThread,
@@ -21,7 +26,7 @@ export class ThreadSharingApplication implements ThreadSharingRequests {
     @inject(DesktopPlaygroundApplication)
     private readonly _playgrounds: Pick<
       DesktopPlaygroundApplication,
-      "loadPlayground" | "createPlayground"
+      "loadPlayground" | "createPlayground" | "readExecution"
     >,
     @inject(ModelsService)
     private readonly _models: ModelsService,
@@ -29,7 +34,7 @@ export class ThreadSharingApplication implements ThreadSharingRequests {
     private readonly _gists: AuthenticatedGistStorage
   ) {}
 
-  async read(playgroundId: string): Promise<PortableThreadSnapshot> {
+  async read(playgroundId: string): Promise<SharedDocumentV1> {
     const [playground, providers, defaultModel] = await Promise.all([
       this._playgrounds.loadPlayground(playgroundId),
       this._models.list(),
@@ -38,21 +43,45 @@ export class ThreadSharingApplication implements ThreadSharingRequests {
     if (playground === undefined) {
       throw new Error(`Playground "${playgroundId}" was not found.`);
     }
+    const frame = await this._playgrounds.readExecution(playgroundId, 0);
+    const display = buildSharedThread(
+      playgroundToThread(playground),
+      providers,
+      defaultModel
+    );
     return {
-      kind: "llm-space.thread-snapshot",
-      schemaVersion: 1,
-      source: {
-        product: "playground",
-        productId: playground.id,
-        sessionId: playground.sessionId,
-        lane: playground.lane,
-        leafId: playground.leafId,
+      kind: "llm-space.shared-document",
+      version: 1,
+      document: {
+        title: playground.title,
+        instructions: [...playground.agentSpec.instructions],
+        ...(display.model === undefined
+          ? {}
+          : { model: structuredClone(display.model) }),
+        tools: structuredClone(playground.agentSpec.tools),
+        ...(playground.agentSpec.variables === undefined
+          ? {}
+          : {
+              promptVariables: structuredClone(
+                playground.agentSpec.variables
+              ),
+            }),
+        ...(playground.agentSpec.variableVariants === undefined
+          ? {}
+          : {
+              variableVariants: structuredClone(
+                playground.agentSpec.variableVariants
+              ),
+            }),
       },
-      thread: buildSharedThread(
-        playgroundToThread(playground),
-        providers,
-        defaultModel
-      ),
+      conversation: {
+        updates: projectPiLogItems(frame.items).filter(
+          _isShareableUpdate
+        ) as SharedSessionUpdate[],
+      },
+      ...(display.modelName === undefined
+        ? {}
+        : { display: { modelName: display.modelName } }),
     };
   }
 
@@ -61,11 +90,11 @@ export class ThreadSharingApplication implements ThreadSharingRequests {
     meta: { title?: string; description?: string } = {}
   ) {
     const snapshot = await this.read(playgroundId);
-    const locator = await this._gists.writeSnapshot(
+    const locator = await this._gists.writeDocument(
       {
         ...snapshot,
-        thread: {
-          ...snapshot.thread,
+        document: {
+          ...snapshot.document,
           ...(meta.title === undefined ? {} : { title: meta.title }),
         },
       },
@@ -77,12 +106,27 @@ export class ThreadSharingApplication implements ThreadSharingRequests {
     };
   }
 
-  importSnapshot(snapshot: PortableThreadSnapshot) {
-    const document = threadToPlaygroundDocument(snapshot.thread, {});
+  importDocument(snapshot: SharedDocumentV1) {
+    const document = threadToPlaygroundDocument(
+      threadFromSharedDocument(snapshot),
+      {}
+    );
     return this._playgrounds.createPlayground(document);
   }
 
   async importGist(gistId: string) {
-    return this.importSnapshot(await this._gists.readSnapshot(gistId));
+    return this.importDocument(await this._gists.readDocument(gistId));
   }
+}
+
+function _isShareableUpdate(
+  update: ReturnType<typeof projectPiLogItems>[number]
+): boolean {
+  return (
+    update.sessionUpdate === "user_message" ||
+    update.sessionUpdate === "agent_message" ||
+    update.sessionUpdate === "agent_thought" ||
+    update.sessionUpdate === "tool_call_update" ||
+    update.sessionUpdate === "usage_update"
+  );
 }

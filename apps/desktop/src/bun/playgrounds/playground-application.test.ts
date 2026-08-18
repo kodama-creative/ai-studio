@@ -79,7 +79,7 @@ test("resolves and executes only the MCP tools frozen into a Playground Run", as
         tools: [tool],
       },
     });
-    await host.savePlayground(playground.id, {
+    const saved = await host.savePlayground(playground.id, {
       title: playground.title,
       agentSpec: playground.agentSpec,
       conversation: {
@@ -95,8 +95,7 @@ test("resolves and executes only the MCP tools frozen into a Playground Run", as
     });
 
     const receipt = await host.run(playground.id, {
-      fromMessageId: "user-weather",
-      commandId: "initial-step-weather",
+      messages: saved.conversation.messages,
       mode: "step",
     });
     await _waitForRunStatus(host, receipt.operationId, "paused");
@@ -105,9 +104,7 @@ test("resolves and executes only the MCP tools frozen into a Playground Run", as
     // Resolver inputs come from the SQLite Run snapshot after restart, not the
     // mutable renderer document or an in-memory tool registry cache.
     host = createHost();
-    await host.continueRun(playground.id, receipt.operationId, {
-      commandId: "continue-weather-after-restart",
-    });
+    await host.continueRun(playground.id, receipt.operationId, {});
     await _waitForTerminalRun(host, receipt.operationId);
     const loaded = await host.loadPlayground(playground.id);
     const assistant = loaded?.conversation.messages.find(
@@ -140,7 +137,7 @@ test("resolves and executes only the MCP tools frozen into a Playground Run", as
   }
 });
 
-test("reconstructs a durable Step receipt after Playground host restart", async () => {
+test("deduplicates a semantic Step through Pi identity after host restart", async () => {
   const homePath = await mkdtemp(
     path.join(tmpdir(), "llm-space-playground-receipt-")
   );
@@ -176,14 +173,12 @@ test("reconstructs a durable Step receipt after Playground host restart", async 
       },
     });
     const run = await host.run(playground.id, {
-      fromMessageId: "user-receipt",
-      commandId: "run-before-restart",
+      messages: playground.conversation.messages,
     });
     const admitted = await host.inspectRun(playground.id, run.operationId);
     const action = admitted.nextAction;
     expect(action?.kind).toBe("model");
     const command = {
-      commandId: "step-after-restart",
       expectedActionId: action!.id,
       kind: "model" as const,
     };
@@ -214,7 +209,7 @@ test("reconstructs a durable Step receipt after Playground host restart", async 
         expectedActionId: "other-action",
       })
     ).rejects.toThrow(
-      'Command "step-after-restart" was already used with other input.'
+      'Semantic action "other-action" is stale; current action is "none".'
     );
   } finally {
     await host.close();

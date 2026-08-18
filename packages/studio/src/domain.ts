@@ -1,3 +1,4 @@
+import type { Message } from "@llm-space/core";
 import type { PiOperationSnapshot } from "@llm-space/pi-runtime";
 
 import type {
@@ -69,20 +70,19 @@ export interface StudioRunHistoryEntry {
 export type StudioRunReceipt = StudioOperationReceipt;
 
 export type StudioRunInput = {
-  readonly fromMessageId: string;
-  /** Stable admission identity used to reconcile Pi/Studio crash windows. */
-  readonly commandId: string;
+  readonly messages: readonly Message[];
   readonly signal?: AbortSignal;
   /** Studio-only Pi model override frozen into this operation binding. */
   readonly modelOverride?: string;
 } & (
   | { readonly mode?: undefined }
   | {
-      readonly mode: "step" | "continue";
+      readonly mode: "step" | "turn" | "continue";
     }
 );
 
 export type StudioStepRunInput = StudioStepInput;
+export type StudioTurnRunInput = StudioStepInput;
 
 export type StudioThreadEventData =
   | {

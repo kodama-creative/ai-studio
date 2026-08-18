@@ -7,7 +7,27 @@ import type {
   AgentMessage as PiAgentMessage,
   LogItem,
 } from "@earendil-works/pi-agent-core";
-import type { PiSessionSnapshot } from "@llm-space/pi-runtime";
+import type {
+  PiSessionSnapshot,
+  RuntimeEphemeralEvent,
+} from "@llm-space/pi-runtime";
+
+/** Projects non-durable Pi deltas to ACP chunks with the final entry identity. */
+export function projectPiEphemeralEvent(
+  event: RuntimeEphemeralEvent
+): SessionUpdate {
+  return event.type === "assistant.text_delta"
+    ? {
+        sessionUpdate: "agent_message_chunk",
+        messageId: event.messageId,
+        content: { type: "text", text: event.delta },
+      }
+    : {
+        sessionUpdate: "agent_thought_chunk",
+        messageId: `${event.messageId}:thought`,
+        content: { type: "text", text: event.delta },
+      };
+}
 
 /** Projects committed Pi entries and records into replay-safe ACP v2 upserts. */
 export function projectPiLogItems(items: readonly LogItem[]): SessionUpdate[] {
@@ -54,8 +74,15 @@ export function projectPiSnapshotState(
     ...(snapshot.suspension === undefined
       ? {}
       : { suspension: structuredClone(snapshot.suspension) }),
+    ...(snapshot.approval === undefined
+      ? {}
+      : { approval: structuredClone(snapshot.approval) }),
   };
-  if (snapshot.status === "paused") {
+  if (
+    snapshot.status === "paused" ||
+    snapshot.approval !== undefined ||
+    snapshot.suspension?.code === "tool_approval_required"
+  ) {
     return {
       sessionUpdate: "state_update",
       state: "requires_action",
@@ -148,6 +175,9 @@ function _projectMessage(
             title: content.name,
             status: "pending",
             rawInput: structuredClone(content.arguments),
+            _meta: {
+              "llm-space.dev": { assistantEntryId: entryId },
+            },
           } satisfies SessionUpdate,
         ]
       : []
@@ -157,6 +187,9 @@ function _projectMessage(
       sessionUpdate: "agent_message",
       messageId: entryId,
       content: visible,
+      _meta: {
+        "llm-space.dev": { usage: structuredClone(message.usage) },
+      },
     },
     ...(thinking.length === 0
       ? []

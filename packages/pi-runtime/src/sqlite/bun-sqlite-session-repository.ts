@@ -29,7 +29,9 @@ const DEFAULT_HEARTBEAT_INTERVAL_MS = 10_000;
 
 export interface BunSqliteSessionRepositoryOptions {
   /** Existing Studio SQLite path; Pi owns only tables prefixed with `pi_`. */
-  readonly path: string;
+  readonly path?: string;
+  /** Host-owned connection shared with binding and product adapters. */
+  readonly database?: Database;
   readonly writerLease?: {
     readonly ttlMs?: number;
     readonly heartbeatIntervalMs?: number;
@@ -116,6 +118,7 @@ export class BunSqliteSessionRepository
   private readonly _activeStorages = new Map<string, BunSqliteSessionStorage>();
   private readonly _leaseTtlMs: number;
   private readonly _heartbeatIntervalMs: number;
+  private readonly _ownsDatabase: boolean;
   private _closed = false;
 
   constructor(options: BunSqliteSessionRepositoryOptions) {
@@ -123,13 +126,22 @@ export class BunSqliteSessionRepository
     this._heartbeatIntervalMs =
       options.writerLease?.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS;
     _validateLeaseOptions(this._leaseTtlMs, this._heartbeatIntervalMs);
-    if (options.path !== ":memory:") {
-      mkdirSync(dirname(options.path), { recursive: true, mode: 0o700 });
+    if (options.database !== undefined && options.path !== undefined) {
+      throw new Error("Provide either a SQLite path or database, not both.");
     }
-    this._database = new Database(options.path, { create: true });
+    const databasePath = options.path;
+    if (options.database === undefined && databasePath === undefined) {
+      throw new Error("A SQLite path or database is required.");
+    }
+    if (databasePath !== undefined && databasePath !== ":memory:") {
+      mkdirSync(dirname(databasePath), { recursive: true, mode: 0o700 });
+    }
+    this._ownsDatabase = options.database === undefined;
+    this._database =
+      options.database ?? new Database(databasePath, { create: true });
     this._database.run("PRAGMA foreign_keys = ON");
     this._database.run("PRAGMA busy_timeout = 5000");
-    if (options.path !== ":memory:") {
+    if (this._database.filename !== ":memory:") {
       this._database.run("PRAGMA journal_mode = WAL");
       this._database.run("PRAGMA synchronous = NORMAL");
     }
@@ -310,7 +322,7 @@ export class BunSqliteSessionRepository
       await this._releaseStorage(id);
     }
     this._closed = true;
-    this._database.close();
+    if (this._ownsDatabase) this._database.close();
   }
 
   /** Enables `await using` to release writer leases before closing SQLite. */

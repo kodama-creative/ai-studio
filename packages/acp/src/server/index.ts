@@ -1,7 +1,7 @@
-export * from "./extensions";
-export * from "./forwarding-agent";
-export * from "./pi-agent-app";
-export * from "./pi-projector";
+export * from "../forwarding-agent";
+export * from "../extensions";
+export * from "../pi-agent-app";
+export * from "../pi-projector";
 
 export {
   PROTOCOL_VERSION,

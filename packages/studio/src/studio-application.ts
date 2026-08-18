@@ -1,3 +1,7 @@
+import {
+  DocumentExecutionEngine,
+  type DocumentExecutionEvent,
+} from "@llm-space/engine";
 import type {
   PiOperationSnapshot,
   PiSessionSnapshot,
@@ -5,7 +9,6 @@ import type {
   DurablePiRuntime,
 } from "@llm-space/pi-runtime";
 
-import { executeDebugCommand } from "./debug-command";
 import type {
   StudioEventCursor,
   StudioExperimentRecord,
@@ -13,6 +16,7 @@ import type {
   StudioRunInput,
   StudioRunReceipt,
   StudioStepRunInput,
+  StudioTurnRunInput,
   StudioThread,
   StudioThreadDocument,
   StudioThreadEvent,
@@ -41,7 +45,7 @@ import {
   type StudioToolApprovalInput,
 } from "./pi-domain";
 import {
-  coreMessagesToPi,
+  coreMessagesToPiInput,
   piEntriesToCoreMessages,
 } from "./pi-message-projection";
 import type { StudioStore } from "./storage";
@@ -94,6 +98,11 @@ export interface StudioApplication {
     operationId: string,
     input: StudioStepRunInput
   ): Promise<StudioRunReceipt>;
+  turnRun(
+    threadId: string,
+    operationId: string,
+    input: StudioTurnRunInput
+  ): Promise<StudioRunReceipt>;
   continueRun(
     threadId: string,
     operationId: string,
@@ -107,6 +116,12 @@ export interface StudioApplication {
   cancelRun(threadId: string, operationId: string): Promise<void>;
   cancelActiveRun(threadId: string): Promise<void>;
   inspectRun(threadId: string, operationId: string): Promise<PiSessionSnapshot>;
+  openExecution(threadId: string): Promise<PiSessionSnapshot>;
+  readExecution(threadId: string, afterSeq?: number): Promise<import("@llm-space/pi-runtime").PiCommittedChange>;
+  observeExecution(
+    threadId: string,
+    cursor?: { readonly afterSeq?: number; readonly signal?: AbortSignal }
+  ): AsyncIterable<DocumentExecutionEvent>;
   events(
     threadId: string,
     cursor?: StudioEventCursor
@@ -125,12 +140,14 @@ class StudioApplicationImpl implements StudioApplication {
   private readonly _generateId: (prefix: string) => string;
   private readonly _waiters = new Map<string, Set<() => void>>();
   private _closed = false;
+  private readonly _engine: DocumentExecutionEngine;
 
   constructor(private readonly _options: CreateStudioApplicationOptions) {
     this._clock = _options.clock ?? Date.now;
     this._generateId =
       _options.generateId ??
       ((prefix) => `${prefix}_${crypto.randomUUID().replaceAll("-", "")}`);
+    this._engine = new DocumentExecutionEngine(_options.runtime);
   }
 
   /** Creates one Project Experiment backed by one authoritative Pi Session. */
@@ -156,7 +173,12 @@ class StudioApplicationImpl implements StudioApplication {
       createdAt: now,
       updatedAt: now,
     };
-    this._options.store.transaction((tx) => tx.insertExperiment(experiment));
+    try {
+      this._options.store.transaction((tx) => tx.insertExperiment(experiment));
+    } catch (error) {
+      await this._options.runtime.rollbackSession(session.sessionId);
+      throw error;
+    }
     return this._composeThread(experiment, session);
   }
 
@@ -360,26 +382,30 @@ class StudioApplicationImpl implements StudioApplication {
       createdAt: now,
       updatedAt: now,
     };
-    this._options.store.transaction((tx) => {
-      tx.insertExperiment(experiment);
-      const references = tx.listOperationReferences(threadId);
-      const inherited =
-        input.entryId === undefined
-          ? references
-          : references.slice(
-              0,
-              references.findIndex(
-                (reference) => reference.leafId === input.entryId
-              ) + 1
-            );
-      tx.replaceOperationReferences(
-        experiment.id,
-        inherited.map((reference) => ({
-          ...reference,
-          relation: "inherited",
-        }))
-      );
-    });
+    try {
+      this._options.store.transaction((tx) => {
+        tx.insertExperiment(experiment);
+        const references = tx.listOperationReferences(threadId);
+        const inherited =
+          input.entryId === undefined
+            ? references
+            : references.slice(
+                0,
+                references.findIndex(
+                  (reference) => reference.leafId === input.entryId
+                ) + 1
+              );
+        tx.replaceOperationReferences(
+          experiment.id,
+          inherited.map((reference) => ({
+            ...reference,
+            relation: "inherited",
+          }))
+        );
+      });
+    } catch (error) {
+      await _rollbackSession(this._options.runtime, fork.sessionId, error);
+    }
     return this._composeThread(experiment, fork);
   }
 
@@ -412,22 +438,11 @@ class StudioApplicationImpl implements StudioApplication {
     this._requireOpen();
     let experiment = this._requireExperiment(threadId);
     const admission = await resolveOperationAdmission({
-      store: this._options.store,
-      runtime: this._options.runtime,
-      productId: threadId,
-      productLabel: `Studio Thread "${threadId}"`,
+      engine: this._engine,
       sessionId: experiment.sessionId,
       lane: experiment.lane,
-      commandId: input.commandId,
-      commandInput: input,
-      mode: input.mode,
+      generateOperationId: () => this._generateId("operation"),
     });
-    if (admission.kind === "receipt") {
-      return {
-        sessionId: experiment.sessionId,
-        operationId: admission.operationId,
-      };
-    }
     const operationId = admission.operationId;
     const current = admission.snapshot;
     if (admission.kind === "recover") {
@@ -439,22 +454,17 @@ class StudioApplicationImpl implements StudioApplication {
       return this._driveAdmittedOperation(threadId, experiment, current, input);
     }
     const view = await this._composeThread(experiment, current);
-    const messages = view.document.conversation.messages;
-    const inputIndex = messages.findIndex(
-      (message) => message.id === input.fromMessageId
-    );
-    const inputMessage = messages[inputIndex];
+    const messages = input.messages;
+    const inputMessage = messages.at(-1);
     if (inputMessage?.role !== "user") {
-      throw new Error(
-        `Studio operation input "${input.fromMessageId}" must be a user Message.`
-      );
+      throw new Error("Studio operation input must end in a user Message.");
     }
     const prepared = await this._prepareSession(experiment, {
-      messages: messages.slice(0, inputIndex),
+      messages: messages.slice(0, -1),
       state: structuredClone(view.document.conversation.state),
     });
     experiment = prepared.experiment;
-    const operationMessages = coreMessagesToPi(
+    const operationInput = coreMessagesToPiInput(
       [...prepared.baseMessages, inputMessage],
       _runtimeBinding(view.document.agent).model,
       this._clock()
@@ -462,7 +472,7 @@ class StudioApplicationImpl implements StudioApplication {
     const currentAgent = await this._options.resolveCurrentAgent({
       sessionId: experiment.sessionId,
       operationId,
-      messages: operationMessages,
+      messages: operationInput.messages,
     });
     const effectiveAgent: StudioAgentSnapshot = {
       ...structuredClone(currentAgent.snapshot),
@@ -470,11 +480,12 @@ class StudioApplicationImpl implements StudioApplication {
         ? {}
         : { model: input.modelOverride }),
     };
-    const snapshot = await this._options.runtime.start({
+    const snapshot = await this._engine.admit({
       operationId,
       sessionId: experiment.sessionId,
       lane: experiment.lane,
-      messages: operationMessages,
+      messages: operationInput.messages,
+      messageIds: operationInput.messageIds,
       binding: _runtimeBinding(effectiveAgent, currentAgent.skills),
     });
     const { draft: _consumedDraft, ...committedExperiment } = experiment;
@@ -515,24 +526,27 @@ class StudioApplicationImpl implements StudioApplication {
     initial: PiSessionSnapshot,
     input: StudioRunInput
   ): Promise<StudioRunReceipt> {
+    if (input.mode === undefined) {
+      const operationId = initial.operationId;
+      if (operationId === undefined) {
+        throw new Error("Admitted Studio operation has no identity.");
+      }
+      await this._recordSnapshot(threadId, initial);
+      return { sessionId: experiment.sessionId, operationId };
+    }
     const { operationId, snapshot } = await driveAdmittedOperation({
-      store: this._options.store,
-      runtime: this._options.runtime,
-      productId: threadId,
+      engine: this._engine,
       sessionId: experiment.sessionId,
       lane: experiment.lane,
       initial,
-      commandId: input.commandId,
-      commandInput: input,
       mode: input.mode,
       signal: input.signal,
-      clock: this._clock,
     });
     await this._recordSnapshot(threadId, snapshot);
     return { sessionId: experiment.sessionId, operationId };
   }
 
-  /** Rebuilds missing Studio metadata from Pi's immutable operation binding. */
+  /** Repairs product metadata from Pi's immutable binding after commit interruption. */
   private async _reconcileAdmittedOperation(
     threadId: string,
     experiment: StudioExperimentRecord,
@@ -584,28 +598,31 @@ class StudioApplicationImpl implements StudioApplication {
   ): Promise<StudioRunReceipt> {
     this._requireOpen();
     const owner = this._requireOperation(threadId, operationId);
-    const snapshot = await executeDebugCommand({
-      store: this._options.store,
+    const snapshot = await this._engine.step({
       sessionId: owner.reference.sessionId,
+      lane: owner.reference.lane,
       operationId,
-      commandId: input.commandId,
-      method: "step",
-      input,
-      clock: this._clock,
-      readCurrent: () =>
-        this._options.runtime.open({
-          sessionId: owner.reference.sessionId,
-          lane: owner.reference.lane,
-        }),
-      needsExecution: (current) =>
-        current.nextAction?.id === input.expectedActionId,
-      execute: () =>
-        this._options.runtime.step({
-          sessionId: owner.reference.sessionId,
-          lane: owner.reference.lane,
-          expectedActionId: input.expectedActionId,
-          kind: input.kind,
-        }),
+      expectedActionId: input.expectedActionId,
+      kind: input.kind,
+    });
+    await this._recordSnapshot(owner.threadId, snapshot);
+    return { sessionId: owner.reference.sessionId, operationId };
+  }
+
+  /** Runs one model action and its immediately following tool actions. */
+  async turnRun(
+    threadId: string,
+    operationId: string,
+    input: StudioTurnRunInput
+  ): Promise<StudioRunReceipt> {
+    this._requireOpen();
+    const owner = this._requireOperation(threadId, operationId);
+    const snapshot = await this._engine.turn({
+      sessionId: owner.reference.sessionId,
+      lane: owner.reference.lane,
+      operationId,
+      expectedActionId: input.expectedActionId,
+      kind: input.kind,
     });
     await this._recordSnapshot(owner.threadId, snapshot);
     return { sessionId: owner.reference.sessionId, operationId };
@@ -615,29 +632,16 @@ class StudioApplicationImpl implements StudioApplication {
   async continueRun(
     threadId: string,
     operationId: string,
-    input: StudioContinueInput
+    _input: StudioContinueInput
   ): Promise<StudioRunReceipt> {
+    void _input;
     this._requireOpen();
     const owner = this._requireOperation(threadId, operationId);
-    const snapshot = await executeDebugCommand({
-      store: this._options.store,
+    const snapshot = await this._engine.drive({
       sessionId: owner.reference.sessionId,
+      lane: owner.reference.lane,
       operationId,
-      commandId: input.commandId,
-      method: "continue",
-      input,
-      clock: this._clock,
-      readCurrent: () =>
-        this._options.runtime.open({
-          sessionId: owner.reference.sessionId,
-          lane: owner.reference.lane,
-        }),
-      needsExecution: (current) => current.status === "paused",
-      execute: () =>
-        this._options.runtime.continue({
-          sessionId: owner.reference.sessionId,
-          lane: owner.reference.lane,
-        }),
+      mode: "continue",
     });
     await this._recordSnapshot(owner.threadId, snapshot);
     return { sessionId: owner.reference.sessionId, operationId };
@@ -651,7 +655,7 @@ class StudioApplicationImpl implements StudioApplication {
   ): Promise<StudioRunReceipt> {
     this._requireOpen();
     const owner = this._requireOperation(threadId, operationId);
-    const snapshot = await this._options.runtime.resolveToolApproval({
+    const snapshot = await this._engine.resolveToolPermission({
       sessionId: owner.reference.sessionId,
       lane: owner.reference.lane,
       toolCallId: input.toolCallId,
@@ -665,7 +669,7 @@ class StudioApplicationImpl implements StudioApplication {
   async cancelRun(threadId: string, operationId: string): Promise<void> {
     this._requireOpen();
     const owner = this._requireOperation(threadId, operationId);
-    const snapshot = await this._options.runtime.abort({
+    const snapshot = await this._engine.cancel({
       sessionId: owner.reference.sessionId,
       lane: owner.reference.lane,
     });
@@ -677,7 +681,7 @@ class StudioApplicationImpl implements StudioApplication {
     this._requireOpen();
     const experiment = this._requireExperiment(threadId);
     const cancelled = await cancelActiveOperation({
-      runtime: this._options.runtime,
+      engine: this._engine,
       sessionId: experiment.sessionId,
       lane: experiment.lane,
     });
@@ -695,6 +699,41 @@ class StudioApplicationImpl implements StudioApplication {
     return this._options.runtime.open({
       sessionId: owner.reference.sessionId,
       lane: owner.reference.lane,
+    });
+  }
+
+  /** Opens the Experiment-owned Pi Session without trusting renderer state. */
+  async openExecution(threadId: string): Promise<PiSessionSnapshot> {
+    this._requireOpen();
+    const experiment = this._requireExperiment(threadId);
+    return this._engine.open({
+      sessionId: experiment.sessionId,
+      lane: experiment.lane,
+    });
+  }
+
+  /** Reads one replay frame for ACP resume without exposing storage ownership. */
+  async readExecution(threadId: string, afterSeq?: number) {
+    this._requireOpen();
+    const experiment = this._requireExperiment(threadId);
+    return this._engine.readCommitted({
+      sessionId: experiment.sessionId,
+      lane: experiment.lane,
+      ...(afterSeq === undefined ? {} : { afterSeq }),
+    });
+  }
+
+  /** Observes committed replay and ephemeral deltas through the shared Engine. */
+  async *observeExecution(
+    threadId: string,
+    cursor: { readonly afterSeq?: number; readonly signal?: AbortSignal } = {}
+  ): AsyncIterable<DocumentExecutionEvent> {
+    this._requireOpen();
+    const experiment = this._requireExperiment(threadId);
+    yield* this._engine.observe({
+      sessionId: experiment.sessionId,
+      lane: experiment.lane,
+      ...cursor,
     });
   }
 
@@ -810,7 +849,15 @@ class StudioApplicationImpl implements StudioApplication {
       draft: desiredBase,
       updatedAt: this._clock(),
     };
-    this._options.store.transaction((tx) => tx.saveExperiment(next));
+    try {
+      this._options.store.transaction((tx) => tx.saveExperiment(next));
+    } catch (error) {
+      await _rollbackSession(
+        this._options.runtime,
+        replacement.sessionId,
+        error
+      );
+    }
     return {
       experiment: next,
       baseMessages: exactPrefix ? [] : desiredBase.messages,
@@ -935,6 +982,27 @@ class StudioApplicationImpl implements StudioApplication {
   private _requireOpen(): void {
     if (this._closed) throw new Error("Studio application is closed.");
   }
+}
+
+async function _rollbackSession(
+  runtime: DurablePiRuntime,
+  sessionId: string,
+  failure: unknown
+): Promise<never> {
+  try {
+    await runtime.rollbackSession(sessionId);
+  } catch (rollbackFailure) {
+    throw new AggregateError(
+      [failure, rollbackFailure],
+      `Failed to roll back Pi Session "${sessionId}" after Studio metadata rejected it.`,
+      { cause: rollbackFailure }
+    );
+  }
+  throw failure instanceof Error
+    ? failure
+    : new Error("Studio metadata rejected a newly created Pi Session.", {
+        cause: failure,
+      });
 }
 
 /** Freezes current source, model, prompt, and tool identities for one Pi operation. */

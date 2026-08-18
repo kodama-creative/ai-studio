@@ -1,20 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
-import type { AgentEvent } from "@earendil-works/pi-agent-core";
-import type {
-  AgentStreamRequest,
-  AgentTransport,
-  ProviderHostedTool,
-  Thread,
-} from "@llm-space/core";
+import type { ProviderHostedTool, Thread } from "@llm-space/core";
 
 import { createThreadStore } from "../../../../src/components/thread-playground/stores";
-
-globalThis.requestAnimationFrame = (callback: FrameRequestCallback): number =>
-  setTimeout(() => callback(performance.now()), 0) as unknown as number;
-globalThis.cancelAnimationFrame = (handle: number): void => {
-  clearTimeout(handle);
-};
 
 const INVALID_THREAD: Thread = {
   context: {
@@ -36,13 +24,8 @@ const INVALID_THREAD: Thread = {
 
 describe("inline run validation", () => {
   test("scopes feedback to the blocking message", async () => {
-    let transportCalls = 0;
     const store = createThreadStore(INVALID_THREAD, {
       resolveModel: (saved) => saved ?? null,
-      transport: () => {
-        transportCalls += 1;
-        throw new Error("Transport should not run for invalid input");
-      },
     });
 
     await store.getState().run();
@@ -53,7 +36,6 @@ describe("inline run validation", () => {
       messageId: "assistant-one",
       resolution: { type: "appendUserMessage" },
     });
-    expect(transportCalls).toBe(0);
 
     store.getState().updateMessageTextContent("assistant-one", "Edited answer");
     expect(store.getState().runValidationIssue?.messageId).toBe(
@@ -72,9 +54,6 @@ describe("inline run validation", () => {
   test("clears feedback when the blocking role becomes runnable", async () => {
     const store = createThreadStore(INVALID_THREAD, {
       resolveModel: (saved) => saved ?? null,
-      transport: () => {
-        throw new Error("Transport should not run for invalid input");
-      },
     });
 
     await store.getState().run();
@@ -117,78 +96,4 @@ describe("provider-hosted tools", () => {
     ]);
   });
 
-  test("forwards provider-hosted config and retains an activity-only final message", async () => {
-    let capturedRequest: AgentStreamRequest | undefined;
-    const finalAssistant = {
-        role: "assistant",
-        content: [],
-        nativeToolActivities: [
-          {
-            id: "ws_1",
-            type: "web_search_call",
-            status: "completed",
-            raw: { id: "ws_1", type: "web_search_call" },
-          },
-        ],
-        responseOutputItems: [{ id: "ws_1", type: "web_search_call" }],
-        api: "openai-responses",
-        provider: "openai",
-        model: "gpt-test",
-        usage: {
-          input: 1,
-          output: 0,
-          cacheRead: 0,
-          cacheWrite: 0,
-          totalTokens: 1,
-          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-        },
-        stopReason: "stop",
-        timestamp: Date.now(),
-      } as const;
-    const events = [
-      {
-        type: "message_start",
-        message: finalAssistant,
-      } as unknown as AgentEvent,
-      {
-        type: "message_end",
-        message: finalAssistant,
-      } as unknown as AgentEvent,
-    ];
-    const transport: AgentTransport = async function* (request) {
-      capturedRequest = request;
-      await new Promise<void>((resolve) => queueMicrotask(resolve));
-      yield* events;
-    };
-    const store = createThreadStore(
-      {
-        model: { id: "gpt-test", provider: "openai" },
-        context: {
-          tools: [providerHostedTool],
-          messages: [
-            {
-              id: "user-1",
-              role: "user",
-              content: [{ type: "text", text: "Search" }],
-            },
-          ],
-        },
-      },
-      {
-        resolveModel: (saved) => saved ?? null,
-        transport,
-      }
-    );
-
-    await store.getState().run();
-
-    expect(capturedRequest?.context.responseApiNativeTools).toEqual([
-      providerHostedTool.config,
-    ]);
-    const assistant = store.getState().thread.context?.messages?.at(-1);
-    expect(assistant?.role).toBe("assistant");
-    if (assistant?.role !== "assistant") throw new Error("Expected assistant");
-    expect(assistant.providerHostedToolActivities).toHaveLength(1);
-    expect(assistant.responseOutputItems).toHaveLength(1);
-  });
 });

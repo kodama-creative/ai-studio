@@ -108,8 +108,7 @@ test("a new Run reloads dirty current source instead of requiring a clean commit
   });
 
   const receipt = await studio.run(saved.id, {
-    fromMessageId: "user-current-source",
-    commandId: "continue-current-source",
+    messages: saved.document.conversation.messages,
     mode: "continue",
   });
   expect(await _terminalEvent(studio, saved.id, receipt.operationId)).toBe(
@@ -175,8 +174,7 @@ test("a source-defined Agent tool executes inside one continued Studio Run", asy
   });
 
   const receipt = await studio.run(saved.id, {
-    fromMessageId: "user-tool",
-    commandId: "continue-tool-loop",
+    messages: saved.document.conversation.messages,
     mode: "continue",
   });
   expect(await _terminalEvent(studio, saved.id, receipt.operationId)).toBe(
@@ -269,8 +267,7 @@ test("load_skill uses the Skill set frozen for the Studio operation", async () =
   });
 
   const receipt = await studio.run(saved.id, {
-    fromMessageId: "user-skill",
-    commandId: "start-skill",
+    messages: saved.document.conversation.messages,
     mode: "step",
   });
   await rm(skillPath);
@@ -280,7 +277,6 @@ test("load_skill uses the Skill set frozen for the Studio operation", async () =
   }
   expect(paused.nextAction).toMatchObject({ kind: "tool" });
   await studio.stepRun(saved.id, receipt.operationId, {
-    commandId: "load-frozen-skill",
     expectedActionId: paused.nextAction.id,
     kind: "tool",
   });
@@ -372,14 +368,12 @@ test("ToolContext uses the Agent identity frozen for the current operation", asy
   });
 
   const receipt = await studio.run(saved.id, {
-    fromMessageId: "user-agent-id",
-    commandId: "frozen-agent-id",
+    messages: saved.document.conversation.messages,
     mode: "step",
   });
   const paused = await studio.inspectRun(saved.id, receipt.operationId);
   if (paused.nextAction === undefined) throw new Error("Expected tool action.");
   await studio.stepRun(saved.id, receipt.operationId, {
-    commandId: "execute-sandbox-id",
     expectedActionId: paused.nextAction.id,
     kind: "tool",
   });

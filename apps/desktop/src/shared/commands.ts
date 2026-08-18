@@ -49,7 +49,7 @@ export interface ImportFilePayload {
 }
 
 /**
- * Import portable Thread Snapshot files as durable Playgrounds. When `files`
+ * Import ACP Shared Document files as new durable Playgrounds. When `files`
  * is absent the renderer opens its hidden picker; native menu actions fill
  * `files` from the OS dialog.
  */

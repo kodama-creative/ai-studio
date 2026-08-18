@@ -169,23 +169,23 @@ test("rejects a foreign Task before admitting a Pi operation", async () => {
   }
 });
 
-test("reconciles a stable Session id after App metadata insertion fails", async () => {
+test("rolls back a new Pi Session when App metadata insertion fails", async () => {
   const store = new FailOnceSessionInsertStore();
   const fixture = await _fixture("memory", store);
   try {
     const input = { sessionId: "stable-session", name: "Stable" } as const;
     const failure = await _captureError(() => fixture.app.createSession(input));
     expect(failure).toBeInstanceOf(Error);
-    expect((await fixture.runtime.open({ sessionId: input.sessionId })).status).toBe(
-      "idle"
-    );
+    expect(
+      fixture.runtime.open({ sessionId: input.sessionId })
+    ).rejects.toThrow(`Session "${input.sessionId}" was not found.`);
 
-    const reconciled = await fixture.app.createSession(input);
-    expect(reconciled).toMatchObject({
+    const created = await fixture.app.createSession(input);
+    expect(created).toMatchObject({
       sessionId: input.sessionId,
       name: input.name,
     });
-    expect(reconciled).not.toHaveProperty("operationId");
+    expect(created).not.toHaveProperty("operationId");
     expect(await fixture.app.listSessions()).toHaveLength(1);
   } finally {
     await fixture.close();
@@ -211,40 +211,7 @@ test("completed operations are not exposed or aborted as active work", async () 
   }
 });
 
-test("reconciles an applied debugger Step when receipt finalization failed", async () => {
-  const store = new FailOnceReceiptSaveStore();
-  const fixture = await _fixture("memory", store);
-  try {
-    const session = await fixture.app.createSession();
-    const admitted = await fixture.runtime.start({
-      sessionId: session.sessionId,
-      operationId: "debug-operation",
-      messages: [{ role: "user", content: "hello", timestamp: 1 }],
-      binding: BINDING,
-    });
-    const action = admitted.nextAction!;
-    const command = {
-      sessionId: session.sessionId,
-      commandId: "debug-command",
-      expectedActionId: action.id,
-      kind: action.kind,
-    } as const;
-
-    const failure = await _captureError(() => fixture.app.step(command));
-    expect(failure).toBeInstanceOf(Error);
-    const recovered = await fixture.app.step(command);
-    expect(recovered.status).toBe("completed");
-    const conflict = await _captureError(() =>
-      fixture.app.step({ ...command, expectedActionId: "other-action" })
-    );
-    expect(conflict).toBeInstanceOf(Error);
-    expect(String(conflict)).toContain("already used with other input");
-  } finally {
-    await fixture.close();
-  }
-});
-
-test("replays App metadata after an applied debugger receipt survives a crash", async () => {
+test("replays App metadata from Pi semantic identity after projection fails", async () => {
   let now = 100;
   const store = new FailOnceSessionSaveStore();
   const fixture = await _fixture("memory", store, () => now);
@@ -270,7 +237,6 @@ test("replays App metadata after an applied debugger receipt survives a crash", 
     const action = admitted.nextAction!;
     const command = {
       sessionId: session.sessionId,
-      commandId: "metadata-recovery",
       expectedActionId: action.id,
       kind: action.kind,
     } as const;
@@ -308,6 +274,19 @@ test("rejects Pi Sessions that are not owned by App metadata", async () => {
     );
     expect(error).toBeInstanceOf(Error);
     expect(String(error)).toContain('Session "pi-only" was not found');
+  } finally {
+    await fixture.close();
+  }
+});
+
+test("does not adopt a pre-existing Pi Session during App creation", async () => {
+  const fixture = await _fixture("memory");
+  try {
+    await fixture.runtime.createSession({ id: "pi-only-create" });
+    expect(
+      fixture.app.createSession({ sessionId: "pi-only-create" })
+    ).rejects.toThrow();
+    expect(await fixture.app.getSession("pi-only-create")).toBeUndefined();
   } finally {
     await fixture.close();
   }
@@ -365,20 +344,6 @@ class FailOnceSessionInsertStore extends InMemoryApplicationStore {
       throw new Error("simulated App metadata failure");
     }
     super.insertSession(session);
-  }
-}
-
-class FailOnceReceiptSaveStore extends InMemoryApplicationStore {
-  private _fail = true;
-
-  override saveCommandReceipt(
-    receipt: Parameters<InMemoryApplicationStore["saveCommandReceipt"]>[0]
-  ): void {
-    if (this._fail) {
-      this._fail = false;
-      throw new Error("simulated receipt finalization failure");
-    }
-    super.saveCommandReceipt(receipt);
   }
 }
 

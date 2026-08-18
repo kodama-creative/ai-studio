@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 
-import type { PiAcpSessionBackend } from "@llm-space/acp";
+import type { PiAcpSessionBackend } from "@llm-space/acp/server";
 import type { Agent } from "@llm-space/app/server";
 
 /** Adapts the product-owned Agent API at the CLI's official ACP boundary. */
@@ -44,23 +44,16 @@ export function createAgentAcpBackend(
     },
     inspect: (request) => agent.readCommitted(request),
     async prompt(input) {
-      const controls = input.meta?.["llm-space.dev"];
-      const mode =
-        typeof controls === "object" &&
-        controls !== null &&
-        !Array.isArray(controls) &&
-        (controls as Record<string, unknown>).mode === "step"
-          ? "step"
-          : "continue";
       return (
         await agent.exec(input.sessionId, {
           messages: input.messages,
-          mode,
+          mode: input.driveMode,
           signal: input.signal,
         })
       ).snapshot;
     },
     step: (input) => agent.step(input),
+    turn: (input) => agent.turn(input),
     continue: (input) => agent.continue(input),
     async abort(input) {
       await agent.abort(input.sessionId);

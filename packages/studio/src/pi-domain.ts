@@ -52,14 +52,13 @@ export interface StudioOperationReceipt {
 }
 
 export interface StudioStepInput {
-  readonly commandId: string;
   readonly expectedActionId: string;
   readonly kind: "model" | "tool";
 }
 
-export interface StudioContinueInput {
-  readonly commandId: string;
-}
+export type StudioTurnInput = StudioStepInput;
+
+export type StudioContinueInput = Readonly<Record<never, never>>;
 
 export interface StudioToolApprovalInput {
   readonly toolCallId: string;

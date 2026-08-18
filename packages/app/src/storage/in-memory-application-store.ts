@@ -1,8 +1,4 @@
-import type {
-  AppCommandReceipt,
-  AppSessionRecord,
-  Task,
-} from "../domain";
+import type { AppSessionRecord, Task } from "../domain";
 
 import type {
   ApplicationStore,
@@ -13,21 +9,17 @@ import type {
 export class InMemoryApplicationStore implements ApplicationStore {
   private readonly _sessions = new Map<string, AppSessionRecord>();
   private readonly _tasks = new Map<string, Task>();
-  private readonly _receipts = new Map<string, AppCommandReceipt>();
 
   transaction<T>(fn: (tx: ApplicationStoreTransaction) => T): T {
     const sessions = structuredClone(this._sessions);
     const tasks = structuredClone(this._tasks);
-    const receipts = structuredClone(this._receipts);
     try {
       return fn(this);
     } catch (error) {
       this._sessions.clear();
       this._tasks.clear();
-      this._receipts.clear();
       for (const [key, value] of sessions) this._sessions.set(key, value);
       for (const [key, value] of tasks) this._tasks.set(key, value);
-      for (const [key, value] of receipts) this._receipts.set(key, value);
       throw error;
     }
   }
@@ -81,36 +73,9 @@ export class InMemoryApplicationStore implements ApplicationStore {
     this._tasks.set(task.id, structuredClone(task));
   }
 
-  getCommandReceipt(
-    sessionId: string,
-    commandId: string
-  ): AppCommandReceipt | undefined {
-    return _clone(this._receipts.get(_receiptKey(sessionId, commandId)));
-  }
-
-  insertCommandReceipt(receipt: AppCommandReceipt): void {
-    const key = _receiptKey(receipt.sessionId, receipt.commandId);
-    if (this._receipts.has(key)) {
-      throw new Error(`Command "${receipt.commandId}" already exists.`);
-    }
-    this._receipts.set(key, structuredClone(receipt));
-  }
-
-  saveCommandReceipt(receipt: AppCommandReceipt): void {
-    const key = _receiptKey(receipt.sessionId, receipt.commandId);
-    if (!this._receipts.has(key)) {
-      throw new Error(`Command "${receipt.commandId}" was not found.`);
-    }
-    this._receipts.set(key, structuredClone(receipt));
-  }
-
   close(): void {
     // In-memory metadata owns no external resources.
   }
-}
-
-function _receiptKey(sessionId: string, commandId: string): string {
-  return `${sessionId}\0${commandId}`;
 }
 
 function _clone<T>(value: T | undefined): T | undefined {

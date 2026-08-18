@@ -56,14 +56,26 @@ export class RuntimeBindingResolutionError extends Error {
 /** Stores LLM Space runtime snapshots next to, but outside, Pi-owned tables. */
 export class BunSqliteRuntimeBindingStore {
   private readonly _database: Database;
+  private readonly _ownsDatabase: boolean;
 
-  constructor(options: { readonly path: string }) {
-    if (options.path !== ":memory:") {
+  constructor(options: {
+    readonly path?: string;
+    readonly database?: Database;
+  }) {
+    if (options.database !== undefined && options.path !== undefined) {
+      throw new Error("Provide either a SQLite path or database, not both.");
+    }
+    if (options.database === undefined && options.path === undefined) {
+      throw new Error("A SQLite path or database is required.");
+    }
+    if (options.path !== undefined && options.path !== ":memory:") {
       mkdirSync(dirname(options.path), { recursive: true, mode: 0o700 });
     }
-    this._database = new Database(options.path, { create: true });
+    this._ownsDatabase = options.database === undefined;
+    this._database =
+      options.database ?? new Database(options.path, { create: true });
     this._database.run("PRAGMA busy_timeout = 5000");
-    if (options.path !== ":memory:") {
+    if (this._database.filename !== ":memory:") {
       this._database.run("PRAGMA journal_mode = WAL");
       this._database.run("PRAGMA synchronous = NORMAL");
     }
@@ -166,7 +178,7 @@ export class BunSqliteRuntimeBindingStore {
 
   /** Closes only this binding-store connection; the shared database remains. */
   close(): void {
-    this._database.close();
+    if (this._ownsDatabase) this._database.close();
   }
 }
 

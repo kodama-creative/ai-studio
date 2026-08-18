@@ -11,12 +11,11 @@ import {
   methods,
   type PiAcpContinueRequest,
   type PiAcpDebugResponse,
-  type PiAcpMutationRequest,
   type PiAcpSessionBackend,
   type PiAcpSnapshotRequest,
   type PiAcpStepRequest,
   type UpdateSessionNotification,
-} from "./index";
+} from "./server/index";
 
 test("serves ACP v2 lifecycle and negotiated debugger methods in process", async () => {
   const backend = new FakePiAcpSessionBackend();
@@ -61,7 +60,6 @@ test("serves ACP v2 lifecycle and negotiated debugger methods in process", async
     const stepRequest = {
       sessionId: "session-1",
       afterSeq: snapshot.cursor,
-      commandId: "command-step-1",
       expectedActionId: "run-1:model:1",
       kind: "model" as const,
     };
@@ -90,96 +88,10 @@ test("serves ACP v2 lifecycle and negotiated debugger methods in process", async
     >(LLM_SPACE_ACP_METHODS.continue, {
       sessionId: "session-1",
       afterSeq: stepped.cursor,
-      commandId: "command-continue-1",
     });
     expect(continued.snapshot.status).toBe("completed");
     expect(backend.continueCalls).toBe(1);
   });
-});
-
-test("reconciles debugger command retries across ACP app restarts", async () => {
-  const backend = new FakePiAcpSessionBackend();
-  const request = {
-    sessionId: "session-1",
-    afterSeq: 0,
-    commandId: "durable-step-command",
-    expectedActionId: "run-1:model:1",
-    kind: "model" as const,
-  };
-  let committed!: PiAcpDebugResponse;
-  await client({ name: "first-client" }).connectWith(
-    createPiAcpAgent({ backend, version: "4.0.1" }),
-    async (agent) => {
-      await agent.request(methods.agent.session.new, { cwd: "/workspace" });
-      committed = await agent.request<PiAcpDebugResponse, PiAcpStepRequest>(
-        LLM_SPACE_ACP_METHODS.step,
-        request
-      );
-    }
-  );
-
-  await client({ name: "restarted-client" }).connectWith(
-    createPiAcpAgent({ backend, version: "4.0.1" }),
-    async (agent) => {
-      expect(
-        await agent.request<PiAcpDebugResponse, PiAcpStepRequest>(
-          LLM_SPACE_ACP_METHODS.step,
-          request
-        )
-      ).toEqual(committed);
-      expect(backend.stepCalls).toBe(1);
-      expect(
-        await _rejectionOf(
-          agent.request<PiAcpDebugResponse, PiAcpStepRequest>(
-            LLM_SPACE_ACP_METHODS.step,
-            {
-              ...request,
-              expectedActionId: "another-action",
-            }
-          )
-        )
-      ).toBeDefined();
-    }
-  );
-});
-
-test("coalesces concurrent debugger retries and retries failed commands", async () => {
-  const backend = new FakePiAcpSessionBackend();
-  const app = createPiAcpAgent({ backend, version: "4.0.1" });
-  const request = {
-    sessionId: "session-1",
-    afterSeq: 0,
-    commandId: "concurrent-step-command",
-    expectedActionId: "run-1:model:1",
-    kind: "model" as const,
-  };
-
-  await client({ name: "concurrent-client" }).connectWith(
-    app,
-    async (agent) => {
-      await agent.request(methods.agent.session.new, { cwd: "/workspace" });
-      const release = backend.holdNextStep();
-      const first = agent.request(LLM_SPACE_ACP_METHODS.step, request);
-      await backend.waitForStep();
-      const second = agent.request(LLM_SPACE_ACP_METHODS.step, request);
-      release();
-      const [left, right] = await Promise.all([first, second]);
-      expect(right).toEqual(left);
-      expect(backend.stepInvocations).toBe(1);
-      expect(backend.stepCalls).toBe(1);
-
-      backend.resetPaused();
-      backend.failNextStep();
-      const retryable = { ...request, commandId: "retryable-command" };
-      expect(
-        await _rejectionOf(agent.request(LLM_SPACE_ACP_METHODS.step, retryable))
-      ).toBeDefined();
-      expect(
-        await agent.request(LLM_SPACE_ACP_METHODS.step, retryable)
-      ).toMatchObject({ snapshot: { status: "completed" } });
-      expect(backend.stepCalls).toBe(3);
-    }
-  );
 });
 
 test("accepts standard v2 prompt before background Pi execution completes", async () => {
@@ -258,7 +170,6 @@ test("reconnects after an ACP transport gap from the last Pi cursor", async () =
   await (backend as PiAcpSessionBackend).step({
     sessionId: "session-1",
     afterSeq: cursor,
-    commandId: "command-disconnected-step",
     expectedActionId: "run-1:model:1",
     kind: "model",
   });
@@ -280,6 +191,7 @@ test("reconnects after an ACP transport gap from the last Pi cursor", async () =
       sessionUpdate: "agent_message",
       messageId: "assistant-entry",
       content: [{ type: "text", text: "Done" }],
+      _meta: { "llm-space.dev": { usage: assistantUsage() } },
     });
     expect(replayed.snapshot.status).toBe("completed");
   });
@@ -385,6 +297,7 @@ test("continues an accepted Pi prompt after transport disconnect and replays it"
         sessionUpdate: "agent_message",
         messageId: "assistant-entry",
         content: [{ type: "text", text: "Done" }],
+        _meta: { "llm-space.dev": { usage: assistantUsage() } },
       });
     }
   );
@@ -392,18 +305,8 @@ test("continues an accepted Pi prompt after transport disconnect and replays it"
 
 class FakePiAcpSessionBackend implements PiAcpSessionBackend {
   stepCalls = 0;
-  stepInvocations = 0;
   continueCalls = 0;
   promptCalls: AgentMessage[][] = [];
-  private _failStep = false;
-  private _stepStarted!: () => void;
-  private _stepStartedPromise = Promise.resolve();
-  private _stepRelease?: Promise<void>;
-  private _releaseStep?: () => void;
-  private readonly _debugCommands = new Map<
-    string,
-    Map<string, { fingerprint: string; response: Promise<PiSessionSnapshot> }>
-  >();
   private _promptResolve!: () => void;
   private readonly _promptSettled = new Promise<void>((resolve) => {
     this._promptResolve = resolve;
@@ -456,28 +359,24 @@ class FakePiAcpSessionBackend implements PiAcpSessionBackend {
     return this._snapshot;
   }
 
-  step(input: PiAcpStepRequest): Promise<PiSessionSnapshot> {
-    this.stepInvocations += 1;
-    return this._runDebugCommand("step", input, async () => {
-      this.stepCalls += 1;
-      this._stepStarted?.();
-      await this._stepRelease;
-      this._stepRelease = undefined;
-      this._releaseStep = undefined;
-      if (this._failStep) {
-        this._failStep = false;
-        throw new Error("fake step failure");
-      }
-      this._complete();
-      return this._snapshot;
-    });
+  step(_input: PiAcpStepRequest): Promise<PiSessionSnapshot> {
+    void _input;
+    if (this._snapshot.status === "completed") {
+      return Promise.resolve(this._snapshot);
+    }
+    this.stepCalls += 1;
+    this._complete();
+    return Promise.resolve(this._snapshot);
   }
 
-  continue(input: PiAcpContinueRequest): Promise<PiSessionSnapshot> {
-    return this._runDebugCommand("continue", input, () => {
-      this.continueCalls += 1;
-      return Promise.resolve(this._snapshot);
-    });
+  turn(input: PiAcpStepRequest): Promise<PiSessionSnapshot> {
+    return this.step(input);
+  }
+
+  continue(_input: PiAcpContinueRequest): Promise<PiSessionSnapshot> {
+    void _input;
+    this.continueCalls += 1;
+    return Promise.resolve(this._snapshot);
   }
 
   abort(): Promise<PiSessionSnapshot> {
@@ -495,61 +394,6 @@ class FakePiAcpSessionBackend implements PiAcpSessionBackend {
 
   finishPrompt(): void {
     this._promptResolve();
-  }
-
-  holdNextStep(): () => void {
-    this._stepStartedPromise = new Promise<void>((resolve) => {
-      this._stepStarted = resolve;
-    });
-    this._stepRelease = new Promise<void>((resolve) => {
-      this._releaseStep = resolve;
-    });
-    return () => this._releaseStep?.();
-  }
-
-  waitForStep(): Promise<void> {
-    return this._stepStartedPromise;
-  }
-
-  failNextStep(): void {
-    this._failStep = true;
-  }
-
-  resetPaused(): void {
-    this._snapshot = pausedSnapshot();
-    this._log = [];
-  }
-
-  private async _runDebugCommand(
-    method: string,
-    input: PiAcpMutationRequest,
-    execute: () => Promise<PiSessionSnapshot>
-  ): Promise<PiSessionSnapshot> {
-    let sessionCommands = this._debugCommands.get(input.sessionId);
-    const fingerprint = JSON.stringify({ method, input });
-    const existing = sessionCommands?.get(input.commandId);
-    if (existing !== undefined) {
-      if (existing.fingerprint !== fingerprint) {
-        throw new Error(
-          `Command "${input.commandId}" was already used with other input.`
-        );
-      }
-      return existing.response;
-    }
-    if (sessionCommands === undefined) {
-      sessionCommands = new Map();
-      this._debugCommands.set(input.sessionId, sessionCommands);
-    }
-    const response = execute();
-    sessionCommands.set(input.commandId, { fingerprint, response });
-    try {
-      return await response;
-    } catch (error) {
-      if (sessionCommands.get(input.commandId)?.response === response) {
-        sessionCommands.delete(input.commandId);
-      }
-      throw error;
-    }
   }
 
   private _complete(): void {
@@ -599,25 +443,19 @@ function assistantMessage(): AgentMessage {
     api: "openai-responses",
     provider: "openai",
     model: "gpt-5",
-    usage: {
-      input: 1,
-      output: 1,
-      cacheRead: 0,
-      cacheWrite: 0,
-      totalTokens: 2,
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-    },
+    usage: assistantUsage(),
     stopReason: "stop",
     timestamp: 1,
   };
 }
 
-/** Captures a required rejection so Bun tests await the actual async outcome. */
-async function _rejectionOf(promise: Promise<unknown>): Promise<unknown> {
-  try {
-    await promise;
-  } catch (error) {
-    return error;
-  }
-  throw new Error("Expected the promise to reject.");
+function assistantUsage() {
+  return {
+    input: 1,
+    output: 1,
+    cacheRead: 0,
+    cacheWrite: 0,
+    totalTokens: 2,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  };
 }

@@ -1,28 +1,26 @@
 /* eslint-disable @typescript-eslint/unbound-method */
 import {
+  createAcpSessionProjection,
+  reduceAcpSessionNotification,
+  type AcpSessionProjection,
+  type ContentBlock,
+  type UpdateSessionNotification,
+} from "@llm-space/acp/protocol";
+import {
   AssistantMessage,
   getMessageText,
   getToolDisplayName,
   getToolKey,
-  isDangerousBashCommand,
-  isExecutableTool,
+  messagesFromSharedSessionUpdates,
   Message,
   normalizeThread,
-  reduceMessages,
-  streamThread,
   Tool as ToolSchema,
   uuid,
-  type AgentTransport,
-  type AgentEvent,
-  type BuiltinTool,
-  type McpTool,
   type MessageContent,
   type ModelConfig,
   type ModelConfigParams,
-  type ReducedMessageContent,
-  type SkillInfo,
+  type SharedSessionUpdate,
   type Thread,
-  type ThreadContext,
   type ThreadVariable,
   type ThreadVariableVariants,
   type ThreadVariables,
@@ -32,7 +30,6 @@ import {
   type UserMessage,
 } from "@llm-space/core";
 import {
-  aggregateMessageUsage,
   createMessagePromptVariablePlaceKey,
   createToolResultPromptVariablePlaceKey,
   DEFAULT_VARIABLE_VARIANT_NAME,
@@ -43,17 +40,12 @@ import {
   normalizeEvaluations,
   normalizePromptVariableState,
   normalizeRunHistory,
-  PromptVariableError,
-  recordRun,
   removePromptVariableSnapshotNames,
   removePromptVariableSnapshotPlaces,
-  renderThreadPromptVariables,
-  resolveThreadPromptVariableValues,
   replaceThreadPromptVariableReferences,
   SYSTEM_PROMPT_PLACE_KEY,
   upsertEvaluation,
   upsertEvaluationRubric,
-  withPromptVariableSnapshot,
   withRunMetadata,
   type EvaluationRecord,
   type EvaluationRubricInput,
@@ -69,9 +61,6 @@ import { createStore, useStore, type StoreApi } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
 import { useShallow } from "zustand/shallow";
 
-import { createFrameThrottle } from "../../../lib/frame-throttle";
-import { PREVIEW_THROTTLE_MS } from "../streaming-preview";
-
 import { getRunValidationIssue } from "./run-validation";
 import type { RunValidationIssue } from "./run-validation-issue";
 import {
@@ -84,59 +73,47 @@ import {
 
 const toolValidator = Compile(ToolSchema);
 
-/** Default `loadSkills` for hosts with no skills access (e.g. web display-only). */
-const _noSkills = (): Promise<SkillInfo[]> => Promise.resolve([]);
-
-/** Default `loadFile` for hosts with no filesystem (e.g. web display-only). */
-const _noFile = (): Promise<string> => Promise.resolve("");
-const _noFileExists = (): Promise<boolean> => Promise.resolve(false);
-
-/**
- * Upper bound on model turns in a single auto-call-tools run. Each turn is one
- * model call (the server terminates the agent loop after tool calls), so this
- * caps how many times a run will auto-execute tools and continue — a backstop
- * against a model that calls tools without ever settling on an answer.
- */
-const MAX_AUTO_TOOL_TURNS = 50;
+function _asError(value: unknown): Error {
+  return value instanceof Error ? value : new Error(String(value));
+}
 
 export type ThreadStoreStatus = "idle" | "preparing" | "running";
 
-export type ExternalThreadRunEvent =
-  | { readonly type: "thread.updated"; readonly thread: Thread }
-  | { readonly type: "tool.started"; readonly toolCallId: string }
-  | { readonly type: "tool.completed"; readonly toolCallId: string }
-  | {
-      readonly type: "tool.approval.required";
-      readonly toolCallId: string;
-      readonly toolName: string;
-      readonly resumeMode: "step" | "continue";
-    }
-  | {
-      readonly type: "message.delta";
-      readonly message: AssistantMessage;
-    };
-
-export interface ExternalThreadExecutionRuntime {
-  execute(input: {
-    readonly thread: Thread;
-    readonly fromMessageId?: string;
-    readonly autoRunTools: boolean;
-    readonly reactLoop: boolean;
+export interface AcpSessionExecutionRuntime {
+  readonly sessionId: string;
+  updates(input: {
+    readonly afterCursor: number;
     readonly signal: AbortSignal;
-  }): AsyncIterable<ExternalThreadRunEvent>;
-  executeToolCall?(input: {
+  }): AsyncIterable<UpdateSessionNotification>;
+  prompt(input: {
+    readonly prompt: readonly ContentBlock[];
+    readonly fromMessageId: string;
+    readonly mode: "step" | "turn" | "continue";
     readonly thread: Thread;
-    readonly messageId: string;
-    readonly toolCallId: string;
     readonly signal: AbortSignal;
-  }): AsyncIterable<ExternalThreadRunEvent>;
-  resolveToolApproval?(input: {
-    readonly thread: Thread;
+  }): Promise<void>;
+  step(input: AcpRuntimeAction): Promise<void>;
+  turn(input: AcpRuntimeAction): Promise<void>;
+  continue(input: {
+    readonly operationId: string;
+    readonly signal: AbortSignal;
+  }): Promise<void>;
+  requestPermission(input: {
+    readonly operationId: string;
+    readonly expectedActionId: string;
     readonly toolCallId: string;
-    readonly approved: boolean;
+    readonly optionId: "allow_once" | "reject_once";
     readonly resumeMode: "step" | "continue";
     readonly signal: AbortSignal;
-  }): AsyncIterable<ExternalThreadRunEvent>;
+  }): Promise<void>;
+  cancel(): Promise<void>;
+}
+
+export interface AcpRuntimeAction {
+  readonly operationId: string;
+  readonly expectedActionId: string;
+  readonly kind: "model" | "tool";
+  readonly signal: AbortSignal;
 }
 
 export interface PendingToolApproval {
@@ -153,6 +130,8 @@ export interface ThreadRunMetadata {
 
 export interface ThreadState {
   thread: Thread;
+  /** The only execution/transcript state for Pi-backed hosts. */
+  acpSession: AcpSessionProjection | null;
   streamingMessage: AssistantMessage | null;
   status: ThreadStoreStatus;
   abortController: AbortController | null;
@@ -251,9 +230,8 @@ export type ThreadStore = StoreApi<ThreadState>;
 export function createThreadStore(
   initialThread: Thread,
   options: {
-    transport?: AgentTransport;
-    /** Host-owned full-run execution used by Studio/Work interactions. */
-    executionRuntime?: ExternalThreadExecutionRuntime;
+    /** ACP is the only execution protocol for an interactive host. */
+    executionRuntime?: AcpSessionExecutionRuntime;
     /** Persist host-owned Run/Evaluation resources after explicit metadata edits. */
     onRunMetadataChange?: (metadata: ThreadRunMetadata) => void;
     /**
@@ -266,8 +244,6 @@ export function createThreadStore(
     resolveModel?: (
       saved: ModelConfig | null | undefined
     ) => ModelConfig | null;
-    /** Resolve the current tab's ephemeral connection choice for a provider. */
-    getProfileId?: (providerId: string) => string | undefined;
     /**
      * Whether a run should automatically execute a model turn's pending tool
      * calls (instead of waiting for the user to click "Call tools"). Read fresh
@@ -281,40 +257,6 @@ export function createThreadStore(
      * Read fresh at run time. Defaults to `false`.
      */
     getReactLoop?: () => boolean;
-    /**
-     * Execute an MCP or built-in tool call, returning structured model-facing
-     * content. Only used by the auto-run-tools path; manual tool runs go through
-     * the UI's own runner. Injected so the store stays decoupled from the RPC
-     * layer.
-     */
-    executeTool?: (
-      tool: McpTool | BuiltinTool,
-      args: Record<string, unknown>,
-      context: {
-        thread: Thread;
-        variables: Awaited<
-          ReturnType<typeof resolveThreadPromptVariableValues>
-        >;
-      }
-    ) => Promise<{
-      content: ToolCallOutput["content"];
-      isError: boolean;
-    }>;
-    /**
-     * Load the enabled local skills used when rendering prompt variables.
-     * Injected so the store stays decoupled from the skills/RPC layer; defaults
-     * to none (e.g. a display-only web host).
-     */
-    loadSkills?: () => Promise<SkillInfo[]>;
-    /**
-     * Read a file's contents for the prompt `@include` macro. Injected like
-     * `loadSkills`; defaults to none (e.g. a display-only web host).
-     */
-    loadFile?: (path: string) => Promise<string>;
-    /** Test readable-file existence for template `exists(path)` conditions. */
-    fileExists?: (path: string) => Promise<boolean>;
-    /** Monotonic clock used for client-observed model timing. */
-    now?: () => number;
   } = {}
 ): ThreadStore {
   const normalizedInputThread = ensureThreadVariableState(
@@ -568,138 +510,113 @@ export function createThreadStore(
         ...content.filter((c) => c.type !== "image"),
       ];
 
-      const hasContent = (message: AssistantMessage): boolean =>
-        Boolean(message.thinking) ||
-        message.content.length > 0 ||
-        (message.toolCalls?.length ?? 0) > 0 ||
-        (message.providerHostedToolActivities?.length ?? 0) > 0;
-
-      /**
-       * Auto-call the pending tool calls on the last message so a run can loop
-       * without manual intervention. Returns the updated message list when
-       * every trailing tool call was executed (the conversation can stream
-       * again), or `null` when there is nothing to auto-call — no trailing tool
-       * calls, a non-executable (`function`) tool among them, missing executor,
-       * or an abort mid-flight. In the `null` case the loop stops and the user
-       * drives the next step by hand.
-       */
-      const executePendingToolCalls = async (
-        messages: Message[],
-        signal: AbortSignal,
-        runId: string
-      ): Promise<Message[] | null> => {
-        const execute = options.executeTool;
-        if (!execute) {
-          return null;
-        }
-        const last = messages[messages.length - 1];
-        if (last?.role !== "assistant") {
-          return null;
-        }
-        const toolCalls = last.toolCalls ?? [];
-        if (toolCalls.length === 0) {
-          return null;
-        }
-        const toolsByName = new Map(
-          (get().thread.context?.tools ?? [])
-            .filter(isExecutableTool)
-            .map((tool) => [tool.name, tool])
-        );
-        // Every tool call must map to an executable tool; a
-        // single `function` stub means the turn needs a hand-written result, so
-        // we bail and let the user fill it in.
-        const executable: {
-          toolCall: ToolCall;
-          tool: McpTool | BuiltinTool;
-        }[] = [];
-        for (const toolCall of toolCalls) {
-          const tool = toolsByName.get(toolCall.input.name);
-          if (!tool || !isExecutableTool(tool)) {
-            return null;
+      const applyAcpNotification = (
+        notification: UpdateSessionNotification
+      ): void => {
+        const current =
+          get().acpSession ??
+          createAcpSessionProjection(notification.sessionId);
+        const projection = reduceAcpSessionNotification(current, notification);
+        if (
+          notification.update.sessionUpdate === "agent_message_chunk" ||
+          notification.update.sessionUpdate === "agent_thought_chunk"
+        ) {
+          const messageId = notification.update.messageId;
+          if (typeof messageId !== "string" || messageId.length === 0) {
+            throw new Error("ACP message chunk requires a non-empty messageId.");
           }
-          // A destructive `bash` command must never be auto-executed, even under
-          // "auto run tools" or the ReAct loop — treat it like a `terminate`
-          // tool: stop the loop and leave it pending for the user to review and
-          // run by hand.
-          if (tool.type === "builtin" && tool.name === "bash") {
-            const command = (toolCall.input.arguments as { command?: unknown })
-              ?.command;
-            if (
-              typeof command === "string" &&
-              isDangerousBashCommand(command)
-            ) {
-              toast.warning("Auto-run paused for a risky command", {
-                description:
-                  "A bash command looked destructive, so it wasn't run automatically. Review it and run it by hand if it's safe.",
-              });
-              return null;
-            }
-          }
-          executable.push({ toolCall, tool });
+          set({
+            acpSession: projection,
+            streamingMessage: _acpStreamingAssistant(projection, messageId),
+          });
+          return;
         }
-        if (get().activeRunId !== runId) {
-          return null;
-        }
-        const owningThread = structuredClone(get().thread);
-        const variables = {};
-        const invocationContext = { thread: owningThread, variables };
-        if (signal.aborted || get().activeRunId !== runId) {
-          return null;
-        }
+        const thread = _acpProjectionToThread(projection, get().thread);
+        const approval = _acpApproval(projection);
         set({
-          executingToolCallIds: executable.map(({ toolCall }) => toolCall.id),
-        });
-        try {
-          const results = await Promise.all(
-            executable.map(async ({ toolCall, tool }) => {
-              try {
-                const { content, isError } = await execute(
-                  tool,
-                  toolCall.input.arguments,
-                  invocationContext
-                );
-                return {
-                  id: toolCall.id,
-                  content,
-                  isError,
-                };
-              } catch (error) {
-                const text =
-                  error instanceof Error ? error.message : "Tool call failed";
-                return {
-                  id: toolCall.id,
-                  content: [{ type: "text" as const, text }],
-                  isError: true,
-                };
-              }
-            })
-          );
-          // An abort could have landed while tools were in flight; drop the
-          // results and let the run's abort handling take over.
-          if (signal.aborted) {
-            return null;
-          }
-          const resultById = new Map(results.map((r) => [r.id, r]));
-          const nextLast: AssistantMessage = {
-            ...last,
-            toolCalls: toolCalls.map((toolCall) => {
-              const result = resultById.get(toolCall.id)!;
-              return {
-                ...toolCall,
-                output: {
-                  content: result.content,
-                  isError: result.isError,
+          acpSession: projection,
+          thread,
+          ...(projection.state === "running" ? { status: "running" } : {}),
+          streamingMessage: null,
+          executingToolCallIds: projection.toolCallOrder.filter(
+            (id) => projection.toolCalls[id]?.status === "in_progress"
+          ),
+          pendingToolApproval:
+            approval === undefined
+              ? null
+              : {
+                  toolCallId: approval.toolCallId,
+                  toolName: approval.toolName,
+                  resumeMode: "step",
                 },
-              };
-            }),
-          };
-          const next = [...messages.slice(0, -1), nextLast];
-          setMessages(next);
-          return next;
-        } finally {
-          if (get().activeRunId === runId) {
-            set({ executingToolCallIds: [] });
+        });
+      };
+
+      const executeAcpCommand = async (
+        command: (
+          runtime: AcpSessionExecutionRuntime,
+          signal: AbortSignal
+        ) => Promise<void>,
+        signal: AbortSignal
+      ): Promise<void> => {
+        const runtime = options.executionRuntime;
+        if (runtime === undefined) {
+          throw new Error("This Thread does not have an ACP Session runtime.");
+        }
+        const streamController = new AbortController();
+        signal.addEventListener("abort", () => streamController.abort(), {
+          once: true,
+        });
+        const initialCursor = get().acpSession?.cursor ?? 0;
+        const iterator = runtime
+          .updates({ afterCursor: initialCursor, signal: streamController.signal })
+          [Symbol.asyncIterator]();
+        try {
+          // Drain the replay frame through its state barrier before issuing a
+          // mutation, so the command always acts on a complete projection.
+          while (!signal.aborted) {
+            const next = await iterator.next();
+            if (next.done) {
+              throw new Error("ACP Session update stream closed during resume.");
+            }
+            applyAcpNotification(next.value);
+            if (next.value.update.sessionUpdate === "state_update") break;
           }
+          const baseline = get().acpSession?.cursor ?? initialCursor;
+          let latestStateCursor = baseline;
+          let wake: (() => void) | undefined;
+          let pumpFailure: unknown;
+          const pump = (async () => {
+            try {
+              while (!streamController.signal.aborted) {
+                const next = await iterator.next();
+                if (next.done) break;
+                applyAcpNotification(next.value);
+                if (next.value.update.sessionUpdate === "state_update") {
+                  latestStateCursor = get().acpSession?.cursor ?? baseline;
+                  wake?.();
+                  wake = undefined;
+                }
+              }
+            } catch (error) {
+              if (!streamController.signal.aborted) pumpFailure = error;
+              wake?.();
+              wake = undefined;
+            }
+          })();
+          await command(runtime, signal);
+          while (latestStateCursor <= baseline && !signal.aborted) {
+            if (pumpFailure !== undefined) throw _asError(pumpFailure);
+            await new Promise<void>((resolve) => {
+              wake = resolve;
+            });
+          }
+          if (pumpFailure !== undefined) throw _asError(pumpFailure);
+          streamController.abort();
+          await pump;
+        } finally {
+          streamController.abort();
+          await iterator.return?.();
         }
       };
 
@@ -707,6 +624,10 @@ export function createThreadStore(
 
       return {
         thread: normalizedInitialThread,
+        acpSession:
+          options.executionRuntime === undefined
+            ? null
+            : createAcpSessionProjection(options.executionRuntime.sessionId),
         streamingMessage: null,
         status: "idle",
         abortController: null,
@@ -714,8 +635,7 @@ export function createThreadStore(
         executingToolCallIds: [],
         pendingToolApproval: null,
         toolCallOutputsReadonly: options.executionRuntime !== undefined,
-        externalToolExecutionAvailable:
-          options.executionRuntime?.executeToolCall !== undefined,
+        externalToolExecutionAvailable: options.executionRuntime !== undefined,
         collapsedMessageIds: [],
         runValidationIssue: null,
         autoFocusMessageId: null,
@@ -1104,508 +1024,134 @@ export function createThreadStore(
           if (get().status !== "idle") {
             throw new Error("Thread is already running");
           }
-          if (options.executionRuntime !== undefined) {
-            const runId = uuid();
-            const abortController = new AbortController();
-            set({
-              status: "preparing",
-              activeRunId: runId,
-              abortController,
-              streamingMessage: null,
-              executingToolCallIds: [],
-              pendingToolApproval: null,
-            });
-            stopActiveRun = () => abortController.abort();
-            try {
-              // The model selector may display a default/fallback without
-              // persisting it. Resolve that same visible value for the request
-              // so the first click behaves like subsequent explicit changes.
-              let executionThread = get().thread;
-              const resolvedModel = options.resolveModel?.(
-                executionThread.model
-              );
-              if (resolvedModel !== undefined && resolvedModel !== null) {
-                executionThread = {
-                  ...executionThread,
-                  model: resolvedModel,
-                };
-              }
-              set({ status: "running" });
-              for await (const event of options.executionRuntime.execute({
-                thread: executionThread,
-                fromMessageId,
-                autoRunTools: options.getAutoRunTools?.() ?? false,
-                reactLoop: options.getReactLoop?.() ?? false,
-                signal: abortController.signal,
-              })) {
-                if (get().activeRunId !== runId) break;
-                if (event.type === "message.delta") {
-                  set({ streamingMessage: event.message });
-                } else if (event.type === "tool.started") {
-                  set((state) => ({
-                    executingToolCallIds: state.executingToolCallIds.includes(
-                      event.toolCallId
-                    )
-                      ? state.executingToolCallIds
-                      : [...state.executingToolCallIds, event.toolCallId],
-                  }));
-                } else if (event.type === "tool.completed") {
-                  set((state) => ({
-                    executingToolCallIds: state.executingToolCallIds.filter(
-                      (id) => id !== event.toolCallId
-                    ),
-                  }));
-                } else if (event.type === "tool.approval.required") {
-                  set({
-                    pendingToolApproval: {
-                      toolCallId: event.toolCallId,
-                      toolName: event.toolName,
-                      resumeMode: event.resumeMode,
-                    },
-                  });
-                } else {
-                  const thread = normalizeThread(event.thread);
-                  const runHistory = normalizeRunHistory(thread.runHistory);
-                  const evaluations = normalizeEvaluations(
-                    thread.evaluations,
-                    runHistory
-                  );
-                  set({
-                    thread,
-                    runHistory,
-                    evaluations,
-                    streamingMessage: null,
-                  });
-                }
-              }
-            } catch (error) {
-              if (!abortController.signal.aborted) {
-                toast.error("Unable to run Thread", {
-                  description:
-                    error instanceof Error
-                      ? error.message
-                      : "Please try again.",
-                });
-              }
-            } finally {
-              if (get().activeRunId === runId) {
-                const thread = get().thread;
-                set({
-                  status: "idle",
-                  activeRunId: null,
-                  abortController: null,
-                  streamingMessage: null,
-                  executingToolCallIds: [],
-                  changeHistory: recordSnapshot(get().changeHistory, thread),
-                });
-              }
-              stopActiveRun = null;
-            }
-            return;
-          }
-          const runId = uuid();
-          const isPreparingRun = () =>
-            get().status === "preparing" && get().activeRunId === runId;
-          const finishPreparingRun = () => {
-            if (isPreparingRun()) {
-              set({ status: "idle", activeRunId: null });
-            }
-          };
-          // Claim the run lifecycle before any async prompt-variable work. A
-          // host can now prevent the pane from being torn down while preflight
-          // is still awaiting skills/files and before a transport exists.
-          set({ status: "preparing", activeRunId: runId });
-          if (!isPreparingRun()) return;
-          // Resolve the model to run with: the thread's own when available,
-          // else the default/first available. A thread with no resolvable model
-          // cannot run.
-          let model: ModelConfig | null = null;
-          try {
-            model = options.resolveModel?.(get().thread.model) ?? null;
-          } catch (error) {
-            toast.error("Unable to resolve a model", {
-              description:
-                error instanceof Error ? error.message : "Please try again.",
-            });
-            finishPreparingRun();
-            return;
-          }
-          if (!model) {
-            toast.error("Select a model to run");
-            finishPreparingRun();
-            return;
-          }
-          // Pre-flight: resolve the message list the run would use (including
-          // the rerun-from truncation) and validate it before entering the
-          // running state, so an unrunnable thread is a complete no-op — no
-          // truncation, no undo step, no run-history entry.
-          let messages = [...(get().thread.context?.messages ?? [])];
-          let truncated = false;
-          if (fromMessageId) {
-            const index = messages.findIndex((m) => m.id === fromMessageId);
-            if (index !== -1 && index !== messages.length - 1) {
-              messages = messages.slice(0, index + 1);
-              truncated = true;
-            }
-          }
-          const runValidationIssue = getRunValidationIssue(messages);
-          if (runValidationIssue) {
-            if (isPreparingRun()) {
-              set({
-                runValidationIssue,
-                status: "idle",
-                activeRunId: null,
-              });
-            }
+          const runValidationIssue = getRunValidationIssue(
+            get().thread.context?.messages ?? []
+          );
+          if (runValidationIssue !== null) {
+            set({ runValidationIssue });
             return;
           }
           set({ runValidationIssue: null });
-          let promptSnapshot: ThreadContext["snapshot"] =
-            get().thread.context?.snapshot;
-          let preparedContext: ThreadContext | null = null;
-          try {
-            const rendered = await renderThreadPromptVariables({
-              context: { ...get().thread.context, messages },
-              loadSkills: options.loadSkills ?? _noSkills,
-              loadFile: options.loadFile ?? _noFile,
-              fileExists: options.fileExists ?? _noFileExists,
-            });
-            preparedContext = rendered.context;
-            promptSnapshot = rendered.snapshot;
-          } catch (error) {
-            if (!isPreparingRun()) return;
-            toast.error("Unable to render prompt variables", {
-              description:
-                error instanceof PromptVariableError || error instanceof Error
-                  ? error.message
-                  : "Please check the system prompt variables.",
-            });
-            finishPreparingRun();
+          const runtime = options.executionRuntime;
+          if (runtime === undefined) {
+            toast.error("This Thread is display-only");
             return;
           }
-          if (!isPreparingRun()) return;
-          const abortController = new AbortController();
-          const isActiveRun = () => get().activeRunId === runId;
-          set({
-            status: "running",
-            abortController,
-            activeRunId: runId,
-            streamingMessage: null,
-            executingToolCallIds: [],
-          });
-
-          // Commit the truncation while running so it folds into the run's
-          // single undo step instead of becoming its own snapshot.
-          if (truncated) {
-            setMessages(messages);
-          }
-          const runStartMessageCount = messages.length;
-
-          // Append a finished assistant message to the thread.
-          const commit = (message: AssistantMessage) => {
-            if (!isActiveRun()) {
-              return;
-            }
-            messages = [...messages, message];
-            setMessages(messages);
-          };
-
-          // Live-preview state for the turn currently streaming; reset per turn.
-          let streamingMessage: AssistantMessage | null = null;
-          let content: ReducedMessageContent[] = [];
-          // Whether any turn produced at least one event — i.e. the run actually
-          // started. A run that dies earlier (transport/auth/network failure) is
-          // not recorded in the run history.
-          let sawEvent = false;
-          // Whether the run ended in an error. The agent loop emits lifecycle
-          // events before the model call, and a model API failure completes
-          // the stream normally with the error tucked into the message
-          // (surfaced as a throw by reduceMessages on agent_end) — so
-          // `sawEvent` alone can't tell a failed run from a successful one.
-          // A failed run is never recorded in the run history.
-          let failed = false;
-
-          // Throttle live-preview updates (frame-aligned, at most one per
-          // PREVIEW_THROTTLE_MS) — see createFrameThrottle for why per-event
-          // set() calls are unsafe and re-rendering the growing document per
-          // frame is too expensive.
-          const { schedule: schedulePreview, cancel: cancelPreview } =
-            createFrameThrottle(() => {
-              if (isActiveRun()) {
-                set({ streamingMessage });
-              }
-            }, PREVIEW_THROTTLE_MS);
-
-          const finalizeActiveRun = () => {
-            if (!isActiveRun()) {
-              return;
-            }
-            // Drop any pending frame before the terminal clear so a late flush
-            // can't resurrect a stale streamingMessage after we reset to null.
-            cancelPreview();
-            set({
-              streamingMessage: null,
-              status: "idle",
-              abortController: null,
-              activeRunId: null,
-              executingToolCallIds: [],
-            });
-            stopActiveRun = null;
-
-            // Fold the whole run (truncation + generated messages) into one
-            // undo step, and record a run snapshot. No-op for undo if the
-            // thread is unchanged.
-            const finalThread = get().thread;
-            if (sawEvent && !failed) {
-              const threadWithSnapshot = withPromptVariableSnapshot(
-                finalThread,
-                promptSnapshot
-              );
-              const runUsage = aggregateMessageUsage(
-                (threadWithSnapshot.context?.messages ?? []).slice(
-                  runStartMessageCount
-                )
-              );
-              const runHistory = recordRun(
-                get().runHistory,
-                threadWithSnapshot,
-                Date.now(),
-                { usage: runUsage }
-              );
-              const evaluations = normalizeEvaluations(
-                get().evaluations,
-                runHistory
-              );
-              const thread = withRunMetadata(threadWithSnapshot, {
-                runHistory,
-                evaluations,
-                evaluationRubrics: get().evaluationRubrics,
-              });
-              set({
-                thread,
-                changeHistory: recordSnapshot(get().changeHistory, thread),
-                runHistory,
-                evaluations,
-              });
-            } else {
-              set({
-                changeHistory: recordSnapshot(get().changeHistory, finalThread),
-              });
-            }
-          };
-
-          stopActiveRun = () => {
-            if (!isActiveRun()) {
-              return;
-            }
-            try {
-              abortController.abort();
-            } catch {
-              // Ignored
-            }
-            if (streamingMessage && hasContent(streamingMessage)) {
-              commit(streamingMessage);
-              streamingMessage = null;
-            }
-            finalizeActiveRun();
-          };
-
-          // Stream a single model turn into `messages`. Returns whether it
-          // finished cleanly, was aborted, or failed — the auto-call loop only
-          // continues after a clean turn.
-          const streamTurn = async (): Promise<
-            "completed" | "aborted" | "failed"
-          > => {
-            streamingMessage = null;
-            content = [];
-            let firstTokenAt: number | null = null;
-            try {
-              const context = preparedContext
-                ? preparedContext
-                : (
-                    await renderThreadPromptVariables({
-                      context: {
-                        ...get().thread.context,
-                        messages,
-                        snapshot: promptSnapshot,
-                      },
-                      loadSkills: options.loadSkills ?? _noSkills,
-                      loadFile: options.loadFile ?? _noFile,
-                      fileExists: options.fileExists ?? _noFileExists,
-                    })
-                  ).context;
-              preparedContext = null;
-              promptSnapshot = context.snapshot;
-              const now = options.now ?? (() => performance.now());
-              const turnStartedAt = now();
-              const profileId = options.getProfileId?.(model.provider);
-              const response = streamThread(
-                {
-                  context,
-                  model,
-                },
-                {
-                  signal: abortController.signal,
-                  transport: options.transport,
-                  connection: {
-                    providerId: model.provider,
-                    ...(profileId ? { profileId } : {}),
-                  },
-                }
-              );
-              for await (const chunk of response) {
-                if (!isActiveRun()) {
-                  return "aborted";
-                }
-                const receivedAt = now();
-                if (firstTokenAt === null && _isNonEmptyAssistantDelta(chunk)) {
-                  firstTokenAt = receivedAt;
-                }
-                sawEvent = true;
-                const reduced = reduceMessages(chunk, {
-                  streamingMessage,
-                  content,
-                });
-                if (!reduced) {
-                  continue;
-                }
-                if (reduced.type === "message_start" && streamingMessage) {
-                  commit(streamingMessage);
-                  // The committed message now lives in `messages`; drop the
-                  // stale preview so it isn't rendered twice before the next
-                  // frame.
-                  cancelPreview();
-                  if (isActiveRun()) {
-                    set({ streamingMessage: null });
-                  }
-                }
-                streamingMessage =
-                  reduced.type === "message_end"
-                    ? {
-                        ...reduced.message,
-                        timing: {
-                          ...(firstTokenAt === null
-                            ? {}
-                            : {
-                                firstTokenMs: Math.max(
-                                  0,
-                                  firstTokenAt - turnStartedAt
-                                ),
-                              }),
-                          durationMs: Math.max(0, receivedAt - turnStartedAt),
-                        },
-                      }
-                    : reduced.message;
-                content = reduced.content;
-                schedulePreview();
-              }
-              if (!isActiveRun()) {
-                return "aborted";
-              }
-              if (streamingMessage) {
-                commit(streamingMessage);
-                // The turn's message now lives in `messages`; clear the preview
-                // so it isn't rendered a second time during the gap before the
-                // next turn (e.g. while auto-run tools execute). The trailing
-                // frame is cancelled so a late flush can't resurrect it.
-                cancelPreview();
-                if (isActiveRun()) {
-                  set({ streamingMessage: null });
-                }
-                streamingMessage = null;
-              }
-              return "completed";
-            } catch (error) {
-              if (abortController.signal.aborted) {
-                if (
-                  isActiveRun() &&
-                  streamingMessage &&
-                  hasContent(streamingMessage)
-                ) {
-                  commit(streamingMessage);
-                }
-                return "aborted";
-              }
-              if (!isActiveRun()) {
-                return "aborted";
-              }
-              failed = true;
-              console.error(error);
-              if (error instanceof Error) {
-                toast.error("Error", { description: error.message });
-              }
-              return "failed";
-            }
-          };
-
-          try {
-            // Drive the run:
-            //  - a model turn always runs;
-            //  - when tools are auto-run, execute the turn's trailing tool
-            //    calls (unless one needs a hand-written result — then stop and
-            //    let the user fill it in);
-            //  - only the ReAct loop continues to the next turn; plain auto-run
-            //    executes tools once and stops, staying step-by-step.
-            // Capped so a model that calls tools forever can't spin forever.
-            for (let turn = 0; turn < MAX_AUTO_TOOL_TURNS; turn++) {
-              const outcome = await streamTurn();
-              if (outcome !== "completed") {
-                break;
-              }
-              const reactLoop = options.getReactLoop?.() ?? false;
-              const autoRunTools =
-                reactLoop || (options.getAutoRunTools?.() ?? false);
-              if (!autoRunTools) {
-                break;
-              }
-              const withResults = await executePendingToolCalls(
-                messages,
-                abortController.signal,
-                runId
-              );
-              if (!isActiveRun()) {
-                break;
-              }
-              if (!withResults) {
-                break;
-              }
-              messages = withResults;
-              if (!reactLoop) {
-                break;
-              }
-            }
-          } finally {
-            finalizeActiveRun();
-          }
-        },
-        async runExternalToolCall(messageId: string, toolCallId: string) {
-          const execute = options.executionRuntime?.executeToolCall;
-          if (execute === undefined || get().status !== "idle") return false;
           const runId = uuid();
           const abortController = new AbortController();
           set({
-            status: "running",
+            status: "preparing",
             activeRunId: runId,
             abortController,
             streamingMessage: null,
+            executingToolCallIds: [],
+            pendingToolApproval: null,
+          });
+          stopActiveRun = () => {
+            abortController.abort();
+            void runtime.cancel();
+          };
+          try {
+            const thread = get().thread;
+            const messages = thread.context?.messages ?? [];
+            const selectedId = fromMessageId ?? messages.at(-1)?.id;
+            const selected = messages.find((message) => message.id === selectedId);
+            const projection =
+              get().acpSession ??
+              createAcpSessionProjection(runtime.sessionId);
+            const mode = options.getReactLoop?.()
+              ? "continue"
+              : options.getAutoRunTools?.()
+                ? "turn"
+                : "step";
+            const action = _acpAction(projection);
+            if (
+              selected?.role === "user" &&
+              (projection.messages[selected.id] === undefined ||
+                action === undefined)
+            ) {
+              await executeAcpCommand(
+                (client, signal) =>
+                  client.prompt({
+                    prompt: selected.content.map(_coreContentToAcp),
+                    fromMessageId: selected.id,
+                    mode,
+                    thread,
+                    signal,
+                  }),
+                abortController.signal
+              );
+            } else {
+              if (action === undefined) {
+                throw new Error(
+                  "ACP Session has no pending action and no new user prompt."
+                );
+              }
+              await executeAcpCommand(
+                (client, signal) =>
+                  mode === "continue"
+                    ? client.continue({
+                        operationId: action.operationId,
+                        signal,
+                      })
+                    : mode === "turn"
+                      ? client.turn({ ...action, signal })
+                      : client.step({ ...action, signal }),
+                abortController.signal
+              );
+            }
+          } catch (error) {
+            if (!abortController.signal.aborted) {
+              toast.error("Unable to run Thread", {
+                description:
+                  error instanceof Error ? error.message : "Please try again.",
+              });
+            }
+          } finally {
+            if (get().activeRunId === runId) {
+              const thread = get().thread;
+              set({
+                status: "idle",
+                activeRunId: null,
+                abortController: null,
+                streamingMessage: null,
+                executingToolCallIds: [],
+                changeHistory: recordSnapshot(get().changeHistory, thread),
+              });
+            }
+            stopActiveRun = null;
+          }
+        },
+        async runExternalToolCall(messageId: string, toolCallId: string) {
+          void messageId;
+          const runtime = options.executionRuntime;
+          if (runtime === undefined || get().status !== "idle") return false;
+          const projection = get().acpSession;
+          if (projection === null) return false;
+          const action = _acpAction(projection);
+          if (
+            action?.kind !== "tool" ||
+            _acpNextToolCallId(projection) !== toolCallId
+          ) {
+            return false;
+          }
+          const runId = uuid();
+          const abortController = new AbortController();
+          set({
+            status: "preparing",
+            activeRunId: runId,
+            abortController,
             executingToolCallIds: [toolCallId],
           });
-          stopActiveRun = () => abortController.abort();
+          stopActiveRun = () => {
+            abortController.abort();
+            void runtime.cancel();
+          };
           try {
-            for await (const event of execute({
-              thread: get().thread,
-              messageId,
-              toolCallId,
-              signal: abortController.signal,
-            })) {
-              if (get().activeRunId !== runId) return false;
-              if (event.type === "message.delta") {
-                set({ streamingMessage: event.message });
-              } else if (event.type === "thread.updated") {
-                const thread = normalizeThread(event.thread);
-                set({ thread, streamingMessage: null });
-              }
-            }
+            await executeAcpCommand(
+              (client, signal) => client.step({ ...action, signal }),
+              abortController.signal
+            );
             return true;
           } finally {
             if (get().activeRunId === runId) {
@@ -1613,7 +1159,6 @@ export function createThreadStore(
                 status: "idle",
                 activeRunId: null,
                 abortController: null,
-                streamingMessage: null,
                 executingToolCallIds: [],
               });
             }
@@ -1622,10 +1167,14 @@ export function createThreadStore(
         },
         async resolveToolApproval(approved: boolean) {
           const approval = get().pendingToolApproval;
-          const resolve = options.executionRuntime?.resolveToolApproval;
+          const runtime = options.executionRuntime;
+          const projection = get().acpSession;
+          const action =
+            projection === null ? undefined : _acpAction(projection);
           if (
             approval === null ||
-            resolve === undefined ||
+            runtime === undefined ||
+            action === undefined ||
             get().status !== "idle"
           ) {
             return false;
@@ -1633,52 +1182,29 @@ export function createThreadStore(
           const runId = uuid();
           const abortController = new AbortController();
           set({
-            status: "running",
+            status: "preparing",
             activeRunId: runId,
             abortController,
-            streamingMessage: null,
             executingToolCallIds: [approval.toolCallId],
             pendingToolApproval: null,
           });
-          stopActiveRun = () => abortController.abort();
+          stopActiveRun = () => {
+            abortController.abort();
+            void runtime.cancel();
+          };
           try {
-            for await (const event of resolve({
-              thread: get().thread,
-              toolCallId: approval.toolCallId,
-              approved,
-              resumeMode: approval.resumeMode,
-              signal: abortController.signal,
-            })) {
-              if (get().activeRunId !== runId) return false;
-              if (event.type === "message.delta") {
-                set({ streamingMessage: event.message });
-              } else if (event.type === "tool.started") {
-                set({ executingToolCallIds: [event.toolCallId] });
-              } else if (event.type === "tool.completed") {
-                set({ executingToolCallIds: [] });
-              } else if (event.type === "tool.approval.required") {
-                set({
-                  pendingToolApproval: {
-                    toolCallId: event.toolCallId,
-                    toolName: event.toolName,
-                    resumeMode: event.resumeMode,
-                  },
-                });
-              } else {
-                const thread = normalizeThread(event.thread);
-                const runHistory = normalizeRunHistory(thread.runHistory);
-                const evaluations = normalizeEvaluations(
-                  thread.evaluations,
-                  runHistory
-                );
-                set({
-                  thread,
-                  runHistory,
-                  evaluations,
-                  streamingMessage: null,
-                });
-              }
-            }
+            await executeAcpCommand(
+              (client, signal) =>
+                client.requestPermission({
+                  operationId: action.operationId,
+                  expectedActionId: action.expectedActionId,
+                  toolCallId: approval.toolCallId,
+                  optionId: approved ? "allow_once" : "reject_once",
+                  resumeMode: approval.resumeMode,
+                  signal,
+                }),
+              abortController.signal
+            );
             return true;
           } catch (error) {
             if (!abortController.signal.aborted) {
@@ -1695,7 +1221,6 @@ export function createThreadStore(
                 status: "idle",
                 activeRunId: null,
                 abortController: null,
-                streamingMessage: null,
                 executingToolCallIds: [],
               });
             }
@@ -1956,24 +1481,212 @@ export function createThreadStore(
   );
 }
 
-function _isNonEmptyAssistantDelta(event: AgentEvent): boolean {
-  if (
-    event.type === "message_end" &&
-    event.message.role === "assistant" &&
-    (event.message.nativeToolActivities?.length ?? 0) > 0
-  ) {
-    return true;
-  }
-  if (event.type !== "message_update") {
-    return false;
-  }
-  const update = event.assistantMessageEvent;
-  return (
-    (update.type === "thinking_delta" ||
-      update.type === "text_delta" ||
-      update.type === "toolcall_delta") &&
-    update.delta.length > 0
+function _coreContentToAcp(content: MessageContent): ContentBlock {
+  return content.type === "text"
+    ? { type: "text", text: content.text }
+    : { type: "image", data: content.data, mimeType: content.mimeType };
+}
+
+/** Derives the editor's presentational model from the ACP execution authority. */
+function _acpProjectionToThread(
+  projection: AcpSessionProjection,
+  base: Thread
+): Thread {
+  const updates: SharedSessionUpdate[] = [
+    ...projection.messageOrder.flatMap((messageId) => {
+      const message = projection.messages[messageId];
+      if (message === undefined) return [];
+      return [
+        {
+          sessionUpdate:
+            message.role === "user"
+              ? "user_message"
+              : message.role === "agent"
+                ? "agent_message"
+                : "agent_thought",
+          messageId: message.messageId,
+          content: message.content.flatMap(_acpContentToCore),
+          ...(message.meta === undefined ? {} : { _meta: message.meta }),
+        } satisfies SharedSessionUpdate,
+      ];
+    }),
+    ...projection.toolCallOrder.flatMap((toolCallId) => {
+      const toolCall = projection.toolCalls[toolCallId];
+      if (toolCall === undefined) return [];
+      const output = _acpToolOutput(toolCall);
+      return [
+        {
+          sessionUpdate: "tool_call_update",
+          toolCallId: toolCall.toolCallId,
+          ...(toolCall.name === undefined ? {} : { name: toolCall.name }),
+          ...(toolCall.title === undefined ? {} : { title: toolCall.title }),
+          ...(toolCall.status === "pending" ||
+          toolCall.status === "in_progress" ||
+          toolCall.status === "completed" ||
+          toolCall.status === "failed"
+            ? { status: toolCall.status }
+            : {}),
+          ...(Object.prototype.hasOwnProperty.call(toolCall, "rawInput")
+            ? { rawInput: toolCall.rawInput }
+            : {}),
+          ...(output === undefined
+            ? {}
+            : {
+                content: output.content.map((content) => ({
+                  type: "content" as const,
+                  content,
+                })),
+              }),
+          ...(toolCall.meta === undefined ? {} : { _meta: toolCall.meta }),
+        } satisfies SharedSessionUpdate,
+      ];
+    }),
+  ];
+  const messages = messagesFromSharedSessionUpdates(updates);
+  const projectedIds = new Set(messages.map((message) => message.id));
+  const uncommittedUsers = (base.context?.messages ?? []).filter(
+    (message) => message.role === "user" && !projectedIds.has(message.id)
   );
+  return normalizeThread({
+    ...base,
+    context: {
+      ...base.context,
+      messages: [...messages, ...uncommittedUsers],
+    },
+  });
+}
+
+function _acpContentToCore(content: ContentBlock): MessageContent[] {
+  const value = content as unknown;
+  if (!_isRecord(value)) return [];
+  if (value.type === "text" && typeof value.text === "string") {
+    return [{ type: "text", text: value.text }];
+  }
+  if (
+    value.type === "image" &&
+    typeof value.data === "string" &&
+    typeof value.mimeType === "string"
+  ) {
+    return [{ type: "image", data: value.data, mimeType: value.mimeType }];
+  }
+  return [];
+}
+
+/** Keeps the committed Thread reference stable on the token-stream hot path. */
+function _acpStreamingAssistant(
+  projection: AcpSessionProjection,
+  updateMessageId: string
+): AssistantMessage {
+  const messageId = updateMessageId.endsWith(":thought")
+    ? updateMessageId.slice(0, -":thought".length)
+    : updateMessageId;
+  const message = projection.messages[messageId];
+  const thought = projection.messages[`${messageId}:thought`];
+  const thinking = thought?.content
+    .flatMap((content) =>
+      _acpContentToCore(content).flatMap((item) =>
+        item.type === "text" ? [item.text] : []
+      )
+    )
+    .join("");
+  return {
+    id: messageId,
+    role: "assistant",
+    content: (message?.content ?? []).flatMap((content) =>
+      _acpContentToCore(content).flatMap((item) =>
+        item.type === "text" ? [item] : []
+      )
+    ),
+    ...(thinking === undefined || thinking.length === 0 ? {} : { thinking }),
+  };
+}
+
+function _acpToolOutput(
+  toolCall: AcpSessionProjection["toolCalls"][string]
+): ToolCallOutput | undefined {
+  if (toolCall.status !== "completed" && toolCall.status !== "failed") {
+    return undefined;
+  }
+  const content: MessageContent[] = [];
+  for (const item of toolCall.content ?? []) {
+    if (!_isRecord(item) || item.type !== "content") continue;
+    const block = item.content;
+    if (!_isRecord(block)) continue;
+    if (block.type === "text" && typeof block.text === "string") {
+      content.push({ type: "text", text: block.text });
+      continue;
+    }
+    if (
+      block.type === "image" &&
+      typeof block.data === "string" &&
+      typeof block.mimeType === "string"
+    ) {
+      content.push({
+        type: "image",
+        data: block.data,
+        mimeType: block.mimeType,
+      });
+    }
+  }
+  return {
+    content,
+    ...(toolCall.status === "failed" ? { isError: true } : {}),
+  };
+}
+
+function _acpAction(
+  projection: AcpSessionProjection
+): Omit<AcpRuntimeAction, "signal"> | undefined {
+  const details = _llmSpaceMeta(projection.meta);
+  const operationId = details?.operationId;
+  const nextAction = details?.nextAction;
+  if (
+    typeof operationId !== "string" ||
+    !_isRecord(nextAction) ||
+    typeof nextAction.id !== "string" ||
+    (nextAction.kind !== "model" && nextAction.kind !== "tool")
+  ) {
+    return undefined;
+  }
+  return {
+    operationId,
+    expectedActionId: nextAction.id,
+    kind: nextAction.kind,
+  };
+}
+
+function _acpNextToolCallId(
+  projection: AcpSessionProjection
+): string | undefined {
+  const nextAction = _llmSpaceMeta(projection.meta)?.nextAction;
+  return _isRecord(nextAction) && typeof nextAction.toolCallId === "string"
+    ? nextAction.toolCallId
+    : undefined;
+}
+
+function _acpApproval(
+  projection: AcpSessionProjection
+): { readonly toolCallId: string; readonly toolName: string } | undefined {
+  const approval = _llmSpaceMeta(projection.meta)?.approval;
+  if (
+    !_isRecord(approval) ||
+    typeof approval.toolCallId !== "string" ||
+    typeof approval.toolName !== "string"
+  ) {
+    return undefined;
+  }
+  return { toolCallId: approval.toolCallId, toolName: approval.toolName };
+}
+
+function _llmSpaceMeta(
+  meta: Readonly<Record<string, unknown>> | null | undefined
+): Readonly<Record<string, unknown>> | undefined {
+  const value = meta?.["llm-space.dev"];
+  return _isRecord(value) ? value : undefined;
+}
+
+function _isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 export const ThreadStoreContext = createContext<ThreadStore | null>(null);

@@ -88,7 +88,6 @@ export async function resolveAgentGeneration(
     );
   }
 
-  _assertSupportedManifestFeatures(generation);
   const agent = (
     generation.manifest.agentSource === undefined
       ? generation.manifest.agent
@@ -332,26 +331,6 @@ function _variablePattern(name: string, flags?: string): RegExp {
 
 function _singleLine(value: string): string {
   return value.trim().replace(/\s+/g, " ") || "No description";
-}
-
-function _assertSupportedManifestFeatures(generation: AgentGeneration): void {
-  const { manifest } = generation;
-  const unsupported = [
-    ["connections", manifest.connections.length],
-    ["hooks", manifest.hooks.length],
-    ["subagents", manifest.subagents.length],
-    ["sandbox workspace", manifest.sandboxWorkspace.length],
-    ["sandbox", manifest.sandbox === undefined ? 0 : 1],
-    ["instrumentation", manifest.instrumentation === undefined ? 0 : 1],
-  ] as const;
-  const active = unsupported
-    .filter(([, count]) => count > 0)
-    .map(([feature]) => feature);
-  if (active.length > 0) {
-    throw new AgentGenerationResolutionError(
-      `Pi runtime does not yet support: ${active.join(", ")}.`
-    );
-  }
 }
 
 function _skillHandle(

@@ -4,6 +4,10 @@ import { COMMAND_SERVICE } from "@/commands/command-service";
 import { RemoteCommandContribution } from "@/commands/remote-command-contribution";
 import { RendererCommandRegistry } from "@/commands/renderer-command-registry";
 import {
+  ACP_SESSION_RPC,
+  ACP_SESSION_SERVICE,
+} from "@/shared/acp-session-rpc";
+import {
   AGENT_PROJECTS_RPC,
   AGENT_PROJECTS_SERVICE,
   type AgentProjectsRpc,
@@ -57,7 +61,6 @@ import {
 import { SEARCH_RPC, SEARCH_SERVICE } from "@/shared/search-rpc";
 import { SHELL_RPC, SHELL_SERVICE, type ShellRpc } from "@/shared/shell-rpc";
 import { SKILLS_RPC, SKILLS_SERVICE, type SkillsRpc } from "@/shared/skills-rpc";
-import { THREAD_RPC, THREAD_SERVICE } from "@/shared/thread-rpc";
 import {
   UPDATES_RPC,
   UPDATES_SERVICE,
@@ -137,7 +140,9 @@ export function rendererCommonModule(
     bind(PROMPT_FILES_SERVICE).toConstantValue(
       createRpcClient(PROMPT_FILES_RPC, transport)
     );
-    bind(THREAD_SERVICE).toConstantValue(createRpcClient(THREAD_RPC, transport));
+    bind(ACP_SESSION_SERVICE).toConstantValue(
+      createRpcClient(ACP_SESSION_RPC, transport)
+    );
     bind(RemoteCommandContribution).toSelf().inSingletonScope();
     bind(RENDERER_LIFECYCLE_CONTRIBUTION).toService(
       RemoteCommandContribution

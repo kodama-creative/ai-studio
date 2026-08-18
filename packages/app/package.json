@@ -15,6 +15,7 @@
     "@earendil-works/pi-agent-core": "catalog:",
     "@earendil-works/pi-ai": "catalog:",
     "@llm-space/agent": "workspace:*",
+    "@llm-space/engine": "workspace:*",
     "@llm-space/pi-runtime": "workspace:*"
   }
 }

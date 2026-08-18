@@ -28,6 +28,10 @@ const BINDING_EXTENSION = "llm-space";
 const TOOL_APPROVAL_REQUEST = "llm-space.tool-approval.request";
 const TOOL_APPROVAL_DECISION = "llm-space.tool-approval.decision";
 
+export type AssistantDeltaEvent =
+  | { readonly type: "assistant.text_delta"; readonly delta: string }
+  | { readonly type: "assistant.thinking_delta"; readonly delta: string };
+
 export interface AssistantExecutor {
   /** Checks the frozen model identity without starting a provider request. */
   checkAvailability?(
@@ -39,7 +43,7 @@ export interface AssistantExecutor {
     readonly binding: RuntimeBinding;
     readonly messages: readonly AgentMessage[];
     readonly signal: AbortSignal;
-    readonly onDelta?: (event: RuntimeEphemeralEvent) => void | Promise<void>;
+    readonly onDelta?: (event: AssistantDeltaEvent) => void | Promise<void>;
   }): Promise<AssistantMessage>;
 }
 
@@ -120,9 +124,9 @@ export class DurableEffectCrash extends Error {
   }
 }
 
-export type RuntimeEphemeralEvent =
-  | { readonly type: "assistant.text_delta"; readonly delta: string }
-  | { readonly type: "assistant.thinking_delta"; readonly delta: string };
+export type RuntimeEphemeralEvent = AssistantDeltaEvent & {
+  readonly messageId: string;
+};
 
 export type SemanticAction =
   | { readonly id: string; readonly kind: "model"; readonly attempt: number }
@@ -306,6 +310,18 @@ export class DurablePiRuntime {
     return this._snapshot(session, DEFAULT_LANE);
   }
 
+  /** Rolls back a newly-created Session before any product identity is published. */
+  async rollbackSession(sessionId: string): Promise<void> {
+    this._requireOpen();
+    const session = this._sessions.get(sessionId);
+    if (session === undefined) {
+      throw new Error(`Pi Session "${sessionId}" is not open for rollback.`);
+    }
+    const metadata = await session.getMetadata();
+    await this._repository.delete(metadata);
+    this._sessions.delete(sessionId);
+  }
+
   /** Forks one committed Pi branch into a new independently writable Session. */
   async forkSession(input: {
     readonly sessionId: string;
@@ -391,11 +407,23 @@ export class DurablePiRuntime {
     readonly sessionId: string;
     readonly lane?: string;
     readonly messages: AgentMessage[];
+    /** Optional protocol identities for the materialized input message entries. */
+    readonly messageIds?: readonly string[];
     readonly binding: RuntimeBindingSource;
   }): Promise<PiSessionSnapshot> {
     this._requireOpen();
     const lane = input.lane ?? DEFAULT_LANE;
     const session = await this._session(input.sessionId);
+    if (
+      input.messageIds !== undefined &&
+      (input.messageIds.length !== input.messages.length ||
+        new Set(input.messageIds).size !== input.messageIds.length ||
+        input.messageIds.some((id) => id.length === 0))
+    ) {
+      throw new Error(
+        "Pi operation messageIds must be non-empty, unique, and align with messages."
+      );
+    }
     const existing = await session.findRecords({
       type: "operation_started",
       runId: input.operationId,
@@ -417,7 +445,7 @@ export class DurablePiRuntime {
       }
       const initialMessages = input.messages.map((message, index) => ({
         type: "message" as const,
-        id: `${input.operationId}:input:${index}`,
+        id: input.messageIds?.[index] ?? `${input.operationId}:input:${index}`,
         message: structuredClone(message),
       }));
       operation = await session.appendRecord({
@@ -882,7 +910,11 @@ export class DurablePiRuntime {
           entry.type === "message" ? [structuredClone(entry.message)] : []
         ),
         signal,
-        onDelta: (event) => this._publish(snapshot.sessionId, event),
+        onDelta: (event) =>
+          this._publish(snapshot.sessionId, {
+            ...event,
+            messageId: resultEntryId,
+          }),
       });
       assistant = _jsonSafe(assistant) as AssistantMessage;
       // Host close and durable user abort both stop process-local materialization.

@@ -35,17 +35,13 @@ export interface PiAcpSnapshotRequest {
   readonly afterSeq?: number;
 }
 
-export interface PiAcpMutationRequest extends PiAcpSnapshotRequest {
-  /** Caller-generated identity used to deduplicate a retried transport request. */
-  readonly commandId: string;
-}
-
-export interface PiAcpStepRequest extends PiAcpMutationRequest {
+export interface PiAcpStepRequest extends PiAcpSnapshotRequest {
   readonly expectedActionId: string;
   readonly kind: "model" | "tool";
 }
 
-export type PiAcpContinueRequest = PiAcpMutationRequest;
+export type PiAcpTurnRequest = PiAcpStepRequest;
+export type PiAcpContinueRequest = PiAcpSnapshotRequest;
 
 export interface PiAcpDebugResponse {
   readonly fromCursor: number;
@@ -65,22 +61,19 @@ export interface PiAcpSessionBackend {
   list(request: ListSessionsRequest): Promise<ListSessionsResponse>;
   /** Reads committed log items and a current Pi debugger snapshot without effects. */
   inspect(request: PiAcpSnapshotRequest): Promise<PiCommittedChange>;
-  /** Admits and automatically drives one standard ACP prompt to a terminal state. */
+  /** Admits one standard ACP prompt using the requested LLM Space drive mode. */
   prompt(input: {
     readonly sessionId: string;
     readonly messages: AgentMessage[];
     readonly meta?: Readonly<Record<string, unknown>>;
+    readonly driveMode: "step" | "turn" | "continue";
     readonly signal: AbortSignal;
   }): Promise<PiSessionSnapshot>;
-  /**
-   * Releases exactly the caller-observed Pi semantic action. The host must
-   * durably deduplicate commandId and reconstruct a committed lost response.
-   */
+  /** Releases exactly the caller-observed Pi semantic action. */
   step(input: PiAcpStepRequest): Promise<PiSessionSnapshot>;
-  /**
-   * Drives the current Pi operation until terminal or suspended. The host must
-   * durably deduplicate commandId across ACP process restarts.
-   */
+  /** Runs one model action and its immediately following tool actions. */
+  turn(input: PiAcpTurnRequest): Promise<PiSessionSnapshot>;
+  /** Drives the current Pi operation until terminal or suspended. */
   continue(input: PiAcpContinueRequest): Promise<PiSessionSnapshot>;
   /** Persists user cancellation for one Pi Session. */
   abort(input: { readonly sessionId: string }): Promise<PiSessionSnapshot>;
@@ -96,31 +89,22 @@ export interface CreatePiAcpAgentOptions {
   readonly now?: () => number;
 }
 
-interface CachedDebugCommand {
-  readonly fingerprint: string;
-  readonly response: Promise<PiAcpDebugResponse>;
-}
-
 export const PI_ACP_SNAPSHOT_REQUEST_SCHEMA = z.object({
   sessionId: z.string().min(1),
   lane: z.string().min(1).optional(),
   afterSeq: z.number().int().nonnegative().optional(),
 });
 export const PI_ACP_STEP_REQUEST_SCHEMA = PI_ACP_SNAPSHOT_REQUEST_SCHEMA.extend({
-  commandId: z.string().min(1),
   expectedActionId: z.string().min(1),
   kind: z.enum(["model", "tool"]),
 });
-export const PI_ACP_CONTINUE_REQUEST_SCHEMA =
-  PI_ACP_SNAPSHOT_REQUEST_SCHEMA.extend({
-    commandId: z.string().min(1),
-  });
+export const PI_ACP_TURN_REQUEST_SCHEMA = PI_ACP_STEP_REQUEST_SCHEMA;
+export const PI_ACP_CONTINUE_REQUEST_SCHEMA = PI_ACP_SNAPSHOT_REQUEST_SCHEMA;
 
 /** Builds the official ACP v2 AgentApp over a host-owned Pi Session backend. */
 export function createPiAcpAgent(options: CreatePiAcpAgentOptions): AgentApp {
   const now = options.now ?? Date.now;
   const activePrompts = new Map<string, AbortController>();
-  const debugCommands = new Map<string, Map<string, CachedDebugCommand>>();
   const info: Implementation = {
     name: options.name ?? "llm-space",
     title: options.title ?? "LLM Space",
@@ -160,7 +144,6 @@ export function createPiAcpAgent(options: CreatePiAcpAgentOptions): AgentApp {
         .get(params.sessionId)
         ?.abort(new Error("The ACP session was closed."));
       await options.backend.closeSession({ sessionId: params.sessionId });
-      debugCommands.delete(params.sessionId);
       return {};
     })
     .onRequest(methods.agent.session.prompt, async ({ params, client }) => {
@@ -179,6 +162,7 @@ export function createPiAcpAgent(options: CreatePiAcpAgentOptions): AgentApp {
         sessionId: params.sessionId,
         afterSeq: before.cursor,
         messages: _promptMessages(params.prompt, now()),
+        driveMode: _driveMode(params._meta),
         ...(params._meta === undefined || params._meta === null
           ? {}
           : { meta: params._meta }),
@@ -221,81 +205,39 @@ export function createPiAcpAgent(options: CreatePiAcpAgentOptions): AgentApp {
       LLM_SPACE_ACP_METHODS.step,
       PI_ACP_STEP_REQUEST_SCHEMA,
       ({ params, client }) =>
-        _runDebugCommand(
-          debugCommands,
-          LLM_SPACE_ACP_METHODS.step,
-          params,
-          async () => {
-            await _notifyRunning(
-              client,
-              params.sessionId,
-              params.afterSeq ?? 0
-            );
-            await options.backend.step(params);
-            const frame = await options.backend.inspect(params);
-            await _notifyFrame(client, frame);
-            return _debugResponse(frame);
-          }
-        )
+        _runDebugAction(client, params, () => options.backend.step(params), options.backend)
+    )
+    .onRequest(
+      LLM_SPACE_ACP_METHODS.turn,
+      PI_ACP_TURN_REQUEST_SCHEMA,
+      ({ params, client }) =>
+        _runDebugAction(client, params, () => options.backend.turn(params), options.backend)
     )
     .onRequest(
       LLM_SPACE_ACP_METHODS.continue,
       PI_ACP_CONTINUE_REQUEST_SCHEMA,
       ({ params, client }) =>
-        _runDebugCommand(
-          debugCommands,
-          LLM_SPACE_ACP_METHODS.continue,
+        _runDebugAction(
+          client,
           params,
-          async () => {
-            await _notifyRunning(
-              client,
-              params.sessionId,
-              params.afterSeq ?? 0
-            );
-            await options.backend.continue(params);
-            const frame = await options.backend.inspect(params);
-            await _notifyFrame(client, frame);
-            return _debugResponse(frame);
-          }
+          () => options.backend.continue(params),
+          options.backend
         )
     );
 }
 
-/**
- * Coalesces only concurrent transport retries. Completed responses come from
- * the backend's durable Pi reconciliation, avoiding an unbounded transcript cache.
- */
-async function _runDebugCommand(
-  cache: Map<string, Map<string, CachedDebugCommand>>,
-  method: string,
-  input: PiAcpMutationRequest,
-  execute: () => Promise<PiAcpDebugResponse>
+/** Runs one semantic debugger action and projects its committed Pi result. */
+async function _runDebugAction(
+  client: AgentContext,
+  input: PiAcpSnapshotRequest,
+  execute: () => Promise<PiSessionSnapshot>,
+  backend: PiAcpSessionBackend
 ): Promise<PiAcpDebugResponse> {
-  const fingerprint = JSON.stringify({ method, input });
-  let sessionCommands = cache.get(input.sessionId);
-  const existing = sessionCommands?.get(input.commandId);
-  if (existing !== undefined) {
-    if (existing.fingerprint !== fingerprint) {
-      throw new Error(
-        `Command "${input.commandId}" was already used with other input.`
-      );
-    }
-    return existing.response;
-  }
-  const response = execute();
-  if (sessionCommands === undefined) {
-    sessionCommands = new Map();
-    cache.set(input.sessionId, sessionCommands);
-  }
-  sessionCommands.set(input.commandId, { fingerprint, response });
-  try {
-    return await response;
-  } finally {
-    if (sessionCommands.get(input.commandId)?.response === response) {
-      sessionCommands.delete(input.commandId);
-      if (sessionCommands.size === 0) cache.delete(input.sessionId);
-    }
-  }
+  await _notifyRunning(client, input.sessionId, input.afterSeq ?? 0);
+  await execute();
+  const frame = await backend.inspect(input);
+  await _notifyFrame(client, frame);
+  return _debugResponse(frame);
 }
 
 /** Runs accepted prompt work and always reports a final reconstructible state. */
@@ -306,6 +248,7 @@ async function _drivePrompt(input: {
   readonly afterSeq: number;
   readonly messages: AgentMessage[];
   readonly meta?: Readonly<Record<string, unknown>>;
+  readonly driveMode: "step" | "turn" | "continue";
   readonly signal: AbortSignal;
 }): Promise<void> {
   try {
@@ -313,6 +256,7 @@ async function _drivePrompt(input: {
       sessionId: input.sessionId,
       messages: input.messages,
       ...(input.meta === undefined ? {} : { meta: input.meta }),
+      driveMode: input.driveMode,
       signal: input.signal,
     });
     await _notifyFrame(
@@ -345,6 +289,18 @@ async function _drivePrompt(input: {
       // A disconnected observer must not become an unhandled execution error.
     }
   }
+}
+
+/** Standard ACP clients default to a full run; Desktop may select a debugger mode. */
+function _driveMode(
+  meta: Readonly<Record<string, unknown>> | null | undefined
+): "step" | "turn" | "continue" {
+  const namespace = meta?.["llm-space.dev"];
+  if (typeof namespace !== "object" || namespace === null) return "continue";
+  const mode = (namespace as Readonly<Record<string, unknown>>).driveMode;
+  return mode === "step" || mode === "turn" || mode === "continue"
+    ? mode
+    : "continue";
 }
 
 /** Sends one transient running notification before a debugger command executes. */

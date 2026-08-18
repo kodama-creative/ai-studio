@@ -6,29 +6,11 @@ import type {
 import type { Evaluation, EvaluationRubric } from "../evaluation";
 import type { PlaygroundRecord } from "../playground";
 
-export interface StudioCommandReceipt {
-  readonly sessionId: string;
-  readonly commandId: string;
-  readonly method: "step" | "continue";
-  readonly status: "accepted" | "applied";
-  readonly fingerprint: string;
-  readonly operationId?: string;
-  readonly leafId?: string;
-  readonly createdAt: number;
-}
-
 export interface StudioStoreTransaction {
   getPlayground(playgroundId: string): PlaygroundRecord | undefined;
   listPlaygrounds(): readonly PlaygroundRecord[];
   insertPlayground(playground: PlaygroundRecord): void;
   savePlayground(playground: PlaygroundRecord): void;
-
-  getCommandReceipt(
-    sessionId: string,
-    commandId: string
-  ): StudioCommandReceipt | undefined;
-  insertCommandReceipt(receipt: StudioCommandReceipt): void;
-  saveCommandReceipt(receipt: StudioCommandReceipt): void;
 
   getExperiment(experimentId: string): StudioExperimentRecord | undefined;
   listExperiments(): readonly StudioExperimentRecord[];

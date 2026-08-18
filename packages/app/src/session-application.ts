@@ -1,4 +1,5 @@
-import { SessionError, type AgentMessage } from "@earendil-works/pi-agent-core";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import { DocumentExecutionEngine } from "@llm-space/engine";
 import type {
   PiOperationSnapshot,
   PiSessionSnapshot,
@@ -10,13 +11,13 @@ import {
   APP_PI_LANE,
   APP_PI_RUNTIME_FORMAT_VERSION,
   type AgentExecutionResult,
-  type AppCommandReceipt,
   type AppSessionRecord,
   type Session,
   type SessionContinueInput,
   type SessionEntry,
   type SessionInspectInput,
   type SessionStepInput,
+  type SessionTurnInput,
   type Task,
 } from "./domain";
 import type { ApplicationStore } from "./storage";
@@ -48,6 +49,7 @@ export interface SessionApplication {
     input: SessionInspectInput
   ): ReturnType<DurablePiRuntime["readCommitted"]>;
   step(input: SessionStepInput): Promise<PiSessionSnapshot>;
+  turn(input: SessionTurnInput): Promise<PiSessionSnapshot>;
   continue(input: SessionContinueInput): Promise<PiSessionSnapshot>;
   recordSystemMessage(input: {
     readonly sessionId: string;
@@ -69,7 +71,7 @@ export interface SessionApplication {
     readonly messages: readonly AgentMessage[];
     readonly operationId?: string;
     readonly taskId?: string;
-    readonly mode?: "step" | "continue";
+    readonly mode?: "step" | "turn" | "continue";
     readonly signal?: AbortSignal;
   }): Promise<AgentExecutionResult>;
   abort(sessionId: string): Promise<void>;
@@ -87,12 +89,13 @@ class SessionApplicationImpl implements SessionApplication {
   private readonly _generateId: (prefix: string) => string;
   private _closed = false;
   private _closePromise: Promise<void> | undefined;
-
+  private readonly _engine: DocumentExecutionEngine;
   constructor(private readonly _options: CreateSessionApplicationOptions) {
     this._clock = _options.clock ?? Date.now;
     this._generateId =
       _options.generateId ??
       ((prefix) => `${prefix}_${crypto.randomUUID().replaceAll("-", "")}`);
+    this._engine = new DocumentExecutionEngine(_options.runtime);
   }
 
   /** Creates Pi first, then reconciles the App reference using its stable id. */
@@ -118,42 +121,27 @@ class SessionApplicationImpl implements SessionApplication {
       return this._compose(existing);
     }
 
-    let snapshot;
-    let created = false;
+    const snapshot = await this._options.runtime.createSession({ id: sessionId });
     try {
-      snapshot = await this._options.runtime.createSession({ id: sessionId });
-      created = true;
-    } catch (error) {
-      if (!(error instanceof SessionError) || error.code !== "already_exists") {
-        throw error;
-      }
-      snapshot = await this._options.runtime.open({
-        sessionId,
-        lane: APP_PI_LANE,
-      });
-    }
-    const name = input.name?.trim() || "New Session";
-    const currentName = await this._options.runtime.getSessionName(sessionId);
-    if (!created && currentName !== undefined && currentName !== name) {
-      throw new Error(
-        `Pi Session "${sessionId}" was already created with another name.`
-      );
-    }
-    if (currentName !== name) {
+      const name = input.name?.trim() || "New Session";
       await this._options.runtime.setSessionName(sessionId, name);
+      const now = this._clock();
+      const record: AppSessionRecord = {
+        schemaVersion: 2,
+        sessionId,
+        ...(input.projectId === undefined
+          ? {}
+          : { projectId: input.projectId }),
+        agentId: this._options.agentId,
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      };
+      this._options.store.transaction((tx) => tx.insertSession(record));
+      return this._compose(record, snapshot, name);
+    } catch (error) {
+      return _rollbackSession(this._options.runtime, sessionId, error);
     }
-    const now = this._clock();
-    const record: AppSessionRecord = {
-      schemaVersion: 2,
-      sessionId,
-      ...(input.projectId === undefined ? {} : { projectId: input.projectId }),
-      agentId: this._options.agentId,
-      status: "active",
-      createdAt: now,
-      updatedAt: now,
-    };
-    this._options.store.transaction((tx) => tx.insertSession(record));
-    return this._compose(record, snapshot, name);
   }
 
   async getSession(sessionId: string): Promise<Session | undefined> {
@@ -201,26 +189,52 @@ class SessionApplicationImpl implements SessionApplication {
     return this._options.runtime.readCommitted(input);
   }
 
-  step(input: SessionStepInput): Promise<PiSessionSnapshot> {
+  async step(input: SessionStepInput): Promise<PiSessionSnapshot> {
     this._requireRecord(input.sessionId);
-    return this._debugCommand("step", input, () =>
-      this._options.runtime.step({
-        sessionId: input.sessionId,
-        ...(input.lane === undefined ? {} : { lane: input.lane }),
-        expectedActionId: input.expectedActionId,
-        kind: input.kind,
-      })
-    );
+    const current = await this._options.runtime.open(input);
+    if (current.operationId === undefined) {
+      throw new Error(`Session "${input.sessionId}" has no active operation.`);
+    }
+    const snapshot = await this._engine.step({
+      sessionId: input.sessionId,
+      ...(input.lane === undefined ? {} : { lane: input.lane }),
+      operationId: current.operationId,
+      expectedActionId: input.expectedActionId,
+      kind: input.kind,
+    });
+    await this._reconcileOperationMetadata(input.sessionId, snapshot);
+    return snapshot;
   }
 
-  continue(input: SessionContinueInput): Promise<PiSessionSnapshot> {
+  async turn(input: SessionTurnInput): Promise<PiSessionSnapshot> {
     this._requireRecord(input.sessionId);
-    return this._debugCommand("continue", input, () =>
-      this._options.runtime.continue({
-        sessionId: input.sessionId,
-        ...(input.lane === undefined ? {} : { lane: input.lane }),
-      })
-    );
+    const current = await this._options.runtime.open(input);
+    if (current.operationId === undefined) {
+      throw new Error(`Session "${input.sessionId}" has no active operation.`);
+    }
+    const snapshot = await this._engine.turn({
+      sessionId: input.sessionId,
+      ...(input.lane === undefined ? {} : { lane: input.lane }),
+      operationId: current.operationId,
+      expectedActionId: input.expectedActionId,
+      kind: input.kind,
+    });
+    await this._reconcileOperationMetadata(input.sessionId, snapshot);
+    return snapshot;
+  }
+
+  async continue(input: SessionContinueInput): Promise<PiSessionSnapshot> {
+    this._requireRecord(input.sessionId);
+    const current = await this._options.runtime.open(input);
+    if (current.operationId === undefined) return current;
+    const snapshot = await this._engine.drive({
+      sessionId: input.sessionId,
+      ...(input.lane === undefined ? {} : { lane: input.lane }),
+      operationId: current.operationId,
+      mode: "continue",
+    });
+    await this._reconcileOperationMetadata(input.sessionId, snapshot);
+    return snapshot;
   }
 
   /** Persists the system timeline directly as a Pi CustomEntry. */
@@ -299,7 +313,7 @@ class SessionApplicationImpl implements SessionApplication {
     readonly messages: readonly AgentMessage[];
     readonly operationId?: string;
     readonly taskId?: string;
-    readonly mode?: "step" | "continue";
+    readonly mode?: "step" | "turn" | "continue";
     readonly signal?: AbortSignal;
   }): Promise<AgentExecutionResult> {
     this._requireRecord(input.sessionId);
@@ -311,7 +325,7 @@ class SessionApplicationImpl implements SessionApplication {
     }
     input.signal?.throwIfAborted();
     const operationId = input.operationId ?? this._generateId("operation");
-    let snapshot = await this._options.runtime.start({
+    await this._engine.admit({
       operationId,
       sessionId: input.sessionId,
       lane: APP_PI_LANE,
@@ -331,31 +345,26 @@ class SessionApplicationImpl implements SessionApplication {
     }
 
     const abort = () => {
-      void this._options.runtime.abort({
+      void this._engine.cancel({
         sessionId: input.sessionId,
         lane: APP_PI_LANE,
       });
     };
     input.signal?.addEventListener("abort", abort, { once: true });
+    let snapshot: PiSessionSnapshot;
     try {
       if (input.signal?.aborted) {
-        snapshot = await this._options.runtime.abort({
+        snapshot = await this._engine.cancel({
           sessionId: input.sessionId,
           lane: APP_PI_LANE,
         });
-      } else if (input.mode === "step") {
-        if (snapshot.nextAction !== undefined) {
-          snapshot = await this._options.runtime.step({
-            sessionId: input.sessionId,
-            lane: APP_PI_LANE,
-            expectedActionId: snapshot.nextAction.id,
-            kind: snapshot.nextAction.kind,
-          });
-        }
       } else {
-        snapshot = await this._options.runtime.continue({
+        snapshot = await this._engine.drive({
           sessionId: input.sessionId,
           lane: APP_PI_LANE,
+          operationId,
+          mode: input.mode ?? "continue",
+          signal: input.signal,
         });
       }
     } catch (error) {
@@ -363,7 +372,7 @@ class SessionApplicationImpl implements SessionApplication {
         this._projectTask(input.taskId, "failed");
         throw error;
       }
-      snapshot = await this._options.runtime.abort({
+      snapshot = await this._engine.cancel({
         sessionId: input.sessionId,
         lane: APP_PI_LANE,
       });
@@ -404,7 +413,7 @@ class SessionApplicationImpl implements SessionApplication {
     if (snapshot.status !== "paused" && snapshot.status !== "suspended") {
       return;
     }
-    await this._options.runtime.abort({ sessionId, lane: APP_PI_LANE });
+    await this._engine.cancel({ sessionId, lane: APP_PI_LANE });
     for (const task of this._options.store.transaction((tx) =>
       tx.listTasks(sessionId)
     )) {
@@ -528,75 +537,6 @@ class SessionApplicationImpl implements SessionApplication {
     });
   }
 
-  /** Durably accepts debugger identity before effects and reconciles retries from Pi. */
-  private async _debugCommand(
-    method: "step" | "continue",
-    input: SessionStepInput | SessionContinueInput,
-    execute: () => Promise<PiSessionSnapshot>
-  ): Promise<PiSessionSnapshot> {
-    const fingerprint = JSON.stringify({ method, input });
-    let receipt = this._options.store.transaction((tx) =>
-      tx.getCommandReceipt(input.sessionId, input.commandId)
-    );
-    if (receipt !== undefined) {
-      if (receipt.method !== method || receipt.fingerprint !== fingerprint) {
-        throw new Error(
-          `Command "${input.commandId}" was already used with other input.`
-        );
-      }
-      const current = await this._options.runtime.open({
-        sessionId: input.sessionId,
-        ...(input.lane === undefined ? {} : { lane: input.lane }),
-      });
-      if (receipt.status === "applied") {
-        await this._reconcileOperationMetadata(input.sessionId, current);
-        return current;
-      }
-      if (!_debugCommandNeedsExecution(method, input, current)) {
-        await this._finalizeDebugCommand(receipt, current);
-        return current;
-      }
-    } else {
-      const acceptedReceipt = {
-        sessionId: input.sessionId,
-        commandId: input.commandId,
-        method,
-        status: "accepted" as const,
-        fingerprint,
-        createdAt: this._clock(),
-      };
-      this._options.store.transaction((tx) =>
-        tx.insertCommandReceipt(acceptedReceipt)
-      );
-      receipt = acceptedReceipt;
-    }
-
-    if (receipt === undefined) {
-      throw new Error(`Command "${input.commandId}" was not accepted.`);
-    }
-    const snapshot = await execute();
-    await this._finalizeDebugCommand(receipt, snapshot);
-    return snapshot;
-  }
-
-  /** Marks the command applied before replaying its idempotent product projection. */
-  private async _finalizeDebugCommand(
-    receipt: AppCommandReceipt,
-    snapshot: PiSessionSnapshot
-  ): Promise<void> {
-    this._options.store.transaction((tx) => {
-      tx.saveCommandReceipt({
-        ...receipt,
-        status: "applied",
-        ...(snapshot.operationId === undefined
-          ? {}
-          : { operationId: snapshot.operationId }),
-        ...(snapshot.leafId === null ? {} : { leafId: snapshot.leafId }),
-      });
-    });
-    await this._reconcileOperationMetadata(receipt.sessionId, snapshot);
-  }
-
   /** Replays product projections after either debugger crash window. */
   private async _reconcileOperationMetadata(
     sessionId: string,
@@ -638,24 +578,31 @@ class SessionApplicationImpl implements SessionApplication {
   }
 }
 
+async function _rollbackSession(
+  runtime: DurablePiRuntime,
+  sessionId: string,
+  failure: unknown
+): Promise<never> {
+  try {
+    await runtime.rollbackSession(sessionId);
+  } catch (rollbackFailure) {
+    throw new AggregateError(
+      [failure, rollbackFailure],
+      `Failed to roll back Pi Session "${sessionId}" after App creation failed.`,
+      { cause: rollbackFailure }
+    );
+  }
+  throw failure instanceof Error
+    ? failure
+    : new Error("App creation failed after creating its Pi Session.", {
+        cause: failure,
+      });
+}
+
 function _activeOperationId(snapshot: PiSessionSnapshot): string | undefined {
   return snapshot.status === "paused" || snapshot.status === "suspended"
     ? snapshot.operationId
     : undefined;
-}
-
-function _debugCommandNeedsExecution(
-  method: "step" | "continue",
-  input: SessionStepInput | SessionContinueInput,
-  snapshot: PiSessionSnapshot
-): boolean {
-  if (method === "step") {
-    return (
-      "expectedActionId" in input &&
-      snapshot.nextAction?.id === input.expectedActionId
-    );
-  }
-  return snapshot.status === "paused";
 }
 
 /** Projects Pi operation lifecycle without treating a debugger pause as failure. */

@@ -1,3 +1,4 @@
+import { mkdirSync } from "node:fs";
 import path from "node:path";
 
 import type { Models, Tool as PiTool } from "@earendil-works/pi-ai";
@@ -11,6 +12,7 @@ import type {
   ProviderConnectionRef,
   ToolCallOutput,
 } from "@llm-space/core";
+import type { DocumentPromptServices } from "@llm-space/engine";
 import {
   BunSqliteRuntimeBindingStore,
   BunSqliteSessionRepository,
@@ -26,6 +28,7 @@ import {
   type PlaygroundApplication,
 } from "@llm-space/studio";
 import { createSqliteStudioStore } from "@llm-space/studio/storage/sqlite";
+import { Database } from "bun:sqlite";
 import { inject, injectable, preDestroy } from "inversify";
 
 import { APP_HOME_PATH } from "../app/desktop-paths";
@@ -39,6 +42,7 @@ export interface CreateDesktopPlaygroundApplicationOptions {
     readonly signal: AbortSignal;
   }) => PiProviderConnection | Promise<PiProviderConnection>;
   readonly tools: PlaygroundToolHost;
+  readonly promptServices?: DocumentPromptServices;
 }
 
 /** Minimal host seam needed to restore and execute frozen Playground tools. */
@@ -60,6 +64,9 @@ export interface PlaygroundToolHost {
 
 export const PLAYGROUND_MODEL_HOST = Symbol("PlaygroundModelHost");
 export const PLAYGROUND_TOOL_HOST = Symbol("PlaygroundToolHost");
+export const PLAYGROUND_PROMPT_HOST = Symbol("PlaygroundPromptHost");
+
+export type PlaygroundPromptHost = DocumentPromptServices;
 
 export interface PlaygroundModelHost {
   readonly models: Models | (() => Models | Promise<Models>);
@@ -79,13 +86,15 @@ export class DesktopPlaygroundApplication implements PlaygroundApplication {
   constructor(
     @inject(APP_HOME_PATH) homePath: string,
     @inject(PLAYGROUND_MODEL_HOST) models: PlaygroundModelHost,
-    @inject(PLAYGROUND_TOOL_HOST) tools: PlaygroundToolHost
+    @inject(PLAYGROUND_TOOL_HOST) tools: PlaygroundToolHost,
+    @inject(PLAYGROUND_PROMPT_HOST) promptServices: PlaygroundPromptHost
   ) {
     this._runtime = _createDesktopPlaygroundRuntime({
       homePath,
       models: models.models,
       resolveConnection: models.resolveConnection,
       tools,
+      promptServices,
     });
   }
 
@@ -119,6 +128,11 @@ export class DesktopPlaygroundApplication implements PlaygroundApplication {
     return this._runtime.stepRun(...args);
   }
 
+  /** Execute one model action and its immediately following tool actions. */
+  turnRun(...args: Parameters<PlaygroundApplication["turnRun"]>) {
+    return this._runtime.turnRun(...args);
+  }
+
   /** Continue one paused durable Playground operation. */
   continueRun(...args: Parameters<PlaygroundApplication["continueRun"]>) {
     return this._runtime.continueRun(...args);
@@ -146,6 +160,24 @@ export class DesktopPlaygroundApplication implements PlaygroundApplication {
   /** Inspect the authoritative Pi Session projection for one operation. */
   inspectRun(...args: Parameters<PlaygroundApplication["inspectRun"]>) {
     return this._runtime.inspectRun(...args);
+  }
+
+  /** Open the product-owned ACP/Pi execution session. */
+  openExecution(...args: Parameters<PlaygroundApplication["openExecution"]>) {
+    return this._runtime.openExecution(...args);
+  }
+
+
+  /** Read one committed Engine frame for ACP replay. */
+  readExecution(...args: Parameters<PlaygroundApplication["readExecution"]>) {
+    return this._runtime.readExecution(...args);
+  }
+
+  /** Stream Engine execution events for ACP projection. */
+  observeExecution(
+    ...args: Parameters<PlaygroundApplication["observeExecution"]>
+  ) {
+    return this._runtime.observeExecution(...args);
   }
 
   /** Return one committed operation snapshot when it still exists. */
@@ -182,7 +214,12 @@ export function createDesktopPlaygroundApplication(
   return new DesktopPlaygroundApplication(
     options.homePath,
     { models: options.models, resolveConnection: options.resolveConnection },
-    options.tools
+    options.tools,
+    options.promptServices ?? {
+      loadSkills: () => Promise.resolve([]),
+      loadFile: () => Promise.resolve(""),
+      fileExists: () => Promise.resolve(false),
+    }
   );
 }
 
@@ -191,12 +228,30 @@ function _createDesktopPlaygroundRuntime(
   options: CreateDesktopPlaygroundApplicationOptions
 ): DesktopPlaygroundRuntime {
   const databasePath = path.join(options.homePath, "studio", "studio.sqlite");
-  const repository = new BunSqliteSessionRepository({ path: databasePath });
+  mkdirSync(path.dirname(databasePath), { recursive: true, mode: 0o700 });
+  const database = new Database(databasePath, { create: true });
+  let studioStore: ReturnType<typeof createSqliteStudioStore>;
+  try {
+    studioStore = createSqliteStudioStore({ database });
+  } catch (error) {
+    database.close();
+    throw error;
+  }
   let bindings: BunSqliteRuntimeBindingStore;
   try {
-    bindings = new BunSqliteRuntimeBindingStore({ path: databasePath });
+    bindings = new BunSqliteRuntimeBindingStore({ database });
   } catch (error) {
-    void repository.close();
+    studioStore.close();
+    database.close();
+    throw error;
+  }
+  let repository: BunSqliteSessionRepository;
+  try {
+    repository = new BunSqliteSessionRepository({ database });
+  } catch (error) {
+    bindings.close();
+    studioStore.close();
+    database.close();
     throw error;
   }
 
@@ -215,25 +270,26 @@ function _createDesktopPlaygroundRuntime(
     createToolContext: ({ execution, signal }) =>
       _toolContext(execution, signal),
   });
-  let studioStore: ReturnType<typeof createSqliteStudioStore>;
-  try {
-    studioStore = createSqliteStudioStore({ path: databasePath });
-  } catch (error) {
-    void runtime.close();
-    bindings.close();
-    void repository.close();
-    throw error;
-  }
   const application = createPlaygroundApplication({
     runtime,
     store: studioStore,
+    ...(options.promptServices === undefined
+      ? {}
+      : { promptServices: options.promptServices }),
   });
   const closeApplication = application.close.bind(application);
   let closePromise: Promise<void> | undefined;
   const close = () => {
     closePromise ??= closeApplication().finally(async () => {
-      bindings.close();
-      await repository.close();
+      try {
+        bindings.close();
+      } finally {
+        try {
+          await repository.close();
+        } finally {
+          database.close();
+        }
+      }
     });
     return closePromise;
   };

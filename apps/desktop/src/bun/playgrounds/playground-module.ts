@@ -11,13 +11,15 @@ import {
 } from "../di/rpc-contribution";
 import type { RpcRegistry } from "../di/rpc-registry";
 import { WINDOW_CONTEXT_PROVIDER } from "../native/native-window-module";
-import { PlaygroundThreadRpcServer } from "../thread/thread-rpc-server";
+import { PlaygroundAcpSessionRpcServer } from "../thread/acp-session-rpc-server";
 
 import { DesktopPlaygroundModelHost } from "./desktop-playground-model-host";
+import { DesktopPlaygroundPromptHost } from "./desktop-playground-prompt-host";
 import { DesktopPlaygroundToolHost } from "./desktop-playground-tool-host";
 import {
   DesktopPlaygroundApplication,
   PLAYGROUND_MODEL_HOST,
+  PLAYGROUND_PROMPT_HOST,
   PLAYGROUND_TOOL_HOST,
 } from "./playground-application";
 
@@ -28,6 +30,8 @@ export function playgroundModule(): ContainerModule {
     bind(PLAYGROUND_MODEL_HOST).toService(DesktopPlaygroundModelHost);
     bind(DesktopPlaygroundToolHost).toSelf().inSingletonScope();
     bind(PLAYGROUND_TOOL_HOST).toService(DesktopPlaygroundToolHost);
+    bind(DesktopPlaygroundPromptHost).toSelf().inSingletonScope();
+    bind(PLAYGROUND_PROMPT_HOST).toService(DesktopPlaygroundPromptHost);
     bind(DesktopPlaygroundApplication).toSelf().inSingletonScope();
   });
 }
@@ -61,7 +65,7 @@ class PlaygroundContribution implements RpcContributionApi {
       requests,
       streams: {},
     } satisfies import("../../shared/namespaced-rpc").RpcServer<PlaygroundRpc>);
-    rpc.registerServer(new PlaygroundThreadRpcServer(this._application));
+    rpc.registerServer(new PlaygroundAcpSessionRpcServer(this._application));
   }
 }
 

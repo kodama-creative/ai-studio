@@ -1,4 +1,4 @@
-import { ndJsonStream, type AgentApp } from "@llm-space/acp";
+import { ndJsonStream, type AgentApp } from "@llm-space/acp/server";
 
 export interface AcpStdioOptions {
   readonly input?: ReadableStream<Uint8Array>;

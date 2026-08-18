@@ -54,8 +54,7 @@ describe.each(["memory", "sqlite"] as const)(
         expect(saved.document.conversation.messages).toHaveLength(1);
 
         const receipt = await fixture.app.run(created.id, {
-          fromMessageId: "user-1",
-          commandId: "initial-step-1",
+          messages: saved.document.conversation.messages,
           mode: "step",
         });
         const loaded = await fixture.app.loadThread(created.id);
@@ -95,23 +94,6 @@ describe.each(["memory", "sqlite"] as const)(
         expect(
           fixture.store.transaction((tx) => tx.getExperiment(created.id))
         ).not.toHaveProperty("draft");
-        expect(
-          fixture.store.transaction((tx) =>
-            tx.getCommandReceipt(receipt.sessionId, "initial-step-1")
-          )
-        ).toMatchObject({
-          method: "step",
-          operationId: receipt.operationId,
-        });
-        expect(
-          await fixture.app.run(created.id, {
-            fromMessageId: "user-1",
-            commandId: "initial-step-1",
-            mode: "step",
-          })
-        ).toEqual(receipt);
-        expect(await fixture.app.listRunHistory(created.id)).toHaveLength(1);
-
         const other = await fixture.app.createThread({ agent: AGENT });
         expect(
           fixture.app.inspectRun(other.id, receipt.operationId)
@@ -143,8 +125,7 @@ test("saves a future Studio Draft while a Pi operation is active", async () => {
       },
     });
     const receipt = await fixture.app.run(created.id, {
-      fromMessageId: "user-active",
-      commandId: "active-run",
+      messages: created.document.conversation.messages,
     });
     const active = await fixture.app.inspectRun(created.id, receipt.operationId);
     if (active.nextAction === undefined) {
@@ -174,7 +155,6 @@ test("saves a future Studio Draft while a Pi operation is active", async () => {
     });
 
     await fixture.app.stepRun(created.id, receipt.operationId, {
-      commandId: "finish-active-run",
       expectedActionId: active.nextAction.id,
       kind: active.nextAction.kind,
     });
@@ -216,8 +196,7 @@ test("forks a Pi branch and marks inherited operation references", async () => {
       },
     });
     const receipt = await fixture.app.run(created.id, {
-      fromMessageId: "user-fork",
-      commandId: "initial-step-fork",
+      messages: created.document.conversation.messages,
       mode: "step",
     });
     const fork = await fixture.app.forkThread(created.id);
@@ -233,6 +212,23 @@ test("forks a Pi branch and marks inherited operation references", async () => {
         },
       },
     ]);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test("rolls back a forked Pi Session when Experiment metadata rejects it", async () => {
+  const fixture = await _fixture("memory", { failForkCommit: true });
+  try {
+    const created = await fixture.app.createThread({ agent: AGENT });
+
+    expect(fixture.app.forkThread(created.id)).rejects.toThrow(
+      "simulated Experiment fork failure"
+    );
+    const orphan = fixture.forkSessionId();
+    expect(orphan).toBeDefined();
+    expect(fixture.runtime.open({ sessionId: orphan! })).rejects.toThrow();
+    expect(await fixture.app.listThreads()).toHaveLength(1);
   } finally {
     await fixture.close();
   }
@@ -255,12 +251,11 @@ test("evaluations target Pi operation ids and events use operation vocabulary", 
       },
     });
     const first = await fixture.app.run(created.id, {
-      fromMessageId: "user-1",
-      commandId: "initial-step-eval-1",
+      messages: created.document.conversation.messages,
       mode: "step",
     });
     const afterFirst = (await fixture.app.loadThread(created.id))!;
-    await fixture.app.saveDocument(created.id, {
+    const secondDraft = await fixture.app.saveDocument(created.id, {
       ...afterFirst.document,
       conversation: {
         ...afterFirst.document.conversation,
@@ -275,8 +270,7 @@ test("evaluations target Pi operation ids and events use operation vocabulary", 
       },
     });
     const second = await fixture.app.run(created.id, {
-      fromMessageId: "user-2",
-      commandId: "initial-step-eval-2",
+      messages: secondDraft.document.conversation.messages,
       mode: "step",
     });
     const metadata = await fixture.app.saveEvaluationMetadata(created.id, {
@@ -324,8 +318,7 @@ test("shared Studio SQLite writes Pi/runtime-binding/Studio tables and no legacy
       },
     });
     await fixture.app.run(created.id, {
-      fromMessageId: "user-schema",
-      commandId: "initial-step-schema",
+      messages: created.document.conversation.messages,
       mode: "step",
     });
     const database = new Database(fixture.path, { readonly: true });
@@ -365,8 +358,7 @@ test("reconciles an admitted Pi operation when Studio metadata commit failed", a
       },
     });
     const input = {
-      fromMessageId: "user-crash",
-      commandId: "admission-crash",
+      messages: created.document.conversation.messages,
       mode: "step" as const,
     };
 
@@ -397,7 +389,10 @@ test("reconciles an admitted Pi operation when Studio metadata commit failed", a
 /** Creates Studio, Pi repository, and binding adapters over one test database. */
 async function _fixture(
   storageKind: "memory" | "sqlite",
-  options: { readonly failAdmissionCommit?: boolean } = {}
+  options: {
+    readonly failAdmissionCommit?: boolean;
+    readonly failForkCommit?: boolean;
+  } = {}
 ) {
   const root = await mkdtemp(join(tmpdir(), "llm-space-project-pi-"));
   const path = join(root, "studio.sqlite");
@@ -420,11 +415,21 @@ async function _fixture(
       ? new InMemoryStudioStore()
       : createSqliteStudioStore({ path });
   let failAdmissionCommit = options.failAdmissionCommit ?? false;
-  const store: StudioStore = failAdmissionCommit
+  let failForkCommit = options.failForkCommit ?? false;
+  let forkSessionId: string | undefined;
+  const store: StudioStore = failAdmissionCommit || failForkCommit
     ? {
         transaction(fn) {
           return innerStore.transaction((tx) => {
             const faulting = Object.create(tx) as typeof tx;
+            faulting.insertExperiment = (experiment) => {
+              if (failForkCommit && tx.listExperiments().length > 0) {
+                failForkCommit = false;
+                forkSessionId = experiment.sessionId;
+                throw new Error("simulated Experiment fork failure");
+              }
+              tx.insertExperiment(experiment);
+            };
             faulting.saveExperiment = (experiment) => {
               if (failAdmissionCommit && experiment.draft === undefined) {
                 failAdmissionCommit = false;
@@ -446,8 +451,10 @@ async function _fixture(
   });
   return {
     app,
+    runtime,
     store,
     path,
+    forkSessionId: () => forkSessionId,
     async close() {
       await app.close();
       bindings.close();

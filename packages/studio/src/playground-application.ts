@@ -1,3 +1,10 @@
+import type { Message } from "@llm-space/core";
+import {
+  DocumentExecutionEngine,
+  materializeDocumentPrompt,
+  type DocumentExecutionEvent,
+  type DocumentPromptServices,
+} from "@llm-space/engine";
 import type {
   PiCommittedChange,
   PiOperationSnapshot,
@@ -6,7 +13,6 @@ import type {
   DurablePiRuntime,
 } from "@llm-space/pi-runtime";
 
-import { executeDebugCommand } from "./debug-command";
 import {
   cancelActiveOperation,
   driveAdmittedOperation,
@@ -20,10 +26,11 @@ import {
   type StudioConversation,
   type StudioOperationReceipt,
   type StudioStepInput,
+  type StudioTurnInput,
   type StudioToolApprovalInput,
 } from "./pi-domain";
 import {
-  coreMessagesToPi,
+  coreMessagesToPiInput,
   piEntriesToCoreMessages,
 } from "./pi-message-projection";
 import {
@@ -39,6 +46,7 @@ export interface CreatePlaygroundApplicationOptions {
   readonly store: StudioStore;
   readonly clock?: () => number;
   readonly generateId?: (prefix: string) => string;
+  readonly promptServices?: DocumentPromptServices;
 }
 
 export interface CreatePlaygroundInput {
@@ -55,15 +63,13 @@ export interface SavePlaygroundInput {
 
 export type RunPlaygroundInput =
   | {
-      readonly fromMessageId: string;
-      readonly commandId: string;
+      readonly messages: readonly Message[];
       readonly signal?: AbortSignal;
       readonly mode?: undefined;
     }
   | {
-      readonly fromMessageId: string;
-      readonly mode: "step" | "continue";
-      readonly commandId: string;
+      readonly messages: readonly Message[];
+      readonly mode: "step" | "turn" | "continue";
       readonly signal?: AbortSignal;
     };
 
@@ -84,6 +90,11 @@ export interface PlaygroundApplication {
     operationId: string,
     input: StudioStepInput
   ): Promise<StudioOperationReceipt>;
+  turnRun(
+    playgroundId: string,
+    operationId: string,
+    input: StudioTurnInput
+  ): Promise<StudioOperationReceipt>;
   continueRun(
     playgroundId: string,
     operationId: string,
@@ -100,6 +111,15 @@ export interface PlaygroundApplication {
     playgroundId: string,
     operationId: string
   ): Promise<PiSessionSnapshot>;
+  openExecution(playgroundId: string): Promise<PiSessionSnapshot>;
+  readExecution(
+    playgroundId: string,
+    afterSeq?: number
+  ): Promise<PiCommittedChange>;
+  observeExecution(
+    playgroundId: string,
+    cursor?: { readonly afterSeq?: number; readonly signal?: AbortSignal }
+  ): AsyncIterable<DocumentExecutionEvent>;
   getRun(operationId: string): Promise<PiOperationSnapshot | undefined>;
   listRuns(playgroundId: string): Promise<readonly PiOperationSnapshot[]>;
   streamRun(
@@ -119,12 +139,14 @@ class PlaygroundApplicationImpl implements PlaygroundApplication {
   private readonly _clock: () => number;
   private readonly _generateId: (prefix: string) => string;
   private _closed = false;
+  private readonly _engine: DocumentExecutionEngine;
 
   constructor(private readonly _options: CreatePlaygroundApplicationOptions) {
     this._clock = _options.clock ?? Date.now;
     this._generateId =
       _options.generateId ??
       ((prefix) => `${prefix}_${crypto.randomUUID().replaceAll("-", "")}`);
+    this._engine = new DocumentExecutionEngine(_options.runtime);
   }
 
   /** Creates one product Playground and one authoritative Pi Session. */
@@ -148,7 +170,12 @@ class PlaygroundApplicationImpl implements PlaygroundApplication {
       createdAt: now,
       updatedAt: now,
     };
-    this._options.store.transaction((tx) => tx.insertPlayground(record));
+    try {
+      this._options.store.transaction((tx) => tx.insertPlayground(record));
+    } catch (error) {
+      await this._options.runtime.rollbackSession(session.sessionId);
+      throw error;
+    }
     return this._compose(record, session);
   }
 
@@ -200,19 +227,11 @@ class PlaygroundApplicationImpl implements PlaygroundApplication {
     this._requireOpen();
     let record = this._requireRecord(playgroundId);
     const admission = await resolveOperationAdmission({
-      store: this._options.store,
-      runtime: this._options.runtime,
-      productId: playgroundId,
-      productLabel: `Playground "${playgroundId}"`,
+      engine: this._engine,
       sessionId: record.sessionId,
       lane: record.lane,
-      commandId: input.commandId,
-      commandInput: input,
-      mode: input.mode,
+      generateOperationId: () => this._generateId("operation"),
     });
-    if (admission.kind === "receipt") {
-      return { sessionId: record.sessionId, operationId: admission.operationId };
-    }
     const operationId = admission.operationId;
     const current = admission.snapshot;
     if (admission.kind === "recover") {
@@ -220,32 +239,55 @@ class PlaygroundApplicationImpl implements PlaygroundApplication {
       return this._driveAdmittedOperation(record, current, input);
     }
     const view = await this._compose(record, current);
-    const inputIndex = view.conversation.messages.findIndex(
-      (message) => message.id === input.fromMessageId
+    const materialized = await materializeDocumentPrompt(
+      {
+        systemPrompt: record.agentSpec.instructions.join("\n\n"),
+        tools: [...record.agentSpec.tools],
+        messages: [...input.messages],
+        ...(record.agentSpec.variables === undefined
+          ? {}
+          : { variables: structuredClone(record.agentSpec.variables) }),
+        ...(record.agentSpec.variableVariants === undefined
+          ? {}
+          : {
+              variableVariants: structuredClone(
+                record.agentSpec.variableVariants
+              ),
+            }),
+      },
+      this._options.promptServices
     );
-    const inputMessage = view.conversation.messages[inputIndex];
+    const effectiveMessages = materialized.context.messages ?? [];
+    const inputMessage = effectiveMessages.at(-1);
     if (inputMessage?.role !== "user") {
-      throw new Error(
-        `Playground operation input "${input.fromMessageId}" must be a user Message.`
-      );
+      throw new Error("Playground operation input must end in a user Message.");
     }
 
     const prepared = await this._prepareSession(record, {
-      messages: view.conversation.messages.slice(0, inputIndex),
+      messages: effectiveMessages.slice(0, -1),
       state: structuredClone(view.conversation.state),
     });
     record = prepared.record;
-    const binding = _runtimeBinding(record.id, record.agentSpec);
-    const messages = coreMessagesToPi(
+    const effectiveAgentSpec: AgentSpec = {
+      ...record.agentSpec,
+      instructions:
+        materialized.context.systemPrompt === undefined
+          ? []
+          : [materialized.context.systemPrompt],
+    };
+    const effectiveAgent = agentSpecSnapshot(record.id, effectiveAgentSpec);
+    const binding = _runtimeBinding(record.id, effectiveAgentSpec);
+    const operationInput = coreMessagesToPiInput(
       [...prepared.baseMessages, inputMessage],
       binding.model,
       this._clock()
     );
-    const snapshot = await this._options.runtime.start({
+    const snapshot = await this._engine.admit({
       operationId,
       sessionId: record.sessionId,
       lane: record.lane,
-      messages,
+      messages: operationInput.messages,
+      messageIds: operationInput.messageIds,
       binding,
     });
     const { draft: _consumedDraft, ...committedRecord } = record;
@@ -260,7 +302,7 @@ class PlaygroundApplicationImpl implements PlaygroundApplication {
           lane: record.lane,
           operationId,
           ...(snapshot.leafId === null ? {} : { leafId: snapshot.leafId }),
-          agentSnapshot: agentSpecSnapshot(record.id, record.agentSpec),
+          agentSnapshot: effectiveAgent,
           relation: "executed",
         },
       ],
@@ -278,38 +320,33 @@ class PlaygroundApplicationImpl implements PlaygroundApplication {
     initial: PiSessionSnapshot,
     input: RunPlaygroundInput
   ): Promise<StudioOperationReceipt> {
+    if (input.mode === undefined) {
+      const operationId = initial.operationId;
+      if (operationId === undefined) {
+        throw new Error("Admitted Playground operation has no identity.");
+      }
+      this._recordSnapshot(operationId, initial);
+      return { sessionId: record.sessionId, operationId };
+    }
     const { operationId, snapshot } = await driveAdmittedOperation({
-      store: this._options.store,
-      runtime: this._options.runtime,
-      productId: record.id,
       sessionId: record.sessionId,
       lane: record.lane,
       initial,
-      commandId: input.commandId,
-      commandInput: input,
+      engine: this._engine,
       mode: input.mode,
       signal: input.signal,
-      clock: this._clock,
     });
     this._recordSnapshot(operationId, snapshot);
     return { sessionId: record.sessionId, operationId };
   }
 
-  /** Repairs a missing Playground reference from Pi's admitted identity. */
+  /** Repairs product metadata from Pi after an interrupted admission commit. */
   private _reconcileAdmittedOperation(
     record: PlaygroundRecord,
     snapshot: PiSessionSnapshot
   ): PlaygroundRecord {
     if (snapshot.operationId === undefined) return record;
     const { draft, ...committed } = record;
-    const reference = {
-      sessionId: record.sessionId,
-      lane: record.lane,
-      operationId: snapshot.operationId,
-      ...(snapshot.leafId === null ? {} : { leafId: snapshot.leafId }),
-      agentSnapshot: agentSpecSnapshot(record.id, record.agentSpec),
-      relation: "executed" as const,
-    };
     const next: PlaygroundRecord = {
       ...committed,
       state: structuredClone(draft?.state ?? record.state),
@@ -317,7 +354,14 @@ class PlaygroundApplicationImpl implements PlaygroundApplication {
         ...record.operationReferences.filter(
           (item) => item.operationId !== snapshot.operationId
         ),
-        reference,
+        {
+          sessionId: record.sessionId,
+          lane: record.lane,
+          operationId: snapshot.operationId,
+          ...(snapshot.leafId === null ? {} : { leafId: snapshot.leafId }),
+          agentSnapshot: agentSpecSnapshot(record.id, record.agentSpec),
+          relation: "executed",
+        },
       ],
       updatedAt: this._clock(),
     };
@@ -333,28 +377,31 @@ class PlaygroundApplicationImpl implements PlaygroundApplication {
   ): Promise<StudioOperationReceipt> {
     this._requireOpen();
     const ownership = this._requireOperation(playgroundId, operationId);
-    const snapshot = await executeDebugCommand({
-      store: this._options.store,
+    const snapshot = await this._engine.step({
       sessionId: ownership.sessionId,
+      lane: ownership.lane,
       operationId,
-      commandId: input.commandId,
-      method: "step",
-      input,
-      clock: this._clock,
-      readCurrent: () =>
-        this._options.runtime.open({
-          sessionId: ownership.sessionId,
-          lane: ownership.lane,
-        }),
-      needsExecution: (current) =>
-        current.nextAction?.id === input.expectedActionId,
-      execute: () =>
-        this._options.runtime.step({
-          sessionId: ownership.sessionId,
-          lane: ownership.lane,
-          expectedActionId: input.expectedActionId,
-          kind: input.kind,
-        }),
+      expectedActionId: input.expectedActionId,
+      kind: input.kind,
+    });
+    this._recordSnapshot(operationId, snapshot);
+    return { sessionId: ownership.sessionId, operationId };
+  }
+
+  /** Runs one model action and its immediately following tool actions. */
+  async turnRun(
+    playgroundId: string,
+    operationId: string,
+    input: StudioTurnInput
+  ): Promise<StudioOperationReceipt> {
+    this._requireOpen();
+    const ownership = this._requireOperation(playgroundId, operationId);
+    const snapshot = await this._engine.turn({
+      sessionId: ownership.sessionId,
+      lane: ownership.lane,
+      operationId,
+      expectedActionId: input.expectedActionId,
+      kind: input.kind,
     });
     this._recordSnapshot(operationId, snapshot);
     return { sessionId: ownership.sessionId, operationId };
@@ -364,29 +411,16 @@ class PlaygroundApplicationImpl implements PlaygroundApplication {
   async continueRun(
     playgroundId: string,
     operationId: string,
-    input: StudioContinueInput
+    _input: StudioContinueInput
   ): Promise<StudioOperationReceipt> {
+    void _input;
     this._requireOpen();
     const ownership = this._requireOperation(playgroundId, operationId);
-    const snapshot = await executeDebugCommand({
-      store: this._options.store,
+    const snapshot = await this._engine.drive({
       sessionId: ownership.sessionId,
+      lane: ownership.lane,
       operationId,
-      commandId: input.commandId,
-      method: "continue",
-      input,
-      clock: this._clock,
-      readCurrent: () =>
-        this._options.runtime.open({
-          sessionId: ownership.sessionId,
-          lane: ownership.lane,
-        }),
-      needsExecution: (current) => current.status === "paused",
-      execute: () =>
-        this._options.runtime.continue({
-          sessionId: ownership.sessionId,
-          lane: ownership.lane,
-        }),
+      mode: "continue",
     });
     this._recordSnapshot(operationId, snapshot);
     return { sessionId: ownership.sessionId, operationId };
@@ -400,7 +434,7 @@ class PlaygroundApplicationImpl implements PlaygroundApplication {
   ): Promise<StudioOperationReceipt> {
     this._requireOpen();
     const ownership = this._requireOperation(playgroundId, operationId);
-    const snapshot = await this._options.runtime.resolveToolApproval({
+    const snapshot = await this._engine.resolveToolPermission({
       sessionId: ownership.sessionId,
       lane: ownership.lane,
       toolCallId: input.toolCallId,
@@ -414,7 +448,7 @@ class PlaygroundApplicationImpl implements PlaygroundApplication {
   async cancelRun(playgroundId: string, operationId: string): Promise<void> {
     this._requireOpen();
     const ownership = this._requireOperation(playgroundId, operationId);
-    const snapshot = await this._options.runtime.abort({
+    const snapshot = await this._engine.cancel({
       sessionId: ownership.sessionId,
       lane: ownership.lane,
     });
@@ -426,7 +460,7 @@ class PlaygroundApplicationImpl implements PlaygroundApplication {
     this._requireOpen();
     const record = this._requireRecord(playgroundId);
     const cancelled = await cancelActiveOperation({
-      runtime: this._options.runtime,
+      engine: this._engine,
       sessionId: record.sessionId,
       lane: record.lane,
     });
@@ -444,6 +478,41 @@ class PlaygroundApplicationImpl implements PlaygroundApplication {
     return this._options.runtime.open({
       sessionId: ownership.sessionId,
       lane: ownership.lane,
+    });
+  }
+
+  /** Opens the product-owned Pi Session without requiring client operation state. */
+  async openExecution(playgroundId: string): Promise<PiSessionSnapshot> {
+    this._requireOpen();
+    const record = this._requireRecord(playgroundId);
+    return this._engine.open({ sessionId: record.sessionId, lane: record.lane });
+  }
+
+  /** Reads one replay frame for ACP resume without exposing storage ownership. */
+  async readExecution(
+    playgroundId: string,
+    afterSeq?: number
+  ): Promise<PiCommittedChange> {
+    this._requireOpen();
+    const record = this._requireRecord(playgroundId);
+    return this._engine.readCommitted({
+      sessionId: record.sessionId,
+      lane: record.lane,
+      ...(afterSeq === undefined ? {} : { afterSeq }),
+    });
+  }
+
+  /** Observes committed replay and ephemeral deltas through the shared Engine. */
+  async *observeExecution(
+    playgroundId: string,
+    cursor: { readonly afterSeq?: number; readonly signal?: AbortSignal } = {}
+  ): AsyncIterable<DocumentExecutionEvent> {
+    this._requireOpen();
+    const record = this._requireRecord(playgroundId);
+    yield* this._engine.observe({
+      sessionId: record.sessionId,
+      lane: record.lane,
+      ...cursor,
     });
   }
 
@@ -588,7 +657,15 @@ class PlaygroundApplicationImpl implements PlaygroundApplication {
       draft: desiredBase,
       updatedAt: this._clock(),
     };
-    this._options.store.transaction((tx) => tx.savePlayground(next));
+    try {
+      this._options.store.transaction((tx) => tx.savePlayground(next));
+    } catch (error) {
+      await _rollbackSession(
+        this._options.runtime,
+        replacement.sessionId,
+        error
+      );
+    }
     return {
       record: next,
       baseMessages: exactCommittedPrefix ? [] : desiredBase.messages,
@@ -672,6 +749,27 @@ class PlaygroundApplicationImpl implements PlaygroundApplication {
   private _requireOpen(): void {
     if (this._closed) throw new Error("Playground application is closed.");
   }
+}
+
+async function _rollbackSession(
+  runtime: DurablePiRuntime,
+  sessionId: string,
+  failure: unknown
+): Promise<never> {
+  try {
+    await runtime.rollbackSession(sessionId);
+  } catch (rollbackFailure) {
+    throw new AggregateError(
+      [failure, rollbackFailure],
+      `Failed to roll back Pi Session "${sessionId}" after Playground metadata rejected it.`,
+      { cause: rollbackFailure }
+    );
+  }
+  throw failure instanceof Error
+    ? failure
+    : new Error("Playground metadata rejected a newly created Pi Session.", {
+        cause: failure,
+      });
 }
 
 /** Freezes one Playground declaration into the runtime-owned identity schema. */

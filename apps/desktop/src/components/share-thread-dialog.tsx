@@ -116,7 +116,7 @@ export function ShareThreadDialog({
       (target) =>
         sharingClient
           .read(_playgroundId(target.path))
-          .then((snapshot) => snapshot.thread),
+          .then((snapshot) => ({ title: snapshot.document.title })),
       setTitle
     );
   }, [flow, open, path, sharingClient, targetCommit]);

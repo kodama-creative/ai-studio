@@ -1,4 +1,4 @@
-import type { PortableThreadSnapshot } from "@llm-space/core";
+import type { SharedDocumentV1 } from "@llm-space/core";
 import {
   GistThreadReader,
   GistThreadWriter,
@@ -21,16 +21,16 @@ export class AuthenticatedGistStorage {
     this._writer = new GistThreadWriter({ getToken });
   }
 
-  /** Read the latest portable snapshot from one Gist. */
-  readSnapshot(gistId: string): Promise<PortableThreadSnapshot> {
-    return this._reader.readSnapshot(gistId);
+  /** Read the latest ACP Shared Document from one Gist. */
+  readDocument(gistId: string): Promise<SharedDocumentV1> {
+    return this._reader.readDocument(gistId);
   }
 
   /** Publish a portable snapshot through the authenticated Gist writer. */
-  writeSnapshot(
-    snapshot: PortableThreadSnapshot,
+  writeDocument(
+    snapshot: SharedDocumentV1,
     options: { description?: string } = {}
   ) {
-    return this._writer.writeSnapshot(snapshot, options);
+    return this._writer.writeDocument(snapshot, options);
   }
 }

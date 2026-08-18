@@ -3,6 +3,7 @@ import type { AgentCapabilities } from "@agentclientprotocol/sdk/experimental/v2
 export const LLM_SPACE_ACP_METHODS = {
   snapshot: "_llm-space.dev/session/snapshot",
   step: "_llm-space.dev/session/step",
+  turn: "_llm-space.dev/session/turn",
   continue: "_llm-space.dev/session/continue",
 } as const;
 
@@ -18,6 +19,7 @@ export function createLlmSpaceAgentCapabilities(): AgentCapabilities {
           methods: [
             LLM_SPACE_ACP_METHODS.snapshot,
             LLM_SPACE_ACP_METHODS.step,
+            LLM_SPACE_ACP_METHODS.turn,
             LLM_SPACE_ACP_METHODS.continue,
           ],
         },

@@ -10,9 +10,9 @@ import type {
 } from "../../types/storage/thread-storage";
 import { type Thread } from "../../types/threads/thread";
 import {
-  parsePortableThreadSnapshot,
-  threadFromSnapshotDocument,
-  type PortableThreadSnapshot,
+  parseSharedDocument,
+  threadFromSharedDocument,
+  type SharedDocumentV1,
 } from "../../types/threads/thread-snapshot";
 
 import {
@@ -99,8 +99,8 @@ export class GistThreadReader
     return (await this._readDocument(file)).thread;
   }
 
-  /** Read the latest portable Thread Snapshot from a gist. */
-  async readSnapshot(threadId: string): Promise<PortableThreadSnapshot> {
+  /** Read the latest committed ACP Shared Document from a gist. */
+  async readDocument(threadId: string): Promise<SharedDocumentV1> {
     const gist = await gistRequest<GistResponse>(
       this._fetch,
       this._baseUrl,
@@ -110,7 +110,7 @@ export class GistThreadReader
     const file = selectThreadFile(gist.files);
     if (!file) throw new Error(`Gist ${threadId} has no readable file.`);
     const content = await this._readFileContent(file);
-    return parsePortableThreadSnapshot(JSON.parse(content));
+    return parseSharedDocument(JSON.parse(content));
   }
 
   /**
@@ -174,7 +174,7 @@ export class GistThreadReader
 }
 
 function _parseThread(content: string): Thread {
-  return threadFromSnapshotDocument(JSON.parse(content));
+  return threadFromSharedDocument(JSON.parse(content));
 }
 
 function _parseThreadDocument(content: string): { thread: Thread } {

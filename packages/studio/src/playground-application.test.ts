@@ -61,7 +61,7 @@ describe.each(["memory", "sqlite"] as const)(
           runtimeFormatVersion: 1,
         });
 
-        await fixture.app.savePlayground(created.id, {
+        const saved = await fixture.app.savePlayground(created.id, {
           title: created.title,
           agentSpec: created.agentSpec,
           conversation: {
@@ -80,21 +80,19 @@ describe.each(["memory", "sqlite"] as const)(
         ).toBeNull();
 
         const receipt = await fixture.app.run(created.id, {
-          fromMessageId: "user-1",
-          commandId: "run-1",
+          messages: saved.conversation.messages,
         });
         const paused = await fixture.runtime.open({
           sessionId: receipt.sessionId,
         });
         expect(paused.nextAction?.kind).toBe("model");
         await fixture.app.stepRun(created.id, receipt.operationId, {
-          commandId: "step-1",
           expectedActionId: paused.nextAction!.id,
           kind: "model",
         });
 
         const loaded = await fixture.app.loadPlayground(created.id);
-        expect(typeof loaded?.conversation.messages[0]?.id).toBe("string");
+        expect(loaded?.conversation.messages[0]?.id).toBe("user-1");
         expect(typeof loaded?.conversation.messages[1]?.id).toBe("string");
         expect(loaded).toMatchObject({
           title: "General Agent",
@@ -162,8 +160,7 @@ test("saves a future Playground Draft while a Pi operation is active", async () 
       },
     });
     const receipt = await fixture.app.run(created.id, {
-      fromMessageId: "user-active",
-      commandId: "active-run",
+      messages: created.conversation.messages,
     });
     const active = await fixture.runtime.open({ sessionId: receipt.sessionId });
     if (active.nextAction === undefined) {
@@ -192,7 +189,6 @@ test("saves a future Playground Draft while a Pi operation is active", async () 
     });
 
     await fixture.app.stepRun(created.id, receipt.operationId, {
-      commandId: "finish-active-run",
       expectedActionId: active.nextAction.id,
       kind: active.nextAction.kind,
     });
@@ -242,8 +238,7 @@ test("rejects Playground tool kinds without a Pi runtime execution path", async 
 
     expect(
       fixture.app.run(created.id, {
-        fromMessageId: "user-native",
-        commandId: "run-native",
+        messages: created.conversation.messages,
       })
     ).rejects.toThrow(
       `Playground "${created.id}" uses tools that the Pi runtime cannot execute: web_search.`
@@ -285,8 +280,7 @@ test("rejects non-JSON built-in config before admitting a Pi operation", async (
 
     expect(
       fixture.app.run(created.id, {
-        fromMessageId: "user-config",
-        commandId: "run-config",
+        messages: created.conversation.messages,
       })
     ).rejects.toThrow(
       'Built-in tool "broken_config" config must be a JSON object.'
@@ -318,8 +312,7 @@ test("reconciles an admitted Playground operation after metadata commit failed",
       },
     });
     const input = {
-      fromMessageId: "user-crash",
-      commandId: "admission-crash",
+      messages: created.conversation.messages,
       mode: "step" as const,
     };
 
@@ -343,10 +336,62 @@ test("reconciles an admitted Playground operation after metadata commit failed",
   }
 });
 
+test("rolls back a replacement Pi Session when Playground metadata rejects it", async () => {
+  const fixture = await _fixture("memory", { failReplacementCommit: true });
+  try {
+    const created = await fixture.app.createPlayground({
+      agentSpec: {
+        schemaVersion: 1,
+        model: { provider: "test", id: "local" },
+        instructions: [],
+        tools: [],
+      },
+      conversation: {
+        messages: [
+          {
+            id: "user-original",
+            role: "user",
+            content: [{ type: "text", text: "original" }],
+          },
+        ],
+        state: {},
+      },
+    });
+    await fixture.app.run(created.id, {
+      messages: created.conversation.messages,
+      mode: "step",
+    });
+
+    expect(
+      fixture.app.run(created.id, {
+        messages: [
+          {
+            id: "user-replacement",
+            role: "user",
+            content: [{ type: "text", text: "replacement" }],
+          },
+        ],
+        mode: "step",
+      })
+    ).rejects.toThrow("simulated Playground replacement failure");
+    const orphan = fixture.replacementSessionId();
+    expect(orphan).toBeDefined();
+    expect(fixture.runtime.open({ sessionId: orphan! })).rejects.toThrow();
+    expect((await fixture.app.loadPlayground(created.id))?.sessionId).toBe(
+      created.sessionId
+    );
+  } finally {
+    await fixture.close();
+  }
+});
+
 /** Creates all adapters over one physical SQLite path where applicable. */
 async function _fixture(
   storageKind: "memory" | "sqlite",
-  options: { readonly failAdmissionCommit?: boolean } = {}
+  options: {
+    readonly failAdmissionCommit?: boolean;
+    readonly failReplacementCommit?: boolean;
+  } = {}
 ) {
   const root = await mkdtemp(join(tmpdir(), "llm-space-studio-pi-"));
   const path = join(root, "studio.sqlite");
@@ -365,12 +410,24 @@ async function _fixture(
       ? new InMemoryStudioStore()
       : createSqliteStudioStore({ path });
   let failAdmissionCommit = options.failAdmissionCommit ?? false;
-  const store: StudioStore = failAdmissionCommit
+  let failReplacementCommit = options.failReplacementCommit ?? false;
+  let replacementSessionId: string | undefined;
+  const store: StudioStore = failAdmissionCommit || failReplacementCommit
     ? {
         transaction(fn) {
           return innerStore.transaction((tx) => {
             const faulting = Object.create(tx) as typeof tx;
             faulting.savePlayground = (playground) => {
+              const current = tx.getPlayground(playground.id);
+              if (
+                failReplacementCommit &&
+                current !== undefined &&
+                current.sessionId !== playground.sessionId
+              ) {
+                failReplacementCommit = false;
+                replacementSessionId = playground.sessionId;
+                throw new Error("simulated Playground replacement failure");
+              }
               if (failAdmissionCommit && playground.draft === undefined) {
                 failAdmissionCommit = false;
                 throw new Error("simulated Playground admission crash");
@@ -388,6 +445,7 @@ async function _fixture(
     app,
     runtime,
     store,
+    replacementSessionId: () => replacementSessionId,
     async close() {
       await app.close();
       bindings.close();

@@ -1,4 +1,6 @@
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+
 
 import type { Models } from "@earendil-works/pi-ai";
 import { loadAgent } from "@llm-space/agent/loader";
@@ -12,6 +14,7 @@ import {
   resolveAgentPreview,
   type RuntimeServices,
 } from "@llm-space/agent/runtime";
+import { validateAgentCapabilities } from "@llm-space/engine";
 import {
   BunSqliteRuntimeBindingStore,
   BunSqliteSessionRepository,
@@ -22,6 +25,7 @@ import {
   type PiProviderConnectionInput,
   type RuntimeTool,
 } from "@llm-space/pi-runtime";
+import { Database } from "bun:sqlite";
 
 import { GitSourceRevision } from "./git-source-revision";
 import type { StudioAgentSnapshot, StudioExecutableAgent } from "./pi-domain";
@@ -69,12 +73,15 @@ export async function createStudio(
   const revision = new GitSourceRevision(options.projectRoot);
   const first = await _loadExecutable(options.projectRoot);
   const databasePath = join(options.dataRoot, "studio.sqlite");
-  const repository = new BunSqliteSessionRepository({ path: databasePath });
+  mkdirSync(options.dataRoot, { recursive: true, mode: 0o700 });
+  const database = new Database(databasePath, { create: true });
+  const repository = new BunSqliteSessionRepository({ database });
   let bindings: BunSqliteRuntimeBindingStore;
   try {
-    bindings = new BunSqliteRuntimeBindingStore({ path: databasePath });
+    bindings = new BunSqliteRuntimeBindingStore({ database });
   } catch (error) {
     await repository.close();
+    database.close();
     throw error;
   }
   const resolveCurrentAgent = async (input?: {
@@ -107,11 +114,12 @@ export async function createStudio(
   });
   let studioStore: ReturnType<typeof createSqliteStudioStore>;
   try {
-    studioStore = createSqliteStudioStore({ path: databasePath });
+    studioStore = createSqliteStudioStore({ database });
   } catch (error) {
     await runtime.close();
     bindings.close();
     await repository.close();
+    database.close();
     throw error;
   }
   const application = createStudioApplication({
@@ -129,6 +137,7 @@ export async function createStudio(
     application,
     bindings,
     repository,
+    database,
     revision,
     new ProjectSource(options.projectRoot)
   );
@@ -143,6 +152,7 @@ class StudioImpl implements Studio {
     private readonly _application: StudioApplication,
     private readonly _bindings: BunSqliteRuntimeBindingStore,
     private readonly _repository: BunSqliteSessionRepository,
+    private readonly _database: Database,
     private readonly _revision: GitSourceRevision,
     private readonly _source: ProjectSource
   ) {}
@@ -224,6 +234,13 @@ class StudioImpl implements Studio {
   ) {
     return this._application.stepRun(threadId, operationId, input);
   }
+  turnRun(
+    threadId: string,
+    operationId: string,
+    input: Parameters<StudioApplication["turnRun"]>[2]
+  ) {
+    return this._application.turnRun(threadId, operationId, input);
+  }
   continueRun(
     threadId: string,
     operationId: string,
@@ -247,6 +264,18 @@ class StudioImpl implements Studio {
   inspectRun(threadId: string, operationId: string) {
     return this._application.inspectRun(threadId, operationId);
   }
+  openExecution(threadId: string) {
+    return this._application.openExecution(threadId);
+  }
+  readExecution(threadId: string, afterSeq?: number) {
+    return this._application.readExecution(threadId, afterSeq);
+  }
+  observeExecution(
+    threadId: string,
+    cursor?: Parameters<StudioApplication["observeExecution"]>[1]
+  ) {
+    return this._application.observeExecution(threadId, cursor);
+  }
   events(
     threadId: string,
     cursor?: Parameters<StudioApplication["events"]>[1]
@@ -267,9 +296,19 @@ class StudioImpl implements Studio {
     try {
       await this._application.close();
     } finally {
-      this._bindings.close();
-      await this._repository.close();
-      await closeRuntimeServices(this._options.runtimeServices);
+      try {
+        this._bindings.close();
+      } finally {
+        try {
+          await this._repository.close();
+        } finally {
+          try {
+            this._database.close();
+          } finally {
+            await closeRuntimeServices(this._options.runtimeServices);
+          }
+        }
+      }
     }
   }
 }
@@ -283,8 +322,10 @@ async function _loadExecutable(
     readonly messages: readonly unknown[];
   }
 ): Promise<StudioExecutableAgent> {
+  const loaded = await loadAgent({ startPath: projectRoot });
+  validateAgentCapabilities(loaded.manifest);
   const definition = mountAgentFrameworkTools(
-    await resolveAgentGeneration(await loadAgent({ startPath: projectRoot }))
+    await resolveAgentGeneration(loaded)
   );
   const resolved =
     operation === undefined

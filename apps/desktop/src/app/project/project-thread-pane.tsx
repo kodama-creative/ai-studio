@@ -10,8 +10,11 @@ import { toast } from "sonner";
 
 import { useInject } from "@/app/di/react";
 import { SerializedPersistence } from "@/app/thread/serialized-persistence";
+import {
+  ACP_SESSION_SERVICE,
+  type AcpSessionClient,
+} from "@/shared/acp-session-rpc";
 import type { StudioTransport } from "@/shared/studio-rpc";
-import { THREAD_SERVICE, type ThreadRequests } from "@/shared/thread-rpc";
 
 import {
   createProjectThreadExecutionRuntime,
@@ -48,7 +51,7 @@ function ProjectThreadPaneOwner({
   onThreadProjection,
   onRunSettled,
 }: ProjectThreadPaneProps) {
-  const threadService = useInject<ThreadRequests>(THREAD_SERVICE);
+  const acpSession = useInject<AcpSessionClient>(ACP_SESSION_SERVICE);
   const threadRef = useRef(thread);
   threadRef.current = thread;
   const metadataSaveChain = useRef(Promise.resolve());
@@ -121,7 +124,7 @@ function ProjectThreadPaneOwner({
     () =>
       createProjectThreadExecutionRuntime({
         client,
-        threadClient: threadService,
+        acpClient: acpSession,
         projectId,
         threadId: thread.id,
         getThread: () => threadRef.current,
@@ -139,7 +142,7 @@ function ProjectThreadPaneOwner({
       projectId,
       publishThread,
       thread.id,
-      threadService,
+      acpSession,
     ]
   );
   return (

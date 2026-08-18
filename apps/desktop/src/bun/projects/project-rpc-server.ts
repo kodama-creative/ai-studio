@@ -24,7 +24,7 @@ export class ProjectSourceRpcServer implements RpcServer<ProjectSourceRpc> {
   }
 }
 
-/** Studio Thread metadata adapter; Run/Step/Continue stay in `thread.*`. */
+/** Studio metadata adapter; Prompt/Step/Turn/Continue stay in `acpSession.*`. */
 export class StudioRpcServer implements RpcServer<StudioRpc> {
   readonly namespace = STUDIO_RPC;
   readonly requests: StudioRpc["requests"];

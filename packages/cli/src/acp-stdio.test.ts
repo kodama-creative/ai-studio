@@ -6,7 +6,7 @@ import {
   client,
   methods,
   ndJsonStream,
-} from "@llm-space/acp";
+} from "@llm-space/acp/server";
 
 import { serveAcpStdio } from "./acp-stdio";
 

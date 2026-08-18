@@ -64,15 +64,26 @@ export function coreMessagesToPi(
   model: { readonly provider: string; readonly modelId: string },
   timestamp: number = Date.now()
 ): AgentMessage[] {
-  return messages.flatMap((message): AgentMessage[] => {
+  return coreMessagesToPiInput(messages, model, timestamp).messages;
+}
+
+/** Expands editor messages while preserving their protocol-visible identities. */
+export function coreMessagesToPiInput(
+  messages: readonly Message[],
+  model: { readonly provider: string; readonly modelId: string },
+  timestamp: number = Date.now()
+): { readonly messages: AgentMessage[]; readonly messageIds: string[] } {
+  const projectedMessages: AgentMessage[] = [];
+  const messageIds: string[] = [];
+  for (const message of messages) {
     if (message.role === "user") {
-      return [
-        {
-          role: "user",
-          content: message.content.map((item) => ({ ...item })),
-          timestamp,
-        },
-      ];
+      projectedMessages.push({
+        role: "user",
+        content: message.content.map((item) => ({ ...item })),
+        timestamp,
+      });
+      messageIds.push(message.id);
+      continue;
     }
     const assistant: PiAssistantMessage = {
       role: "assistant",
@@ -95,24 +106,22 @@ export function coreMessagesToPi(
       stopReason: message.toolCalls?.length ? "toolUse" : "stop",
       timestamp,
     };
-    return [
-      assistant,
-      ...(message.toolCalls ?? []).flatMap((call): AgentMessage[] =>
-        call.output === undefined
-          ? []
-          : [
-              {
-                role: "toolResult",
-                toolCallId: call.id,
-                toolName: call.input.name,
-                content: call.output.content.map((item) => ({ ...item })),
-                isError: call.output.isError ?? false,
-                timestamp,
-              },
-            ]
-      ),
-    ];
-  });
+    projectedMessages.push(assistant);
+    messageIds.push(message.id);
+    for (const call of message.toolCalls ?? []) {
+      if (call.output === undefined) continue;
+      projectedMessages.push({
+        role: "toolResult",
+        toolCallId: call.id,
+        toolName: call.input.name,
+        content: call.output.content.map((item) => ({ ...item })),
+        isError: call.output.isError ?? false,
+        timestamp,
+      });
+      messageIds.push(`${message.id}:tool:${call.id}:result`);
+    }
+  }
+  return { messages: projectedMessages, messageIds };
 }
 
 /** Converts one Pi assistant entry without inventing a second message identity. */

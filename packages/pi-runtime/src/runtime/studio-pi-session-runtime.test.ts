@@ -67,6 +67,7 @@ test("opens without effects and commits exactly one durable model step", async (
           timestamp: 1,
         },
       ],
+      messageIds: ["acp-user-1"],
       binding: {
         formatVersion: 1,
         agent: { agentSpecId: "assistant", sourceRevision: "abc123" },
@@ -78,6 +79,7 @@ test("opens without effects and commits exactly one durable model step", async (
 
     expect(modelCalls).toBe(0);
     expect(started.nextAction?.kind).toBe("model");
+    expect(started.messageEntries[0]?.id).toBe("acp-user-1");
     expect((await runtime.open({ sessionId: "session-1" })).nextAction).toEqual(
       started.nextAction
     );

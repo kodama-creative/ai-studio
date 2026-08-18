@@ -6,15 +6,10 @@ import type {
 import type { Evaluation, EvaluationRubric } from "../evaluation";
 import type { PlaygroundRecord } from "../playground";
 
-import type {
-  StudioCommandReceipt,
-  StudioStore,
-  StudioStoreTransaction,
-} from "./studio-store";
+import type { StudioStore, StudioStoreTransaction } from "./studio-store";
 
 interface MemoryState {
   playgrounds: Map<string, PlaygroundRecord>;
-  commandReceipts: Map<string, StudioCommandReceipt>;
   experiments: Map<string, StudioExperimentRecord>;
   operationReferences: Map<string, ThreadRunReference[]>;
   evaluations: Map<string, Evaluation[]>;
@@ -25,7 +20,6 @@ interface MemoryState {
 export class InMemoryStudioStore implements StudioStore {
   private _state: MemoryState = {
     playgrounds: new Map(),
-    commandReceipts: new Map(),
     experiments: new Map(),
     operationReferences: new Map(),
     evaluations: new Map(),
@@ -70,36 +64,6 @@ class MemoryTransaction implements StudioStoreTransaction {
       throw new Error(`Playground "${playground.id}" was not found.`);
     }
     this._state.playgrounds.set(playground.id, structuredClone(playground));
-  }
-
-  getCommandReceipt(
-    sessionId: string,
-    commandId: string
-  ): StudioCommandReceipt | undefined {
-    return _clone(
-      this._state.commandReceipts.get(`${sessionId}\0${commandId}`)
-    );
-  }
-
-  insertCommandReceipt(receipt: StudioCommandReceipt): void {
-    const key = `${receipt.sessionId}\0${receipt.commandId}`;
-    const existing = this._state.commandReceipts.get(key);
-    if (existing !== undefined) {
-      throw new Error(
-        `Command "${receipt.commandId}" already has a durable receipt.`
-      );
-    }
-    this._state.commandReceipts.set(key, structuredClone(receipt));
-  }
-
-  saveCommandReceipt(receipt: StudioCommandReceipt): void {
-    const key = `${receipt.sessionId}\0${receipt.commandId}`;
-    if (!this._state.commandReceipts.has(key)) {
-      throw new Error(
-        `Command "${receipt.commandId}" does not have a durable receipt.`
-      );
-    }
-    this._state.commandReceipts.set(key, structuredClone(receipt));
   }
 
   getExperiment(experimentId: string): StudioExperimentRecord | undefined {

@@ -22,8 +22,11 @@ import {
   playgroundToEditorThread,
 } from "@/app/playground-thread-adapter";
 import { SerializedPersistence } from "@/app/thread/serialized-persistence";
+import {
+  ACP_SESSION_SERVICE,
+  type AcpSessionClient,
+} from "@/shared/acp-session-rpc";
 import { PLAYGROUND_SERVICE, type PlaygroundClient } from "@/shared/playground-rpc";
-import { THREAD_SERVICE, type ThreadRequests } from "@/shared/thread-rpc";
 
 import type { PaneLifecycleHost } from "./pane-lifecycle-host";
 import { settleStreamingPane } from "./settle-streaming-pane";
@@ -57,7 +60,7 @@ function _PlaygroundTabPane({
 }: PlaygroundTabPaneProps) {
   const queryClient = useQueryClient();
   const client = useInject<PlaygroundClient>(PLAYGROUND_SERVICE);
-  const threadService = useInject<ThreadRequests>(THREAD_SERVICE);
+  const acpSession = useInject<AcpSessionClient>(ACP_SESSION_SERVICE);
   const queryKey = useMemo(
     () => ["playground", playgroundId] as const,
     [playgroundId]
@@ -209,7 +212,7 @@ function _PlaygroundTabPane({
     () =>
       createPlaygroundThreadExecutionRuntime({
         client,
-        threadClient: threadService,
+        acpClient: acpSession,
         playgroundId,
         getPlayground: () => {
           const current = playgroundRef.current;
@@ -235,7 +238,7 @@ function _PlaygroundTabPane({
       playgroundId,
       queryClient,
       queryKey,
-      threadService,
+      acpSession,
     ]
   );
   const handleStreamingStart = useCallback(

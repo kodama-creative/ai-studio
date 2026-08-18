@@ -3,34 +3,41 @@ import { dirname } from "node:path";
 
 import { Database } from "bun:sqlite";
 
-import type {
-  AppCommandReceipt,
-  AppSessionRecord,
-  Task,
-} from "../../domain";
+import type { AppSessionRecord, Task } from "../../domain";
 import type {
   ApplicationStore,
   ApplicationStoreTransaction,
 } from "../application-store";
 
 export interface CreateSqliteApplicationStoreOptions {
-  readonly path: string;
+  readonly path?: string;
+  readonly database?: Database;
 }
 
 /** Opens App-owned metadata tables in the same SQLite file as Pi Session. */
 export function createSqliteApplicationStore(
   options: CreateSqliteApplicationStoreOptions
 ): ApplicationStore {
-  if (options.path !== ":memory:") {
+  if (options.database !== undefined && options.path !== undefined) {
+    throw new Error("Provide either a SQLite path or database, not both.");
+  }
+  if (options.database === undefined && options.path === undefined) {
+    throw new Error("A SQLite path or database is required.");
+  }
+  if (options.path !== undefined && options.path !== ":memory:") {
     mkdirSync(dirname(options.path), { recursive: true, mode: 0o700 });
   }
   return new SqliteApplicationStore(
-    new Database(options.path, { create: true })
+    options.database ?? new Database(options.path, { create: true }),
+    options.database === undefined
   );
 }
 
 class SqliteApplicationStore implements ApplicationStore {
-  constructor(private readonly _database: Database) {
+  constructor(
+    private readonly _database: Database,
+    private readonly _ownsDatabase: boolean
+  ) {
     this._database.run("PRAGMA foreign_keys = ON");
     this._database.run("PRAGMA busy_timeout = 5000");
     if (this._database.filename !== ":memory:") {
@@ -47,7 +54,7 @@ class SqliteApplicationStore implements ApplicationStore {
   }
 
   close(): void {
-    this._database.close();
+    if (this._ownsDatabase) this._database.close();
   }
 }
 
@@ -143,55 +150,6 @@ class SqliteApplicationTransaction implements ApplicationStoreTransaction {
     }
   }
 
-  getCommandReceipt(
-    sessionId: string,
-    commandId: string
-  ): AppCommandReceipt | undefined {
-    const row = this._database
-      .query<{ payload_json: string }, [string, string]>(
-        `SELECT payload_json FROM app_command_receipts
-         WHERE session_id = ? AND command_id = ?`
-      )
-      .get(sessionId, commandId);
-    return row === null ? undefined : _parse(row.payload_json);
-  }
-
-  insertCommandReceipt(receipt: AppCommandReceipt): void {
-    this._database
-      .query(
-        `INSERT INTO app_command_receipts (
-          session_id, command_id, method, fingerprint, payload_json, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?)`
-      )
-      .run(
-        receipt.sessionId,
-        receipt.commandId,
-        receipt.method,
-        receipt.fingerprint,
-        _json(receipt),
-        receipt.createdAt
-      );
-  }
-
-  saveCommandReceipt(receipt: AppCommandReceipt): void {
-    const result = this._database
-      .query(
-        `UPDATE app_command_receipts SET
-          method = ?, fingerprint = ?, payload_json = ?
-         WHERE session_id = ? AND command_id = ?`
-      )
-      .run(
-        receipt.method,
-        receipt.fingerprint,
-        _json(receipt),
-        receipt.sessionId,
-        receipt.commandId
-      );
-    if (result.changes !== 1) {
-      throw new Error(`Command "${receipt.commandId}" was not found.`);
-    }
-  }
-
   private _read<T>(query: string, value: string): T | undefined {
     const row = this._database
       .query<{ payload_json: string }, [string]>(query)
@@ -220,18 +178,6 @@ function _createSchema(database: Database): void {
         payload_json TEXT NOT NULL,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL,
-        FOREIGN KEY(session_id) REFERENCES app_sessions(session_id)
-      )
-    `);
-    database.run(`
-      CREATE TABLE IF NOT EXISTS app_command_receipts (
-        session_id TEXT NOT NULL,
-        command_id TEXT NOT NULL,
-        method TEXT NOT NULL,
-        fingerprint TEXT NOT NULL,
-        payload_json TEXT NOT NULL,
-        created_at INTEGER NOT NULL,
-        PRIMARY KEY(session_id, command_id),
         FOREIGN KEY(session_id) REFERENCES app_sessions(session_id)
       )
     `);

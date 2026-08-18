@@ -1,4 +1,6 @@
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Models } from "@earendil-works/pi-ai";
@@ -13,6 +15,7 @@ import {
   type PreparedAgentDefinition,
   type RuntimeServices,
 } from "@llm-space/agent/runtime";
+import { validateAgentCapabilities } from "@llm-space/engine";
 import {
   BunSqliteRuntimeBindingStore,
   BunSqliteSessionRepository,
@@ -24,6 +27,7 @@ import {
   type RuntimeBinding,
   type RuntimeTool,
 } from "@llm-space/pi-runtime";
+import { Database } from "bun:sqlite";
 
 import {
   APP_PI_RUNTIME_FORMAT_VERSION,
@@ -54,7 +58,7 @@ export interface ExecAgentInput {
   readonly messages: readonly AgentMessage[];
   readonly operationId?: string;
   readonly taskId?: string;
-  readonly mode?: "step" | "continue";
+  readonly mode?: "step" | "turn" | "continue";
   readonly signal?: AbortSignal;
 }
 
@@ -78,6 +82,9 @@ export interface Agent {
   step(
     input: Parameters<SessionApplication["step"]>[0]
   ): ReturnType<SessionApplication["step"]>;
+  turn(
+    input: Parameters<SessionApplication["turn"]>[0]
+  ): ReturnType<SessionApplication["turn"]>;
   continue(
     input: Parameters<SessionApplication["continue"]>[0]
   ): ReturnType<SessionApplication["continue"]>;
@@ -95,12 +102,15 @@ export interface Agent {
 export async function createAgent(options: CreateAgentOptions): Promise<Agent> {
   const first = await _loadExecutable(options.projectRoot);
   const databasePath = join(options.dataRoot, "agent.sqlite");
-  const repository = new BunSqliteSessionRepository({ path: databasePath });
+  mkdirSync(options.dataRoot, { recursive: true, mode: 0o700 });
+  const database = new Database(databasePath, { create: true });
+  const repository = new BunSqliteSessionRepository({ database });
   let bindings: BunSqliteRuntimeBindingStore;
   try {
-    bindings = new BunSqliteRuntimeBindingStore({ path: databasePath });
+    bindings = new BunSqliteRuntimeBindingStore({ database });
   } catch (error) {
     await repository.close();
+    database.close();
     throw error;
   }
   const resolveCurrentAgent = async () => {
@@ -133,7 +143,7 @@ export async function createAgent(options: CreateAgentOptions): Promise<Agent> {
   });
   let store: ReturnType<typeof createSqliteApplicationStore>;
   try {
-    store = createSqliteApplicationStore({ path: databasePath });
+    store = createSqliteApplicationStore({ database });
   } catch (error) {
     try {
       await runtime.close();
@@ -142,6 +152,7 @@ export async function createAgent(options: CreateAgentOptions): Promise<Agent> {
         bindings.close();
       } finally {
         await repository.close();
+        database.close();
       }
     }
     throw error;
@@ -162,7 +173,8 @@ export async function createAgent(options: CreateAgentOptions): Promise<Agent> {
     first.agentId,
     application,
     bindings,
-    repository
+    repository,
+    database
   );
 }
 
@@ -174,7 +186,8 @@ class AgentImpl implements Agent {
     readonly agentId: string,
     private readonly _application: SessionApplication,
     private readonly _bindings: BunSqliteRuntimeBindingStore,
-    private readonly _repository: BunSqliteSessionRepository
+    private readonly _repository: BunSqliteSessionRepository,
+    private readonly _database: Database
   ) {}
 
   createSession(
@@ -217,6 +230,12 @@ class AgentImpl implements Agent {
     return this._application.step(input);
   }
 
+  turn(
+    input: Parameters<SessionApplication["turn"]>[0]
+  ): ReturnType<SessionApplication["turn"]> {
+    return this._application.turn(input);
+  }
+
   continue(
     input: Parameters<SessionApplication["continue"]>[0]
   ): ReturnType<SessionApplication["continue"]> {
@@ -257,7 +276,11 @@ class AgentImpl implements Agent {
         try {
           await this._repository.close();
         } finally {
-          await closeRuntimeServices(this._options.runtimeServices);
+          try {
+            this._database.close();
+          } finally {
+            await closeRuntimeServices(this._options.runtimeServices);
+          }
         }
       }
     }
@@ -273,8 +296,10 @@ interface LoadedExecutable {
 
 /** Loads current project source into one immutable Pi operation binding. */
 async function _loadExecutable(projectRoot: string): Promise<LoadedExecutable> {
+  const loaded = await loadAgent({ startPath: projectRoot });
+  validateAgentCapabilities(loaded.manifest);
   const definition = mountAgentFrameworkTools(
-    await resolveAgentGeneration(await loadAgent({ startPath: projectRoot }))
+    await resolveAgentGeneration(loaded)
   );
   const tools = new Map<string, RuntimeTool>();
   const frozenTools = [...definition.tools.entries()].map(([name, tool]) => {

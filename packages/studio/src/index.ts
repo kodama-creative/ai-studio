@@ -6,6 +6,7 @@ export type {
   StudioRunInput,
   StudioRunReceipt,
   StudioStepRunInput,
+  StudioTurnRunInput,
   StudioThread,
   StudioThreadDocument,
   StudioThreadEvent,
@@ -31,7 +32,10 @@ export type {
   StudioContinueInput,
   StudioToolApprovalInput,
 } from "./pi-domain";
-export { coreMessagesToPi } from "./pi-message-projection";
+export {
+  coreMessagesToPi,
+  coreMessagesToPiInput,
+} from "./pi-message-projection";
 export {
   createPlaygroundApplication,
   type CreatePlaygroundApplicationOptions,

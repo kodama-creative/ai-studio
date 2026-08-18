@@ -49,29 +49,13 @@ export interface SessionInspectInput {
   readonly afterSeq?: number;
 }
 
-/** Durable debugger command identity, independent of any transport protocol. */
-export interface SessionMutationInput extends SessionInspectInput {
-  readonly commandId: string;
-}
-
-export interface SessionStepInput extends SessionMutationInput {
+export interface SessionStepInput extends SessionInspectInput {
   readonly expectedActionId: string;
   readonly kind: "model" | "tool";
 }
 
-export type SessionContinueInput = SessionMutationInput;
-
-/** Durable debugger mutation identity without protocol payload or transcript data. */
-export interface AppCommandReceipt {
-  readonly sessionId: string;
-  readonly commandId: string;
-  readonly method: "step" | "continue";
-  readonly status: "accepted" | "applied";
-  readonly fingerprint: string;
-  readonly operationId?: string;
-  readonly leafId?: string;
-  readonly createdAt: number;
-}
+export type SessionTurnInput = SessionStepInput;
+export type SessionContinueInput = SessionInspectInput;
 
 /** Final machine-readable result returned by App and `llm-space exec`. */
 export interface AgentExecutionResult {

@@ -1,4 +1,4 @@
-import type { PortableThreadSnapshot } from "@llm-space/core";
+import type { SharedDocumentV1 } from "@llm-space/core";
 import type { Playground } from "@llm-space/studio";
 
 import { defineRpcNamespace } from "./namespaced-rpc";
@@ -6,12 +6,12 @@ import { defineRpcNamespace } from "./namespaced-rpc";
 export const THREAD_SHARING_SERVICE = Symbol("ThreadSharingService");
 
 export interface ThreadSharingRequests {
-  read(playgroundId: string): Promise<PortableThreadSnapshot>;
+  read(playgroundId: string): Promise<SharedDocumentV1>;
   publish(
     playgroundId: string,
     meta?: { title?: string; description?: string }
   ): Promise<{ shareUrl: string; gistId: string }>;
-  importSnapshot(snapshot: PortableThreadSnapshot): Promise<Playground>;
+  importDocument(document: SharedDocumentV1): Promise<Playground>;
   importGist(gistId: string): Promise<Playground>;
 }
 
@@ -27,7 +27,7 @@ export const THREAD_SHARING_RPC = defineRpcNamespace<ThreadSharingRpc>(
     requests: {
       read: true,
       publish: true,
-      importSnapshot: true,
+      importDocument: true,
       importGist: true,
     },
     streams: {},

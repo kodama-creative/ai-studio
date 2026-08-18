@@ -1,14 +1,10 @@
-import type {
-  ThreadLocator,
-  WritableThreadStorage,
-} from "../../types/storage/thread-storage";
+import type { ThreadLocator } from "../../types/storage/thread-storage";
 import { normalizeThread, type Thread } from "../../types/threads/thread";
-import type { PortableThreadSnapshot } from "../../types/threads/thread-snapshot";
+import type { SharedDocumentV1 } from "../../types/threads/thread-snapshot";
 
 import {
   GITHUB_API_BASE,
   gistRequest,
-  resolveLatestLocator,
   type GistResponse,
   type TokenProvider,
 } from "./gist-api";
@@ -38,11 +34,11 @@ export interface GistThreadWriterOptions {
 const DEFAULT_FILENAME = "thread.json";
 
 /**
- * Upserts a single Thread into a GitHub gist. Authenticated and write-only —
+ * Publishes one Shared Document into a GitHub gist. Authenticated and write-only —
  * the desktop app owns this; the static web page never imports it. Reading back
  * is {@link GistThreadReader}'s job.
  */
-export class GistThreadWriter implements WritableThreadStorage {
+export class GistThreadWriter {
   private readonly _fetch: typeof fetch;
   private readonly _baseUrl: string;
   private readonly _getToken: TokenProvider;
@@ -56,54 +52,25 @@ export class GistThreadWriter implements WritableThreadStorage {
     this._public = options.public ?? false;
   }
 
-  /**
-   * Upsert the Thread. With no `id`, create a new gist and return its locator.
-   * With an `id`, overwrite the existing thread file in place (reusing its
-   * filename so a title change doesn't orphan the old file) and return the new
-   * revision's locator.
-   *
-   * The gist's `description` (surfaced as {@link SharedThreadMeta.description} in
-   * the viewer) is taken from `options.description` when provided; otherwise it
-   * falls back to the thread title. Pass an empty string to publish with no
-   * description.
-   */
-  async write(
-    thread: Thread,
-    id?: string,
-    options?: { description?: string }
-  ): Promise<ThreadLocator> {
-    const token = await this._getToken();
-    if (!token) {
-      throw new Error("GitHub sign-in required to save to a gist.");
-    }
-
-    const normalized = normalizeThread(thread);
-    // Publish a clean thread: local run history is per-machine debug state, not
-    // part of what's shared, so upload it with an empty `runHistory`.
-    const published: Thread = { ...normalized, runHistory: [] };
-    const content = JSON.stringify(published, null, 2);
-    const description = options?.description ?? normalized.title ?? "";
-
-    return id
-      ? this._update(id, content, description, token)
-      : this._create(normalized, content, description, token);
-  }
-
-  /** Publish one versioned Pi lane/leaf projection without flattening its identity. */
-  async writeSnapshot(
-    snapshot: PortableThreadSnapshot,
+  /** Publish one portable ACP Shared Document without runtime identity. */
+  async writeDocument(
+    snapshot: SharedDocumentV1,
     options: { description?: string } = {}
   ): Promise<ThreadLocator> {
     const token = await this._getToken();
     if (!token) {
       throw new Error("GitHub sign-in required to save to a gist.");
     }
-    const thread = normalizeThread(snapshot.thread);
-    const content = JSON.stringify(
-      { ...snapshot, thread: { ...thread, runHistory: [] } },
-      null,
-      2
-    );
+    const thread = normalizeThread({
+      title: snapshot.document.title,
+      ...(snapshot.document.model === undefined
+        ? {}
+        : { model: snapshot.document.model }),
+      ...(snapshot.display?.modelName === undefined
+        ? {}
+        : { modelName: snapshot.display.modelName }),
+    });
+    const content = JSON.stringify(snapshot, null, 2);
     return this._create(
       thread,
       content,
@@ -138,41 +105,6 @@ export class GistThreadWriter implements WritableThreadStorage {
     return _locatorFrom(gist, gist.id ?? "", filename);
   }
 
-  private async _update(
-    id: string,
-    content: string,
-    description: string,
-    token: string
-  ): Promise<ThreadLocator> {
-    // Reuse the existing filename so overwriting updates the same file rather
-    // than adding a second one.
-    const existing = await resolveLatestLocator(
-      this._fetch,
-      this._baseUrl,
-      id,
-      token
-    );
-    const filename = existing.filename;
-    if (!filename) {
-      throw new Error(`Gist ${id} did not resolve to a thread filename.`);
-    }
-    const gist = await gistRequest<GistResponse>(
-      this._fetch,
-      this._baseUrl,
-      `/gists/${id}`,
-      {
-        token,
-        init: {
-          method: "PATCH",
-          body: JSON.stringify({
-            description,
-            files: { [filename]: { content } },
-          }),
-        },
-      }
-    );
-    return _locatorFrom(gist, id, filename);
-  }
 }
 
 function _locatorFrom(

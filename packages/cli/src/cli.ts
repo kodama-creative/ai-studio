@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { realpath } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
-import { createPiAcpAgent } from "@llm-space/acp";
+import { createPiAcpAgent } from "@llm-space/acp/server";
 import { createAgent, type Agent } from "@llm-space/app/server";
 import { getLlmSpaceHomePath } from "@llm-space/core/server";
 import { ModelManager } from "@llm-space/runtime/models";

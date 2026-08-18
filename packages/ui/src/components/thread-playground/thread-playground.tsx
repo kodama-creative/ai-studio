@@ -1,6 +1,6 @@
 "use client";
 
-import type { AgentTransport, Thread } from "@llm-space/core";
+import type { Thread } from "@llm-space/core";
 import {
   ChevronDownIcon,
   HistoryIcon,
@@ -52,12 +52,10 @@ import { TitleEditor, type TitleValidator } from "./misc/title-editor";
 import { ModelConfigEditor } from "./model/model-config-editor";
 import {
   ProviderProfileSelectionProvider,
-  useGetProviderProfileId,
   useProviderProfileSelections,
 } from "./model/provider-profile-selection-provider";
 import { SystemPromptEditor } from "./prompt/system-prompt-editor";
 import { RunHistoryListView } from "./run-history-list-view";
-import { createPromptFiles } from "./runtime-prompt-files";
 import {
   canRedo,
   canUndo,
@@ -68,16 +66,14 @@ import {
   useRunMode,
   useThreadStore,
   useThreadStoreActions,
-  type ExternalThreadExecutionRuntime,
+  type AcpSessionExecutionRuntime,
   type ThreadRunMetadata,
 } from "./stores";
 import type { RunChangePersistence } from "./thread-playground-events";
 import { ThreadShareButton } from "./thread-share-button";
 import { ToolListView } from "./tool/tool-list-view";
-import { useToolExecutor } from "./tool/use-tool-executor";
 import { useShortcuts } from "./use-shortcuts";
 import { useThreadPlaygroundEvents } from "./use-thread-playground-events";
-import { listEnabledPromptVariableSkills } from "./variable/prompt-variable-skills";
 import { PromptVariablesListView } from "./variable/prompt-variables-list-view";
 
 export interface ThreadPlaygroundProps {
@@ -101,10 +97,8 @@ export interface ThreadPlaygroundProps {
    * single handler per type), so a global run always targets the active tab.
    */
   active?: boolean;
-  /** The streaming transport used by runs (e.g. HTTP or Electrobun RPC). */
-  transport?: AgentTransport;
-  /** Host-owned full-run execution for Studio/Work interactions. */
-  executionRuntime?: ExternalThreadExecutionRuntime;
+  /** Host-owned ACP Session runtime; the only interactive execution seam. */
+  executionRuntime?: AcpSessionExecutionRuntime;
   /** Selects who persists Thread changes emitted when a run settles. */
   runChangePersistence?: RunChangePersistence;
   /** Keep Agent definition controls read-only while messages remain editable. */
@@ -162,7 +156,6 @@ function _ThreadPlayground({ storeKey, ...props }: ThreadPlaygroundProps) {
 
 function _ThreadPlaygroundStore({
   initialValue,
-  transport,
   executionRuntime,
   runChangePersistence = "editor",
   onChange,
@@ -180,13 +173,8 @@ function _ThreadPlaygroundStore({
   const defaultModel = useDefaultModel();
   const defaultModelRef = useRef(defaultModel);
   defaultModelRef.current = defaultModel;
-  const getProfileId = useGetProviderProfileId();
-  const { skills, files } = useHostServices();
-  const toolExecutor = useToolExecutor();
   const [store] = useState(() => {
-    const promptFiles = createPromptFiles(files);
     return createThreadStore(initialValue, {
-      transport,
       executionRuntime,
       onRunMetadataChange,
       resolveModel: (saved) =>
@@ -197,11 +185,6 @@ function _ThreadPlaygroundStore({
         ),
       getAutoRunTools,
       getReactLoop,
-      getProfileId,
-      executeTool: toolExecutor ?? undefined,
-      loadSkills: () => listEnabledPromptVariableSkills(skills),
-      loadFile: promptFiles.loadFile,
-      fileExists: promptFiles.fileExists,
     });
   });
   useThreadPlaygroundEvents(

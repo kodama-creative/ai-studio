@@ -1,13 +1,12 @@
 export type {
   AgentExecutionResult,
-  AppCommandReceipt,
   AppSessionRecord,
   Session,
   SessionContinueInput,
   SessionEntry,
   SessionInspectInput,
-  SessionMutationInput,
   SessionStepInput,
+  SessionTurnInput,
   Task,
 } from "./domain";
 export {

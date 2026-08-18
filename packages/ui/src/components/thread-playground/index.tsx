@@ -1,6 +1,6 @@
 export * from "./thread-playground";
 export type {
-  ExternalThreadExecutionRuntime,
-  ExternalThreadRunEvent,
+  AcpSessionExecutionRuntime,
+  AcpRuntimeAction,
   ThreadRunMetadata,
 } from "./stores";

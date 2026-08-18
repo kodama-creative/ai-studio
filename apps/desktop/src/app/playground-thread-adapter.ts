@@ -5,16 +5,16 @@ import {
   type Playground,
   type SavePlaygroundInput,
 } from "@llm-space/studio";
-import type { ExternalThreadExecutionRuntime } from "@llm-space/ui/components/thread-playground";
+import type { AcpSessionExecutionRuntime } from "@llm-space/ui/components/thread-playground";
 
+import type { AcpSessionClient } from "@/shared/acp-session-rpc";
 import type { PlaygroundClient } from "@/shared/playground-rpc";
-import type { ThreadClient, ThreadTarget } from "@/shared/thread-rpc";
 
-import { createThreadExecutionRuntime } from "./thread-execution-runtime";
+import { createDesktopAcpSessionRuntime } from "./acp-session-runtime";
 
 export interface PlaygroundThreadRuntimeOptions {
   readonly client: PlaygroundClient;
-  readonly threadClient: ThreadClient;
+  readonly acpClient: AcpSessionClient;
   readonly playgroundId: string;
   readonly getPlayground: () => Playground;
   readonly onPlayground: (playground: Playground) => void;
@@ -30,32 +30,27 @@ export function playgroundToEditorThread(playground: Playground): Thread {
 /** Adapts editor controls directly to the product-owned Thread RPC namespace. */
 export function createPlaygroundThreadExecutionRuntime(
   options: PlaygroundThreadRuntimeOptions
-): ExternalThreadExecutionRuntime {
-  const target: ThreadTarget = {
+): AcpSessionExecutionRuntime {
+  const target = {
     kind: "playground",
     playgroundId: options.playgroundId,
-  };
-  return createThreadExecutionRuntime({
-    productName: "Playground",
+  } as const;
+  return createDesktopAcpSessionRuntime({
+    client: options.acpClient,
     target,
-    getClient: () => Promise.resolve(options.threadClient),
-    currentOperationId: () => options.getPlayground().operationId,
-    async persist(thread) {
+    sessionId: options.getPlayground().sessionId,
+    async persistPrompt(thread) {
       const playground = await options.client.save(
         options.playgroundId,
         _document(thread, options.getPlayground())
       );
       options.onPlayground(playground);
     },
-    async refresh() {
-      const playground = await _requirePlayground(options);
-      return {
-        operationId: playground.operationId,
-        thread: playgroundToEditorThread(playground),
-      };
+    beforePrompt: options.beforeAdmission,
+    async onSettled() {
+      await _requirePlayground(options);
+      await options.onSettled?.();
     },
-    beforeAdmission: options.beforeAdmission,
-    onSettled: options.onSettled,
   });
 }
 
@@ -63,7 +58,12 @@ function _document(
   thread: Thread,
   playground: Playground
 ): SavePlaygroundInput {
-  return threadToPlaygroundDocument(thread, playground.conversation.state);
+  return {
+    ...threadToPlaygroundDocument(thread, playground.conversation.state),
+    // Transcript input is carried only by ACP Prompt/context. This save updates
+    // editable Agent metadata without creating a second message transport.
+    conversation: structuredClone(playground.conversation),
+  };
 }
 
 async function _requirePlayground(

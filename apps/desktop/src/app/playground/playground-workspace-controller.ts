@@ -1,5 +1,5 @@
 import {
-  parsePortableThreadSnapshot,
+  parseSharedDocument,
   type Thread,
 } from "@llm-space/core";
 import type { AgentSpec, Playground } from "@llm-space/studio";
@@ -61,7 +61,7 @@ export class PlaygroundWorkspaceController {
     @inject(PLAYGROUND_SERVICE)
     private readonly _playgrounds: Pick<PlaygroundClient, "create" | "list">,
     @inject(THREAD_SHARING_SERVICE)
-    private readonly _sharing: Pick<ThreadSharingRequests, "importSnapshot">,
+    private readonly _sharing: Pick<ThreadSharingRequests, "importDocument">,
     @inject(DesktopSeedHost) private readonly _seedHost: DesktopSeedHost,
     @inject(MainTabsController) private readonly _tabs: MainTabsController,
     @inject(RendererNotificationService)
@@ -169,8 +169,8 @@ export class PlaygroundWorkspaceController {
           typeof document.text === "function"
             ? await document.text()
             : document.text;
-        const snapshot = parsePortableThreadSnapshot(JSON.parse(text));
-        const playground = await this._sharing.importSnapshot(snapshot);
+        const snapshot = parseSharedDocument(JSON.parse(text));
+        const playground = await this._sharing.importDocument(snapshot);
         this.acceptProjection(playground);
         this._openPlayground(playground);
         imported += 1;
@@ -181,7 +181,7 @@ export class PlaygroundWorkspaceController {
     await this.refresh();
     if (imported === 0) {
       this._notifications.error(
-        "No valid LLM Space Thread Snapshots were selected."
+        "No valid LLM Space Shared Documents were selected."
       );
       return;
     }
